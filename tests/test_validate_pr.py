@@ -93,6 +93,35 @@ def test_jaccard_warning_on_near_duplicate(tmp_path):
     assert any('Jaccard' in w and '>= 0.4' in w for w in result['warnings'])
 
 
+def test_jaccard_info_on_related_entry(tmp_path):
+    # Create an existing entry with partially overlapping tokens (similar but not near-duplicate)
+    existing = tmp_path / "quarkus" / "cdi" / "GE-0099.md"
+    existing.parent.mkdir(parents=True)
+    # Different title/summary but shares some tokens — Jaccard should be in [0.2, 0.4)
+    existing.write_text("""\
+---
+title: "Quarkus framework: build issue with profile"
+type: gotcha
+domain: quarkus/cdi
+score: 11
+tags: [quarkus, framework]
+verified: 2026-04-09
+staleness_threshold: 180
+summary: "Profile configuration causes build problems"
+---
+
+## Problem
+Different issue.
+
+## Fix
+Different fix.
+""")
+    new = tmp_path / "quarkus" / "cdi" / "GE-0123.md"
+    new.write_text(VALID_ENTRY)
+    result = validate(str(new), str(tmp_path))
+    assert any('related entry' in i for i in result['infos'] if 'Jaccard' in i)
+
+
 def test_detect_mode_github(tmp_path):
     from unittest.mock import patch
     with patch('subprocess.run') as mock_run:
