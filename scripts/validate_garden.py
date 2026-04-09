@@ -86,15 +86,25 @@ def get_by_technology_ids() -> set[str]:
     return set(re.findall(r'GE-\d{4}', m.group(1)))
 
 
+def strip_code_fences(content: str) -> str:
+    """Remove content inside fenced code blocks (``` or ~~~) to avoid false positives."""
+    return re.sub(r'```.*?```', '', content, flags=re.DOTALL) \
+             .replace('\n~~~', '\n```')  # normalise tildes then strip remaining
+
+
 def scan_garden_entry_ids() -> dict[str, list[str]]:
-    """Scan all garden files (not submissions) for **ID:** GE-XXXX."""
+    """Scan all garden files (not submissions) for **ID:** GE-XXXX.
+
+    Strips fenced code blocks first so that GE-IDs used as examples inside
+    code snippets are not counted as real entry IDs.
+    """
     all_ids: dict[str, list[str]] = {}
     for path in GARDEN_ROOT.rglob("*.md"):
         if any(part in EXCLUDE_DIRS for part in path.parts):
             continue
         if path.name in ("GARDEN.md", "CHECKED.md", "DISCARDED.md"):
             continue
-        content = path.read_text()
+        content = strip_code_fences(path.read_text())
         for m in re.finditer(r'^\*\*ID:\*\*\s+(GE-\d{4})', content, re.MULTILINE):
             ge_id = m.group(1)
             all_ids.setdefault(ge_id, []).append(str(path.relative_to(GARDEN_ROOT)))
