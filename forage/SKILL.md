@@ -32,6 +32,39 @@ For MERGE and DEDUPE (integrating submissions into the garden), use the `harvest
 
 ---
 
+## Git-Only Access Model
+
+**All reads come from git HEAD. The filesystem is a staging area only.**
+
+The garden is a git repository. Git's commit atomicity is the coordination primitive — it works for local-only gardens and remote/federated gardens without any file locking or OS-specific tricks.
+
+```bash
+GARDEN=~/claude/knowledge-garden
+
+# Read a committed file (always use this, never cat/read directly)
+git -C $GARDEN show HEAD:GARDEN.md
+git -C $GARDEN show HEAD:tools/git.md
+
+# List committed submissions
+git -C $GARDEN ls-tree --name-only HEAD submissions/
+
+# Search committed content
+git -C $GARDEN grep "keywords" HEAD -- '*.md' ':!submissions' ':!GARDEN.md'
+```
+
+**Why:** Direct filesystem reads can see partial writes from other sessions. `git show HEAD:path` always returns complete, committed state.
+
+**The commit is the write.** After writing any file to the filesystem, immediately `git add` and `git commit`. Never leave garden files in an uncommitted state.
+
+**Conflict recovery:** If a commit fails because another session committed first:
+```bash
+git -C $GARDEN rebase HEAD   # incorporate the other session's changes
+# Re-read counter from new HEAD, renumber submission if needed
+# Re-commit
+```
+
+---
+
 ## What This Is Not
 
 - **Not an idea log** — ideas go in `idea-log`
@@ -96,18 +129,22 @@ Reading garden files to check for duplicates costs the submitting Claude's conte
 
 **Step 0 — Assign GE-ID (before anything else)**
 
-1. Read the current counter:
-   ```bash
-   grep "Last assigned ID" ~/claude/knowledge-garden/GARDEN.md
-   ```
-2. Increment by 1. Pad to 4 digits: GE-0001, GE-0042, GE-0100.
-3. Update GARDEN.md immediately:
-   ```bash
-   # Update "Last assigned ID: GE-XXXX" → "Last assigned ID: GE-YYYY"
-   ```
-4. Stage the GARDEN.md change — it will be committed with the submission in Step 7.
+Read the counter from committed state:
+```bash
+git -C ~/claude/knowledge-garden show HEAD:GARDEN.md | grep "Last assigned ID"
+```
 
-**Race condition note:** If two Claudes submit simultaneously, one git commit will conflict on GARDEN.md. The loser must rebase: re-read the counter, take the next ID, update their submission file and filename, and re-commit.
+Increment by 1. Pad to 4 digits: GE-0001, GE-0042, GE-0100. This is the submission's GE-ID.
+
+**Conflict recovery:** If your commit fails (another session committed first):
+```bash
+git -C ~/claude/knowledge-garden rebase HEAD
+# Re-read counter from new HEAD — it's now higher
+git -C ~/claude/knowledge-garden show HEAD:GARDEN.md | grep "Last assigned ID"
+# Take the next ID from the new counter
+# Rename your submission file and update its Submission ID header
+# Re-commit
+```
 
 **Step 1 — Classify, score, and filter**
 
@@ -126,14 +163,17 @@ Compute the Garden Score (see [submission-formats.md](submission-formats.md)):
 
 **Step 1b — Light duplicate check (index scan only)**
 
-Before drafting, do a quick scan for obvious conflicts:
+Before drafting, scan the committed index for obvious conflicts:
 
-1. Extract the technology/stack from the entry being prepared
-2. Read GARDEN.md index — find entries in the same technology category
-3. Compare titles: if any existing entry title is very similar, flag it
-   - If same thing → stop; offer REVISE instead
-   - If different → proceed; note which IDs were checked (for CHECKED.md update in Step 7)
-4. Do NOT read garden detail files — index only.
+```bash
+git -C ~/claude/knowledge-garden show HEAD:GARDEN.md
+```
+
+Find entries in the same technology category. Compare titles: if any existing entry title is very similar:
+- If same thing → stop; offer REVISE instead
+- If different → proceed; note which IDs were checked
+
+Do NOT read garden detail files — index only.
 
 **Step 2 — Duplicate awareness check (context only, no reads)**
 
@@ -180,20 +220,28 @@ Draft the submission using the template in [submission-formats.md](submission-fo
 
 Wait for confirmation before writing.
 
-**Step 6 — Write the submission file**
+**Step 6 — Write the submission file and update the counter**
 
+Write the submission file to the filesystem (staging area):
 ```bash
 mkdir -p ~/claude/knowledge-garden/submissions
 # write YYYY-MM-DD-<project>-GE-XXXX-<slug>.md
 ```
 
-**Step 7 — Commit**
-
+Update GARDEN.md counter in the working tree:
 ```bash
-cd ~/claude/knowledge-garden
-git add submissions/ GARDEN.md  # GARDEN.md because counter was updated
-git commit -m "submit(<project>): GE-XXXX '<short title>'"
+# Edit GARDEN.md: "Last assigned ID: GE-XXXX" → "Last assigned ID: GE-YYYY"
 ```
+
+**Step 7 — Commit atomically**
+
+Both changes go in one commit — the counter and the submission are inseparable:
+```bash
+git -C ~/claude/knowledge-garden add submissions/YYYY-MM-DD-<project>-GE-XXXX-<slug>.md GARDEN.md
+git -C ~/claude/knowledge-garden commit -m "submit(<project>): GE-XXXX '<short title>'"
+```
+
+If the commit fails due to conflict, follow the rebase recovery in Step 0.
 
 **Step 8 — Report back**
 
@@ -274,14 +322,17 @@ Use when new knowledge enriches an existing garden entry rather than standing al
 
 **Step 1 — Identify the target entry**
 
-If the entry is already in context from this session, use that knowledge directly. If you need to find it:
+If the entry is already in context from this session, use that knowledge directly. If you need to find it, search committed content:
+
 ```bash
-grep -r "keywords" ~/claude/knowledge-garden/ --include="*.md" \
-  --exclude-dir=submissions -l
+# Search committed content (excludes submissions, metadata files)
+git -C ~/claude/knowledge-garden grep "keywords" HEAD -- '*.md' \
+  ':!submissions' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
 ```
-Then read only the specific entry:
+
+Then read only the specific entry from committed state:
 ```bash
-grep -A 60 "## Entry Title" ~/claude/knowledge-garden/<path>.md
+git -C ~/claude/knowledge-garden show HEAD:<path>/<file>.md | grep -A 60 "## Entry Title"
 ```
 
 **Step 2 — Determine the revision kind**
@@ -307,27 +358,41 @@ YYYY-MM-DD-<project>-GE-XXXX-revise-<entry-slug>.md
 ```
 (GE-XXXX is this revision's own assigned ID, not the target's ID.)
 
-**Step 5 — Commit**
+**Step 5 — Commit atomically**
 
 ```bash
-cd ~/claude/knowledge-garden
-git add submissions/ GARDEN.md
-git commit -m "submit(<project>): GE-XXXX revise '<entry title>' — <what's new>"
+git -C ~/claude/knowledge-garden add submissions/YYYY-MM-DD-<project>-GE-XXXX-revise-<slug>.md GARDEN.md
+git -C ~/claude/knowledge-garden commit -m "submit(<project>): GE-XXXX revise '<entry title>' — <what's new>"
 ```
+
+If the commit fails, follow the rebase recovery documented in CAPTURE Step 0.
 
 ---
 
 ### SEARCH (retrieving entries)
 
-1. Read `~/claude/knowledge-garden/GARDEN.md` — check all index sections
-2. Follow the file link for full detail
-3. If not in the index:
+All reads from committed state:
+
+1. Read the committed index:
    ```bash
-   grep -r "keywords" ~/claude/knowledge-garden/ --include="*.md" \
-     --exclude-dir=submissions
+   git -C ~/claude/knowledge-garden show HEAD:GARDEN.md
    ```
-4. Return the full entry (Symptom + Root Cause + Fix + Why Non-obvious)
-5. If the user just fixed something related, offer to submit the new knowledge via CAPTURE
+   Check all three sections (By Technology, By Symptom/Type, By Label).
+
+2. Follow the file link — read the specific entry from committed state:
+   ```bash
+   git -C ~/claude/knowledge-garden show HEAD:<path>/<file>.md
+   ```
+
+3. If not in the index, search committed content:
+   ```bash
+   git -C ~/claude/knowledge-garden grep "keywords" HEAD -- '*.md' \
+     ':!submissions' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+   ```
+
+4. Return the full entry (Symptom + Root Cause + Fix + Why Non-obvious).
+
+5. If the user just fixed something related, offer to submit the new knowledge via CAPTURE.
 
 ---
 
@@ -363,6 +428,9 @@ Offer, don't assume — and name the type:
 
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
+| Reading garden files with `cat` or `grep` directly from filesystem | May see partial writes from another session | Always use `git show HEAD:path` |
+| Reading GARDEN.md counter from filesystem | Another session may be mid-write | `git show HEAD:GARDEN.md \| grep "Last assigned ID"` |
+| Leaving uncommitted changes in the garden repo | Other sessions see partial state | Commit immediately after every write |
 | Reading garden files to check for duplicates during CAPTURE | Burns context budget; garden grows, cost grows | Write the submission; let harvest handle deduplication |
 | Skipping the submission and writing directly to garden files | Reintroduces the read-for-dedup problem | Always use submissions/ for new entries |
 | Not including "Suggested target" in submission | Harvest has to infer from scratch | Include the likely destination as a hint |
@@ -375,20 +443,21 @@ Offer, don't assume — and name the type:
 | SWEEP: only checking gotchas | Techniques and undocumented items are easy to miss | Always check all three categories explicitly |
 | Forgetting to run harvest periodically | Submissions accumulate, garden stays stale | Harvest after 3–5 submissions, or before a search-heavy session |
 | Omitting GE-ID from submission filename or header | Harvest can't reconcile with CHECKED.md | Always assign GE-ID in CAPTURE Step 0; embed in filename |
-| Forgetting to commit GARDEN.md with the submission | Counter drifts; next submitter picks a duplicate ID | Stage both submissions/ and GARDEN.md in Step 7 |
+| Committing GARDEN.md without the submission (or vice versa) | Counter and submission must be atomic | Always `git add` both together in Step 7 |
 
 ---
 
 ## Success Criteria
 
 CAPTURE is complete when:
+- ✅ Counter read from `git show HEAD:GARDEN.md` (not filesystem)
 - ✅ GE-ID assigned and recorded in GARDEN.md counter before submission written
 - ✅ Filename includes GE-ID: `YYYY-MM-DD-<project>-GE-XXXX-<slug>.md`
 - ✅ Submission header includes `**Submission ID:** GE-XXXX`
-- ✅ Light duplicate check (index scan) performed; scanned IDs noted
-- ✅ No garden detail files were read specifically for duplicate detection
+- ✅ Light duplicate check performed against committed GARDEN.md index
+- ✅ No garden detail files read specifically for duplicate detection
 - ✅ User confirmed the draft before writing
-- ✅ GARDEN.md committed alongside submission (counter update)
+- ✅ Submission file and GARDEN.md committed atomically
 - ✅ Committed with `submit(<project>): GE-XXXX '<title>'` format
 
 SWEEP is complete when:
@@ -398,15 +467,17 @@ SWEEP is complete when:
 - ✅ Report given: N found, M submitted per category
 
 REVISE is complete when:
+- ✅ Target entry located via `git grep` or `git show HEAD:path` (not filesystem grep)
 - ✅ Submission file written with "revise" in the filename
 - ✅ Target entry path and exact title specified
 - ✅ Revision kind declared
 - ✅ User confirmed the draft before writing
-- ✅ Committed with `submit(<project>): revise '<title>' — <what's new>` format
+- ✅ Committed atomically with `submit(<project>): revise '<title>' — <what's new>` format
 
 SEARCH is complete when:
-- ✅ Full entry returned for any matching bugs
-- ✅ grep run (excluding submissions/) if topic not in index
+- ✅ Index read from `git show HEAD:GARDEN.md`
+- ✅ Entry read from `git show HEAD:<path>` (not filesystem)
+- ✅ `git grep` used if topic not in index
 
 ---
 
@@ -416,9 +487,10 @@ SEARCH is complete when:
 
 **Chains to:** `harvest` — for MERGE and DEDUPE (integrating submissions into the garden)
 
-**Reads from:**
-- `~/claude/knowledge-garden/GARDEN.md` — for SEARCH and counter reads
-- Garden detail files — SEARCH only, surgical section reads; never for duplicate checking during CAPTURE
+**Reads from (git HEAD only):**
+- `git show HEAD:GARDEN.md` — counter and index
+- `git show HEAD:<path>` — specific garden entries (SEARCH and REVISE only)
+- `git grep HEAD` — content search (SEARCH and REVISE only)
 
 **Does NOT handle:** MERGE, DEDUPE — those are harvest operations.
 
