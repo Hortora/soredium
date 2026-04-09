@@ -125,3 +125,25 @@ feat(forage): add CAPTURE workflow
 fix(harvest): handle missing GARDEN.md counter
 docs: update migration constraint in CLAUDE.md
 ```
+
+---
+
+## Work Tracking
+
+**Issue tracking:** enabled
+**GitHub repo:** Hortora/soredium
+**Changelog:** GitHub Releases (run `gh release create --generate-notes` at milestones)
+
+**Automatic behaviours (Claude follows these at all times in this project):**
+- **Before implementation begins** — when the user says "implement", "start coding",
+  "execute the plan", "let's build", or similar: check if an active issue or epic
+  exists. If not, run issue-workflow Phase 1 to create one **before writing any code**.
+- **Before writing any code** — check if an issue exists for what's about to be
+  implemented. If not, draft one and assess epic placement (issue-workflow Phase 2)
+  before starting. Also check if the work spans multiple concerns.
+- **Before any commit** — run issue-workflow Phase 3 (via git-commit) to confirm
+  issue linkage and check for split candidates. This is a fallback — the issue
+  should already exist from before implementation began.
+- **All commits should reference an issue** — `Refs #N` (ongoing) or `Closes #N` (done).
+  If the user explicitly says to skip ("commit as is", "no issue"), ask once to confirm
+  before proceeding — it must be a deliberate choice, not a default.
