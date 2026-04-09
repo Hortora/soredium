@@ -250,6 +250,20 @@ For new entries: append to the appropriate garden file in the working tree. Add 
 *Score: 11/15 · Included because: [brief reason] · Reservation: [none / brief reason]*
 ```
 
+**Step 6b — Integrate using integrate_entry.py (preferred method)**
+
+After writing the final integrated entry to `<domain>/GE-XXXX.md`, run:
+
+```bash
+python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/integrate_entry.py \
+  ~/claude/knowledge-garden/<domain>/GE-XXXX.md \
+  ~/claude/knowledge-garden
+```
+
+This updates `_summaries/`, domain `INDEX.md`, `labels/`, and `_index/global.md` in one step, runs the structural check, and commits automatically. **Do not commit manually** — `integrate_entry.py` commits automatically.
+
+Alternatively, if using manual index updates (Step 6 above), proceed to Step 7 and commit as described. The script approach (6b) automates those steps.
+
 **Step 7 — Remove processed submissions**
 
 Stage the deletions:
