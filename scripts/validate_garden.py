@@ -22,6 +22,25 @@ import re
 import sys
 from pathlib import Path
 
+# --structural <garden_root>: early-exit structural check
+if '--structural' in sys.argv:
+    _idx = sys.argv.index('--structural')
+    if _idx + 1 >= len(sys.argv):
+        print('ERROR: --structural requires a GARDEN_ROOT argument', file=sys.stderr)
+        sys.exit(1)
+    _garden = Path(sys.argv[_idx + 1]).expanduser().resolve()
+    _errors = []
+    if not (_garden / 'GARDEN.md').exists():
+        _errors.append('Missing GARDEN.md')
+    if not (_garden / '_index' / 'global.md').exists():
+        _errors.append('Missing _index/global.md')
+    if _errors:
+        for _e in _errors:
+            print(f'ERROR: {_e}', file=sys.stderr)
+        sys.exit(1)
+    print('Structural check passed')
+    sys.exit(0)
+
 # Garden root: first non-flag positional argument, or default convention
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
 GARDEN_ROOT = Path(_args[0]).expanduser().resolve() if _args else Path.home() / "claude" / "knowledge-garden"

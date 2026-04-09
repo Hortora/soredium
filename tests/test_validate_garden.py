@@ -412,5 +412,32 @@ class TestSubmissionIDHeaders(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
 
 
+def test_structural_flag_passes_valid_garden(tmp_path):
+    import subprocess, sys as _sys
+    from pathlib import Path as _Path
+    script = _Path(__file__).parent.parent / 'scripts' / 'validate_garden.py'
+    (tmp_path / 'GARDEN.md').write_text('**Last assigned ID:** GE-0000\n')
+    (tmp_path / '_index').mkdir()
+    (tmp_path / '_index' / 'global.md').write_text('| Domain | Index |\n|--------|-------|\n')
+    result = subprocess.run(
+        [_sys.executable, str(script), '--structural', str(tmp_path)],
+        capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_structural_flag_fails_missing_garden_md(tmp_path):
+    import subprocess, sys as _sys
+    from pathlib import Path as _Path
+    script = _Path(__file__).parent.parent / 'scripts' / 'validate_garden.py'
+    (tmp_path / '_index').mkdir()
+    (tmp_path / '_index' / 'global.md').write_text('')
+    result = subprocess.run(
+        [_sys.executable, str(script), '--structural', str(tmp_path)],
+        capture_output=True, text=True
+    )
+    assert result.returncode != 0
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
