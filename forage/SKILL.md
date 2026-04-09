@@ -174,6 +174,31 @@ If no remote or non-GitHub URL → **Local mode** (skip to the existing submissi
    ```
 7. Done — CI validates, maintainer reviews, CI integrates on merge.
 
+### Local Mode
+
+1. Draft entry content (same scoring, Fix section, tags).
+2. Read next sequential ID from GARDEN.md:
+   ```bash
+   grep "Last assigned ID" ~/claude/knowledge-garden/GARDEN.md
+   ```
+   Increment by 1, zero-pad to 4 digits → `GE-XXXX`.
+3. Write `<domain>/GE-XXXX.md` with complete YAML frontmatter.
+4. Validate locally:
+   ```bash
+   python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
+     ~/claude/knowledge-garden/<domain>/GE-XXXX.md \
+     ~/claude/knowledge-garden
+   ```
+   Fix any CRITICAL issues before continuing.
+5. Integrate locally (updates indexes and commits automatically):
+   ```bash
+   python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/integrate_entry.py \
+     ~/claude/knowledge-garden/<domain>/GE-XXXX.md \
+     ~/claude/knowledge-garden
+   ```
+6. Update GARDEN.md counter — replace `Last assigned ID: GE-YYYY` with the new ID.
+7. Done — no PR, no CI, indexes already updated.
+
 **Step 0 — Assign GE-ID (before anything else)**
 
 Read the counter from committed state:
