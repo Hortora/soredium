@@ -127,6 +127,53 @@ Reading garden files to check for duplicates costs the submitting Claude's conte
 
 ### CAPTURE (write a submission — default operation)
 
+### Mode Detection
+
+Before any CAPTURE step, detect mode:
+
+```bash
+git -C ~/claude/knowledge-garden remote get-url origin 2>/dev/null
+```
+
+If the URL contains `github.com` → **GitHub mode** (follow GitHub Mode below).
+If no remote or non-GitHub URL → **Local mode** (skip to the existing submission workflow below).
+
+### GitHub Mode
+
+1. Draft entry content using the existing scoring rubric, Fix section, and tag selection.
+2. Create a GitHub issue to get a conflict-free GE-ID:
+   ```bash
+   gh issue create --repo Hortora/garden \
+     --title "<60-char slug>" \
+     --label "garden-submission" \
+     --body "Type: <type> | Score: <n>/15 | Domain: <domain>"
+   ```
+   Issue #123 → GE-0123 (zero-pad to 4 digits).
+3. Create a branch:
+   ```bash
+   git -C ~/claude/knowledge-garden checkout -b submit/GE-XXXX
+   ```
+4. Write `<domain>/GE-XXXX.md` with complete YAML frontmatter.
+5. Validate locally before pushing:
+   ```bash
+   python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
+     ~/claude/knowledge-garden/<domain>/GE-XXXX.md \
+     ~/claude/knowledge-garden
+   ```
+   Fix any CRITICAL issues before continuing.
+6. Push and open PR:
+   ```bash
+   git -C ~/claude/knowledge-garden add <domain>/GE-XXXX.md
+   git -C ~/claude/knowledge-garden commit -m "submit(GE-XXXX): <slug>"
+   git -C ~/claude/knowledge-garden push origin submit/GE-XXXX
+   gh pr create --repo Hortora/garden \
+     --title "submit(GE-XXXX): <slug>" \
+     --body "Closes #XXXX" \
+     --label "garden-submission" \
+     --head submit/GE-XXXX
+   ```
+7. Done — CI validates, maintainer reviews, CI integrates on merge.
+
 **Step 0 — Assign GE-ID (before anything else)**
 
 Read the counter from committed state:
