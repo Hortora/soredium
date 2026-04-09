@@ -142,6 +142,16 @@ def validate(entry_path: str, garden_root: str = None) -> dict:
             elif j >= JACCARD_INFO:
                 result['infos'].append(f"Jaccard {j:.2f} with {stem}: related entry")
 
+        # Vocabulary check
+        labels_path = Path(garden_root) / 'labels'
+        if labels_path.exists():
+            known = {f.stem for f in labels_path.glob('*.md')}
+            for tag in fm.get('tags', []):
+                if tag not in known:
+                    result['warnings'].append(
+                        f"Tag '{tag}' not in controlled vocabulary (labels/)"
+                    )
+
     return result
 
 

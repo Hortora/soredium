@@ -138,3 +138,28 @@ def test_detect_mode_local(tmp_path):
         mock_run.return_value.returncode = 1
         mock_run.return_value.stdout = ''
         assert detect_mode(str(tmp_path)) == 'local'
+
+
+def test_unknown_tag_triggers_warning(tmp_path):
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "quarkus.md").write_text("")
+    (labels / "cdi.md").write_text("")
+    # 'build-profile' not present in labels/
+    f = tmp_path / "quarkus" / "cdi" / "GE-0001.md"
+    f.parent.mkdir(parents=True)
+    f.write_text(VALID_ENTRY)  # tags: [quarkus, cdi, build-profile]
+    result = validate(str(f), str(tmp_path))
+    assert any("'build-profile'" in w and 'vocabulary' in w.lower() for w in result['warnings'])
+
+
+def test_all_known_tags_no_vocabulary_warning(tmp_path):
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    for tag in ['quarkus', 'cdi', 'build-profile']:
+        (labels / f"{tag}.md").write_text("")
+    f = tmp_path / "quarkus" / "cdi" / "GE-0001.md"
+    f.parent.mkdir(parents=True)
+    f.write_text(VALID_ENTRY)
+    result = validate(str(f), str(tmp_path))
+    assert not any('vocabulary' in w.lower() for w in result['warnings'])
