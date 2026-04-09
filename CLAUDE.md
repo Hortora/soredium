@@ -9,7 +9,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 **Name:** soredium
 **GitHub:** [Hortora/soredium](https://github.com/Hortora/soredium)
 **Marketplace:** `/plugin marketplace add github.com/Hortora/soredium`
-**Status:** Early scaffold — `forage` and `harvest` skills in development.
+**Status:** Phase 2 complete — `forage` and `harvest` deployed; CI validation live in `Hortora/garden`.
 
 ## Repository Purpose
 
@@ -46,8 +46,8 @@ The `garden` skill at `~/.claude/skills/garden/` (sourced from `cc-praxis`) is *
 
 | Skill | Status | Purpose |
 |-------|--------|---------|
-| `forage` | 🚧 in development (issue #4) | CAPTURE, SWEEP, SEARCH, REVISE — session-time garden operations |
-| `harvest` | 🚧 in development (issue #5) | MERGE, DEDUPE — dedicated maintenance operations |
+| `forage` | ✅ deployed | CAPTURE (GitHub mode + local mode), SWEEP, SEARCH, REVISE |
+| `harvest` | ✅ deployed | MERGE (via integrate_entry.py), DEDUPE |
 
 When both are complete and tested:
 1. Run `sync-local` to push them to `~/.claude/skills/`
@@ -60,12 +60,22 @@ When both are complete and tested:
 
 ```bash
 # Sync skills to ~/.claude/skills/ (after any skill change)
-python3 scripts/claude-skill sync-local --all -y
-# Or sync specific skill:
-python3 scripts/claude-skill sync-local --skills forage -y
+echo "Y" | python3 scripts/claude-skill sync-local
 
 # List installed skills
 python3 scripts/claude-skill list
+
+# Run the test suite
+python3 -m pytest tests/ -v   # currently 139 tests
+
+# Validate a garden entry locally (same as CI)
+python3 scripts/validate_pr.py <entry_file> ~/claude/knowledge-garden
+
+# Integrate an entry locally (updates indexes, commits — same as CI)
+python3 scripts/integrate_entry.py <entry_file> ~/claude/knowledge-garden
+
+# First-time garden clone (sparse blobless)
+bash scripts/garden-setup.sh
 ```
 
 **Skill directory structure** (one per skill at repo root):
