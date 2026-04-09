@@ -16,5 +16,18 @@
       ]
     }
   ],
-  "plugins": []
+  "plugins": [
+    {
+      "name": "forage",
+      "description": "Session-time garden operations: CAPTURE, SWEEP, SEARCH, REVISE",
+      "source": "https://github.com/Hortora/soredium",
+      "path": "forage"
+    },
+    {
+      "name": "harvest",
+      "description": "Garden maintenance operations: MERGE, DEDUPE",
+      "source": "https://github.com/Hortora/soredium",
+      "path": "harvest"
+    }
+  ]
 }
