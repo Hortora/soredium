@@ -443,17 +443,40 @@ If the commit fails, follow the rebase recovery documented in CAPTURE Step 0.
 
 ### SEARCH (retrieving entries)
 
-All reads from committed state:
+**Session start** — pull latest index changes before searching (fast, no entry blobs):
+```bash
+git -C ~/claude/knowledge-garden pull --filter=blob:none
+```
 
-1. Read the committed index:
+**Reading index files** (always materialised in sparse checkout — use Read tool normally):
+- `~/claude/knowledge-garden/GARDEN.md`
+- `~/claude/knowledge-garden/_index/global.md`
+- `~/claude/knowledge-garden/<domain>/INDEX.md`
+- `~/claude/knowledge-garden/_summaries/<domain>/`
+
+**Reading entry bodies** (not materialised — use git cat-file):
+```bash
+# Single entry
+git -C ~/claude/knowledge-garden cat-file blob HEAD:<domain>/GE-XXXX.md
+
+# Multiple entries — one network round-trip (Tier 2: 2-4 candidates)
+printf 'HEAD:quarkus/cdi/GE-0123.md\nHEAD:tools/git/GE-0043.md\n' \
+  | git -C ~/claude/knowledge-garden cat-file --batch
+```
+
+Subsequent reads of the same entry are served from `.git/objects/` — no network cost.
+
+**Search workflow:**
+
+1. Read the committed index using the Read tool:
    ```bash
-   git -C ~/claude/knowledge-garden show HEAD:GARDEN.md
+   Read: ~/claude/knowledge-garden/GARDEN.md
    ```
    Check all three sections (By Technology, By Symptom/Type, By Label).
 
-2. Follow the file link — read the specific entry from committed state:
+2. Follow the file link — read the specific entry using `git cat-file`:
    ```bash
-   git -C ~/claude/knowledge-garden show HEAD:<path>/<file>.md
+   git -C ~/claude/knowledge-garden cat-file blob HEAD:<path>/GE-XXXX.md
    ```
 
 3. If not in the index, search committed content:
@@ -547,8 +570,8 @@ REVISE is complete when:
 - ✅ Committed atomically with `submit(<project>): revise '<title>' — <what's new>` format
 
 SEARCH is complete when:
-- ✅ Index read from `git show HEAD:GARDEN.md`
-- ✅ Entry read from `git show HEAD:<path>` (not filesystem)
+- ✅ Index read from Read tool: `GARDEN.md` or `_index/global.md`
+- ✅ Entry read from `git cat-file blob HEAD:<path>` (not filesystem)
 - ✅ `git grep` used if topic not in index
 
 ---
@@ -560,8 +583,8 @@ SEARCH is complete when:
 **Chains to:** `harvest` — for MERGE and DEDUPE (integrating submissions into the garden)
 
 **Reads from (git HEAD only):**
-- `git show HEAD:GARDEN.md` — counter and index
-- `git show HEAD:<path>` — specific garden entries (SEARCH and REVISE only)
+- Read tool: `GARDEN.md`, `_index/global.md`, `*/INDEX.md`, `_summaries/` — counter and index
+- `git cat-file blob HEAD:<path>` — specific garden entries (SEARCH and REVISE only)
 - `git grep HEAD` — content search (SEARCH and REVISE only)
 
 **Does NOT handle:** MERGE, DEDUPE — those are harvest operations.
