@@ -253,6 +253,21 @@ Tell the user:
 
 ---
 
+### IMPORT (from project-level docs)
+
+Use when importing from `BUGS-AND-ODDITIES.md` or similar project-level bug/quirk documents.
+
+1. Read the source document
+2. For each entry, classify **CROSS-PROJECT** or **PROJECT-LOCAL**
+   - Cross-project: the issue applies to the technology generally, not just this codebase
+   - Project-local: tied to this project's specific logic, data model, or configuration
+3. Show classifications, ask for confirmation
+4. For cross-project entries: write a submission file per entry (CAPTURE flow)
+5. Report: N submissions written, M skipped as project-specific
+6. Suggest running harvest when convenient
+
+---
+
 ### REVISE (submit an enrichment to an existing entry)
 
 Use when new knowledge enriches an existing garden entry rather than standing alone: a solution surfaces for a previously-unsolved gotcha, an alternative approach is found, additional context emerges, or an entry's status changes.
@@ -397,7 +412,7 @@ SEARCH is complete when:
 
 ## Skill Chaining
 
-**Invoked by:** `session-handover` — garden SWEEP is Step 2b of the wrap checklist; user directly ("submit to the garden", "add this to the garden", "forage CAPTURE")
+**Invoked by:** `session-handover` — garden SWEEP is Step 2b of the wrap checklist; `superpowers:systematic-debugging` — offered proactively when a debugging session reveals something non-obvious; user directly ("submit to the garden", "add this to the garden", "forage CAPTURE")
 
 **Chains to:** `harvest` — for MERGE and DEDUPE (integrating submissions into the garden)
 
