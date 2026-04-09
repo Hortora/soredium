@@ -1,0 +1,20 @@
+{
+  "name": "soredium",
+  "description": "Hortora garden skills for Claude Code — forage (session-time capture) and harvest (maintenance merge/dedupe)",
+  "owner": {
+    "name": "Hortora",
+    "url": "https://github.com/Hortora"
+  },
+  "bundles": [
+    {
+      "name": "hortora-garden",
+      "displayName": "Hortora Garden",
+      "description": "Garden skills for Hortora knowledge gardens: forage (CAPTURE/SWEEP/SEARCH/REVISE during session work) and harvest (MERGE/DEDUPE in dedicated maintenance sessions)",
+      "skills": [
+        "forage",
+        "harvest"
+      ]
+    }
+  ],
+  "plugins": []
+}

@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""
+Skill installer and local development sync tool for Hortora/soredium.
+
+Skills are installed into Claude Code's skills directory at:
+  ~/.claude/skills/<skill-name>/
+
+Claude Code auto-discovers all skills in this directory — no registration needed.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Dict, List, Set
+
+MARKETPLACE_URL = "https://raw.githubusercontent.com/Hortora/soredium/main/.claude-plugin/marketplace.json"
+# CLAUDE_SKILLS_DIR env var lets tests redirect installs to a temp directory.
+SKILLS_DIR = Path(os.environ.get('CLAUDE_SKILLS_DIR', str(Path.home() / '.claude' / 'skills')))
+SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+
+
+# ---------------------------------------------------------------------------
+# Network helpers
+# ---------------------------------------------------------------------------
+
+def fetch_json(url: str) -> Dict:
+    """Fetch JSON from URL using curl."""
+    try:
+        result = subprocess.run(
+            ["curl", "-fsSL", url],
+            check=True, capture_output=True, text=True, timeout=30
+        )
+        return json.loads(result.stdout)
+    except Exception as e:
+        print(f"❌ Failed to fetch {url}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def fetch_plugin_metadata(source: str, path: str, ref: str = "main") -> Dict:
+    """Fetch .claude-plugin/plugin.json from a GitHub repository."""
+    repo_path = source.replace("https://github.com/", "")
+    url = f"https://raw.githubusercontent.com/{repo_path}/{ref}/{path}/.claude-plugin/plugin.json"
+    try:
+        result = subprocess.run(
+            ["curl", "-fsSL", url],
+            check=True, capture_output=True, text=True, timeout=10
+        )
+        return json.loads(result.stdout)
+    except Exception:
+        return {"dependencies": []}
+
+
+# ---------------------------------------------------------------------------
+# Dependency resolution
+# ---------------------------------------------------------------------------
+
+def resolve_dependencies(
+    skill_name: str,
+    marketplace: Dict,
+    resolved: List[str],
+    visiting: Set[str]
+) -> None:
+    """Resolve dependencies recursively with cycle detection."""
+    if skill_name in resolved:
+        return
+    if skill_name in visiting:
+        print(f"❌ Circular dependency detected: {skill_name}", file=sys.stderr)
+        sys.exit(1)
+
+    plugin = next((p for p in marketplace["plugins"] if p["name"] == skill_name), None)
+    if not plugin:
+        print(f"❌ Skill '{skill_name}' not found in marketplace", file=sys.stderr)
+        sys.exit(1)
+
+    visiting.add(skill_name)
+    metadata = fetch_plugin_metadata(plugin["source"], plugin["path"])
+    for dep in metadata.get("dependencies", []):
+        dep_name = dep["name"] if isinstance(dep, dict) else dep
+        resolve_dependencies(dep_name, marketplace, resolved, visiting)
+    visiting.remove(skill_name)
+    resolved.append(skill_name)
+
+
+# ---------------------------------------------------------------------------
+# Install / uninstall (from GitHub)
+# ---------------------------------------------------------------------------
+
+def install_skill(plugin: Dict) -> None:
+    """Download a skill from GitHub and install it into ~/.claude/skills/."""
+    name = plugin["name"]
+    install_path = SKILLS_DIR / name
+
+    if install_path.exists():
+        print(f"⚠️  {name} already installed, skipping")
+        return
+
+    temp_path = SKILLS_DIR / f"{name}.tmp"
+
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth=1", "--filter=blob:none", "--sparse",
+             plugin["source"], str(temp_path)],
+            check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "sparse-checkout", "set", plugin["path"]],
+            cwd=temp_path, check=True, capture_output=True
+        )
+
+        skill_dir = temp_path / plugin["path"]
+        if not skill_dir.exists():
+            raise RuntimeError(f"Path '{plugin['path']}' not found in repo")
+
+        SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(skill_dir), str(install_path))
+        shutil.rmtree(temp_path)
+
+        if not (install_path / "SKILL.md").exists():
+            raise RuntimeError("SKILL.md missing after install")
+
+        print(f"✅ Installed {name}")
+
+    except Exception as e:
+        if temp_path.exists():
+            shutil.rmtree(temp_path)
+        print(f"❌ Failed to install {name}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_install(args: argparse.Namespace) -> None:
+    """Install a skill with automatic dependency resolution."""
+    marketplace = fetch_json(MARKETPLACE_URL)
+    resolved: List[str] = []
+    resolve_dependencies(args.skill, marketplace, resolved, set())
+
+    print(f"📦 Installing {args.skill} ({len(resolved)} skill(s)):")
+    for name in resolved:
+        print(f"  • {name}")
+
+    if not args.yes:
+        if input("\nProceed? (Y/n): ").strip().lower() in ('n', 'no'):
+            print("❌ Cancelled")
+            return
+
+    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    for name in resolved:
+        for plugin in marketplace["plugins"]:
+            if plugin["name"] == name:
+                install_skill(plugin)
+                break
+
+
+def cmd_install_all(args: argparse.Namespace) -> None:
+    """Install all skills from the marketplace."""
+    marketplace = fetch_json(MARKETPLACE_URL)
+    all_skills = [plugin["name"] for plugin in marketplace["plugins"]]
+    resolved: List[str] = []
+    visiting: Set[str] = set()
+    for skill_name in all_skills:
+        resolve_dependencies(skill_name, marketplace, resolved, visiting)
+
+    print(f"📦 Installing all skills ({len(resolved)} total):")
+    for name in resolved:
+        print(f"  • {name}")
+
+    if not args.yes:
+        if input("\nProceed? (Y/n): ").strip().lower() in ('n', 'no'):
+            print("❌ Cancelled")
+            return
+
+    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    for name in resolved:
+        for plugin in marketplace["plugins"]:
+            if plugin["name"] == name:
+                install_skill(plugin)
+                break
+
+
+def cmd_uninstall(args: argparse.Namespace) -> None:
+    """Uninstall a skill from ~/.claude/skills/."""
+    install_path = SKILLS_DIR / args.skill
+
+    if not install_path.exists() and not install_path.is_symlink():
+        print(f"❌ Skill '{args.skill}' not installed", file=sys.stderr)
+        sys.exit(1)
+
+    if install_path.is_symlink():
+        install_path.unlink()
+    else:
+        shutil.rmtree(install_path)
+    print(f"✅ Uninstalled {args.skill}")
+
+
+def cmd_uninstall_all(args: argparse.Namespace) -> None:
+    """Uninstall all skills from ~/.claude/skills/."""
+    if not SKILLS_DIR.exists():
+        print("No skills installed")
+        return
+
+    skills = [d.name for d in SKILLS_DIR.iterdir()
+              if d.is_dir() and (d / 'SKILL.md').exists()]
+    if not skills:
+        print("No skills installed")
+        return
+
+    print(f"🗑️  Uninstalling all skills ({len(skills)} total):")
+    for skill in sorted(skills):
+        print(f"  • {skill}")
+
+    if not args.yes:
+        if input("\nProceed? (Y/n): ").strip().lower() in ('n', 'no'):
+            print("❌ Cancelled")
+            return
+
+    for skill in skills:
+        path = SKILLS_DIR / skill
+        if path.is_symlink():
+            path.unlink()
+        else:
+            shutil.rmtree(path)
+        print(f"✅ Uninstalled {skill}")
+
+
+# ---------------------------------------------------------------------------
+# Local development sync
+# ---------------------------------------------------------------------------
+
+def get_repo_root() -> Path:
+    """Return the repository root (parent of the scripts/ directory)."""
+    return Path(__file__).parent.parent
+
+
+def cmd_sync_local(args: argparse.Namespace) -> None:
+    """
+    Sync skills from the local repository into ~/.claude/skills/.
+
+    By default, only updates skills already installed there.
+    With --all, also installs skills from the repo not yet present.
+    """
+    repo_root = get_repo_root()
+    excluded = {'.git', '.claude-plugin', 'scripts', '.claude'}
+
+    local_skills = sorted(
+        [d for d in repo_root.iterdir()
+         if d.is_dir() and d.name not in excluded and (d / 'SKILL.md').exists()],
+        key=lambda p: p.name
+    )
+
+    if not local_skills:
+        print(f"No skills found in {repo_root}")
+        return
+
+    if getattr(args, 'skills', None):
+        requested = set(args.skills)
+        unknown = requested - {s.name for s in local_skills}
+        if unknown:
+            print(f"Error: unknown skills: {', '.join(sorted(unknown))}")
+            sys.exit(1)
+        to_sync = [s for s in local_skills if s.name in requested]
+        to_update = []
+        to_install = to_sync
+        to_skip = [s for s in local_skills if s.name not in requested]
+    else:
+        to_update = [s for s in local_skills if (SKILLS_DIR / s.name).exists()]
+        to_install = [s for s in local_skills if not (SKILLS_DIR / s.name).exists() and args.all]
+        to_sync = to_update + to_install
+        to_skip = [s for s in local_skills if s not in to_sync]
+
+    if not to_sync:
+        print("No installed skills to update.")
+        if to_skip:
+            print(f"  {len(to_skip)} uninstalled skills skipped (use --all to include them)")
+        return
+
+    print(f"📦 Syncing {len(to_sync)} skill(s) from {repo_root}:\n")
+    for skill_dir in to_update:
+        print(f"  • {skill_dir.name} (update)")
+    for skill_dir in to_install:
+        print(f"  • {skill_dir.name} (new)")
+    if to_skip:
+        print(f"\n  Skipping {len(to_skip)} uninstalled: {', '.join(s.name for s in to_skip)}")
+        print("  Use --all to include them.")
+
+    if not args.yes:
+        if input("\nProceed? (Y/n): ").strip().lower() in ('n', 'no'):
+            print("❌ Cancelled")
+            return
+
+    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    print()
+    synced = 0
+
+    for skill_dir in to_sync:
+        install_path = SKILLS_DIR / skill_dir.name
+        try:
+            if install_path.is_symlink():
+                install_path.unlink()
+            elif install_path.exists():
+                shutil.rmtree(install_path)
+
+            shutil.copytree(skill_dir, install_path)
+            print(f"  ✅ {skill_dir.name}")
+            synced += 1
+        except Exception as e:
+            print(f"  ❌ {skill_dir.name}: {e}")
+
+    print(f"\n{synced}/{len(to_sync)} skills synced.")
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    """List installed skills."""
+    if not SKILLS_DIR.exists():
+        print("No skills installed")
+        return
+
+    skills = sorted(d.name for d in SKILLS_DIR.iterdir()
+                    if d.is_dir() and (d / 'SKILL.md').exists())
+    if not skills:
+        print("No skills installed")
+    else:
+        print(f"📦 Installed skills ({len(skills)}):")
+        for skill in skills:
+            print(f"  • {skill}")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Claude Code skill installer for Hortora/soredium"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    install_parser = subparsers.add_parser("install", help="Install a skill from the marketplace")
+    install_parser.add_argument("skill", help="Skill name")
+    install_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    install_all_parser = subparsers.add_parser("install-all", help="Install all marketplace skills")
+    install_all_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    uninstall_parser = subparsers.add_parser("uninstall", help="Uninstall a skill")
+    uninstall_parser.add_argument("skill", help="Skill name")
+
+    uninstall_all_parser = subparsers.add_parser("uninstall-all", help="Uninstall all skills")
+    uninstall_all_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    sync_parser = subparsers.add_parser(
+        "sync-local",
+        help="Sync skills from local repo into ~/.claude/skills/"
+    )
+    sync_parser.add_argument(
+        "--all", action="store_true",
+        help="Also install skills not yet present (default: update only)"
+    )
+    sync_parser.add_argument(
+        "--skills", nargs="+", metavar="SKILL",
+        help="Sync only these specific skills"
+    )
+    sync_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+
+    subparsers.add_parser("list", help="List installed skills")
+
+    args = parser.parse_args()
+
+    if args.command == "install":
+        cmd_install(args)
+    elif args.command == "install-all":
+        cmd_install_all(args)
+    elif args.command == "uninstall":
+        cmd_uninstall(args)
+    elif args.command == "uninstall-all":
+        cmd_uninstall_all(args)
+    elif args.command == "sync-local":
+        cmd_sync_local(args)
+    elif args.command == "list":
+        cmd_list(args)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
