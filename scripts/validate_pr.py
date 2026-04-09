@@ -36,14 +36,14 @@ INJECTION_PATTERNS = [
 
 
 def parse_entry(path: Path) -> tuple:
-    """Return (frontmatter_dict, body_str). Raises on parse failure."""
-    content = path.read_text()
+    """Return (frontmatter_dict, body_str, raw_content). Raises on parse failure."""
+    content = path.read_text(encoding='utf-8')
     if not content.startswith('---'):
         raise ValueError("No YAML frontmatter")
     parts = content.split('---', 2)
     if len(parts) < 3:
         raise ValueError("Incomplete frontmatter — missing closing '---'")
-    return yaml.safe_load(parts[1]) or {}, parts[2].strip()
+    return yaml.safe_load(parts[1]) or {}, parts[2].strip(), content
 
 
 def check_injection(content: str) -> list:
@@ -74,7 +74,7 @@ def scan_domain(domain: str, garden_root: Path, exclude_stem: str) -> list:
         if f.stem == exclude_stem:
             continue
         try:
-            fm, _ = parse_entry(f)
+            fm, _, _raw = parse_entry(f)
             text = f"{fm.get('title', '')} {' '.join(fm.get('tags', []))} {fm.get('summary', '')}"
             results.append((f.stem, tokenise(text)))
         except Exception:
@@ -101,7 +101,7 @@ def validate(entry_path: str, garden_root: str = None) -> dict:
     path = Path(entry_path)
 
     try:
-        fm, body = parse_entry(path)
+        fm, body, raw_content = parse_entry(path)
     except FileNotFoundError:
         result['criticals'].append(f"File not found: {entry_path}")
         return result
@@ -116,10 +116,13 @@ def validate(entry_path: str, garden_root: str = None) -> dict:
         return result
 
     score = fm.get('score', 0)
+    if not isinstance(score, (int, float)):
+        result['criticals'].append(f"'score' must be a number, got: {score!r}")
+        return result
     if score < SCORE_MIN:
         result['criticals'].append(f"Score {score} below minimum {SCORE_MIN}")
 
-    result['criticals'].extend(check_injection(path.read_text()))
+    result['criticals'].extend(check_injection(raw_content))
     if result['criticals']:
         return result
 

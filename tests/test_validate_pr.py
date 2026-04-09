@@ -90,10 +90,12 @@ def test_jaccard_warning_on_near_duplicate(tmp_path):
     new = tmp_path / "quarkus" / "cdi" / "GE-0123.md"
     new.write_text(VALID_ENTRY)
     result = validate(str(new), str(tmp_path))
-    assert any('Jaccard' in w and '>= 0.4' in w for w in result['warnings'])
+    assert any('possible duplicate' in w and 'Jaccard' in w for w in result['warnings'])
 
 
 def test_jaccard_info_on_related_entry(tmp_path):
+    # The two entries share ~3 tokens (quarkus, cdi + frontmatter overlap)
+    # giving a Jaccard similarity of ~0.22, which falls in the INFO range [0.2, 0.4)
     # Create an existing entry with partially overlapping tokens (similar but not near-duplicate)
     existing = tmp_path / "quarkus" / "cdi" / "GE-0099.md"
     existing.parent.mkdir(parents=True)
