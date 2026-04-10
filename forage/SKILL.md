@@ -17,7 +17,7 @@ three kinds of entries:
 - **Techniques** — the umbrella for all non-obvious positive knowledge: specific how-to methods, strategic design philosophy, cross-cutting patterns. A skilled developer wouldn't naturally reach for it, but would immediately value it once shown.
 - **Undocumented** — behaviours, options, or features that exist and work but simply aren't written down anywhere; only discoverable via source code, trial and error, or word of mouth
 
-Stored at `~/claude/knowledge-garden/` so any Claude instance on this machine can read and contribute to it.
+Stored at `${HORTORA_GARDEN:-~/.hortora/garden}/` so any Claude instance on this machine can read and contribute to it.
 
 **Forage handles session-time operations only: CAPTURE, SWEEP, SEARCH, REVISE.**
 For MERGE and DEDUPE (integrating submissions into the garden), use the `harvest` skill.
@@ -39,7 +39,7 @@ For MERGE and DEDUPE (integrating submissions into the garden), use the `harvest
 The garden is a git repository. Git's commit atomicity is the coordination primitive — it works for local-only gardens and remote/federated gardens without any file locking or OS-specific tricks.
 
 ```bash
-GARDEN=~/claude/knowledge-garden
+GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
 
 # Read a committed file (always use this, never cat/read directly)
 git -C $GARDEN show HEAD:GARDEN.md
@@ -81,7 +81,7 @@ git -C $GARDEN rebase HEAD   # incorporate the other session's changes
 ## Garden Structure
 
 ```
-~/claude/knowledge-garden/
+${HORTORA_GARDEN:-~/.hortora/garden}/
 ├── GARDEN.md                   ← metadata header (Last assigned ID, drift counter)
 ├── CHECKED.md                  ← duplicate check pair log
 ├── DISCARDED.md                ← discarded duplicates
@@ -132,7 +132,7 @@ Reading garden files to check for duplicates costs the submitting Claude's conte
 Before any CAPTURE step, detect mode:
 
 ```bash
-git -C ~/claude/knowledge-garden remote get-url origin 2>/dev/null
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} remote get-url origin 2>/dev/null
 ```
 
 If the URL contains `github.com` → **GitHub mode** (follow GitHub Mode below).
@@ -151,21 +151,21 @@ If no remote or non-GitHub URL → **Local mode** (skip to the existing submissi
    Issue #123 → GE-0123 (zero-pad to 4 digits).
 3. Create a branch:
    ```bash
-   git -C ~/claude/knowledge-garden checkout -b submit/GE-XXXX
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} checkout -b submit/GE-XXXX
    ```
 4. Write `<domain>/GE-XXXX.md` with complete YAML frontmatter.
 5. Validate locally before pushing:
    ```bash
    python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-     ~/claude/knowledge-garden/<domain>/GE-XXXX.md \
-     ~/claude/knowledge-garden
+     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+     ${HORTORA_GARDEN:-~/.hortora/garden}
    ```
    Fix any CRITICAL issues before continuing.
 6. Push and open PR:
    ```bash
-   git -C ~/claude/knowledge-garden add <domain>/GE-XXXX.md
-   git -C ~/claude/knowledge-garden commit -m "submit(GE-XXXX): <slug>"
-   git -C ~/claude/knowledge-garden push origin submit/GE-XXXX
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} add <domain>/GE-XXXX.md
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "submit(GE-XXXX): <slug>"
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} push origin submit/GE-XXXX
    gh pr create --repo Hortora/garden \
      --title "submit(GE-XXXX): <slug>" \
      --body "Closes #XXXX" \
@@ -179,22 +179,22 @@ If no remote or non-GitHub URL → **Local mode** (skip to the existing submissi
 1. Draft entry content (same scoring, Fix section, tags).
 2. Read next sequential ID from GARDEN.md:
    ```bash
-   grep "Last assigned ID" ~/claude/knowledge-garden/GARDEN.md
+   grep "Last assigned ID" ${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md
    ```
    Increment by 1, zero-pad to 4 digits → `GE-XXXX`.
 3. Write `<domain>/GE-XXXX.md` with complete YAML frontmatter.
 4. Validate locally:
    ```bash
    python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-     ~/claude/knowledge-garden/<domain>/GE-XXXX.md \
-     ~/claude/knowledge-garden
+     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+     ${HORTORA_GARDEN:-~/.hortora/garden}
    ```
    Fix any CRITICAL issues before continuing.
 5. Integrate locally (updates indexes and commits automatically):
    ```bash
    python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/integrate_entry.py \
-     ~/claude/knowledge-garden/<domain>/GE-XXXX.md \
-     ~/claude/knowledge-garden
+     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+     ${HORTORA_GARDEN:-~/.hortora/garden}
    ```
 6. Update GARDEN.md counter — replace `Last assigned ID: GE-YYYY` with the new ID.
 7. Done — no PR, no CI, indexes already updated.
@@ -203,16 +203,16 @@ If no remote or non-GitHub URL → **Local mode** (skip to the existing submissi
 
 Read the counter from committed state:
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:GARDEN.md | grep "Last assigned ID"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md | grep "Last assigned ID"
 ```
 
 Increment by 1. Pad to 4 digits: GE-0001, GE-0042, GE-0100. This is the submission's GE-ID.
 
 **Conflict recovery:** If your commit fails (another session committed first):
 ```bash
-git -C ~/claude/knowledge-garden rebase HEAD
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} rebase HEAD
 # Re-read counter from new HEAD — it's now higher
-git -C ~/claude/knowledge-garden show HEAD:GARDEN.md | grep "Last assigned ID"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md | grep "Last assigned ID"
 # Take the next ID from the new counter
 # Rename your submission file and update its Submission ID header
 # Re-commit
@@ -238,7 +238,7 @@ Compute the Garden Score (see [submission-formats.md](submission-formats.md)):
 Before drafting, scan the committed index for obvious conflicts:
 
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:GARDEN.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md
 ```
 
 Find entries in the same technology category. Compare titles: if any existing entry title is very similar:
@@ -296,7 +296,7 @@ Wait for confirmation before writing.
 
 Write the submission file to the filesystem (staging area):
 ```bash
-mkdir -p ~/claude/knowledge-garden/submissions
+mkdir -p ${HORTORA_GARDEN:-~/.hortora/garden}/submissions
 # write YYYY-MM-DD-<project>-GE-XXXX-<slug>.md
 ```
 
@@ -309,8 +309,8 @@ Update GARDEN.md counter in the working tree:
 
 Both changes go in one commit — the counter and the submission are inseparable:
 ```bash
-git -C ~/claude/knowledge-garden add submissions/YYYY-MM-DD-<project>-GE-XXXX-<slug>.md GARDEN.md
-git -C ~/claude/knowledge-garden commit -m "submit(<project>): GE-XXXX '<short title>'"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} add submissions/YYYY-MM-DD-<project>-GE-XXXX-<slug>.md GARDEN.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "submit(<project>): GE-XXXX '<short title>'"
 ```
 
 If the commit fails due to conflict, follow the rebase recovery in Step 0.
@@ -398,13 +398,13 @@ If the entry is already in context from this session, use that knowledge directl
 
 ```bash
 # Search committed content (excludes submissions, metadata files)
-git -C ~/claude/knowledge-garden grep "keywords" HEAD -- '*.md' \
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' \
   ':!submissions' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
 ```
 
 Then read only the specific entry from committed state:
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:<path>/<file>.md | grep -A 60 "## Entry Title"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<path>/<file>.md | grep -A 60 "## Entry Title"
 ```
 
 **Step 2 — Determine the revision kind**
@@ -433,8 +433,8 @@ YYYY-MM-DD-<project>-GE-XXXX-revise-<entry-slug>.md
 **Step 5 — Commit atomically**
 
 ```bash
-git -C ~/claude/knowledge-garden add submissions/YYYY-MM-DD-<project>-GE-XXXX-revise-<slug>.md GARDEN.md
-git -C ~/claude/knowledge-garden commit -m "submit(<project>): GE-XXXX revise '<entry title>' — <what's new>"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} add submissions/YYYY-MM-DD-<project>-GE-XXXX-revise-<slug>.md GARDEN.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "submit(<project>): GE-XXXX revise '<entry title>' — <what's new>"
 ```
 
 If the commit fails, follow the rebase recovery documented in CAPTURE Step 0.
@@ -445,23 +445,23 @@ If the commit fails, follow the rebase recovery documented in CAPTURE Step 0.
 
 **Session start** — pull latest index changes before searching (fast, no entry blobs):
 ```bash
-git -C ~/claude/knowledge-garden pull --filter=blob:none
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
 ```
 
 **Reading index files** (always materialised in sparse checkout — use Read tool normally):
-- `~/claude/knowledge-garden/GARDEN.md`
-- `~/claude/knowledge-garden/_index/global.md`
-- `~/claude/knowledge-garden/<domain>/INDEX.md`
-- `~/claude/knowledge-garden/_summaries/<domain>/`
+- `${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md`
+- `${HORTORA_GARDEN:-~/.hortora/garden}/_index/global.md`
+- `${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/INDEX.md`
+- `${HORTORA_GARDEN:-~/.hortora/garden}/_summaries/<domain>/`
 
 **Reading entry bodies** (not materialised — use git cat-file):
 ```bash
 # Single entry
-git -C ~/claude/knowledge-garden cat-file blob HEAD:<domain>/GE-XXXX.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file blob HEAD:<domain>/GE-XXXX.md
 
 # Multiple entries — one network round-trip (Tier 2: 2-4 candidates)
 printf 'HEAD:quarkus/cdi/GE-0123.md\nHEAD:tools/git/GE-0043.md\n' \
-  | git -C ~/claude/knowledge-garden cat-file --batch
+  | git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file --batch
 ```
 
 Subsequent reads of the same entry are served from `.git/objects/` — no network cost.
@@ -470,18 +470,18 @@ Subsequent reads of the same entry are served from `.git/objects/` — no networ
 
 1. Read the committed index using the Read tool:
    ```bash
-   Read: ~/claude/knowledge-garden/GARDEN.md
+   Read: ${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md
    ```
    Check all three sections (By Technology, By Symptom/Type, By Label).
 
 2. Follow the file link — read the specific entry using `git cat-file`:
    ```bash
-   git -C ~/claude/knowledge-garden cat-file blob HEAD:<path>/GE-XXXX.md
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file blob HEAD:<path>/GE-XXXX.md
    ```
 
 3. If not in the index, search committed content:
    ```bash
-   git -C ~/claude/knowledge-garden grep "keywords" HEAD -- '*.md' \
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' \
      ':!submissions' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
    ```
 
@@ -589,5 +589,5 @@ SEARCH is complete when:
 
 **Does NOT handle:** MERGE, DEDUPE — those are harvest operations.
 
-**Garden location:** `~/claude/knowledge-garden/`
+**Garden location:** `${HORTORA_GARDEN:-~/.hortora/garden}/`
 **Submission format:** Identical to the `garden` skill — harvest processes both.

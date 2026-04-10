@@ -12,7 +12,7 @@ description: >
 
 Harvest handles the two maintenance operations for the knowledge garden:
 
-- **MERGE** — integrate pending submissions from `~/claude/knowledge-garden/submissions/` into the main garden files
+- **MERGE** — integrate pending submissions from `${HORTORA_GARDEN:-~/.hortora/garden}/submissions/` into the main garden files
 - **DEDUPE** — find and resolve duplicate entries within the existing garden
 
 Harvest is always a **dedicated session** — never run during normal session work. It has a full context budget for reading submissions and garden files.
@@ -28,7 +28,7 @@ Harvest is always a **dedicated session** — never run during normal session wo
 **All reads come from git HEAD. Writes go straight to commit. The filesystem is a staging area only.**
 
 ```bash
-GARDEN=~/claude/knowledge-garden
+GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
 
 # Read committed file
 git -C $GARDEN show HEAD:GARDEN.md
@@ -61,7 +61,7 @@ This works identically for local git and remote/federated gardens.
 ## Garden Structure
 
 ```
-~/claude/knowledge-garden/
+${HORTORA_GARDEN:-~/.hortora/garden}/
 ├── GARDEN.md                   ← metadata header (Last assigned ID, drift counter)
 ├── CHECKED.md                  ← duplicate check pair log
 ├── DISCARDED.md                ← discarded duplicates
@@ -116,7 +116,7 @@ Run as a dedicated operation with full context budget for reading.
 
 Read GARDEN.md from committed state:
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:GARDEN.md | head -10
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md | head -10
 ```
 
 Check `Entries merged since last sweep` against `Drift threshold` (default: 10).
@@ -130,14 +130,14 @@ If `entries_merged_since_sweep >= drift_threshold`:
 
 Read from committed state:
 ```bash
-git -C ~/claude/knowledge-garden ls-tree --name-only HEAD submissions/
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} ls-tree --name-only HEAD submissions/
 ```
 
 **Step 2 — Read each submission**
 
 Read each submission from committed state:
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:submissions/<filename>.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:submissions/<filename>.md
 ```
 
 They're compact by design — read all of them.
@@ -145,7 +145,7 @@ They're compact by design — read all of them.
 **Step 3 — Load GARDEN.md index**
 
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:GARDEN.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md
 ```
 
 Scan all three index sections (By Technology, By Symptom/Type, By Label) for entries similar to each submission.
@@ -154,7 +154,7 @@ Scan all three index sections (By Technology, By Symptom/Type, By Label) for ent
 
 Read only the sections that might overlap:
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:<file>.md | grep -A 30 "## <existing title>"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<file>.md | grep -A 30 "## <existing title>"
 ```
 
 **Step 4b — Identify REVISE submissions**
@@ -164,7 +164,7 @@ Check filenames for "revise" — these need different handling from new entries.
 For each REVISE submission:
 1. Read the target entry from committed state:
    ```bash
-   git -C ~/claude/knowledge-garden show HEAD:<path>/<file>.md | grep -A 60 "## Exact Entry Title"
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<path>/<file>.md | grep -A 60 "## Exact Entry Title"
    ```
 2. Integrate based on revision kind:
 
@@ -215,7 +215,7 @@ For each submission classified as "New" in Step 5:
 2. Find same-category existing entries in the committed GARDEN.md index
 3. For each candidate, read the first 30 lines from committed state:
    ```bash
-   git -C ~/claude/knowledge-garden show HEAD:<file>.md | grep -A 30 "## Entry Title"
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<file>.md | grep -A 30 "## Entry Title"
    ```
 4. Compare: symptom description, root cause keywords, fix approach
 5. If similar: present to user — "GE-XXXX [new] looks similar to GE-YYYY [existing] — duplicate, related, or distinct?"
@@ -256,8 +256,8 @@ After writing the final integrated entry to `<domain>/GE-XXXX.md`, run:
 
 ```bash
 python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/integrate_entry.py \
-  ~/claude/knowledge-garden/<domain>/GE-XXXX.md \
-  ~/claude/knowledge-garden
+  ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+  ${HORTORA_GARDEN:-~/.hortora/garden}
 ```
 
 This updates `_summaries/`, domain `INDEX.md`, `labels/`, and `_index/global.md` in one step, runs the structural check, and commits automatically. **Do not commit manually** — `integrate_entry.py` commits automatically.
@@ -268,7 +268,7 @@ Alternatively, if using manual index updates (Step 6 above), proceed to Step 7 a
 
 Stage the deletions:
 ```bash
-git -C ~/claude/knowledge-garden rm submissions/<processed-file>.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} rm submissions/<processed-file>.md
 ```
 
 **Step 8 — Update GARDEN.md metadata**
@@ -281,20 +281,20 @@ In the working tree:
 
 Run the validator against the working tree (it legitimately reads uncommitted state here — it's validating what's about to be committed):
 ```bash
-python3 ~/claude/hortora/soredium/scripts/validate_garden.py ~/claude/knowledge-garden
+python3 ~/claude/hortora/soredium/scripts/validate_garden.py ${HORTORA_GARDEN:-~/.hortora/garden}
 ```
 
 Must exit 0. If it reports errors, fix them before committing.
 
 Then commit all changes in one atomic operation:
 ```bash
-git -C ~/claude/knowledge-garden add .
-git -C ~/claude/knowledge-garden commit -m "merge: integrate N submissions — <brief summary>"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} add .
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "merge: integrate N submissions — <brief summary>"
 ```
 
 If the commit fails (a forage session committed in between):
 ```bash
-git -C ~/claude/knowledge-garden rebase HEAD
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} rebase HEAD
 # Re-read any affected files from new HEAD
 # Re-commit
 ```
@@ -320,8 +320,8 @@ Unlike MERGE which checks new submissions against existing entries, DEDUPE check
 
 Read both from committed state:
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:GARDEN.md
-git -C ~/claude/knowledge-garden show HEAD:CHECKED.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:CHECKED.md
 ```
 
 Enumerate all entries with their GE-IDs, grouped by technology category. Build the set of already-verified pairs from CHECKED.md.
@@ -341,7 +341,7 @@ Cross-category pairs are never checked — they cannot be duplicates.
 For each unchecked pair, read both entries surgically from committed state:
 
 ```bash
-git -C ~/claude/knowledge-garden show HEAD:<file>.md | grep -A 40 "## Entry Title"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<file>.md | grep -A 40 "## Entry Title"
 ```
 
 Classify:
@@ -374,8 +374,8 @@ Update GARDEN.md in working tree:
 **Step 7 — Commit atomically**
 
 ```bash
-git -C ~/claude/knowledge-garden add .
-git -C ~/claude/knowledge-garden commit -m "dedupe: sweep N pairs — M related, K duplicates resolved"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} add .
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "dedupe: sweep N pairs — M related, K duplicates resolved"
 ```
 
 If the commit fails, rebase and re-commit.
@@ -458,5 +458,5 @@ DEDUPE is complete when:
 - `git show HEAD:submissions/<file>` — individual submissions
 - `git show HEAD:<path>` — garden detail files (surgical reads)
 
-**Garden location:** `~/claude/knowledge-garden/`
+**Garden location:** `${HORTORA_GARDEN:-~/.hortora/garden}/`
 **Submission format:** Processes both forage submissions and legacy garden submissions (identical format).

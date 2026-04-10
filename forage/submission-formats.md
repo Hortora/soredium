@@ -9,12 +9,12 @@ and SWEEP Step 4 (submit confirmed entries).
 
 **New submissions:**
 ```
-~/claude/knowledge-garden/submissions/YYYY-MM-DD-<project>-GE-XXXX-<slug>.md
+${HORTORA_GARDEN:-~/.hortora/garden}/submissions/YYYY-MM-DD-<project>-GE-XXXX-<slug>.md
 ```
 
 **Revise submissions** — include "revise" in slug so MERGE Claude identifies it immediately:
 ```
-~/claude/knowledge-garden/submissions/YYYY-MM-DD-<project>-GE-XXXX-revise-<entry-slug>.md
+${HORTORA_GARDEN:-~/.hortora/garden}/submissions/YYYY-MM-DD-<project>-GE-XXXX-revise-<entry-slug>.md
 ```
 
 GE-ID is embedded for instant visibility. Assigned in CAPTURE Step 0.

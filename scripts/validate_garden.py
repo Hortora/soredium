@@ -13,7 +13,7 @@ Checks:
 8. Submission files in submissions/ include Submission ID header
 
 Usage: python3 validate_garden.py [garden_root] [--verbose]
-       garden_root defaults to ~/claude/knowledge-garden/
+       garden_root defaults to $HORTORA_GARDEN or ~/.hortora/garden
 
 Exit codes: 0=clean, 1=errors found, 2=warnings only
 """
@@ -41,9 +41,11 @@ if '--structural' in sys.argv:
     print('Structural check passed')
     sys.exit(0)
 
-# Garden root: first non-flag positional argument, or default convention
+import os
+# Garden root: first non-flag positional argument, $HORTORA_GARDEN env var, or default
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
-GARDEN_ROOT = Path(_args[0]).expanduser().resolve() if _args else Path.home() / "claude" / "knowledge-garden"
+_default = Path(os.environ['HORTORA_GARDEN']).expanduser() if 'HORTORA_GARDEN' in os.environ else Path.home() / '.hortora' / 'garden'
+GARDEN_ROOT = Path(_args[0]).expanduser().resolve() if _args else _default.resolve()
 
 GARDEN_MD = GARDEN_ROOT / "GARDEN.md"
 CHECKED_MD = GARDEN_ROOT / "CHECKED.md"

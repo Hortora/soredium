@@ -27,18 +27,18 @@ Named after the lichen's dispersal unit: a self-contained bundle that carries ev
 
 **CRITICAL — read before touching anything garden-related.**
 
-The `garden` skill at `~/.claude/skills/garden/` (sourced from `cc-praxis`) is **production** and must not change. Multiple project Claudes (starcraft, remotecc, permuplate, quarkmind, etc.) depend on it and write submissions to `~/claude/knowledge-garden/submissions/`. Any breakage cascades to all those sessions.
+The `garden` skill at `~/.claude/skills/garden/` (sourced from `cc-praxis`) is **production** and must not change. Multiple project Claudes (starcraft, remotecc, permuplate, quarkmind, etc.) depend on it and write submissions to `${HORTORA_GARDEN:-~/.hortora/garden}/submissions/`. Any breakage cascades to all those sessions.
 
 **The rule:**
 - `forage` and `harvest` are developed here in soredium
 - They replace the installed `garden` skill only when **both are complete and tested**
 - Until then, the installed `garden` skill is untouched
-- Submissions from the legacy `garden` skill continue to accumulate in `~/claude/knowledge-garden/submissions/`; `harvest` must process these too
+- Submissions from the legacy `garden` skill continue to accumulate in `${HORTORA_GARDEN:-~/.hortora/garden}/submissions/`; `harvest` must process these too
 
 **Compatibility requirements:**
 - `forage` submissions must use the **same file format** as `garden` submissions (so `harvest` can process both)
 - `harvest` must process submissions from both `forage` and the legacy `garden` skill
-- The GE-ID counter (currently in `~/claude/knowledge-garden/GARDEN.md`) needs a decided home before `harvest` can be deployed
+- The GE-ID counter (currently in `${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md`) needs a decided home before `harvest` can be deployed
 
 ---
 
@@ -69,10 +69,10 @@ python3 scripts/claude-skill list
 python3 -m pytest tests/ -v   # currently 139 tests
 
 # Validate a garden entry locally (same as CI)
-python3 scripts/validate_pr.py <entry_file> ~/claude/knowledge-garden
+python3 scripts/validate_pr.py <entry_file> ${HORTORA_GARDEN:-~/.hortora/garden}
 
 # Integrate an entry locally (updates indexes, commits — same as CI)
-python3 scripts/integrate_entry.py <entry_file> ~/claude/knowledge-garden
+python3 scripts/integrate_entry.py <entry_file> ${HORTORA_GARDEN:-~/.hortora/garden}
 
 # First-time garden clone (sparse blobless)
 bash scripts/garden-setup.sh

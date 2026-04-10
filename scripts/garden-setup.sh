@@ -4,12 +4,12 @@
 # Usage: bash garden-setup.sh [garden_url] [target_dir]
 # Defaults:
 #   garden_url = https://github.com/Hortora/garden.git
-#   target_dir = ~/claude/knowledge-garden
+#   target_dir = $HORTORA_GARDEN or ~/.hortora/garden
 
 set -euo pipefail
 
 GARDEN_URL="${1:-https://github.com/Hortora/garden.git}"
-TARGET_DIR="${2:-$HOME/claude/knowledge-garden}"
+TARGET_DIR="${2:-${HORTORA_GARDEN:-$HOME/.hortora/garden}}"
 
 if [ -d "$TARGET_DIR/.git" ]; then
   echo "Garden already cloned at $TARGET_DIR"
