@@ -53,7 +53,12 @@ DISCARDED_MD = GARDEN_ROOT / "DISCARDED.md"
 SUBMISSIONS_DIR = GARDEN_ROOT / "submissions"
 EXCLUDE_DIRS = {'.git', 'submissions', 'scripts'}
 
-GE_ID_PATTERN = re.compile(r'GE-(\d{4})')
+# Legacy format: GE-NNNN (sequential counter, entries GE-0001 through GE-0172)
+# New format: GE-YYYYMMDD-xxxxxx (date + 6 hex chars, ADR-0003)
+GE_ID_LEGACY = r'GE-\d{4}'
+GE_ID_NEW = r'GE-\d{8}-[0-9a-f]{6}'
+GE_ID_ANY = rf'(?:{GE_ID_LEGACY}|{GE_ID_NEW})'
+GE_ID_PATTERN = re.compile(GE_ID_ANY)
 
 errors = []
 warnings = []
@@ -91,7 +96,7 @@ def get_garden_index_ids() -> dict[str, str]:
         return {}
     results = {}
     content = GARDEN_MD.read_text()
-    for m in re.finditer(r'-\s+(GE-\d{4})\s+\[([^\]]+)\]', content):
+    for m in re.finditer(rf'-\s+({GE_ID_ANY})\s+\[([^\]]+)\]', content):
         results[m.group(1)] = m.group(2)
     return results
 
@@ -104,7 +109,7 @@ def get_by_technology_ids() -> set[str]:
     m = re.search(r'## By Technology\n(.*?)(?:\n---)', content, re.DOTALL)
     if not m:
         return set()
-    return set(re.findall(r'GE-\d{4}', m.group(1)))
+    return set(re.findall(GE_ID_ANY, m.group(1)))
 
 
 def strip_code_fences(content: str) -> str:
@@ -126,7 +131,7 @@ def scan_garden_entry_ids() -> dict[str, list[str]]:
         if path.name in ("GARDEN.md", "CHECKED.md", "DISCARDED.md"):
             continue
         content = strip_code_fences(path.read_text())
-        for m in re.finditer(r'^\*\*ID:\*\*\s+(GE-\d{4})', content, re.MULTILINE):
+        for m in re.finditer(rf'^\*\*ID:\*\*\s+({GE_ID_ANY})', content, re.MULTILINE):
             ge_id = m.group(1)
             all_ids.setdefault(ge_id, []).append(str(path.relative_to(GARDEN_ROOT)))
     return all_ids
@@ -138,7 +143,7 @@ def get_checked_pairs() -> list[tuple[str, str]]:
         return []
     pairs = []
     content = CHECKED_MD.read_text()
-    for m in re.finditer(r'\|\s*(GE-\d{4})\s*[×x]\s*(GE-\d{4})\s*\|', content):
+    for m in re.finditer(rf'\|\s*({GE_ID_ANY})\s*[×x]\s*({GE_ID_ANY})\s*\|', content):
         pairs.append((m.group(1), m.group(2)))
     return pairs
 
@@ -149,7 +154,7 @@ def get_discarded_ids() -> list[tuple[str, str]]:
         return []
     results = []
     content = DISCARDED_MD.read_text()
-    for m in re.finditer(r'\|\s*(GE-\d{4})\s*\|\s*(GE-\d{4})\s*\|', content):
+    for m in re.finditer(rf'\|\s*({GE_ID_ANY})\s*\|\s*({GE_ID_ANY})\s*\|', content):
         results.append((m.group(1), m.group(2)))
     return results
 
@@ -161,7 +166,7 @@ def get_submission_ids() -> dict[str, str]:
         return results
     for path in SUBMISSIONS_DIR.glob("*.md"):
         content = path.read_text()
-        m = re.search(r'^\*\*Submission ID:\*\*\s+(GE-\d{4})', content, re.MULTILINE)
+        m = re.search(rf'^\*\*Submission ID:\*\*\s+({GE_ID_ANY})', content, re.MULTILINE)
         if m:
             results[m.group(1)] = path.name
     return results
@@ -179,14 +184,15 @@ def validate():
         if len(files) > 1:
             log_error(f"{ge_id} appears in multiple files: {', '.join(files)}")
 
-    # 3. Check counter consistency
+    # 3. Check counter consistency (legacy GE-NNNN IDs only — new GE-YYYYMMDD-xxxxxx IDs are counter-free)
+    legacy_ids = [gid for gid in entry_ids if re.fullmatch(r'GE-\d{4}', gid)]
     counter = get_garden_counter()
-    if counter is not None and entry_ids:
-        highest = max(int(gid[3:]) for gid in entry_ids)
+    if counter is not None and legacy_ids:
+        highest = max(int(gid[3:]) for gid in legacy_ids)
         if counter < highest:
-            log_error(f"GARDEN.md counter GE-{counter:04d} is BELOW highest entry ID GE-{highest:04d}")
+            log_error(f"GARDEN.md counter GE-{counter:04d} is BELOW highest legacy entry ID GE-{highest:04d}")
         else:
-            log_info(f"Counter GE-{counter:04d} >= highest entry GE-{highest:04d} ✓")
+            log_info(f"Counter GE-{counter:04d} >= highest legacy entry GE-{highest:04d} ✓")
 
     # 4. Check GARDEN.md index vs actual entries (whole index)
     index_ids = get_garden_index_ids()

@@ -93,11 +93,16 @@ ${HORTORA_GARDEN:-~/.hortora/garden}/
 
 ---
 
-## GE-ID Counter
+## GE-ID Format
 
-The GE-ID counter lives in GARDEN.md under `**Last assigned ID:**`. Harvest does NOT assign new IDs — those are assigned by forage at submission time. Harvest verifies IDs from submission filenames and headers, checks for conflicts, and adds the `**ID:** GE-XXXX` line to each integrated entry.
+Two formats coexist in the garden:
 
-If a submission has no GE-ID (legacy format): read the counter from committed state, assign the next available ID, note the change in the commit message.
+- **Legacy** (GE-0001 … GE-0172): sequential counter, assigned at submission time. The `Last assigned ID` field in GARDEN.md tracks the highest legacy ID.
+- **New** (GE-YYYYMMDD-xxxxxx, e.g. GE-20260410-a3f7c2): date + 6 random hex chars, assigned by forage at submission time with no counter. See ADR-0003.
+
+Harvest does NOT assign new IDs — those are always assigned by forage. Harvest verifies IDs from submission filenames and headers, checks for conflicts, and adds the `**ID:** GE-XXXX` line to each integrated entry.
+
+If a submission has no GE-ID (legacy format with no ID in the file): generate a new-format ID using `GE-$(date +%Y%m%d)-$(python3 -c "import secrets; print(secrets.token_hex(3))")` and note the assignment in the commit message.
 
 ---
 
@@ -275,7 +280,7 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} rm submissions/<processed-file>.md
 
 In the working tree:
 - Increment `Entries merged since last sweep` by the number of new entries integrated
-- `Last assigned ID` stays as set during submission; verify it matches the highest ID integrated
+- `Last assigned ID`: only update if any legacy-format (GE-NNNN) entries were assigned new IDs from the counter; new-format IDs (GE-YYYYMMDD-xxxxxx) do not affect the counter
 
 **Step 9 — Validate and commit atomically**
 

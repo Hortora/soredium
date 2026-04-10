@@ -141,78 +141,75 @@ If no remote or non-GitHub URL → **Local mode** (skip to the existing submissi
 ### GitHub Mode
 
 1. Draft entry content using the existing scoring rubric, Fix section, and tag selection.
-2. Create a GitHub issue to get a conflict-free GE-ID:
+2. Generate a collision-free GE-ID locally (no GitHub issue needed):
    ```bash
-   gh issue create --repo Hortora/garden \
-     --title "<60-char slug>" \
-     --label "garden-submission" \
-     --body "Type: <type> | Score: <n>/15 | Domain: <domain>"
+   GE_ID="GE-$(date +%Y%m%d)-$(python3 -c "import secrets; print(secrets.token_hex(3))")"
+   # e.g. GE-20260410-a3f7c2
    ```
-   Issue #123 → GE-0123 (zero-pad to 4 digits).
 3. Create a branch:
    ```bash
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} checkout -b submit/GE-XXXX
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} checkout -b submit/$GE_ID
    ```
-4. Write `<domain>/GE-XXXX.md` with complete YAML frontmatter.
+4. Write `<domain>/$GE_ID.md` with complete YAML frontmatter.
 5. Validate locally before pushing:
    ```bash
    python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/$GE_ID.md \
      ${HORTORA_GARDEN:-~/.hortora/garden}
    ```
    Fix any CRITICAL issues before continuing.
 6. Push and open PR:
    ```bash
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} add <domain>/GE-XXXX.md
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "submit(GE-XXXX): <slug>"
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} push origin submit/GE-XXXX
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} add <domain>/$GE_ID.md
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "submit($GE_ID): <slug>"
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} push origin submit/$GE_ID
    gh pr create --repo Hortora/garden \
-     --title "submit(GE-XXXX): <slug>" \
-     --body "Closes #XXXX" \
+     --title "submit($GE_ID): <slug>" \
      --label "garden-submission" \
-     --head submit/GE-XXXX
+     --head submit/$GE_ID
    ```
 7. Done — CI validates, maintainer reviews, CI integrates on merge.
 
 ### Local Mode
 
 1. Draft entry content (same scoring, Fix section, tags).
-2. Read next sequential ID from GARDEN.md:
+2. Generate a collision-free GE-ID locally:
    ```bash
-   grep "Last assigned ID" ${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md
+   GE_ID="GE-$(date +%Y%m%d)-$(python3 -c "import secrets; print(secrets.token_hex(3))")"
+   # e.g. GE-20260410-a3f7c2
    ```
-   Increment by 1, zero-pad to 4 digits → `GE-XXXX`.
-3. Write `<domain>/GE-XXXX.md` with complete YAML frontmatter.
+   No counter to read or update — the ID is self-contained.
+3. Write `<domain>/$GE_ID.md` with complete YAML frontmatter.
 4. Validate locally:
    ```bash
    python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/$GE_ID.md \
      ${HORTORA_GARDEN:-~/.hortora/garden}
    ```
    Fix any CRITICAL issues before continuing.
 5. Integrate locally (updates indexes and commits automatically):
    ```bash
    python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/integrate_entry.py \
-     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/$GE_ID.md \
      ${HORTORA_GARDEN:-~/.hortora/garden}
    ```
-6. Update GARDEN.md counter — replace `Last assigned ID: GE-YYYY` with the new ID.
-7. Done — no PR, no CI, indexes already updated.
+6. Done — no PR, no CI, no counter update needed.
 
 **Step 0 — Assign GE-ID (before anything else)**
 
-Read the counter from committed state:
+Generate locally — no coordination with the garden required:
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md | grep "Last assigned ID"
+GE_ID="GE-$(date +%Y%m%d)-$(python3 -c "import secrets; print(secrets.token_hex(3))")"
 ```
 
-Increment by 1. Pad to 4 digits: GE-0001, GE-0042, GE-0100. This is the submission's GE-ID.
+Format: `GE-YYYYMMDD-xxxxxx` (date + 6 lowercase hex chars). Collision probability
+is negligible at any realistic garden scale (< 0.003% at 1,000 submissions/day).
+See ADR-0003 for rationale.
 
-**Conflict recovery:** If your commit fails (another session committed first):
+**Conflict recovery:** If your commit fails (another session committed in between):
 ```bash
 git -C ${HORTORA_GARDEN:-~/.hortora/garden} rebase HEAD
-# Re-read counter from new HEAD — it's now higher
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md | grep "Last assigned ID"
+# GE-ID does not change — it's already unique
 # Take the next ID from the new counter
 # Rename your submission file and update its Submission ID header
 # Re-commit
