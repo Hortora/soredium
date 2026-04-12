@@ -57,7 +57,7 @@ EXCLUDE_DIRS = {'.git', 'submissions', 'scripts'}
 # New format: GE-YYYYMMDD-xxxxxx (date + 6 hex chars, ADR-0003)
 GE_ID_LEGACY = r'GE-\d{4}'
 GE_ID_NEW = r'GE-\d{8}-[0-9a-f]{6}'
-GE_ID_ANY = rf'(?:{GE_ID_LEGACY}|{GE_ID_NEW})'
+GE_ID_ANY = rf'(?:{GE_ID_NEW}|{GE_ID_LEGACY})'  # new format first — prevents GE-\d{4} greedily matching prefix of GE-YYYYMMDD-xxxxxx
 GE_ID_PATTERN = re.compile(GE_ID_ANY)
 
 errors = []
