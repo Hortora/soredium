@@ -83,7 +83,7 @@ def get_garden_counter() -> int | None:
         log_error("GARDEN.md not found")
         return None
     content = GARDEN_MD.read_text()
-    m = re.search(r'\*\*Last assigned ID:\*\*\s*(GE-(\d{4}))', content)
+    m = re.search(r'\*\*Last legacy ID:\*\*\s*(GE-(\d{4}))', content)
     if not m:
         log_error("GARDEN.md has no 'Last assigned ID' metadata")
         return None
