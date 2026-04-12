@@ -3,7 +3,6 @@
 
 import sys
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -17,6 +16,8 @@ except ImportError:
 def parse_entry(path: Path) -> tuple:
     content = path.read_text(encoding='utf-8')
     parts = content.split('---', 2)
+    if len(parts) < 3:
+        return {}, content.strip()  # no YAML frontmatter — legacy markdown-style entry
     return yaml.safe_load(parts[1]) or {}, parts[2].strip()
 
 
@@ -56,16 +57,6 @@ def update_global_index(domain: str, garden: Path):
             f.write(f"| {domain} | {domain}/INDEX.md |\n")
 
 
-def close_github_issue(ge_id: str):
-    issue_number = int(ge_id.replace('GE-', '').lstrip('0') or '0')
-    if issue_number:
-        subprocess.run(
-            ['gh', 'issue', 'close', str(issue_number),
-             '--comment', f'Integrated as {ge_id}'],
-            check=True
-        )
-
-
 def run_validate(garden: Path):
     script = Path(__file__).parent / 'validate_garden.py'
     subprocess.run(
@@ -83,20 +74,17 @@ def git_commit(garden: Path, ge_id: str):
     )
 
 
-def integrate(entry_path: str, garden_root: str = None, close_issue: bool = True) -> dict:
+def integrate(entry_path: str, garden_root: str = None) -> dict:
     path = Path(entry_path)
     garden = Path(garden_root) if garden_root else path.parent.parent
     fm, _ = parse_entry(path)
     domain = fm.get('domain', '')
-    ge_id = path.stem
+    ge_id = fm.get('id') or path.stem  # frontmatter id wins; filename stem is fallback only
 
     update_summaries(domain, ge_id, fm, garden)
     update_domain_index(domain, ge_id, fm, garden)
     update_labels(fm, ge_id, garden)
     update_global_index(domain, garden)
-
-    if close_issue:
-        close_github_issue(ge_id)
 
     run_validate(garden)
     git_commit(garden, ge_id)
@@ -111,7 +99,6 @@ def main():
     result = integrate(
         sys.argv[1],
         sys.argv[2] if len(sys.argv) > 2 else None,
-        close_issue=bool(os.environ.get('GITHUB_TOKEN'))
     )
     print(json.dumps(result, indent=2))
 
