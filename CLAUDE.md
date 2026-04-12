@@ -23,22 +23,14 @@ Named after the lichen's dispersal unit: a self-contained bundle that carries ev
 
 ---
 
-## The Migration Constraint
+## Migration Status
 
-**CRITICAL — read before touching anything garden-related.**
+**Migration complete** (2026-04-12). `forage` and `harvest` are deployed and replace the legacy `garden` skill.
 
-The `garden` skill at `~/.claude/skills/garden/` (sourced from `cc-praxis`) is **production** and must not change. Multiple project Claudes (starcraft, remotecc, permuplate, quarkmind, etc.) depend on it and write submissions to `${HORTORA_GARDEN:-~/.hortora/garden}/submissions/`. Any breakage cascades to all those sessions.
-
-**The rule:**
-- `forage` and `harvest` are developed here in soredium
-- They replace the installed `garden` skill only when **both are complete and tested**
-- Until then, the installed `garden` skill is untouched
-- Submissions from the legacy `garden` skill continue to accumulate in `${HORTORA_GARDEN:-~/.hortora/garden}/submissions/`; `harvest` must process these too
-
-**Compatibility requirements:**
-- `forage` submissions must use the **same file format** as `garden` submissions (so `harvest` can process both)
-- `harvest` must process submissions from both `forage` and the legacy `garden` skill
-- The GE-ID counter (currently in `${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md`) needs a decided home before `harvest` can be deployed
+- All project CLAUDE.md files updated to reference `forage`/`harvest`
+- Garden path is `~/.hortora/garden/` (env var: `HORTORA_GARDEN`)
+- Legacy `garden` skill at `~/.claude/skills/garden/` is deprecated — kept in place until the `handover` skill in cc-praxis is updated to call forage SWEEP instead of garden sweep
+- `harvest` processes submissions from both `forage` and legacy `garden` format (formats are identical)
 
 ---
 
@@ -48,11 +40,6 @@ The `garden` skill at `~/.claude/skills/garden/` (sourced from `cc-praxis`) is *
 |-------|--------|---------|
 | `forage` | ✅ deployed | CAPTURE (GitHub mode + local mode), SWEEP, SEARCH, REVISE |
 | `harvest` | ✅ deployed | MERGE (via integrate_entry.py), DEDUPE |
-
-When both are complete and tested:
-1. Run `sync-local` to push them to `~/.claude/skills/`
-2. Notify active project Claudes to switch from `garden` to `forage`/`harvest`
-3. The legacy `garden` skill can then be deprecated in `cc-praxis`
 
 ---
 
