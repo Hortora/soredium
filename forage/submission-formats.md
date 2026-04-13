@@ -156,48 +156,45 @@ Any limitations, version constraints, or risks from relying on undocumented beha
 
 ---
 
-## Revise Template
+## Revise — Integration Guide
 
-Enrichment for an existing entry — solution, alternative, variant, update, or status change:
-
-```markdown
----
-id: GE-YYYYMMDD-xxxxxx
-type: revise
-revision_kind: solution | alternative | variant | update | resolved | deprecated
-target_id: GE-YYYY
-target_path: <domain>/GE-YYYY.md
-domain: <same as target>
-submitted: YYYY-MM-DD
----
-
-## What this adds
-[1–2 sentences on what new knowledge this brings to the existing entry]
-
-## Content
-[The actual solution, alternative, update, or note — complete and runnable where code is involved]
-
-## Why it belongs with the existing entry
-[How it relates — is it a complete fix, an alternative approach, additional context?]
-
-## Trade-offs / caveats
-[Any limitations, constraints, or conditions under which this applies or doesn't]
-
-*Score: N/15 · Included because: [why this belongs] · Reservation: [none / brief reason]*
-```
+REVISE modifies the target entry file directly. No separate file is created.
 
 **Revision kind guide:**
 
-| Kind | When to use |
-|------|------------|
-| `solution` | Gotcha had no fix / workaround only — now there's a real fix |
-| `alternative` | Entry has one solution — found a different approach with different trade-offs |
-| `variant` | Same pattern but different context, constraint, or technology |
-| `update` | Additional context, edge cases, or discovery that enriches the entry |
-| `resolved` | The library/tool fixed the bug — entry stays but notes the version |
-| `deprecated` | Feature removed or approach obsolete — entry stays with a warning |
+| Kind | When to use | How to apply |
+|------|------------|-------------|
+| `solution` | Gotcha had no fix — now there's a real fix | If Fix says "None known": replace with solution. If Fix already has one: restructure into Solution 1 / Solution 2 (see below). |
+| `alternative` | Entry has one solution — found a different approach | Add `### Alternative — [brief name]` after existing Fix section with pros/cons. |
+| `variant` | Same pattern in a different context | Add `## Variant — [context]` section within the file. |
+| `update` | Additional context, edge cases, or discovery | Append to the relevant section (Root cause, Context, Caveats, etc.). |
+| `resolved` | Library/tool fixed the bug in a newer version | Add `**Resolved in: vX.Y** — [brief note]` after the **Stack** line. Keep entry intact. |
+| `deprecated` | Feature removed or approach obsolete | Add `**Deprecated:** [reason and date]` near the top. Keep entry for historical reference. |
 
-**Garden Score for REVISE:** score the revision itself, not the original entry.
+**Multiple Solutions structure** — only when 2 or more solutions exist:
+
+```markdown
+### Solution 1 — [brief descriptive name]
+**Approach:** [one sentence]
+**Pros:** [what makes it good]
+**Cons/trade-offs:** [limitations, constraints]
+[code block]
+
+### Solution 2 — [brief descriptive name]
+**Approach:** [one sentence]
+**Pros:** [what makes it good]
+**Cons/trade-offs:** [limitations, constraints]
+[code block]
+```
+
+Single solutions never get pros/cons structure. Only restructure when a second solution is being added.
+
+**Score line:** Append a score line for the revision itself (not the original entry score):
+```
+*Revision score: N/15 · Adds: [what's new] · Reservation: [none / brief reason]*
+```
+
+**Critical:** For `resolved` entries — never delete the original content. Users on older versions still need it. Add the resolved note and keep everything else.
 
 ---
 

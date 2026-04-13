@@ -319,9 +319,11 @@ Use when importing from `BUGS-AND-ODDITIES.md` or similar project-level bug/quir
 
 ---
 
-### REVISE (submit an enrichment to an existing entry)
+### REVISE (enrich an existing entry in-place)
 
-Use when new knowledge enriches an existing garden entry rather than standing alone.
+Use when new knowledge enriches an existing garden entry rather than standing alone: a solution surfaces for a previously-unsolved gotcha, an alternative approach is found, additional context emerges, or an entry's status changes.
+
+Unlike CAPTURE, REVISE modifies the target entry directly — no separate file is created.
 
 **Step 1 — Identify the target entry**
 
@@ -332,7 +334,7 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' \
   ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
 ```
 
-Read only the specific entry:
+Read the full entry from committed state:
 ```bash
 git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<domain>/GE-XXXX.md
 ```
@@ -348,20 +350,57 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<domain>/GE-XXXX.md
 | Bug fixed in a newer version | `resolved` |
 | Feature removed or approach obsolete | `deprecated` |
 
-**Step 3 — Draft and confirm**
+**Step 3 — Draft the modification and confirm**
 
-Use the REVISE template in [submission-formats.md](submission-formats.md). Show it to the user. Wait for confirmation.
+Draft the specific change to the target entry body. Show it to the user. Wait for confirmation before writing.
 
-**Step 4 — Write the REVISE entry file**
+See [submission-formats.md](submission-formats.md) for how to apply each revision kind and the Multiple Solutions format.
 
-REVISE entries get their own GE-ID. Include "revise" in the filename:
-```bash
-# $GARDEN/<domain>/$GE_ID-revise-<target-slug>.md
+**Step 4 — Apply the revision directly to the target entry**
+
+Edit the target entry file in the working tree. Apply based on revision kind:
+
+| Kind | How to apply |
+|------|-------------|
+| `solution` | If Fix says "None known": replace with the fix. If Fix already has a solution: restructure into **Solution 1 / Solution 2** with pros/cons for each (see below). |
+| `alternative` | Add `### Alternative — [brief name]` after the existing Fix/Solution section with pros/cons. |
+| `variant` | Add `## Variant — [context]` section within the file. |
+| `update` | Append to the relevant section (Root cause, Context, Caveats, etc.). |
+| `resolved` | Add `**Resolved in: vX.Y** — [brief note]` after the **Stack** line; keep entry intact. |
+| `deprecated` | Add `**Deprecated:** [reason and date]` near the top; keep the entry for historical reference. |
+
+**Multiple Solutions structure** (only when 2 or more solutions exist):
+
+```markdown
+### Solution 1 — [brief descriptive name]
+**Approach:** [one sentence]
+**Pros:** [what makes it good]
+**Cons/trade-offs:** [limitations, constraints]
+[code block]
+
+### Solution 2 — [brief descriptive name]
+**Approach:** [one sentence]
+**Pros:** [what makes it good]
+**Cons/trade-offs:** [limitations, constraints]
+[code block]
 ```
+
+Single solutions never get pros/cons. Only restructure when a second solution is being added.
+
+**REVISE "resolved" entry:** Never delete the original content — users on older versions still need it. Add the resolved note and keep everything else.
 
 **Step 5 — Validate and deliver**
 
-Same as CAPTURE Steps 7–8: validate, then PR (GitHub remote) or direct commit (local).
+Validate:
+```bash
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
+  ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+  ${HORTORA_GARDEN:-~/.hortora/garden}
+```
+
+Then deliver the same way as CAPTURE Step 8: PR (GitHub remote) or direct commit to main (local).
+
+Commit message: `revise(GE-XXXX): <revision-kind> — <brief description>`
 
 ---
 
@@ -449,11 +488,14 @@ SWEEP is complete when:
 - ✅ Report given: N found, M submitted per category
 
 REVISE is complete when:
-- ✅ Target entry located via `git grep` or `git show HEAD:path`
-- ✅ REVISE entry file written with "revise" in the filename
-- ✅ Revision kind declared in YAML frontmatter
-- ✅ User confirmed before writing
-- ✅ Delivered: PR (GitHub remote) or direct commit (local)
+- ✅ Target entry read from `git show HEAD:<domain>/GE-XXXX.md` (not filesystem)
+- ✅ Revision kind determined and correct integration method applied to target entry body
+- ✅ Multiple Solutions structure used when adding a second solution (not just appending)
+- ✅ "resolved" entries: resolved note added, original content preserved
+- ✅ User confirmed the modification before writing
+- ✅ `validate_pr.py` run on the modified target entry — no CRITICAL errors
+- ✅ Delivered: PR (GitHub remote) or direct commit to main (local)
+- ✅ Commit message: `revise(GE-XXXX): <revision-kind> — <brief description>`
 
 SEARCH is complete when:
 - ✅ Index read from `GARDEN.md` or `_index/global.md`
