@@ -5,7 +5,7 @@ description: >
   mislead about root cause, tools that contradict documentation, silent failures with no error,
   workarounds found only via multiple failed approaches, techniques a skilled developer wouldn't
   naturally reach for. Session-time operations: CAPTURE (specific entry), SWEEP (systematic session
-  scan), SEARCH (retrieve entries), REVISE (enrich existing entry). For MERGE and DEDUPE use harvest.
+  scan), SEARCH (retrieve entries), REVISE (enrich existing entry). For DEDUPE use harvest.
 ---
 
 # Forage — Session-Time Garden Operations
@@ -20,7 +20,7 @@ three kinds of entries:
 Stored at `${HORTORA_GARDEN:-~/.hortora/garden}/` so any Claude instance on this machine can read and contribute to it.
 
 **Forage handles session-time operations only: CAPTURE, SWEEP, SEARCH, REVISE.**
-For MERGE and DEDUPE (integrating submissions into the garden), use the `harvest` skill.
+For DEDUPE (finding duplicates across existing entries), use the `harvest` skill.
 
 **Proactive OFFER rule:** When conditions match the CSO description but the user didn't ask — offer in 2 sentences and wait for confirmation before engaging any workflow.
 
@@ -36,20 +36,15 @@ For MERGE and DEDUPE (integrating submissions into the garden), use the `harvest
 
 **All reads come from git HEAD. The filesystem is a staging area only.**
 
-The garden is a git repository. Git's commit atomicity is the coordination primitive — it works for local-only gardens and remote/federated gardens without any file locking or OS-specific tricks.
-
 ```bash
 GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
 
 # Read a committed file (always use this, never cat/read directly)
 git -C $GARDEN show HEAD:GARDEN.md
-git -C $GARDEN show HEAD:tools/git.md
-
-# List committed submissions
-git -C $GARDEN ls-tree --name-only HEAD submissions/
+git -C $GARDEN show HEAD:tools/GE-0002.md
 
 # Search committed content
-git -C $GARDEN grep "keywords" HEAD -- '*.md' ':!submissions' ':!GARDEN.md'
+git -C $GARDEN grep "keywords" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
 ```
 
 **Why:** Direct filesystem reads can see partial writes from other sessions. `git show HEAD:path` always returns complete, committed state.
@@ -58,8 +53,7 @@ git -C $GARDEN grep "keywords" HEAD -- '*.md' ':!submissions' ':!GARDEN.md'
 
 **Conflict recovery:** If a commit fails because another session committed first:
 ```bash
-git -C $GARDEN rebase HEAD   # incorporate the other session's changes
-# Re-read counter from new HEAD, renumber submission if needed
+git -C $GARDEN rebase HEAD
 # Re-commit
 ```
 
@@ -82,35 +76,40 @@ git -C $GARDEN rebase HEAD   # incorporate the other session's changes
 
 ```
 ${HORTORA_GARDEN:-~/.hortora/garden}/
-├── GARDEN.md                   ← metadata header (Last assigned ID, drift counter)
+├── GARDEN.md                   ← index (By Technology, By Symptom/Type, By Label)
 ├── CHECKED.md                  ← duplicate check pair log
 ├── DISCARDED.md                ← discarded duplicates
-├── submissions/                ← incoming entries from any Claude session
-│   └── YYYY-MM-DD-<project>-GE-XXXX-<slug>.md
 ├── tools/                      ← cross-domain tools, techniques, and patterns
+│   └── GE-YYYYMMDD-xxxxxx.md  ← one file per entry, YAML frontmatter
 ├── quarkus/
 ├── java/
-├── intellij-platform/
 └── <tech-category>/
-    └── <topic>.md
+    └── GE-YYYYMMDD-xxxxxx.md
 ```
 
-**`submissions/`** is how all Claude sessions contribute. Write first, deduplicate with harvest later.
+Every entry is a standalone file with YAML frontmatter. There is no `submissions/` queue — forage writes entries directly to their domain directory.
 
 ---
 
-## The Submission Model
+## Entry Format
 
-**Why submissions instead of direct writes:**
+All entries use YAML frontmatter. See [submission-formats.md](submission-formats.md) for complete templates.
 
-Reading garden files to check for duplicates costs the submitting Claude's context window. The solution: **write first, deduplicate with harvest.**
-
-- **Forage** writes a self-contained submission file. Cheap. No garden files read unless already in context.
-- **Harvest** is a dedicated session whose whole job is reading submissions and integrating them. It has full budget for the merge.
-
-**The only exception:** If forage already has a garden file in context (because it searched the garden earlier in the same session), it should use that existing awareness to avoid an obvious duplicate.
-
-**Submission format:** See [submission-formats.md](submission-formats.md) for complete templates (gotcha, technique, undocumented, revise), scoring dimensions, and post-merge entry format.
+**Required frontmatter fields:**
+```yaml
+---
+id: GE-YYYYMMDD-xxxxxx
+title: "Short descriptive title"
+type: gotcha | technique | undocumented
+domain: tools          # directory name (tools, quarkus, java, etc.)
+stack: "Technology, Version"
+tags: [tag1, tag2]
+score: N               # must be ≥8 to pass validation
+verified: true
+staleness_threshold: 730
+submitted: YYYY-MM-DD
+---
+```
 
 **Score thresholds:**
 
@@ -125,102 +124,21 @@ Reading garden files to check for duplicates costs the submitting Claude's conte
 
 ## Workflows
 
-### CAPTURE (write a submission — default operation)
+### CAPTURE (write an entry — default operation)
 
-### Mode Detection
+**Step 0 — Assign GE-ID**
 
-Before any CAPTURE step, detect mode:
-
-```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} remote get-url origin 2>/dev/null
-```
-
-If the URL contains `github.com` → **GitHub mode** (follow GitHub Mode below).
-If no remote or non-GitHub URL → **Local mode** (skip to the existing submission workflow below).
-
-### GitHub Mode
-
-1. Draft entry content using the existing scoring rubric, Fix section, and tag selection.
-2. Generate a collision-free GE-ID locally (no GitHub issue needed):
-   ```bash
-   GE_ID="GE-$(date +%Y%m%d)-$(python3 -c "import secrets; print(secrets.token_hex(3))")"
-   # e.g. GE-20260410-a3f7c2
-   ```
-3. Create a branch:
-   ```bash
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} checkout -b submit/$GE_ID
-   ```
-4. Write `<domain>/$GE_ID.md` with complete YAML frontmatter.
-5. Validate locally before pushing:
-   ```bash
-   python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/$GE_ID.md \
-     ${HORTORA_GARDEN:-~/.hortora/garden}
-   ```
-   Fix any CRITICAL issues before continuing.
-6. Push and open PR:
-   ```bash
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} add <domain>/$GE_ID.md
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "submit($GE_ID): <slug>"
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} push origin submit/$GE_ID
-   gh pr create --repo Hortora/garden \
-     --title "submit($GE_ID): <slug>" \
-     --label "garden-submission" \
-     --head submit/$GE_ID
-   ```
-7. Done — CI validates, maintainer reviews, CI integrates on merge.
-
-### Local Mode
-
-1. Draft entry content (same scoring, Fix section, tags).
-2. Generate a collision-free GE-ID locally:
-   ```bash
-   GE_ID="GE-$(date +%Y%m%d)-$(python3 -c "import secrets; print(secrets.token_hex(3))")"
-   # e.g. GE-20260410-a3f7c2
-   ```
-   No counter to read or update — the ID is self-contained.
-3. Write `<domain>/$GE_ID.md` with complete YAML frontmatter.
-4. Validate locally:
-   ```bash
-   python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/$GE_ID.md \
-     ${HORTORA_GARDEN:-~/.hortora/garden}
-   ```
-   Fix any CRITICAL issues before continuing.
-5. Integrate locally (updates indexes and commits automatically):
-   ```bash
-   python ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/integrate_entry.py \
-     ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/$GE_ID.md \
-     ${HORTORA_GARDEN:-~/.hortora/garden}
-   ```
-6. Done — no PR, no CI, no counter update needed.
-
-**Step 0 — Assign GE-ID (before anything else)**
-
-Generate locally — no coordination with the garden required:
+Generate locally — no external counter needed:
 ```bash
 GE_ID="GE-$(date +%Y%m%d)-$(python3 -c "import secrets; print(secrets.token_hex(3))")"
+# e.g. GE-20260410-a3f7c2
 ```
 
-Format: `GE-YYYYMMDD-xxxxxx` (date + 6 lowercase hex chars). Collision probability
-is negligible at any realistic garden scale (< 0.003% at 1,000 submissions/day).
-See ADR-0003 for rationale.
-
-**Conflict recovery:** If your commit fails (another session committed in between):
-```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} rebase HEAD
-# GE-ID does not change — it's already unique
-# Take the next ID from the new counter
-# Rename your submission file and update its Submission ID header
-# Re-commit
-```
+Format: `GE-YYYYMMDD-xxxxxx` (date + 6 lowercase hex chars). Collision probability is negligible at any realistic garden scale. See ADR-0003 for rationale.
 
 **Step 1 — Classify, score, and filter**
 
-First, classify the type:
-- **gotcha** — something that went wrong in a non-obvious way
-- **technique** — a non-obvious approach that worked
-- **undocumented** — something that exists and works but isn't in the docs
+Classify the type: **gotcha**, **technique**, or **undocumented**.
 
 Is it cross-project? (Not tied to one specific codebase's logic.) If no → skip.
 
@@ -238,9 +156,9 @@ Before drafting, scan the committed index for obvious conflicts:
 git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md
 ```
 
-Find entries in the same technology category. Compare titles: if any existing entry title is very similar:
+Find entries in the same technology category. Compare titles:
 - If same thing → stop; offer REVISE instead
-- If different → proceed; note which IDs were checked
+- If different → proceed
 
 Do NOT read garden detail files — index only.
 
@@ -266,55 +184,74 @@ Work from what's already known. Ask only for what's genuinely unclear.
 | Fix | The working solution with code |
 | Why non-obvious | Why the obvious approach failed |
 
-**Step 4 — Determine the suggested target (don't read, just reason)**
+**Step 4 — Determine the domain**
 
-Based on the technology stack, suggest the likely destination:
+Based on the technology stack, determine the domain directory:
 
-| Technology | Suggested target |
-|-----------|-----------------|
-| AppKit, WKWebView, NSTextField | `macos-native-appkit/appkit-panama-ffm.md` |
-| Panama FFM, jextract, upcalls | `java-panama-ffm/native-image-patterns.md` |
-| GraalVM native image | `graalvm-native-image/<topic>.md` |
-| Quarkus | `quarkus/<topic>.md` |
-| Git, tmux, Docker, CLI tools | `tools/<tool>.md` |
-| Techniques spanning multiple technologies | `tools/<problem-domain>.md` |
-| Doesn't fit existing | `<new-descriptive-dir>/<topic>.md` |
-
-This is a hint only — harvest decides final placement.
+| Technology | Domain |
+|-----------|--------|
+| AppKit, WKWebView, NSTextField | `macos-native-appkit` |
+| Panama FFM, jextract, GraalVM native | `java-panama-ffm` |
+| Quarkus | `quarkus` |
+| Java (language, JVM) | `java` |
+| Git, tmux, Docker, CLI tools, cross-cutting patterns | `tools` |
+| Doesn't fit existing | `<new-descriptive-dir>` |
 
 **Step 5 — Draft and confirm**
 
-Draft the submission using the template in [submission-formats.md](submission-formats.md). Show it to the user:
+Draft the entry using the YAML frontmatter template in [submission-formats.md](submission-formats.md). Show it to the user:
 > "Does this capture it accurately?"
 
 Wait for confirmation before writing.
 
-**Step 6 — Write the submission file and update the counter**
+**Step 6 — Write the entry file**
 
-Write the submission file to the filesystem (staging area):
 ```bash
-mkdir -p ${HORTORA_GARDEN:-~/.hortora/garden}/submissions
-# write YYYY-MM-DD-<project>-GE-XXXX-<slug>.md
+GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
+# write $GARDEN/<domain>/$GE_ID.md with YAML frontmatter + body
 ```
 
-Update GARDEN.md counter in the working tree:
+**Step 7 — Validate**
+
 ```bash
-# Edit GARDEN.md: "Last assigned ID: GE-XXXX" → "Last assigned ID: GE-YYYY"
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
+  ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/$GE_ID.md \
+  ${HORTORA_GARDEN:-~/.hortora/garden}
 ```
 
-**Step 7 — Commit atomically**
+Fix any CRITICAL issues before continuing.
 
-Both changes go in one commit — the counter and the submission are inseparable:
+**Step 8 — Deliver**
+
+Detect the garden's remote:
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} add submissions/YYYY-MM-DD-<project>-GE-XXXX-<slug>.md GARDEN.md
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "submit(<project>): GE-XXXX '<short title>'"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} remote get-url origin 2>/dev/null
 ```
 
-If the commit fails due to conflict, follow the rebase recovery in Step 0.
+**If the URL contains `github.com`** → create a branch and open a PR:
+```bash
+GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
+git -C $GARDEN checkout -b submit/$GE_ID
+git -C $GARDEN add <domain>/$GE_ID.md
+git -C $GARDEN commit -m "submit($GE_ID): <slug>"
+git -C $GARDEN push origin submit/$GE_ID
+gh pr create --repo Hortora/garden \
+  --title "submit($GE_ID): <slug>" \
+  --label "garden-submission" \
+  --head submit/$GE_ID
+git -C $GARDEN checkout main
+```
 
-**Step 8 — Report back**
+**If no GitHub remote** → commit directly to main:
+```bash
+GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
+git -C $GARDEN add <domain>/$GE_ID.md
+git -C $GARDEN commit -m "submit($GE_ID): <slug>"
+```
 
-Tell the user the submission file path and that it will be merged in the next harvest session.
+**Step 9 — Report back**
+
+Tell the user the entry path and (for GitHub gardens) the PR URL.
 
 ---
 
@@ -376,32 +313,28 @@ Use when importing from `BUGS-AND-ODDITIES.md` or similar project-level bug/quir
 
 1. Read the source document
 2. For each entry, classify **CROSS-PROJECT** or **PROJECT-LOCAL**
-   - Cross-project: the issue applies to the technology generally, not just this codebase
-   - Project-local: tied to this project's specific logic, data model, or configuration
 3. Show classifications, ask for confirmation
-4. For cross-project entries: write a submission file per entry (CAPTURE flow)
-5. Report: N submissions written, M skipped as project-specific
-6. Suggest running harvest when convenient
+4. For cross-project entries: run the CAPTURE flow per entry
+5. Report: N entries written, M skipped as project-specific
 
 ---
 
 ### REVISE (submit an enrichment to an existing entry)
 
-Use when new knowledge enriches an existing garden entry rather than standing alone: a solution surfaces for a previously-unsolved gotcha, an alternative approach is found, additional context emerges, or an entry's status changes.
+Use when new knowledge enriches an existing garden entry rather than standing alone.
 
 **Step 1 — Identify the target entry**
 
-If the entry is already in context from this session, use that knowledge directly. If you need to find it, search committed content:
+If already in context, use that knowledge directly. Otherwise search:
 
 ```bash
-# Search committed content (excludes submissions, metadata files)
 git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' \
-  ':!submissions' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+  ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
 ```
 
-Then read only the specific entry from committed state:
+Read only the specific entry:
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<path>/<file>.md | grep -A 60 "## Entry Title"
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<domain>/GE-XXXX.md
 ```
 
 **Step 2 — Determine the revision kind**
@@ -419,72 +352,48 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<path>/<file>.md | grep -A
 
 Use the REVISE template in [submission-formats.md](submission-formats.md). Show it to the user. Wait for confirmation.
 
-**Step 4 — Write the submission file**
+**Step 4 — Write the REVISE entry file**
 
-Include "revise" in the filename so harvest identifies it immediately:
-```
-YYYY-MM-DD-<project>-GE-XXXX-revise-<entry-slug>.md
-```
-(GE-XXXX is this revision's own assigned ID, not the target's ID.)
-
-**Step 5 — Commit atomically**
-
+REVISE entries get their own GE-ID. Include "revise" in the filename:
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} add submissions/YYYY-MM-DD-<project>-GE-XXXX-revise-<slug>.md GARDEN.md
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "submit(<project>): GE-XXXX revise '<entry title>' — <what's new>"
+# $GARDEN/<domain>/$GE_ID-revise-<target-slug>.md
 ```
 
-If the commit fails, follow the rebase recovery documented in CAPTURE Step 0.
+**Step 5 — Validate and deliver**
+
+Same as CAPTURE Steps 7–8: validate, then PR (GitHub remote) or direct commit (local).
 
 ---
 
 ### SEARCH (retrieving entries)
 
-**Session start** — pull latest index changes before searching (fast, no entry blobs):
+**Session start** — pull latest index changes before searching:
 ```bash
 git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
 ```
 
-**Reading index files** (always materialised in sparse checkout — use Read tool normally):
-- `${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md`
-- `${HORTORA_GARDEN:-~/.hortora/garden}/_index/global.md`
-- `${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/INDEX.md`
-- `${HORTORA_GARDEN:-~/.hortora/garden}/_summaries/<domain>/`
-
-**Reading entry bodies** (not materialised — use git cat-file):
-```bash
-# Single entry
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file blob HEAD:<domain>/GE-XXXX.md
-
-# Multiple entries — one network round-trip (Tier 2: 2-4 candidates)
-printf 'HEAD:quarkus/cdi/GE-0123.md\nHEAD:tools/git/GE-0043.md\n' \
-  | git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file --batch
-```
-
-Subsequent reads of the same entry are served from `.git/objects/` — no network cost.
-
 **Search workflow:**
 
-1. Read the committed index using the Read tool:
-   ```bash
+1. Read the committed index:
+   ```
    Read: ${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md
    ```
-   Check all three sections (By Technology, By Symptom/Type, By Label).
+   Check By Technology, By Symptom/Type, and By Label sections.
 
-2. Follow the file link — read the specific entry using `git cat-file`:
+2. Read the specific entry:
    ```bash
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file blob HEAD:<path>/GE-XXXX.md
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file blob HEAD:<domain>/GE-XXXX.md
    ```
 
 3. If not in the index, search committed content:
    ```bash
    git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' \
-     ':!submissions' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+     ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
    ```
 
-4. Return the full entry (Symptom + Root Cause + Fix + Why Non-obvious).
+4. Return the full entry.
 
-5. If the user just fixed something related, offer to submit the new knowledge via CAPTURE.
+5. If the user just fixed something related, offer to submit via CAPTURE.
 
 ---
 
@@ -492,26 +401,16 @@ Subsequent reads of the same entry are served from `.git/objects/` — no networ
 
 Fire **without being asked** when:
 
-**For gotchas:**
-- Multiple approaches were tried before the fix was found
-- The documented approach didn't work
-- Something works in one context but silently fails in another
-- The user says: "that took way too long", "I'd never have guessed that", "weird behaviour"
+**For gotchas:** multiple approaches tried before fix; documented approach didn't work; silent failure in one context only. User says: "that took way too long", "weird behaviour".
 
-**For techniques:**
-- A non-obvious approach was used that solved a problem more elegantly than expected
-- A combination of tools or APIs was used in an undocumented way
-- The user says: "that's a neat trick", "I didn't know you could do that", "this should be documented"
+**For techniques:** non-obvious approach used; tool/API combination used in unexpected way. User says: "that's a neat trick", "this should be documented".
 
-**For undocumented:**
-- A flag, option, or behaviour was found by reading source code, not docs
-- Something works but there's no official explanation
-- The user says: "this isn't in the docs", "I only found this in the source"
+**For undocumented:** found by reading source code, not docs; works but unexplained. User says: "this isn't in the docs".
 
-Offer, don't assume — and name the type:
+Offer, don't assume:
 > "This was non-obvious — want me to submit it to the garden as a [gotcha / technique / undocumented]?"
 
-**Also fire for REVISE** when a solution surfaces for a previously-unsolved gotcha, or an alternative approach is found:
+**Also fire for REVISE** when a solution surfaces for a previously-unsolved gotcha:
 > "This looks like a solution to an existing garden entry — want me to submit a REVISE to enrich '[entry title]' with the fix?"
 
 ---
@@ -520,71 +419,54 @@ Offer, don't assume — and name the type:
 
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
-| Reading garden files with `cat` or `grep` directly from filesystem | May see partial writes from another session | Always use `git show HEAD:path` |
-| Reading GARDEN.md counter from filesystem | Another session may be mid-write | `git show HEAD:GARDEN.md \| grep "Last assigned ID"` |
+| Reading garden files with `cat` or `grep` from filesystem | May see partial writes | Always use `git show HEAD:path` |
 | Leaving uncommitted changes in the garden repo | Other sessions see partial state | Commit immediately after every write |
-| Reading garden files to check for duplicates during CAPTURE | Burns context budget; garden grows, cost grows | Write the submission; let harvest handle deduplication |
-| Skipping the submission and writing directly to garden files | Reintroduces the read-for-dedup problem | Always use submissions/ for new entries |
-| Not including "Suggested target" in submission | Harvest has to infer from scratch | Include the likely destination as a hint |
-| Omitting **Type: gotcha / technique / undocumented** in submission | Harvest can't categorise correctly | Always declare the type |
+| Using `**Bold:** value` markdown headers | Wrong format — validator rejects the file | Always use YAML frontmatter; see submission-formats.md |
+| Writing to a `submissions/` directory | No submissions queue — write directly to `<domain>/GE-XXXX.md` | Write the entry file to the domain dir |
+| Opening a PR against the wrong repo | Entries end up in someone else's garden | Check `git remote get-url origin` before creating the PR |
+| score below 8 | `validate_pr.py` will reject the entry | Only submit if score ≥ 8 |
 | Gotcha: title describes the fix not the weird thing | Can't find it by symptom | Title = the surprising behaviour, not the solution |
-| Gotcha: fix has no code | Useless in 6 months | Complete, runnable code or config required |
 | Technique: no "why non-obvious" section | Just becomes documentation | Must explain what developers would normally do instead |
-| Not including "revise" in the REVISE submission filename | Harvest has to infer from content | Always include "revise" in the filename slug |
-| SWEEP: asking the user what was discovered | Claude has the context; user shouldn't re-explain | Scan session memory and propose specific candidates |
+| SWEEP: asking the user what was discovered | Claude has the context | Scan session memory and propose specific candidates |
 | SWEEP: only checking gotchas | Techniques and undocumented items are easy to miss | Always check all three categories explicitly |
-| Forgetting to run harvest periodically | Submissions accumulate, garden stays stale | Harvest after 3–5 submissions, or before a search-heavy session |
-| Omitting GE-ID from submission filename or header | Harvest can't reconcile with CHECKED.md | Always assign GE-ID in CAPTURE Step 0; embed in filename |
-| Committing GARDEN.md without the submission (or vice versa) | Counter and submission must be atomic | Always `git add` both together in Step 7 |
 
 ---
 
 ## Success Criteria
 
 CAPTURE is complete when:
-- ✅ Counter read from `git show HEAD:GARDEN.md` (not filesystem)
-- ✅ GE-ID assigned and recorded in GARDEN.md counter before submission written
-- ✅ Filename includes GE-ID: `YYYY-MM-DD-<project>-GE-XXXX-<slug>.md`
-- ✅ Submission header includes `**Submission ID:** GE-XXXX`
+- ✅ GE-ID generated locally (`GE-YYYYMMDD-xxxxxx` format)
+- ✅ Entry file written to `<domain>/GE-YYYYMMDD-xxxxxx.md` with YAML frontmatter
 - ✅ Light duplicate check performed against committed GARDEN.md index
-- ✅ No garden detail files read specifically for duplicate detection
 - ✅ User confirmed the draft before writing
-- ✅ Submission file and GARDEN.md committed atomically
-- ✅ Committed with `submit(<project>): GE-XXXX '<title>'` format
+- ✅ `validate_pr.py` run — no CRITICAL errors
+- ✅ Delivered: PR opened (GitHub remote) or committed directly to main (local)
 
 SWEEP is complete when:
-- ✅ All three categories checked from session memory (gotchas, techniques, undocumented)
+- ✅ All three categories checked from session memory
 - ✅ Each finding proposed explicitly with type and description
 - ✅ Confirmed entries submitted via CAPTURE
 - ✅ Report given: N found, M submitted per category
 
 REVISE is complete when:
-- ✅ Target entry located via `git grep` or `git show HEAD:path` (not filesystem grep)
-- ✅ Submission file written with "revise" in the filename
-- ✅ Target entry path and exact title specified
-- ✅ Revision kind declared
-- ✅ User confirmed the draft before writing
-- ✅ Committed atomically with `submit(<project>): revise '<title>' — <what's new>` format
+- ✅ Target entry located via `git grep` or `git show HEAD:path`
+- ✅ REVISE entry file written with "revise" in the filename
+- ✅ Revision kind declared in YAML frontmatter
+- ✅ User confirmed before writing
+- ✅ Delivered: PR (GitHub remote) or direct commit (local)
 
 SEARCH is complete when:
-- ✅ Index read from Read tool: `GARDEN.md` or `_index/global.md`
+- ✅ Index read from `GARDEN.md` or `_index/global.md`
 - ✅ Entry read from `git cat-file blob HEAD:<path>` (not filesystem)
-- ✅ `git grep` used if topic not in index
 
 ---
 
 ## Skill Chaining
 
-**Invoked by:** `session-handover` — garden SWEEP is Step 2b of the wrap checklist; `superpowers:systematic-debugging` — offered proactively when a debugging session reveals something non-obvious; user directly ("submit to the garden", "add this to the garden", "forage CAPTURE")
+**Invoked by:** `handover` — garden SWEEP is Step 2b of the wrap checklist; user directly ("submit to the garden", "add this to the garden", "forage CAPTURE")
 
-**Chains to:** `harvest` — for MERGE and DEDUPE (integrating submissions into the garden)
+**Chains to:** `harvest` — for DEDUPE only
 
-**Reads from (git HEAD only):**
-- Read tool: `GARDEN.md`, `_index/global.md`, `*/INDEX.md`, `_summaries/` — counter and index
-- `git cat-file blob HEAD:<path>` — specific garden entries (SEARCH and REVISE only)
-- `git grep HEAD` — content search (SEARCH and REVISE only)
-
-**Does NOT handle:** MERGE, DEDUPE — those are harvest operations.
+**Does NOT handle:** DEDUPE — that is a harvest operation.
 
 **Garden location:** `${HORTORA_GARDEN:-~/.hortora/garden}/`
-**Submission format:** Identical to the `garden` skill — harvest processes both.
