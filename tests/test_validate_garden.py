@@ -61,6 +61,117 @@ def run_freshness(garden_root: Path) -> subprocess.CompletedProcess:
     )
 
 
+def run_dedupe_check(garden_root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(VALIDATOR), '--dedupe-check', str(garden_root)],
+        capture_output=True, text=True
+    )
+
+
+def _garden_with_drift(root: Path, drift: int, threshold: int = 10) -> Path:
+    (root / 'GARDEN.md').write_text(
+        f'**Last legacy ID:** GE-0001\n'
+        f'**Last full DEDUPE sweep:** 2026-04-14\n'
+        f'**Entries merged since last sweep:** {drift}\n'
+        f'**Drift threshold:** {threshold}\n'
+    )
+    return root
+
+
+class TestDedupeCheck(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_drift_below_threshold_exits_0(self):
+        _garden_with_drift(self.root, drift=3, threshold=10)
+        result = run_dedupe_check(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('OK', result.stdout)
+
+    def test_drift_at_threshold_exits_2(self):
+        _garden_with_drift(self.root, drift=10, threshold=10)
+        result = run_dedupe_check(self.root)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('DEDUPE recommended', result.stdout)
+
+    def test_drift_above_threshold_exits_2(self):
+        _garden_with_drift(self.root, drift=15, threshold=10)
+        result = run_dedupe_check(self.root)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+
+    def test_drift_just_below_threshold_exits_0(self):
+        _garden_with_drift(self.root, drift=9, threshold=10)
+        result = run_dedupe_check(self.root)
+        self.assertEqual(result.returncode, 0)
+
+    def test_output_shows_drift_and_threshold(self):
+        _garden_with_drift(self.root, drift=5, threshold=10)
+        result = run_dedupe_check(self.root)
+        self.assertIn('drift=5', result.stdout)
+        self.assertIn('threshold=10', result.stdout)
+
+    def test_custom_threshold_respected(self):
+        _garden_with_drift(self.root, drift=3, threshold=3)
+        result = run_dedupe_check(self.root)
+        self.assertEqual(result.returncode, 2)
+
+    def test_no_garden_md_exits_0(self):
+        result = run_dedupe_check(self.root)
+        self.assertEqual(result.returncode, 0)
+
+
+class TestDedupeCheckGitLog(unittest.TestCase):
+    """Git-log cross-verification: git-log count wins when higher than counter."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        subprocess.run(['git', 'init', str(self.root)], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.email', 'test@test.com'],
+                       check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.name', 'Test'],
+                       check=True, capture_output=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _commit(self, message: str):
+        f = self.root / f'file_{message[:20].replace(" ", "_")}.txt'
+        f.write_text(message)
+        subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.root), 'commit', '-m', message],
+                       check=True, capture_output=True)
+
+    def test_git_log_count_wins_when_higher(self):
+        # Counter says 2, git-log shows 4 integrate commits since last dedupe
+        (self.root / 'GARDEN.md').write_text(
+            '**Entries merged since last sweep:** 2\n**Drift threshold:** 3\n'
+        )
+        self._commit('dedupe: baseline sweep')
+        for i in range(4):
+            self._commit(f'index: integrate GE-000{i}')
+        # Counter=2, git-log=4, threshold=3 → git-log (4) >= threshold → exit 2
+        result = run_dedupe_check(self.root)
+        self.assertEqual(result.returncode, 2, result.stdout)
+
+    def test_git_log_does_not_override_higher_counter(self):
+        # Counter=8, git-log shows only 2 → counter (8) is used, below threshold=10
+        (self.root / 'GARDEN.md').write_text(
+            '**Entries merged since last sweep:** 8\n**Drift threshold:** 10\n'
+        )
+        self._commit('dedupe: baseline sweep')
+        for i in range(2):
+            self._commit(f'index: integrate GE-000{i}')
+        result = run_dedupe_check(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('drift=8', result.stdout)
+
+
 class TestFreshnessFlag(unittest.TestCase):
 
     def setUp(self):

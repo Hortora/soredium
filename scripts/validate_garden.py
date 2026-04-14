@@ -108,6 +108,55 @@ if '--freshness' in sys.argv:
         print(f"  ... and {len(_overdue) - 10} more")
     sys.exit(2 if _overdue else 0)
 
+if '--dedupe-check' in sys.argv:
+    import os as _os
+    import re as _re
+    import subprocess as _sp
+
+    _idx = sys.argv.index('--dedupe-check')
+    if _idx + 1 < len(sys.argv) and not sys.argv[_idx + 1].startswith('--'):
+        _garden = Path(sys.argv[_idx + 1]).expanduser().resolve()
+    elif 'HORTORA_GARDEN' in _os.environ:
+        _garden = Path(_os.environ['HORTORA_GARDEN']).expanduser().resolve()
+    else:
+        _garden = (Path.home() / '.hortora' / 'garden').resolve()
+
+    _drift = 0
+    _threshold = 10
+    _garden_md = _garden / 'GARDEN.md'
+    if _garden_md.exists():
+        _content = _garden_md.read_text()
+        _m = _re.search(r'\*\*Entries merged since last sweep:\*\*\s*(\d+)', _content)
+        if _m:
+            _drift = int(_m.group(1))
+        _t = _re.search(r'\*\*Drift threshold:\*\*\s*(\d+)', _content)
+        if _t:
+            _threshold = int(_t.group(1))
+
+    # Cross-check with git log — count 'index: integrate' commits since last 'dedupe:' commit
+    try:
+        _log = _sp.run(
+            ['git', '-C', str(_garden), 'log', '--format=%s'],
+            capture_output=True, text=True, check=True
+        ).stdout.strip().splitlines()
+        _git_count = 0
+        for _line in _log:
+            if _line.startswith('dedupe:'):
+                break
+            if _line.startswith('index: integrate'):
+                _git_count += 1
+        if _git_count > _drift:
+            _drift = _git_count
+    except Exception:
+        pass  # not a git repo or git unavailable — use counter only
+
+    if _drift >= _threshold:
+        print(f"Dedupe check: drift={_drift}, threshold={_threshold} — DEDUPE recommended")
+        sys.exit(2)
+    else:
+        print(f"Dedupe check: drift={_drift}, threshold={_threshold} — OK")
+        sys.exit(0)
+
 import os
 # Garden root: first non-flag positional argument, $HORTORA_GARDEN env var, or default
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
