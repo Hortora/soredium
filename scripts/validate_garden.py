@@ -291,6 +291,27 @@ def get_submission_ids() -> dict[str, str]:
 def validate():
     print(f"Validating garden at {GARDEN_ROOT}\n")
 
+    # 0. Validate SCHEMA.md if present (federation config)
+    _schema_path = GARDEN_MD.parent / 'SCHEMA.md'
+    if _schema_path.exists():
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            'validate_schema',
+            Path(__file__).parent / 'validate_schema.py'
+        )
+        _vs = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_vs)
+        _schema_content = _schema_path.read_text(encoding='utf-8')
+        _schema = _vs.parse_schema(_schema_content)
+        if _schema is None:
+            log_error("SCHEMA.md has no YAML frontmatter")
+        else:
+            _s_errors, _s_warnings = _vs.validate_schema(_schema)
+            for _e in _s_errors:
+                log_error(f"SCHEMA.md: {_e}")
+            for _w in _s_warnings:
+                log_info(f"SCHEMA.md: {_w}")
+
     # 1. Scan garden entry IDs
     entry_ids = scan_garden_entry_ids()
     log_info(f"Found {len(entry_ids)} GE-IDs in garden entries")

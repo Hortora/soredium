@@ -350,6 +350,28 @@ class GardenFixture:
         (self.root / "DISCARDED.md").write_text(current)
         return self
 
+    def schema_md(self, role='canonical', ge_prefix='GE-',
+                  domains=None, name='test-garden',
+                  upstream=None):
+        """Write a valid SCHEMA.md to the garden root."""
+        domains = domains or ['tools']
+        lines = [
+            '---',
+            f'name: {name}',
+            'description: "Test garden"',
+            f'role: {role}',
+            f'ge_prefix: {ge_prefix}',
+            'schema_version: "1.0"',
+            f'domains: [{", ".join(domains)}]',
+        ]
+        if upstream:
+            lines.append('upstream:')
+            for url in upstream:
+                lines.append(f'  - {url}')
+        lines.extend(['---', ''])
+        (self.root / 'SCHEMA.md').write_text('\n'.join(lines))
+        return self
+
 
 class TestValidGarden(unittest.TestCase):
     """A well-formed garden should exit 0."""
@@ -622,6 +644,56 @@ class TestSubmissionIDHeaders(unittest.TestCase):
         fx.garden_md("GE-0001")
         result = run_validator(self.root)
         self.assertEqual(result.returncode, 0, result.stdout)
+
+
+class TestSchemaValidation(unittest.TestCase):
+    """validate_garden.py calls validate_schema when SCHEMA.md is present."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_garden_without_schema_passes(self):
+        GardenFixture(self.root).garden_md('GE-0001')
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_garden_with_valid_schema_passes(self):
+        GardenFixture(self.root).garden_md('GE-0001').schema_md()
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_garden_with_invalid_schema_fails(self):
+        GardenFixture(self.root).garden_md('GE-0001')
+        (self.root / 'SCHEMA.md').write_text('---\nrole: canonical\n---\n')
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        output = result.stdout + result.stderr
+        self.assertTrue(
+            any(term in output for term in ('SCHEMA', 'ge_prefix', 'name', 'domains')),
+            f"Expected schema error in output, got: {output}"
+        )
+
+    def test_garden_with_child_schema_and_upstream_passes(self):
+        GardenFixture(self.root).garden_md('GE-0001').schema_md(
+            role='child',
+            upstream=['https://github.com/Hortora/jvm-garden'],
+        )
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_child_schema_missing_upstream_fails(self):
+        GardenFixture(self.root).garden_md('GE-0001')
+        (self.root / 'SCHEMA.md').write_text(
+            '---\nname: x\nrole: child\nge_prefix: JE-\n'
+            'domains: [java]\nschema_version: "1.0"\n---\n'
+        )
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('upstream', result.stdout + result.stderr)
 
 
 def test_structural_flag_passes_valid_garden(tmp_path):
