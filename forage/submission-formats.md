@@ -203,7 +203,10 @@ Any limitations, version constraints, or risks from relying on undocumented beha
 
 ---
 
-## Revise — Integration Guide
+## Revise Template
+
+**Submission ID:** GE-YYYYMMDD-xxxxxx (the new revision's own ID)
+**Target entry:** GE-XXXX — [title of entry being revised]
 
 REVISE modifies the target entry file directly. No separate file is created.
 

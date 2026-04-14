@@ -4,10 +4,9 @@ description: >
   Use when deduplicating existing garden entries (DEDUPE) or reviewing all stale entries
   across the garden (REVIEW). DEDUPE: user says "dedupe the garden", "check for duplicates".
   REVIEW: user says "review stale entries", "staleness review", "harvest review", or when
-  validate_garden.py --freshness shows many overdue entries. Run as a dedicated session
-  with full context budget. Do NOT use during normal session work — use forage for
-  session-time operations. Never invoked automatically; always a deliberate maintenance
-  operation.
+  validate_garden.py --freshness shows overdue entries. Dedicated session only — do not
+  use during normal session work; use forage for session-time operations. Never invoked
+  automatically; always deliberate.
 ---
 
 # Harvest — Garden Maintenance Operations
