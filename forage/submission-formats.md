@@ -22,6 +22,35 @@ ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-YYYYMMDD-xxxxxx-revise-<target-
 
 ---
 
+## Optional Frontmatter Fields
+
+These fields can be added to any entry type. The validator accepts but does not require them.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `verified_on` | string | Version(s) this was verified on. Used by forage SEARCH to produce a concrete staleness annotation rather than a generic age warning. Example: `"quarkus: 3.34.2"` or `"tmux: 3.4"`. Only meaningful for library/tool-specific entries — omit for technique/cross-cutting entries. |
+| `last_reviewed` | YYYY-MM-DD | Date of last manual staleness review. Resets the staleness clock — forage SWEEP and harvest REVIEW use `max(submitted, last_reviewed)` as the reference date when computing entry age. Set by forage SWEEP (Confirm) and harvest REVIEW (Confirm). |
+
+**Adding to an entry frontmatter:**
+
+```yaml
+staleness_threshold: 730
+verified_on: "quarkus: 3.34.2"   # optional — omit if not applicable
+last_reviewed: 2026-04-14         # optional — set by staleness review
+submitted: 2026-04-14
+```
+
+**Why this fix section** (optional body section, scores ≥12 only):
+
+For entries scoring 12 or above, forage CAPTURE will prompt for an optional rationale. If provided, it is added as a body section after **Why this is non-obvious**:
+
+```markdown
+### Why this fix
+[Why this approach over the obvious alternative — written by submitter at capture time]
+```
+
+---
+
 ## Gotcha Template
 
 Bug, silent failure, or workaround:
