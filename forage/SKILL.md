@@ -432,7 +432,26 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
 
 4. Return the full entry.
 
-5. If the user just fixed something related, offer to submit via CAPTURE.
+5. Append a staleness annotation immediately after the entry content:
+
+   - From the returned entry's YAML frontmatter, read:
+     - `submitted` (required)
+     - `staleness_threshold` (required)
+     - `last_reviewed` (optional — use if present)
+     - `verified_on` (optional — include in annotation if present)
+   - Compute `reference_date = last_reviewed if present, else submitted`
+   - Compute `age_days = (today - reference_date).days`
+
+   **If `age_days > staleness_threshold`:**
+   > ⚠️ **Stale entry** — last verified {reference_date} ({age_days} days ago, threshold {staleness_threshold} days). The fix may not apply to your current stack version. Verify before acting.
+   > Verified on: {verified_on}  ← only if `verified_on` is present
+
+   **If `age_days > staleness_threshold * 0.75` (approaching threshold):**
+   > ℹ️ Entry is {age_days} days old (threshold {staleness_threshold} days) — worth re-verifying if you encounter issues.
+
+   **If `age_days <= staleness_threshold * 0.75`:** no annotation. Do not annotate fresh entries.
+
+6. If the user just fixed something related, offer to submit via CAPTURE.
 
 ---
 
@@ -500,6 +519,7 @@ REVISE is complete when:
 SEARCH is complete when:
 - ✅ Index read from `GARDEN.md` or `_index/global.md`
 - ✅ Entry read from `git cat-file blob HEAD:<path>` (not filesystem)
+- ✅ Staleness annotation appended if entry is past or approaching threshold
 
 ---
 
