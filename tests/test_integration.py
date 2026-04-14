@@ -944,3 +944,153 @@ class TestE2EDedupeScanner(unittest.TestCase):
         self.assertEqual(len(top_data), 1)
         # Top result should be the highest-scoring pair
         self.assertEqual(top_data[0]['score'], all_data[0]['score'])
+
+
+# ── Phase 5 E2E: init_garden pipeline ─────────────────────────────────────────
+
+_INIT     = Path(__file__).parent.parent / 'scripts' / 'init_garden.py'
+_SCHEMA_V = Path(__file__).parent.parent / 'scripts' / 'validate_schema.py'
+
+
+def _run_init_garden(*args) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [_sys.executable, str(_INIT)] + list(args),
+        capture_output=True, text=True
+    )
+
+
+def _run_schema_validator(garden: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [_sys.executable, str(_SCHEMA_V), str(garden)],
+        capture_output=True, text=True
+    )
+
+
+_E2E_ENTRY = textwrap.dedent("""\
+    ---
+    id: GE-20260414-e2e001
+    title: "E2E test entry for init_garden pipeline"
+    type: gotcha
+    domain: java
+    stack: "Java (all versions)"
+    tags: [java, testing]
+    score: 10
+    verified: true
+    staleness_threshold: 730
+    submitted: 2026-04-14
+    ---
+
+    ## E2E test entry for init_garden pipeline
+
+    **ID:** GE-20260414-e2e001
+    **Stack:** Java (all versions)
+    **Symptom:** Test symptom.
+    **Context:** E2E test.
+
+    ### What was tried (didn't work)
+    - tried X — failed
+
+    ### Root cause
+    E2E root cause.
+
+    ### Fix
+    E2E fix.
+
+    ### Why this is non-obvious
+    Used in E2E tests.
+
+    *Score: 10/15 · Included because: test coverage · Reservation: none*
+""")
+
+
+class TestE2EInitGardenPipeline(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.garden = Path(self.tmp.name) / 'test-jvm-garden'
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _init(self, role='canonical', ge_prefix='JE-',
+              domains=None, upstream=None):
+        domains = domains or ['java', 'quarkus']
+        args = [
+            str(self.garden),
+            '--name', 'test-jvm-garden',
+            '--description', 'Test JVM garden',
+            '--role', role,
+            '--ge-prefix', ge_prefix,
+            '--domains', *domains,
+        ]
+        if upstream:
+            args += ['--upstream', *upstream]
+        return _run_init_garden(*args)
+
+    def _git_init(self):
+        for cmd in [
+            ['git', 'init', str(self.garden)],
+            ['git', '-C', str(self.garden), 'config', 'user.email', 'test@test.com'],
+            ['git', '-C', str(self.garden), 'config', 'user.name', 'Test'],
+            ['git', '-C', str(self.garden), 'add', '.'],
+            ['git', '-C', str(self.garden), 'commit', '-m', 'init'],
+        ]:
+            subprocess.run(cmd, check=True, capture_output=True)
+
+    def test_init_exits_0(self):
+        result = self._init()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_schema_validates_after_init(self):
+        self._init()
+        result = _run_schema_validator(self.garden)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_garden_structure_complete_after_init(self):
+        self._init()
+        for path in [
+            'GARDEN.md', 'SCHEMA.md', 'CHECKED.md', 'DISCARDED.md',
+            '.github/workflows/validate_pr.yml',
+            'java/INDEX.md', 'quarkus/INDEX.md',
+        ]:
+            self.assertTrue((self.garden / path).exists(), f"Missing {path}")
+
+    def test_validate_pr_accepts_entry_on_pr_branch(self):
+        """Full pipeline: init → git init → add entry on branch → validate_pr passes."""
+        self._init()
+        self._git_init()
+
+        subprocess.run(
+            ['git', '-C', str(self.garden), 'checkout', '-b', 'submit/GE-20260414-e2e001'],
+            check=True, capture_output=True
+        )
+        entry_path = self.garden / 'java' / 'GE-20260414-e2e001.md'
+        entry_path.write_text(_E2E_ENTRY)
+        subprocess.run(['git', '-C', str(self.garden), 'add', '.'],
+                       check=True, capture_output=True)
+        subprocess.run(
+            ['git', '-C', str(self.garden), 'commit', '-m', 'submit: e2e test entry'],
+            check=True, capture_output=True
+        )
+
+        VALIDATE_PR_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'validate_pr.py'
+        result = subprocess.run(
+            [_sys.executable, str(VALIDATE_PR_SCRIPT), str(entry_path), str(self.garden)],
+            capture_output=True, text=True, cwd=str(self.garden)
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_child_garden_schema_validates(self):
+        self._init(
+            role='child', ge_prefix='ME-',
+            domains=['java'],
+            upstream=['https://github.com/Hortora/jvm-garden'],
+        )
+        result = _run_schema_validator(self.garden)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_idempotent_second_init_does_not_corrupt(self):
+        self._init()
+        self._init()
+        result = _run_schema_validator(self.garden)
+        self.assertEqual(result.returncode, 0)
