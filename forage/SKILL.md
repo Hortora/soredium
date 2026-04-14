@@ -319,11 +319,52 @@ For each candidate, compute the Garden Score then present:
 
 For each finding confirmed by the user: run the CAPTURE workflow with the specific content already known from context. Do NOT ask the user to re-describe things you already know.
 
-**Step 5 — Report**
+**Step 5 — Staleness spot-check (domain-filtered)**
+
+Derive session domains from:
+- The `domain` field of entries submitted in Steps 1–4 of this SWEEP
+- Technology stacks mentioned in the session conversation (Quarkus → `quarkus`, tmux → `tools`, etc.)
+
+If no domains can be identified from either source, skip this step entirely.
+
+Otherwise:
+
+1. Read the committed index:
+   ```bash
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md
+   ```
+
+2. For each entry in the By Technology section whose domain is in the session domain set:
+   - Read the entry's YAML frontmatter (head only):
+     ```bash
+     git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<domain>/GE-XXXX.md | head -20
+     ```
+   - Compute `reference_date = max(submitted, last_reviewed)` if `last_reviewed` present, else `submitted`
+   - If `(today - reference_date).days > staleness_threshold`: add to overdue list
+
+3. For each overdue entry, present to the user:
+   > ⚠️ **GE-XXXX** "[title]" — {N} days old (threshold {T} days).
+   > **Confirm** still valid / **Revise** / **Retire** / **Skip**?
+
+   - **Confirm**: add `last_reviewed: YYYY-MM-DD` to YAML frontmatter in working tree. Commit after all responses collected.
+   - **Revise**: run the REVISE workflow for this entry.
+   - **Retire**: run REVISE with `deprecated` kind — add `**Deprecated:** [reason] — {date}` near the top of the entry body.
+   - **Skip**: no action.
+
+4. If any entries were Confirmed: commit all `last_reviewed` additions atomically:
+   ```bash
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} add .
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "review: staleness spot-check — N confirmed, M revised, K retired"
+   ```
+
+If no overdue entries are found in session domains, omit this step from the report entirely (no noise for fresh gardens).
+
+**Step 6 — Report**
 
 Tell the user:
 - How many candidates were found in each category
 - How many were confirmed and submitted
+- If staleness spot-check ran: N overdue entries found in session domains, M resolved
 - If nothing was found: "Nothing garden-worthy surfaced in this session across gotchas, techniques, or undocumented items."
 
 ---
@@ -527,7 +568,9 @@ SWEEP is complete when:
 - ✅ All three categories checked from session memory
 - ✅ Each finding proposed explicitly with type and description
 - ✅ Confirmed entries submitted via CAPTURE
-- ✅ Report given: N found, M submitted per category
+- ✅ Staleness spot-check run for session domains (if identifiable)
+- ✅ Overdue entries in session domains presented and resolved/skipped
+- ✅ Report given: N found, M submitted per category; overdue entries resolved
 
 REVISE is complete when:
 - ✅ Target entry read from `git show HEAD:<domain>/GE-XXXX.md` (not filesystem)
