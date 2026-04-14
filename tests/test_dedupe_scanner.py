@@ -405,5 +405,96 @@ class TestComputePairs(unittest.TestCase):
         self.assertIn('score', p)
 
 
+class TestDedupesScannerCLI(unittest.TestCase):
+    """Integration tests calling dedupe_scanner.py as a subprocess."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / 'CHECKED.md').write_text(
+            '| Pair | Result | Date | Notes |\n|------|--------|------|-------|\n'
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_no_entries_exits_0_and_says_no_pairs(self):
+        result = run_scanner(str(self.root))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('No unchecked pairs', result.stdout)
+
+    def test_two_similar_entries_appear_in_output(self):
+        make_entry(self.root / 'python' / 'GE-0001.md', 'GE-0001',
+                   'regex yaml crlf skip silent', ['regex', 'yaml', 'crlf'], 'python')
+        make_entry(self.root / 'python' / 'GE-0002.md', 'GE-0002',
+                   'regex yaml crlf skip parsing', ['regex', 'yaml'], 'python')
+        result = run_scanner(str(self.root))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('GE-0001', result.stdout)
+        self.assertIn('GE-0002', result.stdout)
+
+    def test_domain_flag_filters_to_requested_domain(self):
+        make_entry(self.root / 'python' / 'GE-0001.md', 'GE-0001', 'python regex', ['regex'], 'python')
+        make_entry(self.root / 'python' / 'GE-0002.md', 'GE-0002', 'python yaml', ['yaml'], 'python')
+        make_entry(self.root / 'tools' / 'GE-0003.md', 'GE-0003', 'git tools branch', ['git'], 'tools')
+        make_entry(self.root / 'tools' / 'GE-0004.md', 'GE-0004', 'git rebase squash', ['git'], 'tools')
+        result = run_scanner(str(self.root), '--domain', 'python')
+        self.assertIn('GE-0001', result.stdout)
+        self.assertNotIn('GE-0003', result.stdout)
+        self.assertNotIn('GE-0004', result.stdout)
+
+    def test_top_flag_limits_number_of_pairs(self):
+        for i in range(1, 5):
+            make_entry(self.root / 'python' / f'GE-000{i}.md', f'GE-000{i}',
+                       f'regex yaml crlf entry {i}', ['regex', 'yaml'], 'python')
+        result_all = run_scanner(str(self.root))
+        result_top2 = run_scanner(str(self.root), '--top', '2')
+        # 4 entries = 6 pairs; --top 2 shows fewer GE-IDs in output
+        all_count = result_all.stdout.count('GE-')
+        top_count = result_top2.stdout.count('GE-')
+        self.assertGreater(all_count, top_count)
+
+    def test_json_flag_outputs_valid_json(self):
+        make_entry(self.root / 'python' / 'GE-0001.md', 'GE-0001', 'regex yaml', ['regex'], 'python')
+        make_entry(self.root / 'python' / 'GE-0002.md', 'GE-0002', 'regex crlf', ['regex'], 'python')
+        result = run_scanner(str(self.root), '--json')
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 1)
+        self.assertIn('pair', data[0])
+        self.assertIn('score', data[0])
+        self.assertIn('domain', data[0])
+
+    def test_json_empty_garden_returns_empty_list(self):
+        result = run_scanner(str(self.root), '--json')
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data, [])
+
+    def test_record_flag_writes_to_checked_md(self):
+        result = run_scanner(str(self.root), '--record',
+                             'GE-0001 × GE-0002', 'distinct', 'no overlap')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        content = (self.root / 'CHECKED.md').read_text()
+        self.assertIn('GE-0001 × GE-0002', content)
+        self.assertIn('distinct', content)
+        self.assertIn('no overlap', content)
+
+    def test_record_then_rescan_excludes_pair(self):
+        make_entry(self.root / 'python' / 'GE-0001.md', 'GE-0001',
+                   'regex yaml parsing frontmatter', ['regex', 'yaml'], 'python')
+        make_entry(self.root / 'python' / 'GE-0002.md', 'GE-0002',
+                   'regex yaml crlf skip', ['regex', 'yaml'], 'python')
+        # First scan shows the pair
+        result1 = run_scanner(str(self.root))
+        self.assertIn('GE-0001', result1.stdout)
+        # Record it as distinct
+        run_scanner(str(self.root), '--record', 'GE-0001 × GE-0002', 'distinct', '')
+        # Second scan — pair absent
+        result2 = run_scanner(str(self.root))
+        self.assertIn('No unchecked pairs', result2.stdout)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
