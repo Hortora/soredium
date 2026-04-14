@@ -2,6 +2,7 @@
 """integrate_entry.py — Update all garden indexes after a PR is merged."""
 
 import sys
+import re
 import json
 import subprocess
 from pathlib import Path
@@ -57,6 +58,23 @@ def update_global_index(domain: str, garden: Path):
             f.write(f"| {domain} | {domain}/INDEX.md |\n")
 
 
+def increment_drift_counter(garden: Path):
+    """Increment 'Entries merged since last sweep' in GARDEN.md by 1."""
+    garden_md = garden / 'GARDEN.md'
+    if not garden_md.exists():
+        return
+    content = garden_md.read_text(encoding='utf-8')
+    def _inc(m):
+        return f'**Entries merged since last sweep:** {int(m.group(1)) + 1}'
+    new_content = re.sub(
+        r'\*\*Entries merged since last sweep:\*\*\s*(\d+)',
+        _inc,
+        content
+    )
+    if new_content != content:
+        garden_md.write_text(new_content, encoding='utf-8')
+
+
 def run_validate(garden: Path):
     script = Path(__file__).parent / 'validate_garden.py'
     subprocess.run(
@@ -66,7 +84,7 @@ def run_validate(garden: Path):
 
 
 def git_commit(garden: Path, ge_id: str):
-    subprocess.run(['git', '-C', str(garden), 'add', '_summaries/', '_index/', 'labels/'], check=True)
+    subprocess.run(['git', '-C', str(garden), 'add', '_summaries/', '_index/', 'labels/', 'GARDEN.md'], check=True)
     subprocess.run(['git', '-C', str(garden), 'add', '--update'], check=True)
     subprocess.run(
         ['git', '-C', str(garden), 'commit', '-m', f'index: integrate {ge_id}'],
@@ -85,7 +103,7 @@ def integrate(entry_path: str, garden_root: str = None) -> dict:
     update_domain_index(domain, ge_id, fm, garden)
     update_labels(fm, ge_id, garden)
     update_global_index(domain, garden)
-
+    increment_drift_counter(garden)
     run_validate(garden)
     git_commit(garden, ge_id)
 

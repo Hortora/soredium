@@ -1,4 +1,5 @@
 import pytest
+import re
 from pathlib import Path
 from unittest.mock import patch
 import sys
@@ -42,6 +43,84 @@ LEGACY_MARKDOWN_ENTRY = """\
 
 Body text without YAML frontmatter.
 """
+
+
+def _garden_with_drift(tmp_path, drift: int = 0) -> Path:
+    """Fixture: minimal garden with GARDEN.md drift counter."""
+    domain = tmp_path / 'quarkus' / 'cdi'
+    domain.mkdir(parents=True)
+    (domain / 'INDEX.md').write_text(
+        '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+    )
+    (tmp_path / '_index').mkdir()
+    (tmp_path / '_index' / 'global.md').write_text(
+        '| Domain | Index |\n|--------|-------|\n'
+    )
+    (tmp_path / 'GARDEN.md').write_text(
+        f'**Last legacy ID:** GE-0001\n'
+        f'**Last full DEDUPE sweep:** 2026-04-14\n'
+        f'**Entries merged since last sweep:** {drift}\n'
+        f'**Drift threshold:** 10\n'
+    )
+    return tmp_path
+
+
+class TestDriftCounter:
+
+    def _run(self, entry, garden):
+        with patch('integrate_entry.run_validate'), \
+             patch('integrate_entry.git_commit'):
+            return integrate(str(entry), str(garden))
+
+    def test_drift_counter_increments_from_zero(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
+        self._run(entry, garden)
+        content = (garden / 'GARDEN.md').read_text()
+        m = re.search(r'\*\*Entries merged since last sweep:\*\*\s*(\d+)', content)
+        assert m and int(m.group(1)) == 1
+
+    def test_drift_counter_increments_from_nonzero(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=3)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
+        self._run(entry, garden)
+        content = (garden / 'GARDEN.md').read_text()
+        m = re.search(r'\*\*Entries merged since last sweep:\*\*\s*(\d+)', content)
+        assert m and int(m.group(1)) == 4
+
+    def test_drift_counter_missing_field_no_crash(self, tmp_path):
+        domain = tmp_path / 'quarkus' / 'cdi'
+        domain.mkdir(parents=True)
+        (domain / 'INDEX.md').write_text('| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n')
+        (tmp_path / '_index').mkdir()
+        (tmp_path / '_index' / 'global.md').write_text('| Domain | Index |\n|--------|-------|\n')
+        (tmp_path / 'GARDEN.md').write_text('**Last legacy ID:** GE-0001\n')
+        entry = domain / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
+        result = self._run(entry, tmp_path)
+        assert result['status'] == 'ok'
+
+    def test_no_garden_md_no_crash(self, tmp_path):
+        domain = tmp_path / 'quarkus' / 'cdi'
+        domain.mkdir(parents=True)
+        (domain / 'INDEX.md').write_text('| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n')
+        (tmp_path / '_index').mkdir()
+        (tmp_path / '_index' / 'global.md').write_text('| Domain | Index |\n|--------|-------|\n')
+        entry = domain / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
+        result = self._run(entry, tmp_path)
+        assert result['status'] == 'ok'
+
+    def test_other_garden_md_fields_preserved(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
+        self._run(entry, garden)
+        content = (garden / 'GARDEN.md').read_text()
+        assert '**Last legacy ID:** GE-0001' in content
+        assert '**Drift threshold:** 10' in content
 
 
 @pytest.fixture
