@@ -183,6 +183,8 @@ Work from what's already known. Ask only for what's genuinely unclear.
 | Root cause | The diagnosis reached |
 | Fix | The working solution with code |
 | Why non-obvious | Why the obvious approach failed |
+| verified_on | For library/tool-specific entries only (type gotcha or undocumented with a named stack version): version(s) this was verified on — e.g. "quarkus: 3.34.2". Extract from context if mentioned. Skip for technique/cross-cutting entries. |
+| rationale | For entries scoring ≥12: why this fix over the obvious alternative. Extract from context if already explained; otherwise prompt in Step 5. |
 
 **Step 4 — Determine the domain**
 
@@ -201,6 +203,25 @@ Based on the technology stack, determine the domain directory:
 
 Draft the entry using the YAML frontmatter template in [submission-formats.md](submission-formats.md). Show it to the user:
 > "Does this capture it accurately?"
+
+**For library/tool-specific entries** (type gotcha or undocumented with a named stack version), if `verified_on` is not already known from context, ask:
+> "What version was this verified on? (e.g. 'quarkus: 3.34.2' — or press Enter to skip)"
+
+If provided, include as a YAML frontmatter field after `staleness_threshold`:
+```yaml
+staleness_threshold: 730
+verified_on: "quarkus: 3.34.2"
+submitted: YYYY-MM-DD
+```
+
+**For entries scoring 12 or above**, ask:
+> "Optionally: why this fix over the obvious alternative? (Enter to skip)"
+
+If provided, add a `### Why this fix` body section immediately after `### Why this is non-obvious`:
+```markdown
+### Why this fix
+[Submitter's rationale — why this approach over the obvious alternative]
+```
 
 Wait for confirmation before writing.
 
@@ -499,6 +520,8 @@ CAPTURE is complete when:
 - ✅ User confirmed the draft before writing
 - ✅ `validate_pr.py` run — no CRITICAL errors
 - ✅ Delivered: PR opened (GitHub remote) or committed directly to main (local)
+- ✅ `verified_on` field included in YAML frontmatter for library/tool-specific entries (if version known)
+- ✅ `### Why this fix` section added for entries scoring ≥12 (if rationale provided)
 
 SWEEP is complete when:
 - ✅ All three categories checked from session memory
