@@ -688,3 +688,259 @@ class TestGardenDriftCounter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# ── Phase 4 E2E: integrate → drift → scan → record ───────────────────────────
+
+import json as _json
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+from integrate_entry import integrate as _integrate
+from unittest.mock import patch as _patch
+
+_INTEGRATE_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'integrate_entry.py'
+_SCANNER_SCRIPT   = Path(__file__).parent.parent / 'scripts' / 'dedupe_scanner.py'
+_VALIDATOR_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'validate_garden.py'
+
+
+def _run_scanner(*args) -> subprocess.CompletedProcess:
+    import sys as _s
+    return subprocess.run(
+        [_s.executable, str(_SCANNER_SCRIPT)] + list(args),
+        capture_output=True, text=True
+    )
+
+
+def _run_dedupe_check(garden: Path) -> subprocess.CompletedProcess:
+    import sys as _s
+    return subprocess.run(
+        [_s.executable, str(_VALIDATOR_SCRIPT), '--dedupe-check', str(garden)],
+        capture_output=True, text=True
+    )
+
+
+def _integrate_entry(entry: Path, garden: Path) -> dict:
+    """Run integrate_entry.integrate() with git/validate mocked."""
+    with _patch('integrate_entry.run_validate'), _patch('integrate_entry.git_commit'):
+        return _integrate(str(entry), str(garden))
+
+
+YAML_ENTRY_A = textwrap.dedent("""\
+    ---
+    id: GE-20260414-aaaa01
+    title: "YAML frontmatter regex silently skips CRLF line endings"
+    type: gotcha
+    domain: python
+    stack: "Python (all versions), re module"
+    tags: [regex, yaml, crlf, parsing]
+    score: 12
+    verified: true
+    staleness_threshold: 730
+    submitted: 2026-04-14
+    ---
+
+    ## YAML frontmatter regex silently skips CRLF line endings
+
+    **ID:** GE-20260414-aaaa01
+    **Stack:** Python (all versions), re module
+    **Symptom:** Files silently skipped.
+    **Context:** YAML parsing on Windows.
+
+    ### Root cause
+    CRLF vs LF mismatch in regex.
+
+    ### Fix
+    Normalise with .replace('\\r\\n', '\\n').
+
+    ### Why this is non-obvious
+    No error, just silence.
+
+    *Score: 12/15 · Included because: silent failure · Reservation: none*
+""")
+
+YAML_ENTRY_B = textwrap.dedent("""\
+    ---
+    id: GE-20260414-bbbb02
+    title: "Regex date validation insufficient for calendar values in fromisoformat"
+    type: gotcha
+    domain: python
+    stack: "Python 3.7+, datetime.date"
+    tags: [regex, datetime, validation, parsing]
+    score: 11
+    verified: true
+    staleness_threshold: 730
+    submitted: 2026-04-14
+    ---
+
+    ## Regex date validation insufficient for calendar values in fromisoformat
+
+    **ID:** GE-20260414-bbbb02
+    **Stack:** Python 3.7+, datetime.date
+    **Symptom:** ValueError on valid-format dates.
+    **Context:** Date parsing with regex pre-validation.
+
+    ### Root cause
+    Regex checks shape not calendar validity.
+
+    ### Fix
+    Wrap fromisoformat in try/except ValueError.
+
+    ### Why this is non-obvious
+    Regex feels complete but is not.
+
+    *Score: 11/15 · Included because: natural assumption · Reservation: none*
+""")
+
+YAML_ENTRY_C = textwrap.dedent("""\
+    ---
+    id: GE-20260414-cccc03
+    title: "Structure architecture docs as property claims with guarantees"
+    type: technique
+    domain: tools
+    stack: "Technical documentation (cross-cutting)"
+    tags: [documentation, architecture, strategy, pattern]
+    score: 14
+    verified: true
+    staleness_threshold: 1460
+    submitted: 2026-04-14
+    ---
+
+    ## Structure architecture docs as property claims with guarantees
+
+    **ID:** GE-20260414-cccc03
+    **Stack:** Technical documentation
+    **Labels:** #strategy #documentation
+
+    ### The technique
+    Use property claims as headings with Guarantees and Graceful Degradation.
+
+    ### Why this is non-obvious
+    Most developers write component tours, not property evaluations.
+
+    *Score: 14/15 · Included because: high impact · Reservation: none*
+""")
+
+
+def _setup_yaml_garden(tmp_path: Path):
+    """Set up a minimal garden with GARDEN.md, CHECKED.md, domain dirs."""
+    (tmp_path / 'python').mkdir()
+    (tmp_path / 'python' / 'INDEX.md').write_text(
+        '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+    )
+    (tmp_path / 'tools').mkdir()
+    (tmp_path / 'tools' / 'INDEX.md').write_text(
+        '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+    )
+    (tmp_path / '_index').mkdir()
+    (tmp_path / '_index' / 'global.md').write_text('| Domain | Index |\n|--------|-------|\n')
+    (tmp_path / 'GARDEN.md').write_text(
+        '**Last legacy ID:** GE-0001\n'
+        '**Last full DEDUPE sweep:** 2026-04-14\n'
+        '**Entries merged since last sweep:** 0\n'
+        '**Drift threshold:** 3\n'
+        '**Last staleness review:** never\n'
+    )
+    (tmp_path / 'CHECKED.md').write_text(
+        '| Pair | Result | Date | Notes |\n|------|--------|------|-------|\n'
+    )
+    entry_a = tmp_path / 'python' / 'GE-20260414-aaaa01.md'
+    entry_b = tmp_path / 'python' / 'GE-20260414-bbbb02.md'
+    entry_c = tmp_path / 'tools' / 'GE-20260414-cccc03.md'
+    entry_a.write_text(YAML_ENTRY_A)
+    entry_b.write_text(YAML_ENTRY_B)
+    entry_c.write_text(YAML_ENTRY_C)
+    return entry_a, entry_b, entry_c
+
+
+class TestE2EDedupeScanner(unittest.TestCase):
+    """E2E: integrate entries → drift → scan → record → re-scan."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.garden = Path(self.tmp.name)
+        self.entry_a, self.entry_b, self.entry_c = _setup_yaml_garden(self.garden)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_happy_path_related_pair(self):
+        """Integrate 2 similar entries → drift=2 → scan shows pair → record → re-scan empty."""
+        import re
+        _integrate_entry(self.entry_a, self.garden)
+        _integrate_entry(self.entry_b, self.garden)
+
+        # Drift should be 2
+        content = (self.garden / 'GARDEN.md').read_text()
+        m = re.search(r'\*\*Entries merged since last sweep:\*\*\s*(\d+)', content)
+        self.assertEqual(int(m.group(1)), 2)
+
+        # Scanner shows the python pair
+        result = _run_scanner(str(self.garden), '--domain', 'python')
+        self.assertIn('GE-20260414-aaaa01', result.stdout)
+        self.assertIn('GE-20260414-bbbb02', result.stdout)
+
+        # Pair has non-zero score (both share 'regex' and 'parsing')
+        result_json = _run_scanner(str(self.garden), '--domain', 'python', '--json')
+        data = _json.loads(result_json.stdout)
+        self.assertEqual(len(data), 1)
+        self.assertGreater(data[0]['score'], 0.0)
+
+        # Record as related
+        _run_scanner(str(self.garden), '--record',
+                     'GE-20260414-aaaa01 × GE-20260414-bbbb02', 'related',
+                     'both regex validation gaps')
+
+        # Re-scan — pair absent
+        result2 = _run_scanner(str(self.garden), '--domain', 'python')
+        self.assertIn('No unchecked pairs', result2.stdout)
+
+    def test_happy_path_no_cross_domain_pairs(self):
+        """Entry A (python) and Entry C (tools) — no cross-domain pairs generated."""
+        # Remove entry_b so only entry_a is in the python domain
+        self.entry_b.unlink()
+        _integrate_entry(self.entry_a, self.garden)
+        _integrate_entry(self.entry_c, self.garden)
+
+        # python has 1 entry, tools has 1 entry — no within-domain pairs
+        result = _run_scanner(str(self.garden))
+        self.assertIn('No unchecked pairs', result.stdout)
+
+    def test_happy_path_drift_triggers_dedupe_check(self):
+        """Integrate 3 entries → drift=3 >= threshold=3 → --dedupe-check warns."""
+        _integrate_entry(self.entry_a, self.garden)
+        _integrate_entry(self.entry_b, self.garden)
+        _integrate_entry(self.entry_c, self.garden)
+
+        result = _run_dedupe_check(self.garden)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('DEDUPE recommended', result.stdout)
+
+    def test_happy_path_bulk_import_all_pairs_generated(self):
+        """3 entries in same domain → 3 pairs (3×2/2) generated by scanner."""
+        entry_d = self.garden / 'python' / 'GE-20260414-dddd04.md'
+        entry_d.write_text(
+            YAML_ENTRY_A.replace('GE-20260414-aaaa01', 'GE-20260414-dddd04')
+                        .replace('silently skips CRLF', 'raises ValueError on invalid')
+        )
+        # 3 python entries: aaaa01, bbbb02, dddd04
+        result_json = _run_scanner(str(self.garden), '--domain', 'python', '--json')
+        data = _json.loads(result_json.stdout)
+        self.assertEqual(len(data), 3)
+
+    def test_happy_path_top_flag_in_e2e_context(self):
+        """--top 1 returns only the highest-scoring pair from scanner."""
+        entry_d = self.garden / 'python' / 'GE-20260414-dddd04.md'
+        # Make dddd04 identical to aaaa01 so they score 1.0
+        entry_d.write_text(
+            YAML_ENTRY_A.replace('GE-20260414-aaaa01', 'GE-20260414-dddd04')
+        )
+
+        result_all = _run_scanner(str(self.garden), '--domain', 'python', '--json')
+        result_top1 = _run_scanner(str(self.garden), '--domain', 'python', '--json', '--top', '1')
+
+        all_data = _json.loads(result_all.stdout)
+        top_data = _json.loads(result_top1.stdout)
+
+        self.assertEqual(len(top_data), 1)
+        # Top result should be the highest-scoring pair
+        self.assertEqual(top_data[0]['score'], all_data[0]['score'])
