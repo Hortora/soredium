@@ -10,6 +10,7 @@ import subprocess
 import sys
 import textwrap
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -21,6 +22,106 @@ def run_validator(garden_root: Path) -> subprocess.CompletedProcess:
         [sys.executable, str(VALIDATOR), str(garden_root)],
         capture_output=True, text=True
     )
+
+
+def write_yaml_entry(root: Path, domain: str, ge_id: str, title: str,
+                     submitted: str, threshold: int,
+                     last_reviewed: str = None,
+                     verified_on: str = None) -> Path:
+    """Write a garden entry with YAML frontmatter for freshness testing."""
+    category = root / domain
+    category.mkdir(exist_ok=True)
+    path = category / f"{ge_id}.md"
+    lines = [
+        "---",
+        f"id: {ge_id}",
+        f'title: "{title}"',
+        "type: gotcha",
+        f"domain: {domain}",
+        'stack: "Test Stack"',
+        "tags: [test]",
+        "score: 10",
+        "verified: true",
+        f"staleness_threshold: {threshold}",
+        f"submitted: {submitted}",
+    ]
+    if last_reviewed:
+        lines.append(f"last_reviewed: {last_reviewed}")
+    if verified_on:
+        lines.append(f'verified_on: "{verified_on}"')
+    lines.extend(["---", "", f"## {title}", "", f"**ID:** {ge_id}", ""])
+    path.write_text("\n".join(lines))
+    return path
+
+
+def run_freshness(garden_root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(VALIDATOR), '--freshness', str(garden_root)],
+        capture_output=True, text=True
+    )
+
+
+class TestFreshnessFlag(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        # Minimal GARDEN.md so the flag doesn't choke on a missing file
+        (self.root / "GARDEN.md").write_text("**Last legacy ID:** GE-0001\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_no_entries_exits_0(self):
+        result = run_freshness(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("0 entries", result.stdout)
+
+    def test_fresh_entry_exits_0(self):
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        write_yaml_entry(self.root, "tools", "GE-20260414-aabbcc",
+                         "Fresh entry", yesterday, 730)
+        result = run_freshness(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("0 entries", result.stdout)
+
+    def test_overdue_entry_exits_2(self):
+        old = (date.today() - timedelta(days=800)).isoformat()
+        write_yaml_entry(self.root, "tools", "GE-20260414-aabbcc",
+                         "Old entry", old, 730)
+        result = run_freshness(self.root)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("1 entries", result.stdout)
+
+    def test_last_reviewed_resets_clock(self):
+        old = (date.today() - timedelta(days=800)).isoformat()
+        recent = (date.today() - timedelta(days=10)).isoformat()
+        write_yaml_entry(self.root, "tools", "GE-20260414-aabbcc",
+                         "Reviewed entry", old, 730, last_reviewed=recent)
+        result = run_freshness(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("0 entries", result.stdout)
+
+    def test_entry_without_staleness_threshold_is_skipped(self):
+        # Entry with no staleness_threshold field — skipped by freshness check
+        category = self.root / "tools"
+        category.mkdir()
+        (category / "GE-20260414-aabbcc.md").write_text(
+            '---\nid: GE-20260414-aabbcc\ntitle: "No threshold"\nsubmitted: 2020-01-01\n---\n'
+        )
+        result = run_freshness(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("0 entries", result.stdout)
+
+    def test_multiple_overdue_entries_reported(self):
+        old = (date.today() - timedelta(days=800)).isoformat()
+        write_yaml_entry(self.root, "tools", "GE-20260414-aabbcc",
+                         "Old entry A", old, 730)
+        write_yaml_entry(self.root, "java", "GE-20260414-ddeeff",
+                         "Old entry B", old, 730)
+        result = run_freshness(self.root)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("2 entries", result.stdout)
 
 
 class GardenFixture:
