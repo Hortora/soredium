@@ -66,7 +66,8 @@ if '--freshness' in sys.argv:
         if _path.name in _skip_names:
             continue
         _content = _path.read_text()
-        _fm_match = _re.match(r'^---\n(.*?)\n---', _content, _re.DOTALL)
+        _content_normalized = _content.replace('\r\n', '\n')
+        _fm_match = _re.match(r'^---\n(.*?)\n---', _content_normalized, _re.DOTALL)
         if not _fm_match:
             continue
         _fm = _fm_match.group(1)
@@ -79,10 +80,12 @@ if '--freshness' in sys.argv:
         _s = _re.search(r'submitted:\s*(\d{4}-\d{2}-\d{2})', _fm)
         if not _s:
             continue
-        _submitted = _date.fromisoformat(_s.group(1))
-
-        _r = _re.search(r'last_reviewed:\s*(\d{4}-\d{2}-\d{2})', _fm)
-        _last_reviewed = _date.fromisoformat(_r.group(1)) if _r else None
+        try:
+            _submitted = _date.fromisoformat(_s.group(1))
+            _r = _re.search(r'last_reviewed:\s*(\d{4}-\d{2}-\d{2})', _fm)
+            _last_reviewed = _date.fromisoformat(_r.group(1)) if _r else None
+        except ValueError:
+            continue
 
         _ref = max(_submitted, _last_reviewed) if _last_reviewed else _submitted
         _age = (_today - _ref).days
@@ -92,7 +95,7 @@ if '--freshness' in sys.argv:
             _ti_m = _re.search(r'^title:\s*"?(.+?)"?\s*$', _fm, _re.MULTILINE)
             _overdue.append((
                 _id_m.group(1).strip() if _id_m else 'unknown',
-                _ti_m.group(1).strip() if _ti_m else 'unknown',
+                _ti_m.group(1).strip().strip('"') if _ti_m else 'unknown',
                 _age,
                 _threshold,
             ))
