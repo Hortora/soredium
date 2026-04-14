@@ -30,6 +30,11 @@ These fields can be added to any entry type. The validator accepts but does not 
 |-------|------|---------|
 | `verified_on` | string | Version(s) this was verified on. Used by forage SEARCH to produce a concrete staleness annotation rather than a generic age warning. Example: `"quarkus: 3.34.2"` or `"tmux: 3.4"`. Only meaningful for library/tool-specific entries — omit for technique/cross-cutting entries. |
 | `last_reviewed` | YYYY-MM-DD | Date of last manual staleness review. Resets the staleness clock — forage SWEEP and harvest REVIEW use `max(submitted, last_reviewed)` as the reference date when computing entry age. Set by forage SWEEP (Confirm) and harvest REVIEW (Confirm). |
+| `author` | string | Your initials or handle — appears on the contributor scoreboard. Set automatically by forage at CAPTURE time from `~/.claude/settings.json` `initials`. Example: `"mdp"` |
+| `constraints` | string or list | What conditions must hold for this fix to apply. Freetext: `"requires Java 17+, not applicable to reactive pipelines"`. Structured: `[{applies_when: "java.version >= 17", note: "uses sealed classes"}]`. Each format earns the same +1 bonus. |
+| `invalidation_triggers` | string or list | What changes would make this entry wrong. Freetext: `"revisit if Spring Boot 4.0 changes auto-configuration"`. Structured: `[{library: "spring-boot", version: ">= 4.0", reason: "model may change"}]`. Earns +1 bonus. |
+
+**Bonus scoring:** `validate_pr.py` awards +1 per WHY field present (up to +3 effective bonus). The base score gate (≥8) applies to the self-reported score only — bonus points don't bypass it. Effective score = base + bonus and is used by the contributor scoreboard.
 
 **Adding to an entry frontmatter:**
 
@@ -37,6 +42,9 @@ These fields can be added to any entry type. The validator accepts but does not 
 staleness_threshold: 730
 verified_on: "quarkus: 3.34.2"   # optional — omit if not applicable
 last_reviewed: 2026-04-14         # optional — set by staleness review
+author: "mdp"                     # optional — set by forage at CAPTURE time
+constraints: "requires Java 17+"  # optional — adds +1 bonus
+invalidation_triggers: "revisit if library major-version ships"  # optional — adds +1 bonus
 submitted: 2026-04-14
 ```
 
@@ -90,6 +98,10 @@ Code block or config. Be complete. Include what NOT to do alongside what works.
 If no fix exists yet, describe the best available workaround — the entry is still worth capturing.
 A REVISE submission can add a solution later.
 
+### Alternatives considered *(optional — adds +1 bonus; omit if no meaningful alternatives)*
+- Alternative A — reason it was rejected or why it didn't work
+- Alternative B — reason it was rejected or why it didn't work
+
 ### Why this is non-obvious
 The insight. What makes this a gotcha? Why would a skilled developer be misled?
 
@@ -126,6 +138,9 @@ submitted: YYYY-MM-DD
 
 ### The technique
 Code block or concrete description. Complete and runnable.
+
+### Alternatives considered *(optional — adds +1 bonus; omit if no meaningful alternatives)*
+- Alternative A — reason most developers reach for this instead and why it's less good
 
 ### Why this is non-obvious
 What would most developers do instead? Why wouldn't they reach for this?
@@ -172,6 +187,9 @@ exist yet. Be precise about conditions, defaults, edge cases.
 
 ### How to use it / where it appears
 Code block or concrete example. Show it working.
+
+### Alternatives considered *(optional — adds +1 bonus; omit if no meaningful alternatives)*
+- Alternative A — the documented approach that doesn't work / is harder
 
 ### Why it's not obvious
 Why would someone not know this exists? Is it in the source but not the docs?
