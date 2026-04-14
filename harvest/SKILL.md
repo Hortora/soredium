@@ -103,15 +103,16 @@ Use when: drift threshold exceeded, or user explicitly says "dedupe the garden",
 
 DEDUPE checks *existing entries against each other* — it does not process submissions (there are none).
 
-**Step 1 — Load the index and pair log**
+**Step 1 — Run scanner to get pre-scored pair list**
 
-Read both from committed state:
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:CHECKED.md
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py \
+  ${HORTORA_GARDEN:-~/.hortora/garden} --top 50
 ```
 
-Enumerate all entries with their GE-IDs, grouped by technology category. Build the set of already-verified pairs from CHECKED.md.
+The scanner reads domain directories directly for YAML-frontmatter entries, cross-references CHECKED.md to exclude already-checked pairs, computes Jaccard similarity for all unchecked within-domain pairs, and returns them sorted highest-score-first.
+
+Review pairs from highest score down — highest-scoring pairs are most likely related or duplicate. Use `--domain <name>` to focus on one domain at a time. Use `--json` for machine-readable output.
 
 **Step 2 — Generate unchecked pairs per category**
 
@@ -142,15 +143,19 @@ Write changes to working tree:
 - Related pairs: add `**See also:** GE-XXXX [title]` to both entries
 - Duplicates: present both to user, keep the more complete one, discard the other; record in DISCARDED.md
 
-**Step 5 — Update CHECKED.md**
+**Step 5 — Record comparison results via scanner**
 
-Append to CHECKED.md in working tree:
+For each pair reviewed, record the result using the scanner's `--record` flag:
 
-```markdown
-| GE-0003 × GE-0007 | distinct | YYYY-MM-DD | |
-| GE-0004 × GE-0008 | related | YYYY-MM-DD | cross-referenced |
-| GE-0005 × GE-0009 | duplicate-discarded | YYYY-MM-DD | GE-0005 kept |
+```bash
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py \
+  ${HORTORA_GARDEN:-~/.hortora/garden} \
+  --record "GE-XXXX × GE-YYYY" distinct "brief note"
 ```
+
+Results must be one of: `distinct`, `related`, `duplicate-discarded`.
+
+The scanner enforces canonical ID ordering and is idempotent — recording the same pair twice produces one row only. Do NOT append to CHECKED.md manually.
 
 **Step 6 — Reset drift counter**
 
