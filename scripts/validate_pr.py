@@ -34,6 +34,45 @@ INJECTION_PATTERNS = [
     r'\bjailbreak\b',
 ]
 
+BONUS_RULES = {
+    'constraints':             1,  # +1 if constraints field present (string or list, non-empty)
+    'alternatives_considered': 1,  # +1 if ### Alternatives considered has ≥1 list item
+    'invalidation_triggers':   1,  # +1 if invalidation_triggers field present (string or list, non-empty)
+}
+
+
+def compute_bonus(fm: dict, body: str) -> dict:
+    """Return {field_name: bool} for each bonus rule. True = bonus earned."""
+    results = {}
+
+    # constraints: present and non-empty (string or list)
+    constraints = fm.get('constraints')
+    results['constraints'] = bool(constraints) if constraints is not None else False
+
+    # alternatives_considered: heading + ≥1 list item in that section
+    heading_match = re.search(
+        r'^###\s+Alternatives considered\s*\n((?:(?!^###).)*)',
+        body, re.MULTILINE | re.IGNORECASE | re.DOTALL
+    )
+    if heading_match:
+        section = heading_match.group(1)
+        results['alternatives_considered'] = bool(
+            re.search(r'^\s*-\s+\S', section, re.MULTILINE)
+        )
+    else:
+        results['alternatives_considered'] = False
+
+    # invalidation_triggers: present and non-empty (string or list)
+    triggers = fm.get('invalidation_triggers')
+    results['invalidation_triggers'] = bool(triggers) if triggers is not None else False
+
+    return results
+
+
+def bonus_points(bonus_results: dict) -> int:
+    """Sum bonus points from detection results using BONUS_RULES."""
+    return sum(BONUS_RULES.get(k, 0) for k, present in bonus_results.items() if present)
+
 
 def parse_entry(path: Path) -> tuple:
     """Return (frontmatter_dict, body_str, raw_content). Raises on parse failure."""
@@ -151,6 +190,26 @@ def validate(entry_path: str, garden_root: str = None) -> dict:
                     result['warnings'].append(
                         f"Tag '{tag}' not in controlled vocabulary (labels/)"
                     )
+
+    # Bonus scoring for WHY fields
+    bonus_results = compute_bonus(fm, body)
+    bonus = bonus_points(bonus_results)
+    if bonus > 0:
+        effective = score + bonus
+        result['infos'].append(
+            f"Score {score}/15 base + {bonus} bonus = {effective} effective"
+        )
+        for k, present in bonus_results.items():
+            if present:
+                result['infos'].append(f"  ✓ {k} present (+{BONUS_RULES[k]})")
+            else:
+                result['infos'].append(f"  ✗ {k} missing (optional — adds +{BONUS_RULES[k]})")
+
+    # Author field warning
+    if 'author' not in fm:
+        result['warnings'].append(
+            "No 'author' field — entry won't appear on contributor scoreboard"
+        )
 
     return result
 
