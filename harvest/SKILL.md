@@ -1,17 +1,21 @@
 ---
 name: harvest
 description: >
-  Use when deduplicating existing garden entries — user says "dedupe the garden", "check
-  for duplicates", or invokes /harvest. Run as a dedicated session with full context budget.
-  Do NOT use during normal session work — use forage for session-time operations (CAPTURE, SWEEP,
-  SEARCH, REVISE). Never invoked automatically; always a deliberate maintenance operation.
+  Use when deduplicating existing garden entries (DEDUPE) or reviewing all stale entries
+  across the garden (REVIEW). DEDUPE: user says "dedupe the garden", "check for duplicates".
+  REVIEW: user says "review stale entries", "staleness review", "harvest review", or when
+  validate_garden.py --freshness shows many overdue entries. Run as a dedicated session
+  with full context budget. Do NOT use during normal session work — use forage for
+  session-time operations. Never invoked automatically; always a deliberate maintenance
+  operation.
 ---
 
 # Harvest — Garden Maintenance Operations
 
-Harvest handles one maintenance operation for the knowledge garden:
+Harvest handles two maintenance operations for the knowledge garden:
 
 - **DEDUPE** — find and resolve duplicate entries within the existing garden
+- **REVIEW** — find and resolve entries past their `staleness_threshold` across all domains
 
 Harvest is always a **dedicated session** — never run during normal session work. It has a full context budget for reading garden files.
 
@@ -172,12 +176,87 @@ Tell the user:
 
 ---
 
+### REVIEW (find and resolve stale entries)
+
+Use when: "review stale entries", "staleness review", "harvest review", or when
+`validate_garden.py --freshness` shows many overdue entries across the garden.
+
+Unlike the SWEEP staleness spot-check (domain-filtered, session-scoped), REVIEW covers
+ALL domains systematically — it is the backstop that guarantees full garden coverage.
+
+**Step 1 — Report overdue count**
+
+```bash
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_garden.py \
+  --freshness ${HORTORA_GARDEN:-~/.hortora/garden}
+```
+
+Note the count and which entries are most overdue. If count is 0, report to user and stop — no REVIEW needed.
+
+**Step 2 — Load all entries and build the overdue list**
+
+Read the committed index:
+```bash
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:GARDEN.md
+```
+
+For each entry in the By Technology section, read its YAML frontmatter:
+```bash
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<domain>/GE-XXXX.md | head -25
+```
+
+Build the overdue list: entries where `(today - max(submitted, last_reviewed)).days > staleness_threshold`.
+Sort oldest-first.
+
+**Step 3 — Process each overdue entry**
+
+For each entry in the overdue list, present:
+
+> ⚠️ **GE-XXXX** "[title]"
+> Domain: {domain} | Submitted: {submitted} | Last reviewed: {last_reviewed or "never"} | Age: {N} days | Threshold: {T} days
+> **CONFIRM** still valid / **REVISE** / **RETIRE** / **Skip**?
+
+- **CONFIRM**: add `last_reviewed: YYYY-MM-DD` to YAML frontmatter in working tree (or update if already present).
+- **REVISE**: run the REVISE workflow for this entry in-place.
+- **RETIRE**: add `**Deprecated:** [reason] — {date}` near the top of the entry body. Keep content intact — users on older versions still need it.
+- **Skip**: no action. Entry will appear on the next REVIEW.
+
+**Step 4 — Update GARDEN.md staleness tracking**
+
+In the GARDEN.md working tree, update the `Last staleness review` line:
+```
+**Last staleness review:** YYYY-MM-DD
+```
+
+**Step 5 — Commit atomically**
+
+```bash
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} add .
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} commit -m "review: staleness sweep — N confirmed, M revised, K retired, P skipped"
+```
+
+If the commit fails (concurrent forage session committed first):
+```bash
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} rebase HEAD
+# Re-commit
+```
+
+**Step 6 — Report**
+
+Tell the user:
+- How many entries were overdue in total
+- How many confirmed / revised / retired / skipped
+- That `Last staleness review` in GARDEN.md is now updated to today
+
+---
+
 ## Common Pitfalls
 
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
 | Reading garden files with `cat` or `grep` from filesystem | May see partial writes from a concurrent forage session | Always use `git show HEAD:path` |
 | Running DEDUPE during normal session work | Needs full context budget; deprives active session | Always run harvest as a dedicated session |
+| Running REVIEW during normal session work | Needs full context budget for full garden sweep | Always run harvest as a dedicated session |
 | Adding a second solution without pros/cons | Reader can't choose between approaches | Always use Solution 1 / Solution 2 format when 2+ exist |
 | Skipping the commit | Makes git history useless as an archive | Commit is mandatory |
 | Not updating CHECKED.md | Loses track of which pairs have been compared | Every comparison made must be logged |
@@ -197,11 +276,22 @@ DEDUPE is complete when:
 - ✅ GARDEN.md drift counter reset
 - ✅ All changes committed atomically with `dedupe:` format
 
+REVIEW is complete when:
+- ✅ `validate_garden.py --freshness` run and count noted
+- ✅ All overdue entries read via `git show HEAD:<path>` (not filesystem)
+- ✅ All overdue entries processed (CONFIRM / REVISE / RETIRE / Skip)
+- ✅ `last_reviewed` field added/updated for all CONFIRMed entries
+- ✅ RETIRE entries have deprecation note added, original content preserved
+- ✅ `Last staleness review` in GARDEN.md updated to today
+- ✅ All changes committed atomically with `review:` message format
+
 ---
 
 ## Skill Chaining
 
-**Invoked by:** User directly for maintenance sessions ("dedupe the garden", "check for duplicates")
+**Invoked by:** User directly for maintenance sessions
+- DEDUPE: "dedupe the garden", "check for duplicates", drift counter at threshold
+- REVIEW: "review stale entries", "staleness review", "harvest review", or when `--freshness` shows many overdue entries
 
 **Does NOT handle:** CAPTURE, SWEEP, SEARCH, REVISE — those are forage operations.
 
