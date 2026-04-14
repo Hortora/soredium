@@ -185,6 +185,10 @@ Work from what's already known. Ask only for what's genuinely unclear.
 | Why non-obvious | Why the obvious approach failed |
 | verified_on | For library/tool-specific entries only (type gotcha or undocumented with a named stack version): version(s) this was verified on — e.g. "quarkus: 3.34.2". Extract from context if mentioned. Skip for technique/cross-cutting entries. |
 | rationale | For entries scoring ≥12: why this fix over the obvious alternative. Extract from context if already explained; otherwise prompt in Step 5. |
+| author | Read from `~/.claude/settings.json` `initials` field. Set automatically — do not ask the user unless `initials` is not set (see Step 6). |
+| constraints | What conditions must hold for this fix to apply — environment, version, architecture. Extract from context if mentioned; otherwise prompt in Step 5. |
+| alternatives_considered | What else was tried/evaluated and why rejected. Extract from session context — the "What was tried (didn't work)" section often contains this. |
+| invalidation_triggers | What changes would make this entry wrong — library updates, deprecations, architectural shifts. Extract if mentioned; otherwise prompt in Step 5. |
 
 **Step 4 — Determine the domain**
 
@@ -223,9 +227,29 @@ If provided, add a `### Why this fix` body section immediately after `### Why th
 [Submitter's rationale — why this approach over the obvious alternative]
 ```
 
+**For all entries**, prompt for WHY context fields — each is optional but earns a +1 bonus on the effective score:
+
+> "What constraints must hold for this fix to apply? (e.g. 'requires Java 17+, not applicable to reactive pipelines' — or press Enter to skip)"
+
+If provided, add `constraints: "<text>"` to YAML frontmatter.
+
+> "What alternatives did you consider and reject? (Enter to skip — or describe briefly)"
+
+If provided, add a `### Alternatives considered` body section with a bulleted list.
+
+> "What changes would invalidate this entry? (e.g. 'revisit if Spring Boot 4.0 ships' — or press Enter to skip)"
+
+If provided, add `invalidation_triggers: "<text>"` to YAML frontmatter.
+
+Each WHY field present adds +1 to the effective score reported by the validator (base gate of ≥8 still applies to self-reported score only).
+
 Wait for confirmation before writing.
 
 **Step 6 — Write the entry file**
+
+**Set author field:** Read `initials` from `~/.claude/settings.json`. If set, include `author: "<initials>"` in YAML frontmatter. If not set, prompt once:
+> "What initials should identify your garden entries on the contributor scoreboard? (e.g. 'mdp')"
+Save the answer to `~/.claude/settings.json` as `"initials": "<answer>"` and include `author: "<answer>"` in frontmatter.
 
 ```bash
 GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
@@ -563,6 +587,8 @@ CAPTURE is complete when:
 - ✅ Delivered: PR opened (GitHub remote) or committed directly to main (local)
 - ✅ `verified_on` field included in YAML frontmatter for library/tool-specific entries (if version known)
 - ✅ `### Why this fix` section added for entries scoring ≥12 (if rationale provided)
+- ✅ `author` field included in YAML frontmatter (from `~/.claude/settings.json` `initials`)
+- ✅ WHY fields (constraints, alternatives_considered, invalidation_triggers) prompted — user responses included if provided
 
 SWEEP is complete when:
 - ✅ All three categories checked from session memory
