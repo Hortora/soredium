@@ -41,6 +41,70 @@ if '--structural' in sys.argv:
     print('Structural check passed')
     sys.exit(0)
 
+if '--freshness' in sys.argv:
+    import os as _os
+    from datetime import date as _date
+    import re as _re
+
+    _idx = sys.argv.index('--freshness')
+    # Garden root: next positional arg if present, else $HORTORA_GARDEN or default
+    if _idx + 1 < len(sys.argv) and not sys.argv[_idx + 1].startswith('--'):
+        _garden = Path(sys.argv[_idx + 1]).expanduser().resolve()
+    elif 'HORTORA_GARDEN' in _os.environ:
+        _garden = Path(_os.environ['HORTORA_GARDEN']).expanduser().resolve()
+    else:
+        _garden = (Path.home() / '.hortora' / 'garden').resolve()
+
+    _today = _date.today()
+    _overdue = []
+    _exclude = {'.git', 'submissions', 'scripts'}
+    _skip_names = {'GARDEN.md', 'CHECKED.md', 'DISCARDED.md'}
+
+    for _path in _garden.rglob('*.md'):
+        if any(part in _exclude for part in _path.parts):
+            continue
+        if _path.name in _skip_names:
+            continue
+        _content = _path.read_text()
+        _fm_match = _re.match(r'^---\n(.*?)\n---', _content, _re.DOTALL)
+        if not _fm_match:
+            continue
+        _fm = _fm_match.group(1)
+
+        _t = _re.search(r'staleness_threshold:\s*(\d+)', _fm)
+        if not _t:
+            continue
+        _threshold = int(_t.group(1))
+
+        _s = _re.search(r'submitted:\s*(\d{4}-\d{2}-\d{2})', _fm)
+        if not _s:
+            continue
+        _submitted = _date.fromisoformat(_s.group(1))
+
+        _r = _re.search(r'last_reviewed:\s*(\d{4}-\d{2}-\d{2})', _fm)
+        _last_reviewed = _date.fromisoformat(_r.group(1)) if _r else None
+
+        _ref = max(_submitted, _last_reviewed) if _last_reviewed else _submitted
+        _age = (_today - _ref).days
+
+        if _age > _threshold:
+            _id_m = _re.search(r'^id:\s*(.+)$', _fm, _re.MULTILINE)
+            _ti_m = _re.search(r'^title:\s*"?(.+?)"?\s*$', _fm, _re.MULTILINE)
+            _overdue.append((
+                _id_m.group(1).strip() if _id_m else 'unknown',
+                _ti_m.group(1).strip() if _ti_m else 'unknown',
+                _age,
+                _threshold,
+            ))
+
+    _overdue.sort(key=lambda x: x[2], reverse=True)
+    print(f"Freshness check: {len(_overdue)} entries past staleness threshold")
+    for _ge_id, _entry_title, _age, _thresh in _overdue[:10]:
+        print(f"  {_ge_id}: {_entry_title[:60]} ({_age}d / {_thresh}d threshold)")
+    if len(_overdue) > 10:
+        print(f"  ... and {len(_overdue) - 10} more")
+    sys.exit(2 if _overdue else 0)
+
 import os
 # Garden root: first non-flag positional argument, $HORTORA_GARDEN env var, or default
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
