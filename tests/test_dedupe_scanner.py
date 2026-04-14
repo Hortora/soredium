@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from dedupe_scanner import (
     tokenize, jaccard, canonical_pair, parse_tags,
     load_checked_pairs, record_pair,
+    load_entries, compute_pairs,
 )
 
 SCANNER = Path(__file__).parent.parent / 'scripts' / 'dedupe_scanner.py'
@@ -235,6 +236,173 @@ class TestRecordPair(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             record_pair(self.root, 'GE-0001 × GE-0002', 'bogus', '')
         self.assertEqual(ctx.exception.code, 1)
+
+
+class TestLoadEntries(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_finds_yaml_entries(self):
+        make_entry(self.root / 'python' / 'GE-0001.md', 'GE-0001', 'CRLF regex skip', ['regex', 'yaml'], 'python')
+        make_entry(self.root / 'python' / 'GE-0002.md', 'GE-0002', 'fromisoformat crash', ['datetime'], 'python')
+        result = load_entries(self.root)
+        self.assertIn('python', result)
+        self.assertEqual(len(result['python']), 2)
+
+    def test_skips_non_frontmatter_entries(self):
+        (self.root / 'tools').mkdir()
+        (self.root / 'tools' / 'GE-0042.md').write_text(
+            '## Legacy entry\n\n**ID:** GE-0042\n**Stack:** git\n'
+        )
+        result = load_entries(self.root)
+        self.assertEqual(len(result.get('tools', [])), 0)
+
+    def test_skips_index_and_control_files(self):
+        (self.root / 'GARDEN.md').write_text('**Last legacy ID:** GE-0001\n')
+        (self.root / 'CHECKED.md').write_text('| Pair |\n')
+        (self.root / 'DISCARDED.md').write_text('| Pair |\n')
+        (self.root / 'tools').mkdir()
+        (self.root / 'tools' / 'INDEX.md').write_text('| GE-ID | Title |\n')
+        make_entry(self.root / 'tools' / 'GE-0001.md', 'GE-0001', 'Test', ['git'], 'tools')
+        result = load_entries(self.root)
+        self.assertEqual(len(result.get('tools', [])), 1)
+
+    def test_skips_hidden_dirs(self):
+        (self.root / '_summaries').mkdir()
+        (self.root / '_summaries' / 'GE-0001.md').write_text(
+            '---\nid: GE-0001\ntitle: "Test"\ntype: gotcha\ndomain: tools\n'
+            'tags: [git]\nscore: 10\nverified: true\nstaleness_threshold: 730\n'
+            'submitted: 2026-04-14\n---\n\n## Test\n'
+        )
+        result = load_entries(self.root)
+        self.assertEqual(result, {})
+
+    def test_domain_filter(self):
+        make_entry(self.root / 'python' / 'GE-0001.md', 'GE-0001', 'Python entry', ['regex'], 'python')
+        make_entry(self.root / 'tools' / 'GE-0002.md', 'GE-0002', 'Tools entry', ['git'], 'tools')
+        result = load_entries(self.root, domain_filter='python')
+        self.assertIn('python', result)
+        self.assertNotIn('tools', result)
+
+    def test_crlf_files_not_skipped(self):
+        path = self.root / 'python' / 'GE-0001.md'
+        path.parent.mkdir(parents=True)
+        path.write_bytes(
+            b'---\r\nid: GE-0001\r\ntitle: "CRLF test"\r\ntype: gotcha\r\n'
+            b'domain: python\r\ntags: [regex]\r\nscore: 10\r\nverified: true\r\n'
+            b'staleness_threshold: 730\r\nsubmitted: 2026-04-14\r\n---\r\n\r\n'
+            b'## CRLF test\r\n'
+        )
+        result = load_entries(self.root)
+        self.assertIn('python', result)
+        self.assertEqual(len(result['python']), 1)
+
+    def test_entry_fields_correctly_parsed(self):
+        make_entry(self.root / 'python' / 'GE-0001.md', 'GE-0001', 'CRLF regex skip', ['regex', 'yaml'], 'python')
+        result = load_entries(self.root)
+        entry = result['python'][0]
+        self.assertEqual(entry['id'], 'GE-0001')
+        self.assertEqual(entry['title'], 'CRLF regex skip')
+        self.assertIn('regex', entry['tags'])
+        self.assertIn('yaml', entry['tags'])
+
+
+class TestComputePairs(unittest.TestCase):
+
+    def test_no_entries_empty_result(self):
+        self.assertEqual(compute_pairs({}, set()), [])
+
+    def test_single_entry_no_pairs(self):
+        entries = {'python': [{'id': 'GE-0001', 'title': 'Test', 'tags': ['regex']}]}
+        self.assertEqual(compute_pairs(entries, set()), [])
+
+    def test_two_entries_one_pair(self):
+        entries = {'python': [
+            {'id': 'GE-0001', 'title': 'regex yaml crlf parsing', 'tags': ['regex', 'yaml']},
+            {'id': 'GE-0002', 'title': 'regex datetime parsing', 'tags': ['regex']},
+        ]}
+        pairs = compute_pairs(entries, set())
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0]['pair'], 'GE-0001 × GE-0002')
+
+    def test_three_entries_three_pairs(self):
+        entries = {'python': [
+            {'id': 'GE-0001', 'title': 'entry one', 'tags': ['tag']},
+            {'id': 'GE-0002', 'title': 'entry two', 'tags': ['tag']},
+            {'id': 'GE-0003', 'title': 'entry three', 'tags': ['tag']},
+        ]}
+        self.assertEqual(len(compute_pairs(entries, set())), 3)
+
+    def test_checked_pairs_excluded(self):
+        entries = {'python': [
+            {'id': 'GE-0001', 'title': 'one', 'tags': []},
+            {'id': 'GE-0002', 'title': 'two', 'tags': []},
+        ]}
+        checked = {'GE-0001 × GE-0002'}
+        self.assertEqual(compute_pairs(entries, checked), [])
+
+    def test_cross_domain_never_paired(self):
+        entries = {
+            'python': [{'id': 'GE-0001', 'title': 'regex yaml', 'tags': ['regex']}],
+            'tools': [{'id': 'GE-0002', 'title': 'regex yaml', 'tags': ['regex']}],
+        }
+        pairs = compute_pairs(entries, set())
+        pair_keys = [p['pair'] for p in pairs]
+        self.assertNotIn('GE-0001 × GE-0002', pair_keys)
+
+    def test_sorted_highest_score_first(self):
+        entries = {'python': [
+            {'id': 'GE-0001', 'title': 'regex yaml crlf parsing frontmatter', 'tags': ['regex', 'yaml', 'crlf']},
+            {'id': 'GE-0002', 'title': 'regex yaml crlf parsing frontmatter', 'tags': ['regex', 'yaml', 'crlf']},
+            {'id': 'GE-0003', 'title': 'completely different git branch rebase', 'tags': ['git']},
+        ]}
+        pairs = compute_pairs(entries, set())
+        self.assertGreaterEqual(pairs[0]['score'], pairs[-1]['score'])
+        self.assertEqual(pairs[0]['score'], 1.0)
+
+    def test_top_limit(self):
+        entries = {'python': [
+            {'id': f'GE-000{i}', 'title': f'entry {i}', 'tags': ['tag']}
+            for i in range(1, 5)
+        ]}
+        self.assertEqual(len(compute_pairs(entries, set())), 6)
+        self.assertEqual(len(compute_pairs(entries, set(), top=3)), 3)
+
+    def test_high_score_for_identical_entries(self):
+        entries = {'python': [
+            {'id': 'GE-0001', 'title': 'yaml regex crlf skip silent', 'tags': ['regex', 'yaml', 'crlf']},
+            {'id': 'GE-0002', 'title': 'yaml regex crlf skip silent', 'tags': ['regex', 'yaml', 'crlf']},
+        ]}
+        pairs = compute_pairs(entries, set())
+        self.assertEqual(pairs[0]['score'], 1.0)
+
+    def test_low_score_for_unrelated_entries(self):
+        entries = {'python': [
+            {'id': 'GE-0001', 'title': 'yaml frontmatter regex crlf parsing', 'tags': ['regex', 'yaml']},
+            {'id': 'GE-0002', 'title': 'git commit rebase squash branch history', 'tags': ['git', 'workflow']},
+        ]}
+        pairs = compute_pairs(entries, set())
+        self.assertLess(pairs[0]['score'], 0.1)
+
+    def test_pair_result_has_required_fields(self):
+        entries = {'python': [
+            {'id': 'GE-0001', 'title': 'regex', 'tags': ['regex']},
+            {'id': 'GE-0002', 'title': 'yaml', 'tags': ['yaml']},
+        ]}
+        pairs = compute_pairs(entries, set())
+        p = pairs[0]
+        self.assertIn('pair', p)
+        self.assertIn('id_a', p)
+        self.assertIn('id_b', p)
+        self.assertIn('title_a', p)
+        self.assertIn('title_b', p)
+        self.assertIn('domain', p)
+        self.assertIn('score', p)
 
 
 if __name__ == '__main__':
