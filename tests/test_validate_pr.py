@@ -1,6 +1,9 @@
 import pytest
 import json
+import subprocess
+import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from validate_pr import validate, detect_mode
@@ -138,6 +141,114 @@ The fix.
 
 ### Why this is non-obvious
 The insight.
+"""
+
+UPSTREAM_ENTRY = """\
+---
+id: GE-20260414-parent1
+title: "Hibernate @PreUpdate fires at flush time not at persist"
+type: gotcha
+domain: java
+stack: "Hibernate ORM 6.x, Quarkus"
+tags: [hibernate, jpa, java, lifecycle, flush]
+score: 12
+verified: true
+staleness_threshold: 730
+submitted: 2026-04-14
+---
+
+## Hibernate @PreUpdate fires at flush time not at persist
+
+**ID:** GE-20260414-parent1
+**Stack:** Hibernate ORM 6.x, Quarkus
+**Symptom:** @PreUpdate not firing when expected.
+**Context:** Entity lifecycle callbacks.
+
+### What was tried (didn't work)
+- Relied on @PreUpdate to fire at persist() time.
+
+### Root cause
+Fires at flush, not persist.
+
+### Fix
+Force flush or restructure logic.
+
+### Why this is non-obvious
+Naming implies otherwise.
+
+*Score: 12/15 · Included because: common trap · Reservation: none*
+"""
+
+UPSTREAM_DUPLICATE_ENTRY = """\
+---
+id: GE-20260414-test001
+title: "Hibernate @PreUpdate fires at flush time not at persist"
+type: gotcha
+domain: java
+stack: "Hibernate ORM 6.x"
+tags: [hibernate, jpa, java, lifecycle, flush]
+score: 10
+verified: true
+staleness_threshold: 730
+submitted: 2026-04-15
+---
+
+## Hibernate @PreUpdate fires at flush time not at persist
+
+**ID:** GE-20260414-test001
+**Stack:** Hibernate ORM 6.x
+**Symptom:** Same symptom as upstream.
+**Context:** Same context.
+
+### What was tried (didn't work)
+- Same approaches.
+
+### Root cause
+Same root cause.
+
+### Fix
+Same fix.
+
+### Why this is non-obvious
+Same reason.
+
+*Score: 10/15 · Included because: test · Reservation: none*
+"""
+
+DISTINCT_ENTRY = """\
+---
+id: GE-20260414-test001
+title: "CompletableFuture.get() blocks the carrier thread in virtual thread context"
+type: gotcha
+domain: java
+stack: "Java 21+, Virtual Threads"
+tags: [java, virtual-threads, async, blocking]
+score: 11
+verified: true
+staleness_threshold: 730
+submitted: 2026-04-15
+---
+
+## CompletableFuture.get() blocks the carrier thread in virtual thread context
+
+**ID:** GE-20260414-test001
+**Stack:** Java 21+, Virtual Threads
+**Symptom:** Performance degradation under virtual threads.
+**Context:** Java 21 virtual thread migration.
+
+### What was tried (didn't work)
+- Used CompletableFuture.get() expecting cooperative scheduling.
+
+### Root cause
+get() is a blocking call that pins the carrier thread.
+
+### Fix
+Use .join() or structured concurrency instead.
+
+### Why this is non-obvious
+Virtual threads appear to handle blocking transparently but don't for all methods.
+
+*Score: 11/15 · Included because: Java 21 migration gotcha · Reservation: none*
 """
 
 
@@ -395,3 +506,104 @@ def test_all_known_tags_no_vocabulary_warning(tmp_path):
     f.write_text(VALID_ENTRY)
     result = validate(str(f), str(tmp_path))
     assert not any('vocabulary' in w.lower() for w in result['warnings'])
+
+
+class TestUpstreamGardenDedup(unittest.TestCase):
+    """validate_pr.py --upstream-garden rejects entries that duplicate upstream content."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+        # Child garden — minimal git repo with no entries
+        self.child = self.root / 'child-garden'
+        self.child.mkdir()
+        for cmd in [
+            ['git', 'init', str(self.child)],
+            ['git', '-C', str(self.child), 'config', 'user.email', 'test@test.com'],
+            ['git', '-C', str(self.child), 'config', 'user.name', 'Test'],
+        ]:
+            subprocess.run(cmd, check=True, capture_output=True)
+        (self.child / 'GARDEN.md').write_text(
+            '**Last assigned ID:** GE-0000\n'
+            '**Last full DEDUPE sweep:** 2026-04-15\n'
+            '**Entries merged since last sweep:** 0\n'
+            '**Drift threshold:** 10\n'
+        )
+        (self.child / 'java').mkdir()
+        subprocess.run(['git', '-C', str(self.child), 'add', '.'],
+                       check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.child), 'commit', '-m', 'init'],
+                       check=True, capture_output=True)
+
+        # Parent garden — has one committed entry
+        self.parent = self.root / 'parent-garden'
+        self.parent.mkdir()
+        for cmd in [
+            ['git', 'init', str(self.parent)],
+            ['git', '-C', str(self.parent), 'config', 'user.email', 'test@test.com'],
+            ['git', '-C', str(self.parent), 'config', 'user.name', 'Test'],
+        ]:
+            subprocess.run(cmd, check=True, capture_output=True)
+        (self.parent / 'GARDEN.md').write_text(
+            '**Last assigned ID:** GE-0000\n'
+        )
+        (self.parent / 'java').mkdir()
+        (self.parent / 'java' / 'GE-20260414-parent1.md').write_text(UPSTREAM_ENTRY)
+        subprocess.run(['git', '-C', str(self.parent), 'add', '.'],
+                       check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.parent), 'commit', '-m', 'add parent entry'],
+                       check=True, capture_output=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _submit_entry(self, content: str, entry_name: str = 'GE-20260414-test001.md'):
+        """Add entry on a PR branch in child garden, return entry path."""
+        branch = f'submit/{entry_name[:-3]}'
+        subprocess.run(
+            ['git', '-C', str(self.child), 'checkout', '-b', branch],
+            check=True, capture_output=True
+        )
+        entry_path = self.child / 'java' / entry_name
+        entry_path.write_text(content)
+        subprocess.run(['git', '-C', str(self.child), 'add', '.'],
+                       check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(self.child), 'commit', '-m', f'submit: {entry_name}'],
+                       check=True, capture_output=True)
+        return entry_path
+
+    def _run_validator(self, entry_path, *extra_args):
+        VALIDATE_PR = Path(__file__).parent.parent / 'scripts' / 'validate_pr.py'
+        return subprocess.run(
+            [sys.executable, str(VALIDATE_PR), str(entry_path), str(self.child)]
+            + list(extra_args),
+            capture_output=True, text=True, cwd=str(self.child)
+        )
+
+    def test_distinct_entry_passes_without_upstream_flag(self):
+        entry = self._submit_entry(DISTINCT_ENTRY)
+        result = self._run_validator(entry)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_distinct_entry_passes_with_upstream_flag(self):
+        entry = self._submit_entry(DISTINCT_ENTRY)
+        result = self._run_validator(entry, '--upstream-garden', str(self.parent))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_duplicate_of_upstream_entry_rejected(self):
+        entry = self._submit_entry(UPSTREAM_DUPLICATE_ENTRY)
+        result = self._run_validator(entry, '--upstream-garden', str(self.parent))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        output = (result.stdout + result.stderr).lower()
+        self.assertTrue(
+            any(term in output for term in ('upstream', 'duplicate', 'similar')),
+            f"Expected upstream/duplicate/similar in output, got: {output}"
+        )
+
+    def test_no_upstream_flag_does_not_check_parent(self):
+        """Without the flag, duplicating a parent entry is allowed (child-only scope)."""
+        entry = self._submit_entry(UPSTREAM_DUPLICATE_ENTRY)
+        result = self._run_validator(entry)  # no --upstream-garden
+        # Should pass because we only check the child garden (which has no entries)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

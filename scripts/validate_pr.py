@@ -9,7 +9,17 @@ import sys
 import json
 import re
 import subprocess
+import argparse as _argparse
 from pathlib import Path
+
+# Parse --upstream-garden flags before any other processing, strip them from sys.argv
+# so the rest of the script sees only the positional arguments it expects.
+_up_parser = _argparse.ArgumentParser(add_help=False)
+_up_parser.add_argument('--upstream-garden', action='append', dest='upstream_gardens',
+                        metavar='PATH', default=[])
+_up_known, _up_remaining = _up_parser.parse_known_args()
+_UPSTREAM_GARDENS = [Path(p).expanduser().resolve() for p in _up_known.upstream_gardens]
+sys.argv = [sys.argv[0]] + _up_remaining
 
 try:
     import yaml
@@ -135,7 +145,7 @@ def detect_mode(garden_root: str) -> str:
     return 'local'
 
 
-def validate(entry_path: str, garden_root: str = None) -> dict:
+def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = None) -> dict:
     result = {'file': entry_path, 'criticals': [], 'warnings': [], 'infos': []}
     path = Path(entry_path)
 
@@ -191,6 +201,19 @@ def validate(entry_path: str, garden_root: str = None) -> dict:
                         f"Tag '{tag}' not in controlled vocabulary (labels/)"
                     )
 
+    # Upstream garden dedup check
+    if upstream_gardens:
+        domain = fm.get('domain', '')
+        target_text = f"{fm.get('title', '')} {' '.join(fm.get('tags', []))} {fm.get('summary', '')}"
+        target_tokens = tokenise(target_text)
+        for upstream_path in upstream_gardens:
+            for stem, tokens in scan_domain(domain, upstream_path, ''):
+                j = jaccard(target_tokens, tokens)
+                if j >= JACCARD_WARNING:
+                    result['criticals'].append(
+                        f"Upstream duplicate: Jaccard {j:.2f} >= 0.4 with {stem} in {upstream_path.name}"
+                    )
+
     # Bonus scoring for WHY fields
     bonus_results = compute_bonus(fm, body)
     bonus = bonus_points(bonus_results)
@@ -218,7 +241,11 @@ def main():
     if len(sys.argv) < 2:
         print(json.dumps({'error': 'Usage: validate_pr.py <entry_file> [garden_root]'}))
         sys.exit(1)
-    result = validate(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    result = validate(
+        sys.argv[1],
+        sys.argv[2] if len(sys.argv) > 2 else None,
+        upstream_gardens=_UPSTREAM_GARDENS if _UPSTREAM_GARDENS else None,
+    )
     print(json.dumps(result, indent=2))
     sys.exit(1 if result['criticals'] else 0)
 
