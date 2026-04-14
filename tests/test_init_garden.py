@@ -316,6 +316,33 @@ class TestInitGarden(unittest.TestCase):
         self.assertTrue(any('GARDEN.md' in p for p in created))
         self.assertTrue(any('SCHEMA.md' in p for p in created))
 
+    def test_child_garden_creates_augment_dir(self):
+        init_garden(self.root, name='my-garden', description='Private',
+                    role='child', ge_prefix='ME-', domains=['java'],
+                    upstream=['https://github.com/Hortora/jvm-garden'])
+        self.assertTrue((self.root / '_augment').is_dir(),
+                        "Child garden should have _augment/ directory")
+
+    def test_canonical_garden_no_augment_dir(self):
+        init_garden(self.root, name='jvm-garden', description='JVM',
+                    role='canonical', ge_prefix='JE-', domains=['java'])
+        self.assertFalse((self.root / '_augment').exists(),
+                         "Canonical garden should NOT have _augment/")
+
+    def test_peer_garden_no_augment_dir(self):
+        init_garden(self.root, name='tools-garden', description='Tools',
+                    role='peer', ge_prefix='TE-', domains=['tools'])
+        self.assertFalse((self.root / '_augment').exists(),
+                         "Peer garden should NOT have _augment/")
+
+    def test_augment_dir_has_readme(self):
+        init_garden(self.root, name='my-garden', description='Private',
+                    role='child', ge_prefix='ME-', domains=['java'],
+                    upstream=['https://github.com/Hortora/jvm-garden'])
+        readme = self.root / '_augment' / 'README.md'
+        self.assertTrue(readme.exists(), "_augment/ should have README.md")
+        self.assertIn('augment', readme.read_text().lower())
+
 
 class TestInitGardenCLI(unittest.TestCase):
 
@@ -369,6 +396,19 @@ class TestInitGardenCLI(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn('GARDEN.md', result.stdout)
         self.assertIn('SCHEMA.md', result.stdout)
+
+    def test_child_role_creates_augment_dir(self):
+        result = run_init(
+            str(self.root),
+            '--name', 'my-garden',
+            '--description', 'Private garden',
+            '--role', 'child',
+            '--ge-prefix', 'ME-',
+            '--domains', 'java',
+            '--upstream', 'https://github.com/Hortora/jvm-garden',
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / '_augment').is_dir())
 
     def test_second_run_reports_nothing_created(self):
         args = [

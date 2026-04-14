@@ -132,6 +132,32 @@ def create_ci_workflow(root: Path) -> None:
     )
 
 
+def create_augment_dir(root: Path) -> None:
+    """Create _augment/ directory with README.md for child gardens."""
+    augment_dir = root / '_augment'
+    augment_dir.mkdir(exist_ok=True)
+    readme = augment_dir / 'README.md'
+    if readme.exists():
+        return
+    readme.write_text(
+        '# _augment/\n\n'
+        'Private annotations on parent garden entries.\n\n'
+        'Each file augments a single parent entry without modifying it.\n\n'
+        '## Format\n\n'
+        '```yaml\n'
+        '---\n'
+        'target: GE-20260414-aabbcc\n'
+        'target_garden: jvm-garden\n'
+        'augment_type: context   # context | correction | update\n'
+        'submitted: YYYY-MM-DD\n'
+        '---\n\n'
+        '## Private context for GE-20260414-aabbcc\n\n'
+        '[Your private notes here]\n'
+        '```\n',
+        encoding='utf-8',
+    )
+
+
 def init_garden(root: Path, name: str, description: str, role: str,
                 ge_prefix: str, domains: list, upstream: list = None) -> list:
     """Initialize a garden. Idempotent — skips files that already exist.
@@ -155,6 +181,12 @@ def init_garden(root: Path, name: str, description: str, role: str,
     for domain in domains:
         before = set(root.rglob('*'))
         create_domain(root, domain)
+        after = set(root.rglob('*'))
+        created.extend(str(p.relative_to(root)) for p in sorted(after - before))
+
+    if role == 'child':
+        before = set(root.rglob('*'))
+        create_augment_dir(root)
         after = set(root.rglob('*'))
         created.extend(str(p.relative_to(root)) for p in sorted(after - before))
 
