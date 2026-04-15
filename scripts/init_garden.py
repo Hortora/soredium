@@ -16,6 +16,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
+# garden_db is a sibling script — ensure scripts/ is on path for direct invocation
+sys.path.insert(0, str(Path(__file__).parent))
+from garden_db import init_db as _db_init
+
 TODAY = date.today().isoformat()
 
 
@@ -85,11 +89,8 @@ def create_discarded_md(root: Path) -> None:
 
 def create_garden_db(root: Path) -> None:
     """Initialise garden.db with SQLite schema. Replaces CHECKED.md + DISCARDED.md."""
-    import sys as _sys
-    _sys.path.insert(0, str(Path(__file__).parent))
-    from garden_db import init_db
     if not (root / 'garden.db').exists():
-        init_db(root)
+        _db_init(root)
 
 
 def create_gitattributes(root: Path) -> None:
