@@ -1049,7 +1049,7 @@ class TestE2EInitGardenPipeline(unittest.TestCase):
     def test_garden_structure_complete_after_init(self):
         self._init()
         for path in [
-            'GARDEN.md', 'SCHEMA.md', 'CHECKED.md', 'DISCARDED.md',
+            'GARDEN.md', 'SCHEMA.md', 'garden.db', '.gitattributes',
             '.github/workflows/validate_pr.yml',
             'java/INDEX.md', 'quarkus/INDEX.md',
         ]:
