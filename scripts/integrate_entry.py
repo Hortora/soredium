@@ -60,16 +60,15 @@ def update_global_index(domain: str, garden: Path):
 
 def upsert_entry_index(garden: Path, entry_path: Path, domain: str) -> None:
     """Upsert entry metadata into entries_index. Errors are swallowed — never block integration."""
-    import sys as _sys
-    _sys.path.insert(0, str(Path(__file__).parent))
-    from garden_db import upsert_entry, init_db
-    db_path = Path(garden) / 'garden.db'
-    if not db_path.exists():
-        init_db(Path(garden))
-
     import re as _re
     _FM_RE = _re.compile(r'^---\n(.*?)\n---', _re.DOTALL)
     try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent))
+        from garden_db import upsert_entry, init_db
+        db_path = Path(garden) / 'garden.db'
+        if not db_path.exists():
+            init_db(Path(garden))
         content = Path(entry_path).read_text(encoding='utf-8').replace('\r\n', '\n')
         m = _FM_RE.match(content)
         if not m:
@@ -149,10 +148,7 @@ def integrate(entry_path: str, garden_root: str = None) -> dict:
     update_labels(fm, ge_id, garden)
     update_global_index(domain, garden)
     increment_drift_counter(garden)
-    try:
-        upsert_entry_index(garden, path, domain)
-    except Exception:
-        pass  # index failure never blocks integration
+    upsert_entry_index(garden, path, domain)
     run_validate(garden)
     git_commit(garden, ge_id)
 

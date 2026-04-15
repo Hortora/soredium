@@ -286,19 +286,31 @@ class TestEntriesIndexIntegration:
         rows = get_entries_by_domain(garden, 'quarkus/cdi')
         assert len(rows) > 0
 
+    def _run_no_db(self, entry, garden):
+        """Run integrate without pre-creating garden.db."""
+        with patch('integrate_entry.run_validate'), \
+             patch('integrate_entry.git_commit'):
+            return integrate(str(entry), str(garden))
+
     def test_no_garden_db_no_crash(self, tmp_path):
         """integrate succeeds even if garden.db doesn't pre-exist."""
         garden = _garden_with_drift(tmp_path, drift=0)
+        # No init_db call — garden.db does not exist yet
+        assert not (garden / 'garden.db').exists()
         entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
         entry.write_text(VALID_ENTRY)
-        result = self._run(entry, garden)
+        result = self._run_no_db(entry, garden)
         assert result['status'] == 'ok'
+        # garden.db should now exist (created during integration)
+        assert (garden / 'garden.db').exists()
 
     def test_index_failure_does_not_block_integration(self, tmp_path):
         """entries_index errors must never block the integration itself."""
         garden = _garden_with_drift(tmp_path, drift=0)
         entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
         entry.write_text(VALID_ENTRY)
-        with patch('integrate_entry.upsert_entry_index', side_effect=Exception('db error')):
+        # Patch the inner upsert_entry call so the exception is swallowed by
+        # upsert_entry_index's own except block — verifying it never propagates.
+        with patch('garden_db.upsert_entry', side_effect=Exception('db error')):
             result = self._run(entry, garden)
         assert result['status'] == 'ok'
