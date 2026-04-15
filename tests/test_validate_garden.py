@@ -242,16 +242,10 @@ class GardenFixture:
         self.root = root
         self.submissions = root / "submissions"
         self.submissions.mkdir(exist_ok=True)
-        (root / "CHECKED.md").write_text(
-            "# Garden Duplicate Check Log\n\n"
-            "| Pair | Result | Date | Notes |\n"
-            "|------|--------|------|-------|\n"
-        )
-        (root / "DISCARDED.md").write_text(
-            "# Discarded Submissions\n\n"
-            "| Discarded | Conflicts With | Date | Reason |\n"
-            "|-----------|---------------|------|--------|\n"
-        )
+        import sys as _sys_gf
+        _sys_gf.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db as _init_db
+        _init_db(root)
 
     def garden_md(self, last_id: str = "GE-0001", entries_since_sweep: int = 0):
         (self.root / "GARDEN.md").write_text(textwrap.dedent(f"""\
@@ -339,15 +333,29 @@ class GardenFixture:
         return self
 
     def checked_pair(self, id_a: str, id_b: str, result: str = "distinct"):
-        current = (self.root / "CHECKED.md").read_text()
+        checked_md = self.root / "CHECKED.md"
+        if not checked_md.exists():
+            checked_md.write_text(
+                "# Garden Duplicate Check Log\n\n"
+                "| Pair | Result | Date | Notes |\n"
+                "|------|--------|------|-------|\n"
+            )
+        current = checked_md.read_text()
         current += f"| {id_a} × {id_b} | {result} | 2026-04-09 | |\n"
-        (self.root / "CHECKED.md").write_text(current)
+        checked_md.write_text(current)
         return self
 
     def discarded(self, discarded_id: str, conflicts_with: str):
-        current = (self.root / "DISCARDED.md").read_text()
+        discarded_md = self.root / "DISCARDED.md"
+        if not discarded_md.exists():
+            discarded_md.write_text(
+                "# Discarded Submissions\n\n"
+                "| Discarded | Conflicts With | Date | Reason |\n"
+                "|-----------|---------------|------|--------|\n"
+            )
+        current = discarded_md.read_text()
         current += f"| {discarded_id} | {conflicts_with} | 2026-04-09 | duplicate |\n"
-        (self.root / "DISCARDED.md").write_text(current)
+        discarded_md.write_text(current)
         return self
 
     def schema_md(self, role='canonical', ge_prefix='GE-',
@@ -721,6 +729,70 @@ def test_structural_flag_fails_missing_garden_md(tmp_path):
         capture_output=True, text=True
     )
     assert result.returncode != 0
+
+
+def run_check_db(garden_root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(VALIDATOR), '--check-db', str(garden_root)],
+        capture_output=True, text=True
+    )
+
+
+class TestCheckDb(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_valid_garden_db_exits_0(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db
+        init_db(self.root)
+        result = run_check_db(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_missing_garden_db_exits_1(self):
+        result = run_check_db(self.root)
+        self.assertEqual(result.returncode, 1)
+
+    def test_missing_garden_db_error_mentions_garden_db(self):
+        result = run_check_db(self.root)
+        output = result.stdout + result.stderr
+        self.assertIn('garden.db', output)
+
+    def test_output_shows_schema_version(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db
+        init_db(self.root)
+        result = run_check_db(self.root)
+        self.assertIn('schema', result.stdout.lower())
+
+    def test_output_shows_table_counts(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db, record_pair
+        init_db(self.root)
+        record_pair(self.root, 'GE-0001 × GE-0002', 'distinct')
+        result = run_check_db(self.root)
+        self.assertIn('1', result.stdout)
+
+    def test_exits_0_with_empty_tables(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db
+        init_db(self.root)
+        result = run_check_db(self.root)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('0', result.stdout)
+
+    def test_corrupt_garden_db_exits_1(self):
+        # Write non-SQLite bytes — simulate a corrupt file
+        (self.root / 'garden.db').write_bytes(b'not a sqlite database\x00\xff')
+        result = run_check_db(self.root)
+        self.assertEqual(result.returncode, 1)
+        output = result.stdout + result.stderr
+        self.assertIn('ERROR', output)
 
 
 if __name__ == "__main__":

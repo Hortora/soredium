@@ -4,7 +4,7 @@ dedupe_scanner.py — Jaccard similarity pre-scorer for harvest DEDUPE.
 
 Scans garden domain directories for YAML-frontmatter entries, computes
 Jaccard similarity for all unchecked within-domain pairs, and returns
-pairs sorted highest-first. Owns CHECKED.md state via --record.
+pairs sorted highest-first. Owns pair-check state via garden.db (--record).
 
 Usage:
   dedupe_scanner.py [garden_root]
@@ -20,6 +20,14 @@ import json
 import os
 from datetime import date
 from pathlib import Path
+
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))
+from garden_db import (
+    load_checked_pairs as _db_load_checked_pairs,
+    record_pair as _db_record_pair,
+    init_db as _db_init,
+)
 
 SKIP_FILES = {'GARDEN.md', 'CHECKED.md', 'DISCARDED.md', 'INDEX.md', 'README.md'}
 SKIP_DIRS  = {'.git', '_summaries', '_index', 'labels', 'submissions', 'scripts'}
@@ -50,34 +58,21 @@ def canonical_pair(id_a: str, id_b: str) -> str:
 
 
 def load_checked_pairs(garden: Path) -> set:
-    """Return set of canonical pair strings already in CHECKED.md."""
-    checked_md = garden / 'CHECKED.md'
-    if not checked_md.exists():
-        return set()
-    pairs = set()
-    for m in re.finditer(r'\|\s*(GE-[\w-]+)\s*[×x]\s*(GE-[\w-]+)\s*\|',
-                         checked_md.read_text(encoding='utf-8')):
-        pairs.add(canonical_pair(m.group(1), m.group(2)))
-    return pairs
+    """Return set of canonical pair strings already in garden.db."""
+    if not (garden / 'garden.db').exists():
+        _db_init(garden)
+    return _db_load_checked_pairs(garden)
 
 
-def record_pair(garden: Path, pair: str, result: str, note: str = ''):
-    """Append a pair comparison result to CHECKED.md. Idempotent."""
+def record_pair(garden: Path, pair: str, result: str, note: str = '') -> None:
+    """Record pair comparison result to garden.db. Idempotent."""
     valid = {'distinct', 'related', 'duplicate-discarded'}
     if result not in valid:
         print(f"ERROR: result must be one of {valid}", file=sys.stderr)
         sys.exit(1)
-    m = re.search(r'(GE-[\w-]+)\s*[×x]\s*(GE-[\w-]+)', pair)
-    if not m:
-        print(f"ERROR: invalid pair format: {pair!r}", file=sys.stderr)
-        sys.exit(1)
-    canon = canonical_pair(m.group(1), m.group(2))
-    if canon in load_checked_pairs(garden):
-        return  # already recorded — idempotent
-    today = date.today().isoformat()
-    row = f"| {canon} | {result} | {today} | {note} |\n"
-    with open(garden / 'CHECKED.md', 'a', encoding='utf-8') as f:
-        f.write(row)
+    if not (garden / 'garden.db').exists():
+        _db_init(garden)
+    _db_record_pair(garden, pair, result, note)
 
 
 def load_entries(garden: Path, domain_filter: str = None) -> dict:

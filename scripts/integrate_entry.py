@@ -58,6 +58,50 @@ def update_global_index(domain: str, garden: Path):
             f.write(f"| {domain} | {domain}/INDEX.md |\n")
 
 
+def upsert_entry_index(garden: Path, entry_path: Path, domain: str) -> None:
+    """Upsert entry metadata into entries_index. Errors are swallowed — never block integration."""
+    import re as _re
+    _FM_RE = _re.compile(r'^---\n(.*?)\n---', _re.DOTALL)
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent))
+        from garden_db import upsert_entry, init_db
+        db_path = Path(garden) / 'garden.db'
+        if not db_path.exists():
+            init_db(Path(garden))
+        content = Path(entry_path).read_text(encoding='utf-8').replace('\r\n', '\n')
+        m = _FM_RE.match(content)
+        if not m:
+            return
+        fm = m.group(1)
+
+        def _get(key, default=''):
+            mm = _re.search(rf'^{key}:\s*(.+)$', fm, _re.MULTILINE)
+            return mm.group(1).strip().strip('"\'') if mm else default
+
+        tags_raw = _get('tags', '[]')
+        tags = [t.strip().strip('"\'') for t in tags_raw.strip('[]').split(',') if t.strip()]
+        score_s = _get('score', '0')
+        thresh_s = _get('staleness_threshold', '730')
+        ge_id = _get('id') or Path(entry_path).stem
+
+        upsert_entry(Path(garden), {
+            'ge_id': ge_id,
+            'title': _get('title'),
+            'domain': _get('domain', domain),
+            'type': _get('type', 'gotcha'),
+            'score': int(score_s) if score_s.isdigit() else 0,
+            'submitted': _get('submitted'),
+            'staleness_threshold': int(thresh_s) if thresh_s.isdigit() else 730,
+            'tags': tags,
+            'verified_on': _get('verified_on'),
+            'last_reviewed': _get('last_reviewed'),
+            'file_path': f"{domain}/{Path(entry_path).name}",
+        })
+    except Exception:
+        pass  # index failure never blocks integration
+
+
 def increment_drift_counter(garden: Path):
     """Increment 'Entries merged since last sweep' in GARDEN.md by 1."""
     garden_md = garden / 'GARDEN.md'
@@ -104,6 +148,7 @@ def integrate(entry_path: str, garden_root: str = None) -> dict:
     update_labels(fm, ge_id, garden)
     update_global_index(domain, garden)
     increment_drift_counter(garden)
+    upsert_entry_index(garden, path, domain)
     run_validate(garden)
     git_commit(garden, ge_id)
 

@@ -10,7 +10,8 @@ from tempfile import TemporaryDirectory
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from init_garden import (
     create_garden_md, create_schema_md, create_checked_md,
-    create_discarded_md, create_domain, create_ci_workflow, init_garden,
+    create_discarded_md, create_garden_db, create_gitattributes,
+    create_domain, create_ci_workflow, init_garden,
 )
 from validate_schema import parse_schema, validate_schema
 
@@ -274,8 +275,8 @@ class TestInitGarden(unittest.TestCase):
                     role='canonical', ge_prefix='JE-', domains=['java', 'quarkus'])
         self.assertTrue((self.root / 'GARDEN.md').exists())
         self.assertTrue((self.root / 'SCHEMA.md').exists())
-        self.assertTrue((self.root / 'CHECKED.md').exists())
-        self.assertTrue((self.root / 'DISCARDED.md').exists())
+        self.assertTrue((self.root / 'garden.db').exists())
+        self.assertTrue((self.root / '.gitattributes').exists())
         self.assertTrue((self.root / '.github' / 'workflows' / 'validate_pr.yml').exists())
 
     def test_creates_all_domain_directories(self):
@@ -342,6 +343,27 @@ class TestInitGarden(unittest.TestCase):
         readme = self.root / '_augment' / 'README.md'
         self.assertTrue(readme.exists(), "_augment/ should have README.md")
         self.assertIn('augment', readme.read_text().lower())
+
+    def test_garden_db_created_not_checked_md(self):
+        init_garden(self.root, name='jvm-garden', description='JVM garden',
+                    role='canonical', ge_prefix='JE-', domains=['java'])
+        self.assertTrue((self.root / 'garden.db').exists())
+        self.assertFalse((self.root / 'CHECKED.md').exists())
+        self.assertFalse((self.root / 'DISCARDED.md').exists())
+
+    def test_garden_db_has_valid_schema(self):
+        init_garden(self.root, name='jvm-garden', description='JVM garden',
+                    role='canonical', ge_prefix='JE-', domains=['java'])
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import get_schema_version, SCHEMA_VERSION
+        self.assertEqual(get_schema_version(self.root), SCHEMA_VERSION)
+
+    def test_gitattributes_created(self):
+        init_garden(self.root, name='jvm-garden', description='JVM garden',
+                    role='canonical', ge_prefix='JE-', domains=['java'])
+        gitattributes = self.root / '.gitattributes'
+        self.assertTrue(gitattributes.exists())
+        self.assertIn('garden.db diff=sqlite3', gitattributes.read_text())
 
 
 class TestInitGardenCLI(unittest.TestCase):
@@ -419,6 +441,16 @@ class TestInitGardenCLI(unittest.TestCase):
         result = run_init(*args)
         self.assertEqual(result.returncode, 0)
         self.assertIn('nothing created', result.stdout.lower())
+
+    def test_cli_creates_garden_db_not_checked_md(self):
+        result = run_init(
+            str(self.root),
+            '--name', 'test-garden', '--description', 'Test',
+            '--role', 'canonical', '--ge-prefix', 'TE-', '--domains', 'tools',
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / 'garden.db').exists())
+        self.assertFalse((self.root / 'CHECKED.md').exists())
 
 
 if __name__ == '__main__':

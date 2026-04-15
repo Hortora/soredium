@@ -146,48 +146,37 @@ class TestLoadCheckedPairs(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        from garden_db import init_db
+        init_db(self.root)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_empty_file(self):
-        (self.root / 'CHECKED.md').write_text(
-            '| Pair | Result | Date | Notes |\n|------|--------|------|-------|\n'
-        )
+    def test_empty_db(self):
         self.assertEqual(load_checked_pairs(self.root), set())
 
-    def test_missing_file(self):
+    def test_missing_db_returns_empty_set(self):
+        import shutil
+        (self.root / 'garden.db').unlink()
         self.assertEqual(load_checked_pairs(self.root), set())
 
     def test_single_pair(self):
-        (self.root / 'CHECKED.md').write_text(
-            '| GE-0001 × GE-0002 | distinct | 2026-04-14 | |\n'
-        )
+        from garden_db import record_pair as db_record
+        db_record(self.root, 'GE-0001 × GE-0002', 'distinct')
         result = load_checked_pairs(self.root)
         self.assertIn('GE-0001 × GE-0002', result)
 
     def test_both_orderings_recognised(self):
-        (self.root / 'CHECKED.md').write_text(
-            '| GE-0002 × GE-0001 | distinct | 2026-04-14 | |\n'
-        )
+        from garden_db import record_pair as db_record
+        db_record(self.root, 'GE-0002 × GE-0001', 'distinct')
         result = load_checked_pairs(self.root)
         self.assertIn('GE-0001 × GE-0002', result)
 
-    def test_malformed_rows_skipped(self):
-        (self.root / 'CHECKED.md').write_text(
-            'This is not a pair row\n'
-            '| GE-0001 × GE-0002 | distinct | 2026-04-14 | |\n'
-            'Another bad row\n'
-        )
-        result = load_checked_pairs(self.root)
-        self.assertEqual(len(result), 1)
-
     def test_multiple_pairs(self):
-        (self.root / 'CHECKED.md').write_text(
-            '| GE-0001 × GE-0002 | distinct | 2026-04-14 | |\n'
-            '| GE-0003 × GE-0004 | related | 2026-04-14 | cross-referenced |\n'
-            '| GE-0005 × GE-0006 | duplicate-discarded | 2026-04-14 | GE-0005 kept |\n'
-        )
+        from garden_db import record_pair as db_record
+        db_record(self.root, 'GE-0001 × GE-0002', 'distinct')
+        db_record(self.root, 'GE-0003 × GE-0004', 'related')
+        db_record(self.root, 'GE-0005 × GE-0006', 'duplicate-discarded')
         self.assertEqual(len(load_checked_pairs(self.root)), 3)
 
 
@@ -198,39 +187,37 @@ class TestRecordPair(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        (self.root / 'CHECKED.md').write_text(
-            '| Pair | Result | Date | Notes |\n|------|--------|------|-------|\n'
-        )
+        from garden_db import init_db
+        init_db(self.root)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def test_appends_row(self):
+        from garden_db import get_pair_result
         record_pair(self.root, 'GE-0001 × GE-0002', 'distinct', 'no overlap')
-        content = (self.root / 'CHECKED.md').read_text()
-        self.assertIn('GE-0001 × GE-0002', content)
-        self.assertIn('distinct', content)
-        self.assertIn('no overlap', content)
+        self.assertEqual(get_pair_result(self.root, 'GE-0001 × GE-0002'), 'distinct')
 
     def test_canonical_ordering_enforced(self):
+        from garden_db import is_pair_checked
         record_pair(self.root, 'GE-0002 × GE-0001', 'distinct', '')
-        content = (self.root / 'CHECKED.md').read_text()
-        self.assertIn('GE-0001 × GE-0002', content)
-        self.assertNotIn('GE-0002 × GE-0001', content)
+        self.assertTrue(is_pair_checked(self.root, 'GE-0001 × GE-0002'))
+        self.assertFalse(is_pair_checked(self.root, 'GE-0002 × GE-0001 reversed'))
 
     def test_idempotent(self):
+        from garden_db import load_checked_pairs as db_load
         record_pair(self.root, 'GE-0001 × GE-0002', 'distinct', '')
         record_pair(self.root, 'GE-0001 × GE-0002', 'distinct', '')
-        content = (self.root / 'CHECKED.md').read_text()
-        self.assertEqual(content.count('GE-0001 × GE-0002'), 1)
+        pairs = db_load(self.root)
+        self.assertEqual(len(pairs), 1)
 
     def test_all_valid_results_accepted(self):
+        from garden_db import get_pair_result
         for i, res in enumerate(['distinct', 'related', 'duplicate-discarded']):
             record_pair(self.root, f'GE-000{i+1} × GE-999{i+1}', res, '')
-        content = (self.root / 'CHECKED.md').read_text()
-        self.assertIn('distinct', content)
-        self.assertIn('related', content)
-        self.assertIn('duplicate-discarded', content)
+        self.assertEqual(get_pair_result(self.root, 'GE-0001 × GE-9991'), 'distinct')
+        self.assertEqual(get_pair_result(self.root, 'GE-0002 × GE-9992'), 'related')
+        self.assertEqual(get_pair_result(self.root, 'GE-0003 × GE-9993'), 'duplicate-discarded')
 
     def test_invalid_result_exits_1(self):
         with self.assertRaises(SystemExit) as ctx:
@@ -411,9 +398,9 @@ class TestDedupesScannerCLI(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        (self.root / 'CHECKED.md').write_text(
-            '| Pair | Result | Date | Notes |\n|------|--------|------|-------|\n'
-        )
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db
+        init_db(self.root)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -472,14 +459,12 @@ class TestDedupesScannerCLI(unittest.TestCase):
         data = json.loads(result.stdout)
         self.assertEqual(data, [])
 
-    def test_record_flag_writes_to_checked_md(self):
+    def test_record_flag_writes_to_garden_db(self):
         result = run_scanner(str(self.root), '--record',
                              'GE-0001 × GE-0002', 'distinct', 'no overlap')
         self.assertEqual(result.returncode, 0, result.stderr)
-        content = (self.root / 'CHECKED.md').read_text()
-        self.assertIn('GE-0001 × GE-0002', content)
-        self.assertIn('distinct', content)
-        self.assertIn('no overlap', content)
+        from garden_db import get_pair_result
+        self.assertEqual(get_pair_result(self.root, 'GE-0001 × GE-0002'), 'distinct')
 
     def test_record_then_rescan_excludes_pair(self):
         make_entry(self.root / 'python' / 'GE-0001.md', 'GE-0001',
@@ -494,6 +479,43 @@ class TestDedupesScannerCLI(unittest.TestCase):
         # Second scan — pair absent
         result2 = run_scanner(str(self.root))
         self.assertIn('No unchecked pairs', result2.stdout)
+
+
+class TestDedupeUsesGardenDb(unittest.TestCase):
+    """Verify dedupe_scanner delegates to garden_db instead of CHECKED.md."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db
+        init_db(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_record_pair_writes_to_garden_db_not_checked_md(self):
+        from dedupe_scanner import record_pair as ds_record
+        ds_record(self.root, 'GE-0001 × GE-0002', 'distinct', '')
+        from garden_db import get_pair_result
+        self.assertEqual(get_pair_result(self.root, 'GE-0001 × GE-0002'), 'distinct')
+        self.assertFalse((self.root / 'CHECKED.md').exists())
+
+    def test_load_checked_pairs_reads_from_garden_db(self):
+        from garden_db import record_pair as db_record
+        db_record(self.root, 'GE-0001 × GE-0002', 'distinct')
+        from dedupe_scanner import load_checked_pairs as ds_load
+        pairs = ds_load(self.root)
+        self.assertIn('GE-0001 × GE-0002', pairs)
+
+    def test_load_checked_pairs_returns_set_from_db(self):
+        from garden_db import record_pair as db_record
+        db_record(self.root, 'GE-0001 × GE-0002', 'distinct')
+        db_record(self.root, 'GE-0003 × GE-0004', 'related')
+        from dedupe_scanner import load_checked_pairs as ds_load
+        pairs = ds_load(self.root)
+        self.assertIsInstance(pairs, set)
+        self.assertEqual(len(pairs), 2)
 
 
 if __name__ == '__main__':

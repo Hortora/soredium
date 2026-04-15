@@ -157,6 +157,45 @@ if '--dedupe-check' in sys.argv:
         print(f"Dedupe check: drift={_drift}, threshold={_threshold} — OK")
         sys.exit(0)
 
+if '--check-db' in sys.argv:
+    import sqlite3 as _sqlite3
+
+    _idx = sys.argv.index('--check-db')
+    if _idx + 1 < len(sys.argv) and not sys.argv[_idx + 1].startswith('--'):
+        _garden = Path(sys.argv[_idx + 1]).expanduser().resolve()
+    else:
+        import os as _os2
+        _garden = Path(_os2.environ.get('HORTORA_GARDEN',
+                       str(Path.home() / '.hortora' / 'garden'))).resolve()
+
+    _db_path = _garden / 'garden.db'
+    if not _db_path.exists():
+        print(f"ERROR: garden.db not found in {_garden}")
+        sys.exit(1)
+
+    try:
+        _conn = _sqlite3.connect(str(_db_path))
+        try:
+            _version = _conn.execute(
+                "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+            ).fetchone()
+            if not _version:
+                print("ERROR: schema_version table empty — garden.db may be uninitialised")
+                sys.exit(1)
+            _checked = _conn.execute("SELECT COUNT(*) FROM checked_pairs").fetchone()[0]
+            _discarded = _conn.execute("SELECT COUNT(*) FROM discarded_entries").fetchone()[0]
+            _indexed = _conn.execute("SELECT COUNT(*) FROM entries_index").fetchone()[0]
+        finally:
+            _conn.close()
+        print(f"garden.db OK — schema version {_version[0]}")
+        print(f"  checked pairs:     {_checked}")
+        print(f"  discarded entries: {_discarded}")
+        print(f"  entries indexed:   {_indexed}")
+        sys.exit(0)
+    except _sqlite3.DatabaseError as _e:
+        print(f"ERROR: garden.db is corrupt or unreadable: {_e}")
+        sys.exit(1)
+
 import os
 # Garden root: first non-flag positional argument, $HORTORA_GARDEN env var, or default
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]

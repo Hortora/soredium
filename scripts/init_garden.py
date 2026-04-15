@@ -16,6 +16,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
+# garden_db is a sibling script — ensure scripts/ is on path for direct invocation
+sys.path.insert(0, str(Path(__file__).parent))
+from garden_db import init_db as _db_init
+
 TODAY = date.today().isoformat()
 
 
@@ -79,6 +83,24 @@ def create_discarded_md(root: Path) -> None:
         '# Discarded Submissions\n\n'
         '| Discarded | Conflicts With | Date | Reason |\n'
         '|-----------|----------------|------|--------|\n',
+        encoding='utf-8',
+    )
+
+
+def create_garden_db(root: Path) -> None:
+    """Initialise garden.db with SQLite schema. Replaces CHECKED.md + DISCARDED.md."""
+    if not (root / 'garden.db').exists():
+        _db_init(root)
+
+
+def create_gitattributes(root: Path) -> None:
+    """Create .gitattributes with SQLite textconv diff driver config."""
+    path = root / '.gitattributes'
+    if path.exists():
+        return
+    path.write_text(
+        '# SQLite diff driver — shows human-readable SQL dump in git diff\n'
+        'garden.db diff=sqlite3\n',
         encoding='utf-8',
     )
 
@@ -166,12 +188,12 @@ def init_garden(root: Path, name: str, description: str, role: str,
     created = []
 
     for fn, args, kwargs in [
-        (create_garden_md,    [root, name, ge_prefix], {}),
-        (create_schema_md,    [root, name, description, role, ge_prefix, domains],
-                              {'upstream': upstream}),
-        (create_checked_md,   [root], {}),
-        (create_discarded_md, [root], {}),
-        (create_ci_workflow,  [root], {}),
+        (create_garden_md,     [root, name, ge_prefix], {}),
+        (create_schema_md,     [root, name, description, role, ge_prefix, domains],
+                               {'upstream': upstream}),
+        (create_garden_db,     [root], {}),
+        (create_gitattributes, [root], {}),
+        (create_ci_workflow,   [root], {}),
     ]:
         before = set(root.rglob('*'))
         fn(*args, **kwargs)
