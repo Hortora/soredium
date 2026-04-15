@@ -155,6 +155,23 @@ class TestForageRequiredSections(unittest.TestCase):
         self.assertIn("harvest", self.content.lower(),
                       "forage/SKILL.md should mention harvest for MERGE/DEDUPE")
 
+    def test_search_documents_upstream_chain_walk(self):
+        self.assertIn("upstream chain", self.content.lower(),
+                      "SEARCH should document upstream chain walk for child gardens")
+
+    def test_search_documents_peer_search(self):
+        self.assertIn("peer", self.content.lower(),
+                      "SEARCH should document peer garden search")
+
+    def test_search_documents_garden_label(self):
+        # Entries from non-local gardens should be labelled with their source
+        self.assertIn("[upstream:", self.content,
+                      "SEARCH should show [upstream: <name>] label on results from parent gardens")
+
+    def test_search_references_route_submission(self):
+        self.assertIn("route_submission.py", self.content,
+                      "SEARCH should reference route_submission.py for domain routing")
+
 
 class TestHarvestRequiredSections(unittest.TestCase):
 

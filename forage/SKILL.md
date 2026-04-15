@@ -497,7 +497,7 @@ Commit message: `revise(GE-XXXX): <revision-kind> — <brief description>`
 git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
 ```
 
-**Search workflow:**
+**Single-garden search workflow** (no `garden-config.toml`, or single garden configured):
 
 1. Read the committed index:
    ```
@@ -538,6 +538,51 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
    **If `age_days <= staleness_threshold * 0.75`:** no annotation. Do not annotate fresh entries.
 
 6. If the user just fixed something related, offer to submit via CAPTURE.
+
+---
+
+**Multi-garden search workflow** (`~/.claude/garden-config.toml` present with multiple gardens):
+
+Check `~/.claude/garden-config.toml` at session start. If present, determine the garden topology before searching.
+
+**For child gardens** (local garden has `role: child` in SCHEMA.md):
+
+Search in priority order — stop at first match:
+
+1. **Local garden first** — search the local child garden using Steps 1–4 above. If found, return immediately with staleness annotation and label:
+   > `[local]` — from `<garden-name>`
+
+2. **Walk upstream chain** — if not found locally, search each upstream garden in order (as declared in SCHEMA.md `upstream:` list, resolved to local paths via `garden-config.toml`):
+   ```bash
+   git -C <upstream-garden-path> pull --filter=blob:none
+   git -C <upstream-garden-path> cat-file blob HEAD:<domain>/GE-XXXX.md
+   ```
+   Label the result so the user knows which garden it came from:
+   > `[upstream: <garden-name>]` — from `<upstream-garden-name>`
+
+3. **Full upstream grep** — if still not found after checking all indexed entries, run `git grep` across the upstream garden:
+   ```bash
+   git -C <upstream-garden-path> grep "keywords" HEAD -- '*.md' \
+     ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+   ```
+
+Apply the same staleness annotation (Step 5) regardless of which garden the entry came from.
+
+**For peer gardens** (local garden has `role: peer` in SCHEMA.md, or `peers:` list in config):
+
+Search all peers in parallel (or sequentially) and synthesise results:
+
+1. Search each configured peer garden using the single-garden Steps 1–3.
+2. Collect all matches across peers — do not deduplicate (peer overlaps are expected and valid).
+3. Present results grouped by garden, each labelled:
+   > `[peer: <garden-name>]`
+4. If two peers have entries on the same topic, present both — the user decides which applies to their context.
+
+**Submitting to the correct garden** — use `route_submission.py` to find the right garden for a new capture:
+```bash
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/route_submission.py <domain>
+```
+This reads SCHEMA.md from each configured garden and returns the path of the one that owns the domain.
 
 ---
 
