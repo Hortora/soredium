@@ -731,5 +731,61 @@ def test_structural_flag_fails_missing_garden_md(tmp_path):
     assert result.returncode != 0
 
 
+def run_check_db(garden_root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(VALIDATOR), '--check-db', str(garden_root)],
+        capture_output=True, text=True
+    )
+
+
+class TestCheckDb(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_valid_garden_db_exits_0(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db
+        init_db(self.root)
+        result = run_check_db(self.root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_missing_garden_db_exits_1(self):
+        result = run_check_db(self.root)
+        self.assertEqual(result.returncode, 1)
+
+    def test_missing_garden_db_error_mentions_garden_db(self):
+        result = run_check_db(self.root)
+        output = result.stdout + result.stderr
+        self.assertIn('garden.db', output)
+
+    def test_output_shows_schema_version(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db
+        init_db(self.root)
+        result = run_check_db(self.root)
+        self.assertIn('schema', result.stdout.lower())
+
+    def test_output_shows_table_counts(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db, record_pair
+        init_db(self.root)
+        record_pair(self.root, 'GE-0001 × GE-0002', 'distinct')
+        result = run_check_db(self.root)
+        self.assertIn('1', result.stdout)
+
+    def test_exits_0_with_empty_tables(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db
+        init_db(self.root)
+        result = run_check_db(self.root)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('0', result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
