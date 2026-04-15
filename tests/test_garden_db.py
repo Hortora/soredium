@@ -17,6 +17,13 @@ from garden_db import (
 )
 
 
+class TestGetConnection(unittest.TestCase):
+
+    def test_get_connection_missing_garden_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            get_connection(Path('/nonexistent/path/garden'))
+
+
 class TestInitDb(unittest.TestCase):
 
     def setUp(self):
@@ -229,6 +236,19 @@ class TestEntriesIndex(unittest.TestCase):
         upsert_entry(self.garden, {**self.entry, 'title': 'Updated title'})
         rows = get_entries_by_domain(self.garden, 'java')
         self.assertEqual(rows[0]['title'], 'Updated title')
+
+    def test_upsert_missing_ge_id_raises(self):
+        with self.assertRaises(ValueError):
+            upsert_entry(self.garden, {'title': 'No ID', 'domain': 'java'})
+
+    def test_upsert_empty_ge_id_raises(self):
+        with self.assertRaises(ValueError):
+            upsert_entry(self.garden, {**self.entry, 'ge_id': ''})
+
+    def test_upsert_non_list_tags_raises(self):
+        bad = {**self.entry, 'tags': 'not-a-list'}
+        with self.assertRaises(ValueError):
+            upsert_entry(self.garden, bad)
 
 
 if __name__ == '__main__':
