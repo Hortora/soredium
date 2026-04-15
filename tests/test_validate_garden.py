@@ -242,16 +242,10 @@ class GardenFixture:
         self.root = root
         self.submissions = root / "submissions"
         self.submissions.mkdir(exist_ok=True)
-        (root / "CHECKED.md").write_text(
-            "# Garden Duplicate Check Log\n\n"
-            "| Pair | Result | Date | Notes |\n"
-            "|------|--------|------|-------|\n"
-        )
-        (root / "DISCARDED.md").write_text(
-            "# Discarded Submissions\n\n"
-            "| Discarded | Conflicts With | Date | Reason |\n"
-            "|-----------|---------------|------|--------|\n"
-        )
+        import sys as _sys_gf
+        _sys_gf.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+        from garden_db import init_db as _init_db
+        _init_db(root)
 
     def garden_md(self, last_id: str = "GE-0001", entries_since_sweep: int = 0):
         (self.root / "GARDEN.md").write_text(textwrap.dedent(f"""\
@@ -339,15 +333,29 @@ class GardenFixture:
         return self
 
     def checked_pair(self, id_a: str, id_b: str, result: str = "distinct"):
-        current = (self.root / "CHECKED.md").read_text()
+        checked_md = self.root / "CHECKED.md"
+        if not checked_md.exists():
+            checked_md.write_text(
+                "# Garden Duplicate Check Log\n\n"
+                "| Pair | Result | Date | Notes |\n"
+                "|------|--------|------|-------|\n"
+            )
+        current = checked_md.read_text()
         current += f"| {id_a} × {id_b} | {result} | 2026-04-09 | |\n"
-        (self.root / "CHECKED.md").write_text(current)
+        checked_md.write_text(current)
         return self
 
     def discarded(self, discarded_id: str, conflicts_with: str):
-        current = (self.root / "DISCARDED.md").read_text()
+        discarded_md = self.root / "DISCARDED.md"
+        if not discarded_md.exists():
+            discarded_md.write_text(
+                "# Discarded Submissions\n\n"
+                "| Discarded | Conflicts With | Date | Reason |\n"
+                "|-----------|---------------|------|--------|\n"
+            )
+        current = discarded_md.read_text()
         current += f"| {discarded_id} | {conflicts_with} | 2026-04-09 | duplicate |\n"
-        (self.root / "DISCARDED.md").write_text(current)
+        discarded_md.write_text(current)
         return self
 
     def schema_md(self, role='canonical', ge_prefix='GE-',
