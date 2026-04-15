@@ -175,17 +175,18 @@ if '--check-db' in sys.argv:
 
     try:
         _conn = _sqlite3.connect(str(_db_path))
-        _version = _conn.execute(
-            "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
-        ).fetchone()
-        if not _version:
-            print("ERROR: schema_version table empty — garden.db may be uninitialised")
+        try:
+            _version = _conn.execute(
+                "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+            ).fetchone()
+            if not _version:
+                print("ERROR: schema_version table empty — garden.db may be uninitialised")
+                sys.exit(1)
+            _checked = _conn.execute("SELECT COUNT(*) FROM checked_pairs").fetchone()[0]
+            _discarded = _conn.execute("SELECT COUNT(*) FROM discarded_entries").fetchone()[0]
+            _indexed = _conn.execute("SELECT COUNT(*) FROM entries_index").fetchone()[0]
+        finally:
             _conn.close()
-            sys.exit(1)
-        _checked = _conn.execute("SELECT COUNT(*) FROM checked_pairs").fetchone()[0]
-        _discarded = _conn.execute("SELECT COUNT(*) FROM discarded_entries").fetchone()[0]
-        _indexed = _conn.execute("SELECT COUNT(*) FROM entries_index").fetchone()[0]
-        _conn.close()
         print(f"garden.db OK — schema version {_version[0]}")
         print(f"  checked pairs:     {_checked}")
         print(f"  discarded entries: {_discarded}")

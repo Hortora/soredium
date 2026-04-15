@@ -786,6 +786,14 @@ class TestCheckDb(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn('0', result.stdout)
 
+    def test_corrupt_garden_db_exits_1(self):
+        # Write non-SQLite bytes — simulate a corrupt file
+        (self.root / 'garden.db').write_bytes(b'not a sqlite database\x00\xff')
+        result = run_check_db(self.root)
+        self.assertEqual(result.returncode, 1)
+        output = result.stdout + result.stderr
+        self.assertIn('ERROR', output)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
