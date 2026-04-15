@@ -35,8 +35,8 @@ GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
 git -C $GARDEN show HEAD:GARDEN.md
 git -C $GARDEN show HEAD:tools/GE-0002.md
 
-# Search committed content
-git -C $GARDEN grep "keywords" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+# Search committed content (skip metadata files)
+git -C $GARDEN grep "keywords" HEAD -- '*.md' ':!GARDEN.md' ':!DISCARDED.md'
 
 # Surgical section read from committed file
 git -C $GARDEN show HEAD:tools/GE-0002.md | head -20
@@ -58,8 +58,8 @@ git -C $GARDEN rebase HEAD
 ```
 ${HORTORA_GARDEN:-~/.hortora/garden}/
 ├── GARDEN.md                   ← index and metadata (drift counter)
-├── CHECKED.md                  ← duplicate check pair log
-├── DISCARDED.md                ← discarded duplicates
+├── garden.db                   ← SQLite database: duplicate check pairs + metadata
+├── DISCARDED.md                ← discarded duplicates (legacy, being phased out)
 ├── tools/
 │   └── GE-YYYYMMDD-xxxxxx.md  ← one file per entry, YAML frontmatter
 ├── quarkus/
@@ -77,9 +77,9 @@ ${HORTORA_GARDEN:-~/.hortora/garden}/
 **Drift threshold:** 10
 ```
 
-**`CHECKED.md`** tracks which entry pairs have been semantically compared for duplicate detection. Only within-category pairs are checked.
+**`garden.db`** is a SQLite database that tracks which entry pairs have been semantically compared for duplicate detection. Only within-category pairs are checked. Create it by running `python3 scripts/garden_db_migrate.py <garden>` when migrating from older gardens using CHECKED.md.
 
-**`DISCARDED.md`** records entries discarded as duplicates:
+**`DISCARDED.md`** records entries discarded as duplicates (legacy artifact, being phased out):
 ```
 | GE-XXXX | GE-YYYY | date | [brief reason] |
 ```
@@ -102,6 +102,8 @@ Use when: drift threshold exceeded, or user explicitly says "dedupe the garden",
 
 DEDUPE checks *existing entries against each other* — it does not process submissions (there are none).
 
+**Prerequisite:** `garden.db` must exist — run `python3 scripts/garden_db_migrate.py <garden>` once if migrating from an older garden that uses `CHECKED.md`.
+
 **Step 1 — Run scanner to get pre-scored pair list**
 
 ```bash
@@ -109,7 +111,7 @@ python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py \
   ${HORTORA_GARDEN:-~/.hortora/garden} --top 50
 ```
 
-The scanner reads domain directories directly for YAML-frontmatter entries, cross-references CHECKED.md to exclude already-checked pairs, computes Jaccard similarity for all unchecked within-domain pairs, and returns them sorted highest-score-first.
+The scanner reads domain directories directly for YAML-frontmatter entries, queries `garden.db` to exclude already-checked pairs, computes Jaccard similarity for all unchecked within-domain pairs, and returns them sorted highest-score-first.
 
 Review pairs from highest score down — highest-scoring pairs are most likely related or duplicate. Use `--domain <name>` to focus on one domain at a time. Use `--json` for machine-readable output.
 
@@ -118,7 +120,7 @@ Review pairs from highest score down — highest-scoring pairs are most likely r
 For each technology category:
 - List all entries in that category
 - Generate all within-category pairs
-- Exclude pairs already in CHECKED.md
+- Exclude pairs already recorded in `garden.db`
 - These are the unchecked pairs to process
 
 Cross-category pairs are never checked — they cannot be duplicates.
@@ -154,7 +156,7 @@ python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py \
 
 Results must be one of: `distinct`, `related`, `duplicate-discarded`.
 
-The scanner enforces canonical ID ordering and is idempotent — recording the same pair twice produces one row only. Do NOT append to CHECKED.md manually.
+The scanner enforces canonical ID ordering and is idempotent — recording the same pair twice produces one row only. Do NOT modify `garden.db` directly — always use `dedupe_scanner --record`.
 
 **Step 6 — Reset drift counter**
 
@@ -263,7 +265,7 @@ Tell the user:
 | Running REVIEW during normal session work | Needs full context budget for full garden sweep | Always run harvest as a dedicated session |
 | Adding a second solution without pros/cons | Reader can't choose between approaches | Always use Solution 1 / Solution 2 format when 2+ exist |
 | Skipping the commit | Makes git history useless as an archive | Commit is mandatory |
-| Not updating CHECKED.md | Loses track of which pairs have been compared | Every comparison made must be logged |
+| Not recording comparison results in garden.db | Loses track of which pairs have been compared | Use `dedupe_scanner --record` to log every comparison |
 | Running DEDUPE across categories | Cross-category entries can't be duplicates | Only compare within-category pairs |
 
 ---
@@ -271,10 +273,11 @@ Tell the user:
 ## Success Criteria
 
 DEDUPE is complete when:
-- ✅ Index and CHECKED.md read via `git show HEAD:` (not filesystem)
+- ✅ Index read via `git show HEAD:GARDEN.md` (not filesystem)
+- ✅ `garden.db` exists (run migration script if needed)
 - ✅ All within-category unchecked pairs processed
 - ✅ Garden entries read via `git show HEAD:<path>` (not filesystem)
-- ✅ CHECKED.md updated with all results
+- ✅ Comparison results recorded in `garden.db` via `dedupe_scanner --record`
 - ✅ Related entries have cross-references
 - ✅ Duplicate entries resolved (user confirmed which to keep)
 - ✅ GARDEN.md drift counter reset
@@ -301,7 +304,7 @@ REVIEW is complete when:
 
 **Reads from (git HEAD only):**
 - `git show HEAD:GARDEN.md` — index and metadata
-- `git show HEAD:CHECKED.md` — pair log for DEDUPE
+- `garden.db` (local SQLite) — pair comparison log for DEDUPE
 - `git show HEAD:<domain>/<entry>.md` — garden entry files (surgical reads)
 
 **Garden location:** `${HORTORA_GARDEN:-~/.hortora/garden}/`
