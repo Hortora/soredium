@@ -4,7 +4,7 @@ dedupe_scanner.py — Jaccard similarity pre-scorer for harvest DEDUPE.
 
 Scans garden domain directories for YAML-frontmatter entries, computes
 Jaccard similarity for all unchecked within-domain pairs, and returns
-pairs sorted highest-first. Owns CHECKED.md state via --record.
+pairs sorted highest-first. Owns pair-check state via garden.db (--record).
 
 Usage:
   dedupe_scanner.py [garden_root]
