@@ -339,9 +339,60 @@ For each candidate, compute the Garden Score then present:
 
 **Score threshold during SWEEP:** Only propose candidates scoring ≥8.
 
-**Step 4 — Submit confirmed entries**
+**Step 4 — Submit confirmed entries (batched delivery)**
 
-For each finding confirmed by the user: run the CAPTURE workflow with the specific content already known from context. Do NOT ask the user to re-describe things you already know.
+For each confirmed entry, run CAPTURE steps 0–6 (GE-ID generation through writing the file). Work from session context — do NOT ask the user to re-describe things you already know. Track the list of written entry paths as you go.
+
+After all entry files are written, validate and deliver as a single batch:
+
+**Validate**
+
+If 3 or more entries were written, run validation in parallel (faster for typical 6–8 entry sweeps):
+```bash
+GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
+for ENTRY_PATH in <list of written entry paths>; do
+  python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
+    "$ENTRY_PATH" "$GARDEN" &
+done
+wait
+```
+
+If fewer than 3, validate sequentially (same command without `&`).
+
+Fix any CRITICAL issues before continuing.
+
+**Deliver**
+
+Detect the garden's remote:
+```bash
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} remote get-url origin 2>/dev/null
+```
+
+**GitHub remote** — single branch + single PR for all entries:
+```bash
+GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
+BRANCH="sweep/$(date +%Y%m%d)-batch"
+git -C $GARDEN checkout -b $BRANCH
+git -C $GARDEN add <all written entry files>
+git -C $GARDEN commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
+git -C $GARDEN push origin $BRANCH
+gh pr create --repo Hortora/garden \
+  --title "sweep: <N> entries" \
+  --label "garden-submission" \
+  --head $BRANCH \
+  --body "Batch sweep submission:
+- submit(<GE-ID-1>): <slug1>
+- submit(<GE-ID-2>): <slug2>
+..."
+git -C $GARDEN checkout main
+```
+
+**No GitHub remote** — single commit to main:
+```bash
+GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
+git -C $GARDEN add <all written entry files>
+git -C $GARDEN commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
+```
 
 **Step 5 — Staleness spot-check (domain-filtered)**
 
@@ -638,7 +689,7 @@ CAPTURE is complete when:
 SWEEP is complete when:
 - ✅ All three categories checked from session memory
 - ✅ Each finding proposed explicitly with type and description
-- ✅ Confirmed entries submitted via CAPTURE
+- ✅ Confirmed entries written via CAPTURE steps 0–6; validated (parallel if ≥3 entries) and delivered as a single batch commit + PR
 - ✅ Staleness spot-check run for session domains (if identifiable)
 - ✅ Overdue entries in session domains presented and resolved/skipped
 - ✅ Report given: N found, M submitted per category; overdue entries resolved
