@@ -190,6 +190,19 @@ Work from what's already known. Ask only for what's genuinely unclear.
 | alternatives_considered | What else was tried/evaluated and why rejected. Extract from session context — the "What was tried (didn't work)" section often contains this. |
 | invalidation_triggers | What changes would make this entry wrong — library updates, deprecations, architectural shifts. Extract if mentioned; otherwise prompt in Step 5. |
 
+**For patterns-garden entries**, also extract these optional fields from context:
+
+| Field | Extract from |
+|-------|-------------|
+| `observed_in` | Projects where this pattern was observed in the session — name, URL, path if mentioned |
+| `suitability` | Any discussion of when the pattern works and when it doesn't |
+| `variants` | Named adaptations discussed (e.g. in-memory vs event-sourced) |
+| `variant_frequency` | Any frequency or adoption counts mentioned |
+| `authors` | Developer names or GitHub handles attributed to the pattern |
+| `stability` | Any discussion of how widely or consistently the pattern is used across projects |
+
+These fields are optional — include only what's known from context. Do not ask the user to supply them if they weren't discussed.
+
 **Step 4 — Determine the garden and domain**
 
 First, select the garden based on knowledge type:
@@ -718,6 +731,7 @@ CAPTURE is complete when:
 - ✅ `garden` field declared in YAML frontmatter
 - ✅ `type` value is valid for the declared garden
 - ✅ Garden-specific required fields present (evolution: `changed_in`; risk: `severity`)
+- ✅ For patterns-garden entries: optional extended fields (`observed_in`, `suitability`, `variants`, `variant_frequency`, `authors`, `stability`) included where known from context; no extended-field warnings from `validate_pr.py`
 
 SWEEP is complete when:
 - ✅ All three categories checked from session memory
