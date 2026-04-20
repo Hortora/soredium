@@ -50,6 +50,41 @@ BONUS_RULES = {
     'invalidation_triggers':   1,  # +1 if invalidation_triggers field present (string or list, non-empty)
 }
 
+GARDEN_DEFAULT = 'discovery'
+
+GARDEN_TYPES = {
+    'discovery': {
+        'valid_types': ['gotcha', 'technique', 'undocumented'],
+        'required_extra': [],
+        'staleness_default': 730,
+    },
+    'patterns': {
+        'valid_types': ['architectural', 'migration', 'integration', 'testing'],
+        'required_extra': [],
+        'staleness_default': 3650,
+    },
+    'examples': {
+        'valid_types': ['code'],
+        'required_extra': [],
+        'staleness_default': 1095,
+    },
+    'evolution': {
+        'valid_types': ['breaking', 'deprecation', 'capability'],
+        'required_extra': ['changed_in'],
+        'staleness_default': 1095,
+    },
+    'risk': {
+        'valid_types': ['failure-mode', 'antipattern', 'incident'],
+        'required_extra': ['severity'],
+        'staleness_default': 1825,
+    },
+    'decisions': {
+        'valid_types': ['architecture', 'technology', 'process'],
+        'required_extra': [],
+        'staleness_default': 3650,
+    },
+}
+
 
 def compute_bonus(fm: dict, body: str) -> dict:
     """Return {field_name: bool} for each bonus rule. True = bonus earned."""
