@@ -319,6 +319,71 @@ def test_each_invalid_type_rejected_per_garden():
             os.unlink(path)
 
 
+from validate_pr import validate_patterns_extended
+
+
+def test_patterns_extended_valid_observed_in_no_warnings():
+    fm = {
+        'observed_in': [
+            {'project': 'serverless-workflow', 'url': 'https://github.com/x', 'first_seen': '2022-03-14'}
+        ]
+    }
+    warnings = validate_patterns_extended(fm)
+    assert warnings == []
+
+
+def test_patterns_extended_observed_in_not_list():
+    fm = {'observed_in': 'serverless-workflow'}
+    warnings = validate_patterns_extended(fm)
+    assert any('observed_in' in w and 'list' in w.lower() for w in warnings)
+
+
+def test_patterns_extended_observed_in_item_missing_project():
+    fm = {'observed_in': [{'url': 'https://github.com/x'}]}
+    warnings = validate_patterns_extended(fm)
+    assert any('observed_in' in w and 'project' in w for w in warnings)
+
+
+def test_patterns_extended_valid_authors_no_warnings():
+    fm = {
+        'authors': [
+            {'github_handle': 'fabian-martinez', 'role': 'originator'},
+            {'github_handle': 'sanne-grinovero', 'role': 'innovator'},
+        ]
+    }
+    warnings = validate_patterns_extended(fm)
+    assert warnings == []
+
+
+def test_patterns_extended_authors_not_list():
+    fm = {'authors': {'github_handle': 'fabian-martinez', 'role': 'originator'}}
+    warnings = validate_patterns_extended(fm)
+    assert any('authors' in w and 'list' in w.lower() for w in warnings)
+
+
+def test_patterns_extended_authors_item_missing_github_handle():
+    fm = {'authors': [{'role': 'originator'}]}
+    warnings = validate_patterns_extended(fm)
+    assert any('authors' in w and 'github_handle' in w for w in warnings)
+
+
+def test_patterns_extended_authors_invalid_role():
+    fm = {'authors': [{'github_handle': 'fabian-martinez', 'role': 'creator'}]}
+    warnings = validate_patterns_extended(fm)
+    assert any('authors' in w and 'role' in w for w in warnings)
+
+
+def test_patterns_extended_authors_item_missing_role():
+    fm = {'authors': [{'github_handle': 'fabian-martinez'}]}
+    warnings = validate_patterns_extended(fm)
+    assert any('authors' in w and 'role' in w for w in warnings)
+
+
+def test_patterns_extended_empty_fm_no_warnings():
+    warnings = validate_patterns_extended({})
+    assert warnings == []
+
+
 import subprocess
 import json
 

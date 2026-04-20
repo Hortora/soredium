@@ -138,6 +138,53 @@ def check_injection(content: str) -> list:
     ]
 
 
+VALID_AUTHOR_ROLES = {'originator', 'adopter', 'innovator'}
+VALID_STABILITY = {'low', 'medium', 'high'}
+
+
+def validate_patterns_extended(fm: dict) -> list:
+    """Return warning strings for malformed optional patterns-garden fields."""
+    warnings = []
+
+    # observed_in: must be a list; each item must have 'project'
+    observed_in = fm.get('observed_in')
+    if observed_in is not None:
+        if not isinstance(observed_in, list):
+            warnings.append("observed_in must be a list of project dicts")
+        else:
+            for i, item in enumerate(observed_in):
+                if not isinstance(item, dict) or 'project' not in item:
+                    warnings.append(
+                        f"observed_in[{i}] missing required 'project' key"
+                    )
+
+    # authors: must be a list; each item must have github_handle and valid role
+    authors = fm.get('authors')
+    if authors is not None:
+        if not isinstance(authors, list):
+            warnings.append("authors must be a list of dicts")
+        else:
+            for i, item in enumerate(authors):
+                if not isinstance(item, dict):
+                    warnings.append(f"authors[{i}] must be a dict")
+                    continue
+                if 'github_handle' not in item:
+                    warnings.append(f"authors[{i}] missing required 'github_handle'")
+                role = item.get('role')
+                if role is None:
+                    warnings.append(
+                        f"authors[{i}] missing required 'role' "
+                        f"(valid: {sorted(VALID_AUTHOR_ROLES)})"
+                    )
+                elif role not in VALID_AUTHOR_ROLES:
+                    warnings.append(
+                        f"authors[{i}] invalid role '{role}' "
+                        f"(valid: {sorted(VALID_AUTHOR_ROLES)})"
+                    )
+
+    return warnings
+
+
 def tokenise(text: str) -> set:
     return set(re.findall(r'\b[a-z]{3,}\b', text.lower()))
 
