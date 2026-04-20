@@ -190,18 +190,46 @@ Work from what's already known. Ask only for what's genuinely unclear.
 | alternatives_considered | What else was tried/evaluated and why rejected. Extract from session context — the "What was tried (didn't work)" section often contains this. |
 | invalidation_triggers | What changes would make this entry wrong — library updates, deprecations, architectural shifts. Extract if mentioned; otherwise prompt in Step 5. |
 
-**Step 4 — Determine the domain**
+**Step 4 — Determine the garden and domain**
 
-Based on the technology stack, determine the domain directory:
+First, select the garden based on knowledge type:
+
+| Knowledge type | Garden |
+|---------------|--------|
+| Non-obvious behaviour, silent failure, undocumented feature | `discovery` |
+| Reusable architectural or structural solution | `patterns` |
+| Minimal working code example, copy-paste ready | `examples` |
+| Breaking change, deprecation, or new capability in a version | `evolution` |
+| Production failure mode, anti-pattern, or incident pattern | `risk` |
+| Architectural or technology choice with alternatives considered | `decisions` |
+
+**Editorial bar per garden:**
+
+| Garden | Bar |
+|--------|-----|
+| `discovery` | Would a skilled developer familiar with the technology still have spent significant time on this? |
+| `patterns` | Would a practitioner reach for something more complex or less elegant without this pattern? |
+| `examples` | Is this minimal, working, and demonstrating a real use case — not a toy? |
+| `evolution` | Does this describe a breaking change, deprecation, or capability shift that would change code correctness for someone on that version? |
+| `risk` | Has this failure mode caused production harm at meaningful scale, and is the mechanism universal enough to recur? |
+| `decisions` | Does this capture the reasoning clearly enough that someone facing the same choice could apply it — including what was rejected and why? |
+
+Then, select the coarse domain (Qdrant partition key):
 
 | Technology | Domain |
 |-----------|--------|
 | AppKit, WKWebView, NSTextField | `macos-native-appkit` |
 | Panama FFM, jextract, GraalVM native | `java-panama-ffm` |
-| Quarkus | `quarkus` |
-| Java (language, JVM) | `java` |
+| Quarkus, Java, Drools, JVM | `jvm` |
+| Python | `python` |
 | Git, tmux, Docker, CLI tools, cross-cutting patterns | `tools` |
+| Web, frontend, Node.js | `web` |
+| Databases, data pipelines | `data` |
+| Cloud platforms, Kubernetes | `cloud` |
+| Security tooling | `security` |
 | Doesn't fit existing | `<new-descriptive-dir>` |
+
+Include `garden: <garden>` as the first field after `id` in the entry frontmatter.
 
 **Step 5 — Draft and confirm**
 
@@ -669,6 +697,8 @@ Offer, don't assume:
 | Technique: no "why non-obvious" section | Just becomes documentation | Must explain what developers would normally do instead |
 | SWEEP: asking the user what was discovered | Claude has the context | Scan session memory and propose specific candidates |
 | SWEEP: only checking gotchas | Techniques and undocumented items are easy to miss | Always check all three categories explicitly |
+| CAPTURE: omitting garden field | New entries need explicit garden declaration | Always include `garden: <type>` in frontmatter |
+| CAPTURE: using gotcha/technique/undocumented in non-discovery garden | Type vocabulary is per-garden | patterns uses architectural/migration/integration/testing; examples uses code |
 
 ---
 
@@ -685,6 +715,9 @@ CAPTURE is complete when:
 - ✅ `### Why this fix` section added for entries scoring ≥12 (if rationale provided)
 - ✅ `author` field included in YAML frontmatter (from `~/.claude/settings.json` `initials`)
 - ✅ WHY fields (constraints, alternatives_considered, invalidation_triggers) prompted — user responses included if provided
+- ✅ `garden` field declared in YAML frontmatter
+- ✅ `type` value is valid for the declared garden
+- ✅ Garden-specific required fields present (evolution: `changed_in`; risk: `severity`)
 
 SWEEP is complete when:
 - ✅ All three categories checked from session memory
