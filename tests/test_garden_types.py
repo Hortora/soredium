@@ -486,3 +486,137 @@ def test_cli_all_six_gardens_exit_zero():
             assert r.returncode == 0, f"CLI failed: {data['criticals']}"
         finally:
             os.unlink(f.name)
+
+
+FULL_PATTERNS_ENTRY = """\
+---
+id: GE-20260418-aabbcc
+garden: patterns
+title: "Pluggable Evaluator with Swappable Persistence"
+type: architectural
+domain: jvm
+stack: "Java, Quarkus"
+tags: [java, architecture, quarkus]
+score: 11
+verified: true
+staleness_threshold: 3650
+observed_in:
+  - project: serverless-workflow
+    url: https://github.com/serverlessworkflow/specification
+    first_seen: "2022-03-14"
+suitability: |
+  Works when evaluation logic must be swappable at runtime.
+variants:
+  - name: in-memory
+    description: Evaluator holds state in-process
+    tradeoffs: Fast, not distributable
+  - name: event-sourced
+    description: State from event log
+    tradeoffs: Distributable, higher latency
+variant_frequency:
+  in-memory: 12
+  event-sourced: 31
+authors:
+  - github_handle: fabian-martinez
+    role: originator
+stability: high
+submitted: 2026-04-18
+---
+
+## Pattern
+
+Description here.
+"""
+
+MALFORMED_PATTERNS_ENTRY_OBSERVED_IN = """\
+---
+id: GE-20260418-aabbcd
+garden: patterns
+title: "Some Pattern"
+type: architectural
+domain: jvm
+stack: "Java"
+tags: [java]
+score: 10
+verified: true
+staleness_threshold: 3650
+observed_in: not-a-list
+submitted: 2026-04-18
+---
+
+## Pattern
+
+Description.
+"""
+
+MALFORMED_PATTERNS_ENTRY_BAD_ROLE = """\
+---
+id: GE-20260418-aabbce
+garden: patterns
+title: "Some Pattern"
+type: architectural
+domain: jvm
+stack: "Java"
+tags: [java]
+score: 10
+verified: true
+staleness_threshold: 3650
+authors:
+  - github_handle: fabian-martinez
+    role: inventor
+submitted: 2026-04-18
+---
+
+## Pattern
+
+Description.
+"""
+
+
+def test_full_patterns_entry_with_extended_fields_passes():
+    path = _write_entry(FULL_PATTERNS_ENTRY)
+    try:
+        result = validate(path)
+        assert result['criticals'] == [], result['criticals']
+        extended_warnings = [w for w in result['warnings'] if any(
+            field in w for field in ['observed_in', 'authors', 'stability', 'variants', 'variant_frequency']
+        )]
+        assert extended_warnings == [], extended_warnings
+    finally:
+        os.unlink(path)
+
+
+def test_patterns_entry_malformed_observed_in_produces_warning():
+    path = _write_entry(MALFORMED_PATTERNS_ENTRY_OBSERVED_IN)
+    try:
+        result = validate(path)
+        assert result['criticals'] == []
+        assert any('observed_in' in w for w in result['warnings'])
+    finally:
+        os.unlink(path)
+
+
+def test_patterns_entry_bad_author_role_produces_warning():
+    path = _write_entry(MALFORMED_PATTERNS_ENTRY_BAD_ROLE)
+    try:
+        result = validate(path)
+        assert result['criticals'] == []
+        assert any('authors' in w and 'role' in w for w in result['warnings'])
+    finally:
+        os.unlink(path)
+
+
+def test_discovery_entry_extended_fields_not_checked():
+    """validate_patterns_extended must NOT run for non-patterns gardens."""
+    malformed = DISCOVERY_ENTRY.replace(
+        'staleness_threshold: 730\n---',
+        'staleness_threshold: 730\nobserved_in: not-a-list\n---'
+    )
+    path = _write_entry(malformed)
+    try:
+        result = validate(path)
+        extended_warnings = [w for w in result['warnings'] if 'observed_in' in w]
+        assert extended_warnings == [], \
+            "validate_patterns_extended must not run for discovery-garden"
+    finally:
+        os.unlink(path)

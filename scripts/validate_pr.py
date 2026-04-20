@@ -311,6 +311,10 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
                 f"Missing required field for {garden}-garden: '{field}'"
             )
 
+    # patterns-garden: validate optional extended fields
+    if garden == 'patterns':
+        result['warnings'].extend(validate_patterns_extended(fm))
+
     if score >= SCORE_AUTO_APPROVE:
         result['infos'].append(f"Score {score} >= {SCORE_AUTO_APPROVE}: auto-approve eligible")
     else:
