@@ -182,6 +182,35 @@ def validate_patterns_extended(fm: dict) -> list:
                         f"(valid: {sorted(VALID_AUTHOR_ROLES)})"
                     )
 
+    # stability: one of low|medium|high
+    stability = fm.get('stability')
+    if stability is not None and stability not in VALID_STABILITY:
+        warnings.append(
+            f"stability '{stability}' invalid (valid: {sorted(VALID_STABILITY)})"
+        )
+
+    # variants: must be a list; each item must have 'name'
+    variants = fm.get('variants')
+    if variants is not None:
+        if not isinstance(variants, list):
+            warnings.append("variants must be a list of dicts")
+        else:
+            for i, item in enumerate(variants):
+                if not isinstance(item, dict) or 'name' not in item:
+                    warnings.append(f"variants[{i}] missing required 'name' key")
+
+    # variant_frequency: must be a dict with int values
+    variant_frequency = fm.get('variant_frequency')
+    if variant_frequency is not None:
+        if not isinstance(variant_frequency, dict):
+            warnings.append("variant_frequency must be a dict mapping variant name to int count")
+        else:
+            for k, v in variant_frequency.items():
+                if not isinstance(v, int):
+                    warnings.append(
+                        f"variant_frequency['{k}'] must be an int, got {type(v).__name__}"
+                    )
+
     return warnings
 
 

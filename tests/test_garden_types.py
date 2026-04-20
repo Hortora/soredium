@@ -384,6 +384,54 @@ def test_patterns_extended_empty_fm_no_warnings():
     assert warnings == []
 
 
+def test_patterns_extended_valid_stability_no_warnings():
+    for val in ('low', 'medium', 'high'):
+        warnings = validate_patterns_extended({'stability': val})
+        assert warnings == [], f"stability '{val}' produced unexpected warning"
+
+
+def test_patterns_extended_invalid_stability():
+    warnings = validate_patterns_extended({'stability': 'very-high'})
+    assert any('stability' in w for w in warnings)
+
+
+def test_patterns_extended_valid_variants_no_warnings():
+    fm = {
+        'variants': [
+            {'name': 'in-memory', 'description': 'Fast', 'tradeoffs': 'Not distributable'},
+            {'name': 'event-sourced'},
+        ]
+    }
+    warnings = validate_patterns_extended(fm)
+    assert warnings == []
+
+
+def test_patterns_extended_variants_not_list():
+    warnings = validate_patterns_extended({'variants': 'in-memory'})
+    assert any('variants' in w and 'list' in w.lower() for w in warnings)
+
+
+def test_patterns_extended_variants_item_missing_name():
+    warnings = validate_patterns_extended({'variants': [{'description': 'Fast'}]})
+    assert any('variants' in w and 'name' in w for w in warnings)
+
+
+def test_patterns_extended_valid_variant_frequency_no_warnings():
+    fm = {'variant_frequency': {'in-memory': 12, 'event-sourced': 31}}
+    warnings = validate_patterns_extended(fm)
+    assert warnings == []
+
+
+def test_patterns_extended_variant_frequency_not_dict():
+    warnings = validate_patterns_extended({'variant_frequency': [12, 31]})
+    assert any('variant_frequency' in w for w in warnings)
+
+
+def test_patterns_extended_variant_frequency_non_int_value():
+    warnings = validate_patterns_extended({'variant_frequency': {'in-memory': 'many'}})
+    assert any('variant_frequency' in w and 'int' in w.lower() for w in warnings)
+
+
 import subprocess
 import json
 
