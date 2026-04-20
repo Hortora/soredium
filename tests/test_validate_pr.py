@@ -12,6 +12,7 @@ from validate_pr import compute_bonus, bonus_points, BONUS_RULES
 VALID_ENTRY = """\
 ---
 title: "Quarkus CDI: @UnlessBuildProfile fails in consumers"
+garden: discovery
 type: gotcha
 domain: quarkus/cdi
 score: 13
