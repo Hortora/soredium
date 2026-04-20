@@ -271,7 +271,7 @@ Rate each dimension 1–3:
 ---
 id: GE-YYYYMMDD-xxxxxx
 garden: patterns
-title: "Pattern name"
+title: "Pattern name — what it does, not how"
 type: architectural | migration | integration | testing
 domain: jvm | python | tools | web | data | infrastructure | security | cloud
 stack: "Technology, Version"
@@ -280,6 +280,31 @@ score: N
 verified: true
 staleness_threshold: 3650
 submitted: YYYY-MM-DD
+
+# Extended fields — all optional, each enriches retrieval and attribution
+observed_in:
+  - project: project-name
+    url: https://github.com/org/repo
+    path: path/to/relevant/directory/
+    first_seen: "YYYY-MM-DD"
+    last_seen: "YYYY-MM-DD"
+
+suitability: |
+  Works when [condition]. Less suitable when [constraint].
+
+variants:
+  - name: variant-name
+    description: One sentence.
+    tradeoffs: Pros and cons.
+
+variant_frequency:
+  variant-name: N
+
+authors:
+  - github_handle: github-username
+    role: originator | adopter | innovator
+
+stability: low | medium | high
 ---
 ```
 
