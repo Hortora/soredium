@@ -317,3 +317,59 @@ def test_each_invalid_type_rejected_per_garden():
                 f"{garden}-garden accepted invalid type '{wrong_type}'"
         finally:
             os.unlink(path)
+
+
+import subprocess
+import json
+
+SCRIPT = str(Path(__file__).parent.parent / 'scripts' / 'validate_pr.py')
+
+
+def test_cli_discovery_entry_exits_zero():
+    f = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False)
+    try:
+        f.write(DISCOVERY_ENTRY)
+    finally:
+        f.close()
+    try:
+        r = subprocess.run(['python3', SCRIPT, f.name], capture_output=True, text=True)
+        data = json.loads(r.stdout)
+        assert r.returncode == 0, f"Expected exit 0, got {r.returncode}: {data}"
+        assert data['criticals'] == []
+    finally:
+        os.unlink(f.name)
+
+
+def test_cli_invalid_garden_exits_one():
+    entry = DISCOVERY_ENTRY.replace('garden: discovery', 'garden: bogus')
+    f = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False)
+    try:
+        f.write(entry)
+    finally:
+        f.close()
+    try:
+        r = subprocess.run(['python3', SCRIPT, f.name], capture_output=True, text=True)
+        assert r.returncode == 1
+        data = json.loads(r.stdout)
+        assert any('garden' in c.lower() for c in data['criticals'])
+    finally:
+        os.unlink(f.name)
+
+
+def test_cli_all_six_gardens_exit_zero():
+    entries = [
+        DISCOVERY_ENTRY, PATTERNS_ENTRY, EXAMPLES_ENTRY,
+        EVOLUTION_ENTRY, RISK_ENTRY, DECISIONS_ENTRY,
+    ]
+    for content in entries:
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False)
+        try:
+            f.write(content)
+        finally:
+            f.close()
+        try:
+            r = subprocess.run(['python3', SCRIPT, f.name], capture_output=True, text=True)
+            data = json.loads(r.stdout)
+            assert r.returncode == 0, f"CLI failed: {data['criticals']}"
+        finally:
+            os.unlink(f.name)
