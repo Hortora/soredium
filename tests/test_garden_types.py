@@ -260,3 +260,110 @@ def test_no_garden_field_defaults_to_discovery():
         assert result['criticals'] == [], result['criticals']
     finally:
         os.unlink(path)
+
+
+EXAMPLES_ENTRY = """\
+---
+title: "Multi-datasource Quarkus configuration"
+garden: examples
+type: code
+domain: jvm
+score: 9
+tags: [quarkus, datasource]
+verified: true
+staleness_threshold: 1095
+---
+
+## Example
+
+Minimal working example here.
+"""
+
+DECISIONS_ENTRY = """\
+---
+title: "Vert.x over Netty as Quarkus reactive engine"
+garden: decisions
+type: architecture
+domain: jvm
+score: 10
+tags: [quarkus, vertx, netty]
+verified: true
+staleness_threshold: 3650
+---
+
+## Decision
+Chose Vert.x.
+
+### Alternatives considered
+- Netty: lower-level, more boilerplate
+"""
+
+
+def test_valid_examples_entry_passes():
+    path = _write_entry(EXAMPLES_ENTRY)
+    try:
+        result = validate(path)
+        assert result['criticals'] == [], result['criticals']
+    finally:
+        os.unlink(path)
+
+
+def test_valid_decisions_entry_passes():
+    path = _write_entry(DECISIONS_ENTRY)
+    try:
+        result = validate(path)
+        assert result['criticals'] == [], result['criticals']
+    finally:
+        os.unlink(path)
+
+
+def test_all_six_gardens_happy_path():
+    """Each garden type must produce a passing validation with a valid entry."""
+    entries = {
+        'discovery': DISCOVERY_ENTRY,
+        'patterns': PATTERNS_ENTRY,
+        'examples': EXAMPLES_ENTRY,
+        'evolution': EVOLUTION_ENTRY,
+        'risk': RISK_ENTRY,
+        'decisions': DECISIONS_ENTRY,
+    }
+    for garden, content in entries.items():
+        path = _write_entry(content)
+        try:
+            result = validate(path)
+            assert result['criticals'] == [], \
+                f"{garden}-garden entry failed: {result['criticals']}"
+        finally:
+            os.unlink(path)
+
+
+def test_each_invalid_type_rejected_per_garden():
+    """Types from other gardens are rejected by each garden."""
+    cross_type_cases = [
+        ('patterns', 'gotcha'),
+        ('examples', 'architectural'),
+        ('evolution', 'code'),
+        ('risk', 'breaking'),
+        ('decisions', 'failure-mode'),
+        ('discovery', 'architecture'),
+    ]
+    base_entries = {
+        'patterns': PATTERNS_ENTRY,
+        'examples': EXAMPLES_ENTRY,
+        'evolution': EVOLUTION_ENTRY,
+        'risk': RISK_ENTRY,
+        'decisions': DECISIONS_ENTRY,
+        'discovery': DISCOVERY_ENTRY,
+    }
+    for garden, wrong_type in cross_type_cases:
+        original_type = GARDEN_TYPES[garden]['valid_types'][0]
+        entry = base_entries[garden].replace(
+            f'type: {original_type}', f'type: {wrong_type}'
+        )
+        path = _write_entry(entry)
+        try:
+            result = validate(path)
+            assert any('type' in c.lower() for c in result['criticals']), \
+                f"{garden}-garden accepted invalid type '{wrong_type}'"
+        finally:
+            os.unlink(path)
