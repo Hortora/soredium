@@ -620,3 +620,53 @@ def test_discovery_entry_extended_fields_not_checked():
             "validate_patterns_extended must not run for discovery-garden"
     finally:
         os.unlink(path)
+
+
+def test_patterns_entry_with_no_extended_fields_still_passes():
+    """A minimal patterns entry (no extended fields) must pass cleanly."""
+    path = _write_entry(PATTERNS_ENTRY)
+    try:
+        result = validate(path)
+        assert result['criticals'] == [], result['criticals']
+        extended_warnings = [w for w in result['warnings'] if any(
+            f in w for f in ['observed_in', 'authors', 'stability', 'variants', 'variant_frequency']
+        )]
+        assert extended_warnings == []
+    finally:
+        os.unlink(path)
+
+
+def test_patterns_entry_invalid_stability_produces_warning_not_critical():
+    entry = FULL_PATTERNS_ENTRY.replace('stability: high', 'stability: extreme')
+    path = _write_entry(entry)
+    try:
+        result = validate(path)
+        assert result['criticals'] == []
+        assert any('stability' in w for w in result['warnings'])
+    finally:
+        os.unlink(path)
+
+
+def test_patterns_entry_variants_missing_name_produces_warning():
+    entry = FULL_PATTERNS_ENTRY.replace(
+        '  - name: in-memory\n    description: Evaluator holds state in-process\n    tradeoffs: Fast, not distributable\n',
+        '  - description: Evaluator holds state in-process\n    tradeoffs: Fast, not distributable\n'
+    )
+    path = _write_entry(entry)
+    try:
+        result = validate(path)
+        assert result['criticals'] == []
+        assert any('variants' in w and 'name' in w for w in result['warnings'])
+    finally:
+        os.unlink(path)
+
+
+def test_patterns_entry_variant_frequency_non_int_produces_warning():
+    entry = FULL_PATTERNS_ENTRY.replace('  in-memory: 12', '  in-memory: "twelve"')
+    path = _write_entry(entry)
+    try:
+        result = validate(path)
+        assert result['criticals'] == []
+        assert any('variant_frequency' in w for w in result['warnings'])
+    finally:
+        os.unlink(path)
