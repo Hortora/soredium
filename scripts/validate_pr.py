@@ -210,6 +210,31 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
     if result['criticals']:
         return result
 
+    # Garden type validation
+    garden = fm.get('garden', GARDEN_DEFAULT)
+    if garden not in GARDEN_TYPES:
+        result['criticals'].append(
+            f"Unknown garden '{garden}'. Valid: {sorted(GARDEN_TYPES)}"
+        )
+        return result
+
+    garden_cfg = GARDEN_TYPES[garden]
+
+    # Entry type must be valid for this garden
+    entry_type = fm.get('type', '')
+    if entry_type not in garden_cfg['valid_types']:
+        result['criticals'].append(
+            f"Type '{entry_type}' invalid for {garden}-garden. "
+            f"Valid: {garden_cfg['valid_types']}"
+        )
+
+    # Garden-specific required fields
+    for field in garden_cfg['required_extra']:
+        if field not in fm:
+            result['criticals'].append(
+                f"Missing required field for {garden}-garden: '{field}'"
+            )
+
     if score >= SCORE_AUTO_APPROVE:
         result['infos'].append(f"Score {score} >= {SCORE_AUTO_APPROVE}: auto-approve eligible")
     else:
