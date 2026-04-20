@@ -91,8 +91,10 @@ import tempfile, os
 def _write_entry(content: str) -> str:
     """Write entry to a temp file and return its path."""
     f = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False)
-    f.write(content)
-    f.close()
+    try:
+        f.write(content)
+    finally:
+        f.close()
     return f.name
 
 
@@ -251,17 +253,6 @@ def test_risk_missing_severity_fails():
 
 def test_no_garden_field_defaults_to_discovery():
     # Existing entries without garden field — backward compatible
-    entry = DISCOVERY_ENTRY.replace('garden: discovery\n', '')
-    path = _write_entry(entry)
-    try:
-        result = validate(path)
-        assert result['criticals'] == [], result['criticals']
-    finally:
-        os.unlink(path)
-
-
-def test_gotcha_type_valid_without_garden_field():
-    # Backward compat: gotcha is valid when garden defaults to discovery
     entry = DISCOVERY_ENTRY.replace('garden: discovery\n', '')
     path = _write_entry(entry)
     try:
