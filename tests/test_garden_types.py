@@ -174,41 +174,6 @@ Description.
 """
 
 
-def test_valid_discovery_entry_passes():
-    path = _write_entry(DISCOVERY_ENTRY)
-    try:
-        result = validate(path)
-        assert result['criticals'] == [], result['criticals']
-    finally:
-        os.unlink(path)
-
-
-def test_valid_patterns_entry_passes():
-    path = _write_entry(PATTERNS_ENTRY)
-    try:
-        result = validate(path)
-        assert result['criticals'] == [], result['criticals']
-    finally:
-        os.unlink(path)
-
-
-def test_valid_evolution_entry_passes():
-    path = _write_entry(EVOLUTION_ENTRY)
-    try:
-        result = validate(path)
-        assert result['criticals'] == [], result['criticals']
-    finally:
-        os.unlink(path)
-
-
-def test_valid_risk_entry_passes():
-    path = _write_entry(RISK_ENTRY)
-    try:
-        result = validate(path)
-        assert result['criticals'] == [], result['criticals']
-    finally:
-        os.unlink(path)
-
 
 def test_unknown_garden_fails():
     entry = DISCOVERY_ENTRY.replace('garden: discovery', 'garden: unknown-garden')
@@ -299,24 +264,6 @@ Chose Vert.x.
 """
 
 
-def test_valid_examples_entry_passes():
-    path = _write_entry(EXAMPLES_ENTRY)
-    try:
-        result = validate(path)
-        assert result['criticals'] == [], result['criticals']
-    finally:
-        os.unlink(path)
-
-
-def test_valid_decisions_entry_passes():
-    path = _write_entry(DECISIONS_ENTRY)
-    try:
-        result = validate(path)
-        assert result['criticals'] == [], result['criticals']
-    finally:
-        os.unlink(path)
-
-
 def test_all_six_gardens_happy_path():
     """Each garden type must produce a passing validation with a valid entry."""
     entries = {
@@ -356,10 +303,13 @@ def test_each_invalid_type_rejected_per_garden():
         'discovery': DISCOVERY_ENTRY,
     }
     for garden, wrong_type in cross_type_cases:
-        original_type = GARDEN_TYPES[garden]['valid_types'][0]
-        entry = base_entries[garden].replace(
-            f'type: {original_type}', f'type: {wrong_type}'
+        fixture = base_entries[garden]
+        # Find the valid type that actually appears in the fixture
+        original_type = next(
+            t for t in GARDEN_TYPES[garden]['valid_types']
+            if f'type: {t}' in fixture
         )
+        entry = fixture.replace(f'type: {original_type}', f'type: {wrong_type}')
         path = _write_entry(entry)
         try:
             result = validate(path)
