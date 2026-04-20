@@ -66,6 +66,7 @@ Bug, silent failure, or workaround:
 ```markdown
 ---
 id: GE-YYYYMMDD-xxxxxx
+garden: discovery
 title: "Short imperative title — the weird thing, not the fix"
 type: gotcha
 domain: tools
@@ -117,6 +118,7 @@ Specific how-to, strategic approach, design philosophy, or pattern — all non-o
 ```markdown
 ---
 id: GE-YYYYMMDD-xxxxxx
+garden: discovery
 title: "Short active title — what you can do"
 type: technique
 domain: tools
@@ -163,6 +165,7 @@ Behaviour, feature, or option not in official docs:
 ```markdown
 ---
 id: GE-YYYYMMDD-xxxxxx
+garden: discovery
 title: "Short title — describes what exists, not that it's undocumented"
 type: undocumented
 domain: tools
@@ -259,3 +262,217 @@ Rate each dimension 1–3:
 | **Breadth** | Narrow edge case or rare setup | Common pattern; many users will hit this | Affects almost anyone using this technology |
 | **Pain / Impact** | Annoying but quickly diagnosed | Significant time loss; misleading symptoms | Silent failure, production risk, or data loss |
 | **Longevity** | May be fixed or changed soon | Stable API; unlikely to change near-term | Fundamental behaviour; essentially permanent |
+
+---
+
+## patterns-garden Entry Template
+
+```yaml
+---
+id: GE-YYYYMMDD-xxxxxx
+garden: patterns
+title: "Pattern name"
+type: architectural | migration | integration | testing
+domain: jvm | python | tools | web | data | infrastructure | security | cloud
+stack: "Technology, Version"
+tags: [tag1, tag2]
+score: N
+verified: true
+staleness_threshold: 3650
+submitted: YYYY-MM-DD
+---
+```
+
+**Body sections:**
+
+```markdown
+## Pattern
+
+[One paragraph: what problem this solves and why it works]
+
+## Structure
+
+[Description of the structural elements]
+
+## Suitability
+
+[When to use. When not to use.]
+
+## Variants
+
+### Variant: [name]
+[Description and tradeoffs]
+```
+
+**Editorial bar:** Would a practitioner facing this class of problem reach for something more complex or less elegant without this pattern?
+
+---
+
+## examples-garden Entry Template
+
+```yaml
+---
+id: GE-YYYYMMDD-xxxxxx
+garden: examples
+title: "Intent — e.g. 'Multi-datasource Quarkus with named injection'"
+type: code
+domain: jvm | python | tools | web | data | infrastructure | security | cloud
+stack: "Technology, Version"
+tags: [tag1, tag2]
+score: N
+verified: true
+staleness_threshold: 1095
+submitted: YYYY-MM-DD
+---
+```
+
+**Body sections:**
+
+```markdown
+## Example
+
+[One sentence of intent]
+
+```java
+// Minimal working example — copy-paste ready
+```
+
+## Notes
+
+[Optional: what to watch out for, what this doesn't cover]
+```
+
+**Editorial bar:** Minimal, working, demonstrating a real use case — not a toy?
+
+---
+
+## evolution-garden Entry Template
+
+```yaml
+---
+id: GE-YYYYMMDD-xxxxxx
+garden: evolution
+title: "Library X.Y — what changed and what breaks"
+type: breaking | deprecation | capability
+domain: jvm | python | tools | web | data | infrastructure | security | cloud
+stack: "Library, Version range"
+tags: [tag1, tag2]
+score: N
+verified: true
+staleness_threshold: 1095
+changed_in: "X.Y.Z"
+breaking: true
+migration_effort: low | medium | high
+submitted: YYYY-MM-DD
+---
+```
+
+**Body sections:**
+
+```markdown
+## What Changed
+
+[What the library did before and what it does now]
+
+## Impact
+
+[What breaks. What needs to change in consumer code.]
+
+## Migration
+
+[Step-by-step if migration_effort is medium or high]
+```
+
+**Editorial bar:** Does this describe a breaking change, deprecation, or capability shift that would change code correctness for someone on that version?
+
+---
+
+## risk-garden Entry Template
+
+```yaml
+---
+id: GE-YYYYMMDD-xxxxxx
+garden: risk
+title: "Failure mode name"
+type: failure-mode | antipattern | incident
+domain: jvm | python | tools | web | data | infrastructure | security | cloud
+stack: "Technology, Version"
+tags: [tag1, tag2]
+score: N
+verified: true
+staleness_threshold: 1825
+severity: low | medium | high | critical
+failure_pattern: "brief pattern name"
+observed_at_scale: true | false
+submitted: YYYY-MM-DD
+---
+```
+
+**Body sections:**
+
+```markdown
+## Failure Mode
+
+[What goes wrong and how it manifests]
+
+## Root Cause
+
+[Mechanism — not just what breaks, but why]
+
+## Mitigation
+
+[How to prevent or recover]
+
+## Detection
+
+[How to know this is happening]
+```
+
+**Editorial bar:** Has this failure mode caused production harm at meaningful scale, and is the mechanism universal enough to recur in other systems?
+
+---
+
+## decisions-garden Entry Template
+
+```yaml
+---
+id: GE-YYYYMMDD-xxxxxx
+garden: decisions
+title: "Technology/approach X chosen over Y for Z"
+type: architecture | technology | process
+domain: jvm | python | tools | web | data | infrastructure | security | cloud
+stack: "Technology, Version"
+tags: [tag1, tag2]
+score: N
+verified: true
+staleness_threshold: 3650
+submitted: YYYY-MM-DD
+---
+```
+
+**Body sections:**
+
+```markdown
+## Decision
+
+[What was chosen and a one-sentence summary of why]
+
+## Context
+
+[What problem was being solved. What constraints applied.]
+
+## Alternatives Considered
+
+- **[Alternative A]:** [Why rejected]
+- **[Alternative B]:** [Why rejected]
+
+## Reasoning
+
+[The argument for the chosen approach over the alternatives]
+
+## Consequences
+
+[What this decision makes easier. What it makes harder.]
+```
+
+**Editorial bar:** Does this capture the reasoning clearly enough that someone facing the same choice could apply it — including what was rejected and why?
