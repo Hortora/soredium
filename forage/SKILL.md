@@ -335,7 +335,21 @@ git -C $GARDEN add <domain>/$GE_ID.md
 git -C $GARDEN commit -m "submit($GE_ID): <slug>"
 ```
 
-**Step 9 — Report back**
+**Step 9 — Check for other untracked entries**
+
+Before reporting back, scan for any other untracked entry files in the garden:
+
+```bash
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} ls-files --others --exclude-standard \
+  | grep -E "^[^/]+/GE-[0-9]{8}-[0-9a-f]{6}\.md$"
+```
+
+If any appear, offer to commit them immediately before they can be lost by a future branch operation:
+> "There are N other untracked entry files in the garden — want me to commit them now?"
+
+If confirmed, stage and commit them in a single commit alongside any GARDEN.md index updates needed.
+
+**Step 10 — Report back**
 
 Tell the user the entry path and (for GitHub gardens) the PR URL.
 

@@ -35,6 +35,9 @@ git sparse-checkout set \
 
 git checkout main
 
+echo "Configuring git hooks..."
+git config core.hooksPath .githooks
+
 echo ""
 echo "Garden ready at $TARGET_DIR"
 echo "Index files materialised. Entry bodies fetched on demand via git cat-file."
