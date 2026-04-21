@@ -133,3 +133,12 @@ HOOK_EOF
     chmod +x "$HOOK"
     echo "$PASS  .git/hooks/post-commit     installed"
 fi
+
+# ── .gitignore ────────────────────────────────────────────────────────────────
+GITIGNORE="$GARDEN/.gitignore"
+if [[ -f "$GITIGNORE" ]] && grep -q "garden-agent.log" "$GITIGNORE"; then
+    echo "$SKIP  .gitignore                 already present"
+else
+    echo "garden-agent.log" >> "$GITIGNORE"
+    echo "$PASS  .gitignore                 updated"
+fi

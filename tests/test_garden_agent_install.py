@@ -94,6 +94,30 @@ class TestGardenAgentInstall(unittest.TestCase):
             self.assertIn('existing', content)
             self.assertIn('garden-agent.sh', content)
 
+    def test_installs_gitignore_entry(self):
+        with make_garden() as garden:
+            result = run_installer(garden)
+            gitignore = Path(garden) / '.gitignore'
+            self.assertTrue(gitignore.exists(), f".gitignore not created. stderr: {result.stderr}")
+            self.assertIn('garden-agent.log', gitignore.read_text())
+
+    def test_gitignore_idempotent(self):
+        with make_garden() as garden:
+            run_installer(garden)
+            run_installer(garden)
+            gitignore = Path(garden) / '.gitignore'
+            content = gitignore.read_text()
+            self.assertEqual(content.count('garden-agent.log'), 1)
+
+    def test_gitignore_appends_to_existing(self):
+        with make_garden() as garden:
+            gitignore = Path(garden) / '.gitignore'
+            gitignore.write_text('*.pyc\n__pycache__/\n')
+            run_installer(garden)
+            content = gitignore.read_text()
+            self.assertIn('*.pyc', content)
+            self.assertIn('garden-agent.log', content)
+
 
 if __name__ == '__main__':
     unittest.main()
