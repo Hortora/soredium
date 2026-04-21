@@ -1,7 +1,7 @@
 """Serialize/deserialize cluster+delta candidate reports to/from JSON."""
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -9,7 +9,7 @@ from pathlib import Path
 class CandidateReport:
     cluster_candidates: list
     delta_candidates: list
-    generated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def total_count(self) -> int:
         return len(self.cluster_candidates) + len(self.delta_candidates)
