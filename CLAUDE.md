@@ -9,7 +9,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 **Name:** soredium
 **GitHub:** [Hortora/soredium](https://github.com/Hortora/soredium)
 **Marketplace:** `/plugin marketplace add github.com/Hortora/soredium`
-**Status:** Phase 2 complete — `forage` and `harvest` deployed; CI validation live in `Hortora/garden`.
+**Status:** Phase 4 complete — `forage`, `harvest` deployed; CI live; ecosystem mining pipeline (registry, extractor, clustering, delta analysis, validation gate) shipped.
 
 ## Repository Purpose
 
@@ -53,7 +53,7 @@ echo "Y" | python3 scripts/claude-skill sync-local
 python3 scripts/claude-skill list
 
 # Run the test suite
-python3 -m pytest tests/ -v   # currently 139 tests
+python3 -m pytest tests/ -v   # 826 tests
 
 # Validate a garden entry locally (same as CI)
 python3 scripts/validate_pr.py <entry_file> ${HORTORA_GARDEN:-~/.hortora/garden}
@@ -63,6 +63,19 @@ python3 scripts/integrate_entry.py <entry_file> ${HORTORA_GARDEN:-~/.hortora/gar
 
 # First-time garden clone (sparse blobless)
 bash scripts/garden-setup.sh
+
+# Ecosystem mining pipeline
+python3 scripts/run_pipeline.py          # orchestrate: registry → extract → cluster → delta → report
+python3 scripts/validate_candidates.py   # human validation gate (accept/reject/skip candidates)
+
+# Registry management
+# scripts/project_registry.py    — CRUD for monitored projects (registry/projects.yaml)
+# scripts/rejection_registry.py  — suppress re-surfacing of rejected candidates (known_rejections.yaml)
+# scripts/candidate_report.py    — JSON serialization for pipeline output
+# scripts/pattern_entry.py       — GP-ID skeleton generator for accepted patterns
+# scripts/feature_extractor.py   — regex-based structural fingerprinting
+# scripts/cluster_pipeline.py    — cosine similarity clustering
+# scripts/delta_analysis.py      — new abstractions between git tags
 ```
 
 **Skill directory structure** (one per skill at repo root):
