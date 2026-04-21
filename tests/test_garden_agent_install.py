@@ -43,6 +43,18 @@ class TestGardenAgentInstall(unittest.TestCase):
             self.assertIn('HORTORA_GARDEN', content)
             self.assertIn('garden-agent.log', content)
 
+    def test_installs_settings_json(self):
+        import json
+        with make_garden() as garden:
+            result = run_installer(garden)
+            settings = Path(garden) / '.claude' / 'settings.json'
+            self.assertTrue(settings.exists(), f"settings.json not created. stderr: {result.stderr}")
+            data = json.loads(settings.read_text())
+            self.assertEqual(data.get('defaultMode'), 'acceptEdits')
+            allowed = data['permissions']['allow']
+            self.assertTrue(any('dedupe_scanner.py' in r for r in allowed))
+            self.assertTrue(any('git commit' in r for r in allowed))
+
 
 if __name__ == '__main__':
     unittest.main()

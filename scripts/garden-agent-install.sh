@@ -36,3 +36,31 @@ AGENT_EOF
     chmod +x "$AGENT_SH"
     echo "$PASS  garden-agent.sh            installed"
 fi
+
+# ── .claude/settings.json ────────────────────────────────────────────────────
+SETTINGS_DIR="$GARDEN/.claude"
+SETTINGS="$SETTINGS_DIR/settings.json"
+if [[ -f "$SETTINGS" ]]; then
+    echo "$SKIP  .claude/settings.json      already present"
+else
+    mkdir -p "$SETTINGS_DIR"
+    cat > "$SETTINGS" << 'SETTINGS_EOF'
+{
+  "defaultMode": "acceptEdits",
+  "permissions": {
+    "allow": [
+      "Bash(git show *)",
+      "Bash(git log *)",
+      "Bash(git status *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git diff *)",
+      "Bash(python3 */dedupe_scanner.py *)",
+      "Bash(python3 */validate_garden.py *)"
+    ],
+    "deny": []
+  }
+}
+SETTINGS_EOF
+    echo "$PASS  .claude/settings.json      installed"
+fi
