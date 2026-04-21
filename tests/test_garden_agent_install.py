@@ -118,6 +118,26 @@ class TestGardenAgentInstall(unittest.TestCase):
             self.assertIn('*.pyc', content)
             self.assertIn('garden-agent.log', content)
 
+    def test_status_output_on_fresh_install(self):
+        with make_garden() as garden:
+            result = run_installer(garden)
+            self.assertEqual(result.returncode, 0)
+            output = result.stdout
+            self.assertIn('garden-agent.sh', output)
+            self.assertIn('settings.json', output)
+            self.assertIn('CLAUDE.md', output)
+            self.assertIn('post-commit', output)
+            self.assertIn('.gitignore', output)
+
+    def test_full_idempotency(self):
+        with make_garden() as garden:
+            run_installer(garden)
+            second = run_installer(garden)
+            self.assertEqual(second.returncode, 0)
+            for line in second.stdout.splitlines():
+                if any(name in line for name in ['garden-agent.sh', 'settings.json', 'CLAUDE.md', 'post-commit', '.gitignore']):
+                    self.assertIn('already present', line, f"Expected 'already present' in: {line}")
+
 
 if __name__ == '__main__':
     unittest.main()
