@@ -32,7 +32,16 @@ def run_installer(garden_path: str) -> subprocess.CompletedProcess:
 
 
 class TestGardenAgentInstall(unittest.TestCase):
-    pass
+    def test_installs_garden_agent_sh(self):
+        with make_garden() as garden:
+            result = run_installer(garden)
+            agent_sh = Path(garden) / 'garden-agent.sh'
+            self.assertTrue(agent_sh.exists(), f"garden-agent.sh not created. stderr: {result.stderr}")
+            self.assertTrue(agent_sh.stat().st_mode & 0o111, "garden-agent.sh not executable")
+            content = agent_sh.read_text()
+            self.assertIn('claude --print', content)
+            self.assertIn('HORTORA_GARDEN', content)
+            self.assertIn('garden-agent.log', content)
 
 
 if __name__ == '__main__':
