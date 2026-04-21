@@ -42,6 +42,7 @@ class TestGardenAgentInstall(unittest.TestCase):
             self.assertIn('claude --print', content)
             self.assertIn('HORTORA_GARDEN', content)
             self.assertIn('garden-agent.log', content)
+            self.assertIn('wc -c', content)  # log rotation present
 
     def test_installs_settings_json(self):
         import json
@@ -107,7 +108,8 @@ class TestGardenAgentInstall(unittest.TestCase):
             run_installer(garden)
             gitignore = Path(garden) / '.gitignore'
             content = gitignore.read_text()
-            self.assertEqual(content.count('garden-agent.log'), 1)
+            self.assertEqual(content.count('garden-agent.log\n'), 1)
+            self.assertEqual(content.count('garden-agent.log.*\n'), 1)
 
     def test_gitignore_appends_to_existing(self):
         with make_garden() as garden:
