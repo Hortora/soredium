@@ -21,7 +21,7 @@ else
     cat > "$AGENT_SH" << 'AGENT_EOF'
 #!/usr/bin/env bash
 # garden-agent.sh — invoke Claude dedup agent (hook or manual mode).
-GARDEN_ROOT="${HORTORA_GARDEN:-$(pwd)}"
+GARDEN_ROOT="${HORTORA_GARDEN:-$HOME/.hortora/garden}"
 LOG="$GARDEN_ROOT/garden-agent.log"
 TASK="You are the Hortora garden deduplication agent. Run the dedup sweep as described in CLAUDE.md."
 

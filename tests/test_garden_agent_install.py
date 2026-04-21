@@ -138,6 +138,29 @@ class TestGardenAgentInstall(unittest.TestCase):
                 if any(name in line for name in ['garden-agent.sh', 'settings.json', 'CLAUDE.md', 'post-commit', '.gitignore']):
                     self.assertIn('already present', line, f"Expected 'already present' in: {line}")
 
+    def test_hortora_garden_env_var(self):
+        with TemporaryDirectory() as garden, TemporaryDirectory() as cwd:
+            # Init git in garden dir
+            import os
+            env = {**os.environ, 'GIT_AUTHOR_NAME': 'Test', 'GIT_AUTHOR_EMAIL': 'test@test.com',
+                   'GIT_COMMITTER_NAME': 'Test', 'GIT_COMMITTER_EMAIL': 'test@test.com'}
+            subprocess.run(['git', 'init', garden], check=True, capture_output=True)
+            (Path(garden) / 'GARDEN.md').write_text('# Garden\n')
+            subprocess.run(['git', '-C', garden, 'add', '.'], check=True, capture_output=True)
+            subprocess.run(['git', '-C', garden, 'commit', '-m', 'init'], check=True, capture_output=True, env=env)
+            # Run installer from cwd (different dir) but with HORTORA_GARDEN pointing to garden
+            result = subprocess.run(
+                ['bash', str(INSTALLER)],
+                capture_output=True, text=True,
+                cwd=cwd,
+                env={**os.environ, 'HORTORA_GARDEN': garden}
+            )
+            self.assertEqual(result.returncode, 0, f"Installer failed. stderr: {result.stderr}")
+            # Files should land in garden, not cwd
+            self.assertTrue((Path(garden) / 'garden-agent.sh').exists(), "garden-agent.sh not in HORTORA_GARDEN")
+            self.assertFalse((Path(cwd) / 'garden-agent.sh').exists(), "garden-agent.sh wrongly in cwd")
+            self.assertTrue((Path(garden) / 'CLAUDE.md').exists(), "CLAUDE.md not in HORTORA_GARDEN")
+
 
 if __name__ == '__main__':
     unittest.main()
