@@ -55,6 +55,17 @@ class TestGardenAgentInstall(unittest.TestCase):
             self.assertTrue(any('dedupe_scanner.py' in r for r in allowed))
             self.assertTrue(any('git commit' in r for r in allowed))
 
+    def test_installs_claude_md(self):
+        with make_garden() as garden:
+            result = run_installer(garden)
+            claude_md = Path(garden) / 'CLAUDE.md'
+            self.assertTrue(claude_md.exists(), f"CLAUDE.md not created. stderr: {result.stderr}")
+            content = claude_md.read_text()
+            self.assertIn('garden deduplication agent', content)
+            self.assertIn('dedupe_scanner.py', content)
+            self.assertIn('duplicate-discarded', content)
+            self.assertIn('git show HEAD:', content)
+
 
 if __name__ == '__main__':
     unittest.main()
