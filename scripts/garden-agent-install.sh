@@ -110,3 +110,26 @@ Score → submitted date → line count (keep longer).
 CLAUDE_EOF
     echo "$PASS  CLAUDE.md                  installed"
 fi
+
+# ── .git/hooks/post-commit ───────────────────────────────────────────────────
+HOOK="$GARDEN/.git/hooks/post-commit"
+SENTINEL="# garden-agent: auto-installed"
+if [[ -f "$HOOK" ]] && grep -q "$SENTINEL" "$HOOK"; then
+    echo "$SKIP  .git/hooks/post-commit     already present"
+else
+    cat >> "$HOOK" << 'HOOK_EOF'
+# garden-agent: auto-installed
+# Fire garden dedup agent when a commit adds new GE-*.md entries.
+_GARDEN_ROOT="$(git rev-parse --show-toplevel)"
+_LOG="$_GARDEN_ROOT/garden-agent.log"
+_new_entries=$(git diff --name-only HEAD~1 HEAD 2>/dev/null \
+  | grep -E "^[^/]+/GE-[0-9]{8}-[0-9a-f]{6}\.md$")
+if [[ -n "$_new_entries" ]]; then
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] new entries detected, starting agent:" >> "$_LOG"
+    echo "$_new_entries" | sed 's/^/  /' >> "$_LOG"
+    nohup "$_GARDEN_ROOT/garden-agent.sh" --hook >> "$_LOG" 2>&1 &
+fi
+HOOK_EOF
+    chmod +x "$HOOK"
+    echo "$PASS  .git/hooks/post-commit     installed"
+fi

@@ -66,6 +66,34 @@ class TestGardenAgentInstall(unittest.TestCase):
             self.assertIn('duplicate-discarded', content)
             self.assertIn('git show HEAD:', content)
 
+    def test_installs_post_commit_hook(self):
+        with make_garden() as garden:
+            result = run_installer(garden)
+            hook = Path(garden) / '.git' / 'hooks' / 'post-commit'
+            self.assertTrue(hook.exists(), f"post-commit hook not created. stderr: {result.stderr}")
+            self.assertTrue(hook.stat().st_mode & 0o111, "post-commit hook not executable")
+            content = hook.read_text()
+            self.assertIn('garden-agent.sh', content)
+            self.assertIn('GE-', content)
+
+    def test_post_commit_hook_idempotent(self):
+        with make_garden() as garden:
+            run_installer(garden)
+            run_installer(garden)  # second run
+            hook = Path(garden) / '.git' / 'hooks' / 'post-commit'
+            content = hook.read_text()
+            self.assertEqual(content.count('garden-agent.sh'), 1)
+
+    def test_post_commit_hook_appends_to_existing(self):
+        with make_garden() as garden:
+            hook = Path(garden) / '.git' / 'hooks' / 'post-commit'
+            hook.write_text('#!/bin/bash\n# existing hook\necho "existing"\n')
+            hook.chmod(0o755)
+            run_installer(garden)
+            content = hook.read_text()
+            self.assertIn('existing', content)
+            self.assertIn('garden-agent.sh', content)
+
 
 if __name__ == '__main__':
     unittest.main()
