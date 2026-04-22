@@ -53,7 +53,7 @@ class TestGardenAgentInstall(unittest.TestCase):
             data = json.loads(settings.read_text())
             self.assertEqual(data.get('defaultMode'), 'acceptEdits')
             allowed = data['permissions']['allow']
-            self.assertTrue(any('dedupe_scanner.py' in r for r in allowed))
+            self.assertTrue(any('run-scanner.sh' in r for r in allowed))
             self.assertTrue(any('git commit' in r for r in allowed))
 
     def test_installs_claude_md(self):

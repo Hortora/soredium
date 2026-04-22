@@ -34,7 +34,7 @@ if [[ "$1" == "--hook" ]] || [[ ! -t 0 ]]; then
         mv "$LOG" "${LOG}.1"
     fi
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] garden-agent starting" >> "$LOG"
-    claude --print --dangerously-skip-permissions "$TASK" >> "$LOG" 2>&1
+    claude --print "$TASK" >> "$LOG" 2>&1
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] garden-agent done" >> "$LOG"
 else
     claude "$TASK"
@@ -42,6 +42,22 @@ fi
 AGENT_EOF
     chmod +x "$AGENT_SH"
     echo "$PASS  garden-agent.sh            installed"
+fi
+
+# ── run-scanner.sh ───────────────────────────────────────────────────────────
+SCANNER_SH="$GARDEN/run-scanner.sh"
+if [[ -f "$SCANNER_SH" ]]; then
+    echo "$SKIP  run-scanner.sh             already present"
+else
+    cat > "$SCANNER_SH" << 'SCANNER_EOF'
+#!/usr/bin/env bash
+# Wrapper so the garden agent calls dedupe_scanner.py without shell expansions.
+# The agent calls: bash run-scanner.sh [args...]
+SOREDIUM="${SOREDIUM_PATH:-$HOME/claude/hortora/soredium}"
+exec python3 "$SOREDIUM/scripts/dedupe_scanner.py" "$@"
+SCANNER_EOF
+    chmod +x "$SCANNER_SH"
+    echo "$PASS  run-scanner.sh             installed"
 fi
 
 # ── .claude/settings.json ────────────────────────────────────────────────────
@@ -62,7 +78,7 @@ else
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git diff *)",
-      "Bash(python3 */dedupe_scanner.py *)",
+      "Bash(bash run-scanner.sh *)",
       "Bash(python3 */validate_garden.py *)"
     ],
     "deny": []
@@ -86,25 +102,22 @@ dedup sweep and commit the results without asking for confirmation.
 ## Environment
 
 - Garden root: current working directory
-- Scanner: resolve the path to a concrete value first, then use it in all commands:
-  ```bash
-  SOREDIUM="${SOREDIUM_PATH:-$HOME/claude/hortora/soredium}"
-  SCANNER="$SOREDIUM/scripts/dedupe_scanner.py"
-  ```
-  Then call `python3 "$SCANNER" .` — never use `${VAR:-default}` syntax directly
-  inside bash tool calls, as it triggers permission prompts.
+- Scanner: call `bash run-scanner.sh` — this wrapper resolves SOREDIUM_PATH
+  and delegates to dedupe_scanner.py without shell expansions in the command.
+  Example: `bash run-scanner.sh . --top 50`
+  Example: `bash run-scanner.sh . --record "GE-X × GE-Y" distinct "note"`
 - All reads via `git show HEAD:<path>` — never read files directly
 
 ## Workflow
 
-1. Run `dedupe_scanner.py . --top 50` to get unchecked pairs, highest score first
+1. Run `bash run-scanner.sh . --top 50` to get unchecked pairs, highest score first
 2. For each pair, read both entries: `git show HEAD:<domain>/<id>.md | head -35`
 3. Classify and act:
 
 | Classification | Action |
 |---|---|
-| **Distinct** | `--record` as `distinct` |
-| **Related** | Append `**See also:**` line to both files, `--record` as `related` |
+| **Distinct** | `bash run-scanner.sh . --record "GE-X × GE-Y" distinct "note"` |
+| **Related** | Append `**See also:**` line to both files, then record as `related` |
 | **Duplicate** | Apply duplicate rules below |
 
 4. Commit: `git add -A && git commit -m "dedupe: sweep N pairs — M related, K duplicates resolved"`
