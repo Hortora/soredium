@@ -34,7 +34,7 @@ public class DeltaAnalysis {
     }
 
     public List<String> getMajorVersionTags(Path repo) {
-        return git(repo, "tag", "--sort=version:refname").lines()
+        return gitOrThrow(repo, "tag", "--sort=version:refname").lines()
             .filter(t -> !t.isBlank())
             .toList();
     }
@@ -82,6 +82,27 @@ public class DeltaAnalysis {
             var out = new String(proc.getInputStream().readAllBytes());
             proc.waitFor();
             return out;
+        } catch (Exception e) {
+            throw new RuntimeException("git failed: " + e.getMessage(), e);
+        }
+    }
+
+    /** Like {@link #git} but throws {@link RuntimeException} if git exits non-zero. */
+    private String gitOrThrow(Path repo, String... args) {
+        try {
+            var cmd = new ArrayList<String>();
+            cmd.add("git");
+            cmd.addAll(List.of(args));
+            var pb = new ProcessBuilder(cmd).directory(repo.toFile()).redirectErrorStream(true);
+            var proc = pb.start();
+            var out = new String(proc.getInputStream().readAllBytes());
+            int exit = proc.waitFor();
+            if (exit != 0) {
+                throw new RuntimeException("git " + String.join(" ", args) + " exited " + exit + ": " + out.strip());
+            }
+            return out;
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("git failed: " + e.getMessage(), e);
         }

@@ -88,6 +88,13 @@ public class FeatureExtractor {
             return; // unreadable — skip silently
         }
 
+        // Strip string literals before pattern matching to avoid false positives
+        text = text.replaceAll("\"(?:[^\"\\\\]|\\\\.)*\"", "\"\"");
+        // Strip single-line comments
+        text = text.replaceAll("//[^\n]*", "");
+        // Strip multi-line comments (DOTALL via inline flag)
+        text = text.replaceAll("(?s)/\\*.*?\\*/", " ");
+
         c.interfaceCount     += countMatches(INTERFACE_OR_ABSTRACT, text);
         c.injectionPoints    += countMatches(INJECTION, text);
         c.extensionSignatures += countMatches(EXTENDS_IMPLEMENTS, text);
