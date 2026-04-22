@@ -24,7 +24,7 @@ else
 GARDEN_ROOT="${HORTORA_GARDEN:-$HOME/.hortora/garden}"
 LOG="$GARDEN_ROOT/garden-agent.log"
 LOCK="$GARDEN_ROOT/garden-agent.lock"
-TASK="You are the Hortora garden deduplication agent. Run the dedup sweep as described in CLAUDE.md."
+TASK="You are the Hortora garden agent. Merge open forage PRs and run the dedup sweep as described in CLAUDE.md."
 
 # Acquire lockfile — prevent concurrent runs (mkdir is atomic).
 if ! mkdir "$LOCK" 2>/dev/null; then
