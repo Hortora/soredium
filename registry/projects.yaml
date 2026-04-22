@@ -1,2 +1,41 @@
 # Hortora project registry — monitored projects for ecosystem mining
-projects: []
+projects:
+- project: incus-spawn
+  url: https://github.com/Sanne/incus-spawn
+  domain: jvm
+  primary_language: java
+  frameworks: [quarkus]
+  last_processed_commit: null
+  notable_contributors: [Sanne]
+
+- project: quarkus-demo
+  url: https://github.com/Sanne/quarkus-demo
+  domain: jvm
+  primary_language: java
+  frameworks: [quarkus]
+  last_processed_commit: null
+  notable_contributors: [Sanne]
+
+- project: quarkus-quickstarts
+  url: https://github.com/quarkusio/quarkus-quickstarts
+  domain: jvm
+  primary_language: java
+  frameworks: [quarkus]
+  last_processed_commit: null
+  notable_contributors: [Sanne]
+
+- project: quarkus
+  url: https://github.com/quarkusio/quarkus
+  domain: jvm
+  primary_language: java
+  frameworks: [quarkus, vert.x, smallrye]
+  last_processed_commit: null
+  notable_contributors: [Sanne]
+
+- project: hibernate-orm
+  url: https://github.com/hibernate/hibernate-orm
+  domain: jvm
+  primary_language: java
+  frameworks: [hibernate, jpa]
+  last_processed_commit: null
+  notable_contributors: [Sanne]
