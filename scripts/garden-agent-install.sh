@@ -34,7 +34,7 @@ if [[ "$1" == "--hook" ]] || [[ ! -t 0 ]]; then
         mv "$LOG" "${LOG}.1"
     fi
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] garden-agent starting" >> "$LOG"
-    claude --print "$TASK" >> "$LOG" 2>&1
+    claude --print --dangerously-skip-permissions "$TASK" >> "$LOG" 2>&1
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] garden-agent done" >> "$LOG"
 else
     claude "$TASK"
@@ -86,7 +86,13 @@ dedup sweep and commit the results without asking for confirmation.
 ## Environment
 
 - Garden root: current working directory
-- Scanner: `python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py .`
+- Scanner: resolve the path to a concrete value first, then use it in all commands:
+  ```bash
+  SOREDIUM="${SOREDIUM_PATH:-$HOME/claude/hortora/soredium}"
+  SCANNER="$SOREDIUM/scripts/dedupe_scanner.py"
+  ```
+  Then call `python3 "$SCANNER" .` — never use `${VAR:-default}` syntax directly
+  inside bash tool calls, as it triggers permission prompts.
 - All reads via `git show HEAD:<path>` — never read files directly
 
 ## Workflow
