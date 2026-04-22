@@ -12,55 +12,72 @@ The engine for Hortora gardens — validators, CI scripts, GitHub Actions workfl
 
 | Skill | Purpose |
 |-------|---------|
-| `forage` | Session-time capture, search, and retrieval. CAPTURE opens a GitHub issue, writes the entry, validates locally, and opens a PR — or integrates directly in local mode. SEARCH uses `git cat-file --batch` for efficient on-demand entry retrieval. |
-| `harvest` | Dedicated maintenance sessions. MERGE integrates submissions, deduplicates, calls `integrate_entry.py`. DEDUPE sweeps the full garden for near-duplicates. |
+| `forage` | Session-time capture, search, and retrieval. CAPTURE writes the entry, validates locally, commits, and pushes directly to main. SWEEP scans a session for all three entry types (gotchas, techniques, undocumented) and delivers as a single batch commit. SEARCH uses `git grep` for fast on-demand retrieval. REVISE enriches an existing entry in place. |
+| `harvest` | Dedicated maintenance sessions. DEDUPE sweeps the full garden for near-duplicates. REVIEW surfaces stale entries overdue for a freshness check. |
 
 ### Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/validate_pr.py` | Validates a single garden entry. Checks required fields, score threshold (≥ 8), prompt injection patterns, Jaccard duplicate scan (≥ 0.4 = warning), vocabulary compliance. Outputs JSON. Exits 1 on CRITICAL failures. Called by GitHub Actions on PR open and by forage locally before pushing. |
-| `scripts/integrate_entry.py` | Updates all garden indexes after a merge: `_summaries/`, domain `INDEX.md`, `labels/`, `_index/global.md`. Runs structural check, commits. Called by GitHub Actions on merge and by forage/harvest in local mode. |
-| `scripts/validate_garden.py` | Full garden validation — structural checks (`--structural`), entry format, index consistency. |
+| `scripts/validate_pr.py` | Validates a single garden entry. Checks required fields, score threshold (≥ 8), prompt injection patterns, Jaccard duplicate scan (≥ 0.4 = warning), vocabulary compliance. Exits 1 on CRITICAL failures. Called by forage before committing. |
+| `scripts/validate_garden.py` | Full garden validation — structural checks, entry format, index consistency (GARDEN.md vs actual files). Recognises both legacy `**ID:**` body format and current YAML `id:` frontmatter. |
+| `scripts/dedupe_scanner.py` | Scans all entry pairs for semantic similarity. Outputs ranked unchecked pairs. Records classifications (distinct / related / duplicate-discarded) in `CHECKED.md`. |
+| `scripts/garden-agent-install.sh` | Installs the autonomous garden agent into a local garden clone. Idempotent — safe to re-run. See [Garden Agent](#garden-agent) below. |
 | `scripts/garden-setup.sh` | One-time sparse blobless clone setup. Index files materialised; entry bodies fetched on demand via `git cat-file`. |
+| `scripts/integrate_entry.py` | Updates garden indexes after entry changes: domain `INDEX.md`, `labels/`, `_index/global.md`. |
 | `scripts/claude-skill` | Skill installer — `install`, `sync-local`, `uninstall`. |
-
-### GitHub Actions (live in `Hortora/garden`)
-
-| Workflow | Trigger | What it does |
-|----------|---------|--------------|
-| `validate-on-pr.yml` | PR opened/updated touching `*/GE-*.md` | Checks out soredium, runs `validate_pr.py`, posts comment, applies label (`rejected` / `needs-review` / `auto-approve-eligible`) |
-| `integrate-on-merge.yml` | PR merged with `garden-submission` label | Checks out soredium, runs `integrate_entry.py`, pushes index updates, closes linked GitHub issue |
 
 ---
 
 ## How submissions work
 
-**GitHub mode** (default when garden has a GitHub remote):
-
 ```
-forage CAPTURE
-  → gh issue create          # conflict-free GE-ID
-  → write GE-XXXX.md
-  → validate_pr.py           # fast local check before push
-  → gh pr create
-    → validate-on-pr CI      # format, score, Jaccard, injection
-    → human review
-    → merge
-    → integrate-on-merge CI  # indexes updated, issue closed
+forage CAPTURE / SWEEP
+  → write GE-YYYYMMDD-xxxxxx.md
+  → validate_pr.py           # format, score, Jaccard, injection check
+  → git commit + git pull --rebase origin main + git push origin main
+  → post-commit hook fires garden agent (async)
+    → git pull               # pull any other concurrent entries
+    → dedupe_scanner.py      # sweep top-50 unchecked pairs
+    → classify + commit      # "dedupe: sweep N pairs — ..."
 ```
 
-**Local mode** (no GitHub remote):
+**Local mode** (no GitHub remote): same flow, push step skipped.
 
-```
-forage CAPTURE
-  → write GE-XXXX.md
-  → validate_pr.py           # same validation as CI
-  → integrate_entry.py       # same index maintenance as CI
-  → git commit
+The garden agent runs autonomously in the background — no manual intervention needed after the initial `git push`.
+
+---
+
+## Garden Agent
+
+The garden agent runs autonomously on every `git push` to the garden. It pulls new entries and runs a full dedup sweep without prompting.
+
+### Install
+
+After cloning the garden, run the installer from inside the garden directory:
+
+```bash
+cd ~/.hortora/garden   # or wherever your garden clone lives
+bash ~/claude/hortora/soredium/scripts/garden-agent-install.sh
 ```
 
-Same scripts, different callers. CI and local mode produce identical results.
+The installer is idempotent — safe to re-run and safe across machines. It installs:
+
+| File | Purpose |
+|------|---------|
+| `garden-agent.sh` | Entry point. Acquires a lockfile, rotates logs, invokes Claude. |
+| `run-scanner.sh` | Thin wrapper around `dedupe_scanner.py` — avoids shell expansion issues in agent commands. |
+| `.claude/settings.json` | Allows git read/write and scanner commands without prompting. |
+| `CLAUDE.md` | Agent instructions: pull → dedup sweep → commit. |
+| `.git/hooks/post-commit` | Fires the agent after any non-dedupe commit. |
+
+### Manual trigger
+
+```bash
+cd ~/.hortora/garden && ./garden-agent.sh
+```
+
+Useful for clearing a backlog or verifying the agent runs cleanly after config changes. Output goes to `garden-agent.log` (gitignored).
 
 ---
 
