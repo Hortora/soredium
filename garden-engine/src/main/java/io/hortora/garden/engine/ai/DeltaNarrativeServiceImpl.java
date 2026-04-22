@@ -1,5 +1,6 @@
 package io.hortora.garden.engine.ai;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.hortora.garden.engine.DeltaNarrative;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -19,7 +20,7 @@ public class DeltaNarrativeServiceImpl implements DeltaNarrativeService {
                     node.path("motivation").asText(),
                     node.path("introduced_at").asText()
             );
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to parse delta narrative response: " + e.getMessage(), e);
         }
     }

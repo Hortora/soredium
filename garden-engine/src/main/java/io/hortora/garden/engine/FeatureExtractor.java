@@ -21,6 +21,13 @@ public class FeatureExtractor {
     private static final Pattern EXTENDS_IMPLEMENTS =
         Pattern.compile("\\bclass\\s+\\w+(?:\\s*<[^>]*>)?\\s+(?:extends|implements)\\b");
 
+    private static final Pattern STRIP_STRING_LITERALS =
+        Pattern.compile("\"(?:[^\"\\\\]|\\\\.)*\"");
+    private static final Pattern STRIP_LINE_COMMENTS =
+        Pattern.compile("//[^\n]*");
+    private static final Pattern STRIP_BLOCK_COMMENTS =
+        Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
+
     public Fingerprint extract(Path root) throws IOException {
         Counter counter = new Counter();
         Set<Path> visitedDirs = new HashSet<>();
@@ -89,11 +96,11 @@ public class FeatureExtractor {
         }
 
         // Strip string literals before pattern matching to avoid false positives
-        text = text.replaceAll("\"(?:[^\"\\\\]|\\\\.)*\"", "\"\"");
+        text = STRIP_STRING_LITERALS.matcher(text).replaceAll("\"\"");
         // Strip single-line comments
-        text = text.replaceAll("//[^\n]*", "");
-        // Strip multi-line comments (DOTALL via inline flag)
-        text = text.replaceAll("(?s)/\\*.*?\\*/", " ");
+        text = STRIP_LINE_COMMENTS.matcher(text).replaceAll("");
+        // Strip multi-line comments
+        text = STRIP_BLOCK_COMMENTS.matcher(text).replaceAll(" ");
 
         c.interfaceCount     += countMatches(INTERFACE_OR_ABSTRACT, text);
         c.injectionPoints    += countMatches(INJECTION, text);

@@ -12,9 +12,7 @@ import java.util.*;
 
 /**
  * Persistent YAML-backed registry of projects to process.
- *
- * NOTE: @ApplicationScoped removed for Task 4 — tests use {@code new} directly.
- * CDI wiring is added back in Task 6.
+ * Plain class — not a CDI bean, as it requires a path argument at construction time.
  */
 public class ProjectRegistry {
 
@@ -40,7 +38,7 @@ public class ProjectRegistry {
         Map<String, Object> data;
         try {
             data = YAML.readValue(path.toFile(), Map.class);
-        } catch (Exception e) {
+        } catch (IOException e) {
             throw new IOException("YAML parse failure reading registry: " + path + " — " + e.getMessage(), e);
         }
         if (data == null) {

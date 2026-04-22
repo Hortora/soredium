@@ -1,5 +1,6 @@
 package io.hortora.garden.engine.ai;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.hortora.garden.engine.Fingerprint;
 import io.hortora.garden.engine.PatternCandidate;
@@ -25,7 +26,7 @@ public class PatternNamingServiceImpl implements PatternNamingService {
                     node.path("structural_signal").asText(),
                     node.path("why_it_exists").asText()
             );
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to parse pattern naming response: " + e.getMessage(), e);
         }
     }

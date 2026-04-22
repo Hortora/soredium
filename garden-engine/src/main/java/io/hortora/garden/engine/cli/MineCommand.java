@@ -16,11 +16,11 @@ public class MineCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        if (project != null && project.equals("unknown-project-that-does-not-exist")) {
-            System.err.println("Project not found: " + project);
+        if (project != null) {
+            System.err.println("Project not found: " + project + " (registry not configured in Phase 1)");
             return 1;
         }
-        System.out.println("mine: " + (all ? "all" : project));
+        System.out.println("mine: all=" + all);
         return 0;
     }
 }

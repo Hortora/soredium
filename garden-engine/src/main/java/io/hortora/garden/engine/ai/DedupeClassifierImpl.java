@@ -1,5 +1,6 @@
 package io.hortora.garden.engine.ai;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.hortora.garden.engine.DedupeDecision;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -22,7 +23,7 @@ public class DedupeClassifierImpl implements DedupeClassifier {
         } catch (IllegalArgumentException e) {
             // Unknown classification value — safe default
             return new DedupeDecision(DedupeDecision.Classification.DISTINCT, "parse error: " + e.getMessage(), null, null);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             // Malformed JSON — safe default
             return new DedupeDecision(DedupeDecision.Classification.DISTINCT, "parse error: " + e.getMessage(), null, null);
         }

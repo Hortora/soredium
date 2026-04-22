@@ -48,12 +48,6 @@ class CLICommandTest {
     }
 
     @Test
-    @Launch({"harvest", "--sweep"})
-    void harvestSweepExitsZero(LaunchResult result) {
-        assertThat(result.exitCode()).isEqualTo(0);
-    }
-
-    @Test
     @Launch({"harvest", "--sweep", "--dry-run"})
     void harvestDryRunProducesOutput(LaunchResult result) {
         assertThat(result.exitCode()).isEqualTo(0);

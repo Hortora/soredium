@@ -34,13 +34,13 @@ public class DeltaAnalysis {
     }
 
     public List<String> getMajorVersionTags(Path repo) {
-        return gitOrThrow(repo, "tag", "--sort=version:refname").lines()
+        return git(repo, "tag", "--sort=version:refname").lines()
             .filter(t -> !t.isBlank())
             .toList();
     }
 
     private boolean isShallow(Path repo) {
-        return git(repo, "rev-parse", "--is-shallow-repository").strip().equals("true");
+        return gitSilent(repo, "rev-parse", "--is-shallow-repository").strip().equals("true");
     }
 
     private List<String> getAddedFiles(Path repo, String from, String to) {
@@ -51,8 +51,7 @@ public class DeltaAnalysis {
     }
 
     private String showFile(Path repo, String ref, String file) {
-        try { return git(repo, "show", ref + ":" + file); }
-        catch (RuntimeException e) { return ""; }
+        return gitSilent(repo, "show", ref + ":" + file);
     }
 
     private String[] getBlame(Path repo, String ref, String file) {
@@ -80,22 +79,6 @@ public class DeltaAnalysis {
             var pb = new ProcessBuilder(cmd).directory(repo.toFile()).redirectErrorStream(true);
             var proc = pb.start();
             var out = new String(proc.getInputStream().readAllBytes());
-            proc.waitFor();
-            return out;
-        } catch (Exception e) {
-            throw new RuntimeException("git failed: " + e.getMessage(), e);
-        }
-    }
-
-    /** Like {@link #git} but throws {@link RuntimeException} if git exits non-zero. */
-    private String gitOrThrow(Path repo, String... args) {
-        try {
-            var cmd = new ArrayList<String>();
-            cmd.add("git");
-            cmd.addAll(List.of(args));
-            var pb = new ProcessBuilder(cmd).directory(repo.toFile()).redirectErrorStream(true);
-            var proc = pb.start();
-            var out = new String(proc.getInputStream().readAllBytes());
             int exit = proc.waitFor();
             if (exit != 0) {
                 throw new RuntimeException("git " + String.join(" ", args) + " exited " + exit + ": " + out.strip());
@@ -105,6 +88,22 @@ public class DeltaAnalysis {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("git failed: " + e.getMessage(), e);
+        }
+    }
+
+    /** Silent variant — does not throw on non-zero exit; returns empty string on any failure. */
+    private String gitSilent(Path repo, String... args) {
+        try {
+            var cmd = new ArrayList<String>();
+            cmd.add("git");
+            cmd.addAll(List.of(args));
+            var pb = new ProcessBuilder(cmd).directory(repo.toFile()).redirectErrorStream(true);
+            var proc = pb.start();
+            var out = new String(proc.getInputStream().readAllBytes());
+            proc.waitFor();
+            return out;
+        } catch (Exception e) {
+            return "";
         }
     }
 }
