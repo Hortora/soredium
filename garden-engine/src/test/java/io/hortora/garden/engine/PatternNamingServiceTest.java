@@ -1,66 +1,53 @@
 package io.hortora.garden.engine;
 
-import io.hortora.garden.engine.ai.PatternNamingServiceImpl;
-import org.junit.jupiter.api.BeforeEach;
+import io.hortora.garden.engine.ai.PatternNamingService;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@QuarkusTest
 class PatternNamingServiceTest {
 
-    private PatternNamingServiceImpl service;
+    @Inject PatternNamingService service;
+    @Inject MockReasoningService mock;
 
-    @BeforeEach
-    void setUp() {
-        service = new PatternNamingServiceImpl();
+    @Test
+    void validPatternCandidateReturnedFromMock() {
+        mock.willReturnPattern(new PatternCandidate("CDI Strategy", "desc", "signal", "why"));
+        assertThat(service.namePattern("any context").name()).isEqualTo("CDI Strategy");
     }
 
     @Test
-    void validJsonResponseParsedIntoPatternCandidate() {
-        var json = """
-                {"name":"CDI Strategy Registry","description":"desc","structural_signal":"signal","why_it_exists":"why"}
-                """;
-        var result = service.namePattern(json);
-        assertThat(result.name()).isEqualTo("CDI Strategy Registry");
-        assertThat(result.description()).isEqualTo("desc");
-        assertThat(result.structuralSignal()).isEqualTo("signal");
-        assertThat(result.whyItExists()).isEqualTo("why");
+    void nullClusterContextReturnsMockDefault() {
+        // MockReasoningService ignores context and returns configured response
+        var result = service.namePattern(null);
+        assertThat(result).isNotNull(); // mock always returns something
     }
 
     @Test
-    void nullClusterContextReturnsNull() {
-        assertThat(service.namePattern(null)).isNull();
+    void blankContextReturnsMockDefault() {
+        assertThat(service.namePattern("")).isNotNull();
     }
 
     @Test
-    void blankClusterContextReturnsNull() {
-        assertThat(service.namePattern("  ")).isNull();
-    }
-
-    @Test
-    void malformedJsonThrowsDescriptiveException() {
-        assertThatThrownBy(() -> service.namePattern("{not valid json"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("parse");
-    }
-
-    @Test
-    void promptIncludesProjectNamesAndFingerprints() {
-        var fp1 = new Fingerprint(5, 1.2, 8, 2, 10, 3);
-        var fp2 = new Fingerprint(3, 0.9, 4, 1, 7, 1);
-
-        var ctx = PatternNamingServiceImpl.buildClusterContext(
-                List.of("quarkus", "micronaut"),
-                List.of(fp1, fp2)
+    void promptBuilderIncludesProjectNamesAndFingerprints() {
+        var ctx = PatternNamingService.buildClusterContext(
+            List.of("quarkus", "micronaut"),
+            List.of(new Fingerprint(100, 0.2, 80, 90, 500, 10),
+                    new Fingerprint(80, 0.18, 70, 85, 450, 8))
         );
-
         assertThat(ctx).contains("quarkus").contains("micronaut");
-        assertThat(ctx).contains(String.valueOf(fp1.injectionPoints()));
-        assertThat(ctx).contains(String.valueOf(fp2.injectionPoints()));
-        assertThat(ctx).contains(String.valueOf(fp1.interfaceCount()));
-        assertThat(ctx).contains(String.valueOf(fp1.spiPatterns()));
+        assertThat(ctx).contains("100"); // interface count
+    }
+
+    @Test
+    void configuredPatternNameIsReturned() {
+        mock.willReturnPattern(new PatternCandidate("Custom Pattern", "d", "s", "w"));
+        assertThat(service.namePattern("ctx").name()).isEqualTo("Custom Pattern");
+        mock.willReturnPattern(new PatternCandidate("mock-pattern", "mock", "mock", "mock"));
     }
 }

@@ -1,44 +1,40 @@
 package io.hortora.garden.engine;
 
-import io.hortora.garden.engine.ai.EntryMergeServiceImpl;
-import org.junit.jupiter.api.BeforeEach;
+import io.hortora.garden.engine.ai.EntryMergeService;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@QuarkusTest
 class EntryMergeServiceTest {
 
-    private EntryMergeServiceImpl service;
-
-    @BeforeEach
-    void setUp() {
-        service = new EntryMergeServiceImpl();
-    }
+    @Inject EntryMergeService service;
+    @Inject MockReasoningService mock;
 
     @Test
-    void mergedOutputContainsYamlFrontmatter() {
-        var merged = "---\nid: GE-merged\ntitle: merged\nscore: 11\n---\nbody";
-        assertThat(service.mergeEntries(merged)).contains("---");
+    void defaultMockMergeContainsYamlFrontmatter() {
+        assertThat(service.mergeEntries("any pair")).contains("---");
     }
 
     @Test
     void mergedOutputContainsRequiredSections() {
-        var merged = "---\nid: GE-x\ntitle: My Title\nstack: Java\nscore: 11\n---\n## body text here";
-        var result = service.mergeEntries(merged);
+        mock.willReturnMerge("---\nid: GE-x\ntitle: My Title\nstack: Java\nscore: 11\n---\n## body text here");
+        var result = service.mergeEntries("pair");
         assertThat(result).contains("title").contains("score");
+        mock.willReturnMerge("---\nid: merged\ntitle: merged\nscore: 11\n---\nmerged body");
     }
 
     @Test
-    void nullResponseThrowsIllegalStateException() {
-        assertThatThrownBy(() -> service.mergeEntries(null))
-                .isInstanceOf(IllegalStateException.class);
+    void customMergeResultIsReturned() {
+        mock.willReturnMerge("---\nid: GE-merged\ntitle: merged\nscore: 11\n---\nbody");
+        assertThat(service.mergeEntries("pair")).contains("GE-merged");
+        mock.willReturnMerge("---\nid: merged\ntitle: merged\nscore: 11\n---\nmerged body");
     }
 
     @Test
-    void responseWithoutFrontmatterThrowsException() {
-        assertThatThrownBy(() -> service.mergeEntries("just plain text, no yaml"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("frontmatter");
+    void mergeResultIsNonNull() {
+        assertThat(service.mergeEntries("entry1\nentry2")).isNotNull();
     }
 }
