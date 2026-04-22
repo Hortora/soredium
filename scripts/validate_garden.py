@@ -274,7 +274,11 @@ def strip_code_fences(content: str) -> str:
 
 
 def scan_garden_entry_ids() -> dict[str, list[str]]:
-    """Scan all garden files (not submissions) for **ID:** GE-XXXX.
+    """Scan all garden files (not submissions) for GE-IDs.
+
+    Accepts both formats:
+    - Legacy body line:   **ID:** GE-0031
+    - YAML frontmatter:  id: GE-20260415-5a9a11
 
     Strips fenced code blocks first so that GE-IDs used as examples inside
     code snippets are not counted as real entry IDs.
@@ -285,10 +289,21 @@ def scan_garden_entry_ids() -> dict[str, list[str]]:
             continue
         if path.name in ("GARDEN.md", "CHECKED.md", "DISCARDED.md"):
             continue
-        content = strip_code_fences(path.read_text())
+        raw = path.read_text()
+        rel = str(path.relative_to(GARDEN_ROOT))
+        # YAML frontmatter: id: GE-YYYYMMDD-xxxxxx
+        if raw.startswith('---'):
+            fm_end = raw.find('\n---', 3)
+            if fm_end > 0:
+                fm = raw[3:fm_end]
+                m = re.search(rf'^id:\s*({GE_ID_ANY})', fm, re.MULTILINE)
+                if m:
+                    all_ids.setdefault(m.group(1), []).append(rel)
+                    continue  # found via frontmatter, skip body scan for this file
+        # Legacy body line: **ID:** GE-NNNN
+        content = strip_code_fences(raw)
         for m in re.finditer(rf'^\*\*ID:\*\*\s+({GE_ID_ANY})', content, re.MULTILINE):
-            ge_id = m.group(1)
-            all_ids.setdefault(ge_id, []).append(str(path.relative_to(GARDEN_ROOT)))
+            all_ids.setdefault(m.group(1), []).append(rel)
     return all_ids
 
 
