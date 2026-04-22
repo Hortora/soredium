@@ -314,18 +314,13 @@ Detect the garden's remote:
 git -C ${HORTORA_GARDEN:-~/.hortora/garden} remote get-url origin 2>/dev/null
 ```
 
-**If the URL contains `github.com`** → create a branch and open a PR:
+**If the URL contains `github.com`** → commit directly to main and push:
 ```bash
 GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
-git -C $GARDEN checkout -b submit/$GE_ID
 git -C $GARDEN add <domain>/$GE_ID.md
 git -C $GARDEN commit -m "submit($GE_ID): <slug>"
-git -C $GARDEN push origin submit/$GE_ID
-gh pr create --repo Hortora/garden \
-  --title "submit($GE_ID): <slug>" \
-  --label "garden-submission" \
-  --head submit/$GE_ID
-git -C $GARDEN checkout main
+git -C $GARDEN pull --rebase origin main
+git -C $GARDEN push origin main
 ```
 
 **If no GitHub remote** → commit directly to main:
@@ -351,7 +346,7 @@ If confirmed, stage and commit them in a single commit alongside any GARDEN.md i
 
 **Step 10 — Report back**
 
-Tell the user the entry path and (for GitHub gardens) the PR URL.
+Tell the user the entry path and confirm it was pushed to main.
 
 ---
 
@@ -423,23 +418,13 @@ Detect the garden's remote:
 git -C ${HORTORA_GARDEN:-~/.hortora/garden} remote get-url origin 2>/dev/null
 ```
 
-**GitHub remote** — single branch + single PR for all entries:
+**GitHub remote** — single commit to main and push:
 ```bash
 GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
-BRANCH="sweep/$(date +%Y%m%d)-batch"
-git -C $GARDEN checkout -b $BRANCH
 git -C $GARDEN add <all written entry files>
 git -C $GARDEN commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
-git -C $GARDEN push origin $BRANCH
-gh pr create --repo Hortora/garden \
-  --title "sweep: <N> entries" \
-  --label "garden-submission" \
-  --head $BRANCH \
-  --body "Batch sweep submission:
-- submit(<GE-ID-1>): <slug1>
-- submit(<GE-ID-2>): <slug2>
-..."
-git -C $GARDEN checkout main
+git -C $GARDEN pull --rebase origin main
+git -C $GARDEN push origin main
 ```
 
 **No GitHub remote** — single commit to main:
