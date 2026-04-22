@@ -10,6 +10,24 @@ def fingerprint_to_vector(fp: dict) -> list[float]:
     return [float(fp.get(key, 0.0)) for key in FEATURE_KEYS]
 
 
+def _to_ratio_fp(fp: dict) -> dict:
+    """Normalise raw counts to per-file ratios so project size doesn't dominate similarity.
+
+    Without this, small projects (6–50 files) collapse to near-zero on every raw-count
+    feature after min-max normalisation, making any two small projects appear ~100% similar
+    regardless of actual structure.
+    """
+    file_count = max(fp.get('file_count', 1), 1)
+    return {
+        'interface_count': fp.get('interface_count', 0) / file_count,
+        'abstraction_depth': fp.get('abstraction_depth', 0.0),  # already a ratio
+        'injection_points': fp.get('injection_points', 0) / file_count,
+        'extension_signatures': fp.get('extension_signatures', 0) / file_count,
+        'file_count': 1.0,  # absorbed into ratios; kept for vector shape consistency
+        'spi_patterns': fp.get('spi_patterns', 0) / file_count,
+    }
+
+
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     mag_a = math.sqrt(sum(x * x for x in a))
@@ -46,7 +64,7 @@ def cluster_projects(
     if len(names) < 2:
         return []
 
-    vectors = {name: fingerprint_to_vector(fingerprints[name]) for name in names}
+    vectors = {name: fingerprint_to_vector(_to_ratio_fp(fingerprints[name])) for name in names}
 
     # Greedy single-linkage clustering
     visited: set[str] = set()

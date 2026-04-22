@@ -21,6 +21,14 @@ class PipelineConfig:
     similarity_threshold: float = 0.75
 
 
+def _is_shallow(repo: Path) -> bool:
+    result = subprocess.run(
+        ['git', '-C', str(repo), 'rev-parse', '--is-shallow-repository'],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() == 'true'
+
+
 def _head_commit(repo: Path) -> str:
     result = subprocess.run(
         ['git', '-C', str(repo), 'rev-parse', 'HEAD'],
@@ -60,6 +68,10 @@ def run_pipeline(config: PipelineConfig) -> CandidateReport:
         if root is None:
             continue
         repo = Path(root)
+        if _is_shallow(repo):
+            print(f"[pipeline] {name}: shallow clone — delta analysis skipped. "
+                  f"Re-clone with --filter=blob:none for full tag history.")
+            continue
         tags = get_major_version_tags(repo)
         if len(tags) < 2:
             continue
