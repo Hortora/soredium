@@ -84,8 +84,8 @@ public class FeatureExtractor {
         String text;
         try {
             text = Files.readString(path, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return; // bad encoding or unreadable — skip silently
+        } catch (IOException e) {
+            return; // unreadable — skip silently
         }
 
         c.interfaceCount     += countMatches(INTERFACE_OR_ABSTRACT, text);
