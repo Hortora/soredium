@@ -75,7 +75,7 @@ class TestGardenAgentInstall(unittest.TestCase):
             self.assertTrue(hook.stat().st_mode & 0o111, "post-commit hook not executable")
             content = hook.read_text()
             self.assertIn('garden-agent.sh', content)
-            self.assertIn('GE-', content)
+            self.assertIn('dedupe:', content)
 
     def test_post_commit_hook_idempotent(self):
         with make_garden() as garden:
