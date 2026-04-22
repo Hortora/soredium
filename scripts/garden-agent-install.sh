@@ -20,10 +20,18 @@ if [[ -f "$AGENT_SH" ]]; then
 else
     cat > "$AGENT_SH" << 'AGENT_EOF'
 #!/usr/bin/env bash
-# garden-agent.sh — invoke Claude dedup agent (hook or manual mode).
+# garden-agent.sh — invoke Claude harvest+dedup agent (hook or manual mode).
 GARDEN_ROOT="${HORTORA_GARDEN:-$HOME/.hortora/garden}"
 LOG="$GARDEN_ROOT/garden-agent.log"
+LOCK="$GARDEN_ROOT/garden-agent.lock"
 TASK="You are the Hortora garden deduplication agent. Run the dedup sweep as described in CLAUDE.md."
+
+# Acquire lockfile — prevent concurrent runs (mkdir is atomic).
+if ! mkdir "$LOCK" 2>/dev/null; then
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] garden-agent already running, skipping" >> "$LOG"
+    exit 0
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 if [[ "$1" == "--hook" ]] || [[ ! -t 0 ]]; then
     # Rotate log at 1MB, keep last 5
@@ -78,8 +86,12 @@ else
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git diff *)",
+      "Bash(git pull *)",
       "Bash(bash run-scanner.sh *)",
-      "Bash(python3 */validate_garden.py *)"
+      "Bash(python3 */validate_garden.py *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr view *)"
     ],
     "deny": []
   }
@@ -96,8 +108,8 @@ else
     cat > "$CLAUDE_MD" << 'CLAUDE_EOF'
 # Garden Deduplication Agent
 
-You are the Hortora garden deduplication agent. When invoked, run a full
-dedup sweep and commit the results without asking for confirmation.
+You are the Hortora garden deduplication agent. When invoked, merge open forage
+PRs then run a full dedup sweep, committing results without asking for confirmation.
 
 ## Environment
 
@@ -110,6 +122,16 @@ dedup sweep and commit the results without asking for confirmation.
 
 ## Workflow
 
+### Phase 1 — Merge open PRs
+
+1. List open PRs: `gh pr list --state open --json number,title`
+2. For each open PR: `gh pr merge <number> --squash --delete-branch`
+3. Pull merged commits: `git pull`
+
+Skip to Phase 2 if no open PRs.
+
+### Phase 2 — Dedup sweep
+
 1. Run `bash run-scanner.sh . --top 50` to get unchecked pairs, highest score first
 2. For each pair, read both entries: `git show HEAD:<domain>/<id>.md | head -35`
 3. Classify and act:
@@ -121,6 +143,8 @@ dedup sweep and commit the results without asking for confirmation.
 | **Duplicate** | Apply duplicate rules below |
 
 4. Commit: `git add -A && git commit -m "dedupe: sweep N pairs — M related, K duplicates resolved"`
+
+Skip the commit if no pairs were processed.
 
 ## Duplicate Rules
 
@@ -145,16 +169,15 @@ if [[ -f "$HOOK" ]] && grep -q "$SENTINEL" "$HOOK"; then
 else
     cat >> "$HOOK" << 'HOOK_EOF'
 # garden-agent: auto-installed
-# Fire garden dedup agent when a commit adds new GE-*.md entries.
+# Fire garden agent after any non-dedupe commit — merges open PRs then dedupes.
 _GARDEN_ROOT="$(git rev-parse --show-toplevel)"
 _LOG="$_GARDEN_ROOT/garden-agent.log"
-_new_entries=$(git diff --name-only HEAD~1 HEAD 2>/dev/null \
-  | grep -E "^[^/]+/GE-[0-9]{8}-[0-9a-f]{6}\.md$")
-if [[ -n "$_new_entries" ]]; then
-    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] new entries detected, starting agent:" >> "$_LOG"
-    echo "$_new_entries" | sed 's/^/  /' >> "$_LOG"
-    nohup "$_GARDEN_ROOT/garden-agent.sh" --hook >> "$_LOG" 2>&1 &
+_commit_msg=$(git log -1 --format="%s")
+if echo "$_commit_msg" | grep -qE "^dedupe:"; then
+    exit 0
 fi
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] commit detected, starting agent" >> "$_LOG"
+nohup "$_GARDEN_ROOT/garden-agent.sh" --hook >> "$_LOG" 2>&1 &
 HOOK_EOF
     chmod +x "$HOOK"
     echo "$PASS  .git/hooks/post-commit     installed"
@@ -165,6 +188,6 @@ GITIGNORE="$GARDEN/.gitignore"
 if [[ -f "$GITIGNORE" ]] && grep -q "garden-agent.log" "$GITIGNORE"; then
     echo "$SKIP  .gitignore                 already present"
 else
-    printf "garden-agent.log\ngarden-agent.log.*\n" >> "$GITIGNORE"
+    printf "garden-agent.log\ngarden-agent.log.*\ngarden-agent.lock\n" >> "$GITIGNORE"
     echo "$PASS  .gitignore                 updated"
 fi
