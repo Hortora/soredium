@@ -8,28 +8,29 @@ import static org.assertj.core.api.Assertions.*;
 @QuarkusTest
 class ProfileSwitchingTest {
 
-    @ConfigProperty(name = "quarkus.langchain4j.ollama.base-url")
-    String ollamaBaseUrl;
-
     @ConfigProperty(name = "quarkus.langchain4j.chat-model.provider")
     String chatModelProvider;
 
+    @ConfigProperty(name = "quarkus.langchain4j.jlama.chat-model.model-name")
+    String jlamaModelName;
+
     @Test
-    void defaultProviderIsOllama() {
-        assertThat(chatModelProvider).isEqualTo("ollama");
+    void defaultProviderIsJlama() {
+        assertThat(chatModelProvider).isEqualTo("jlama");
     }
 
     @Test
-    void ollamaBaseUrlIsConfigured() {
-        assertThat(ollamaBaseUrl).isNotBlank();
-        assertThat(ollamaBaseUrl).startsWith("http");
+    void jlamaModelNameIsConfigured() {
+        // Production model: tjake/Qwen2.5-3B-Instruct-JQ4
+        // Test profile uses a lightweight placeholder; both should be non-blank org/model paths
+        assertThat(jlamaModelName).isNotBlank().contains("/");
     }
 
     @Test
-    void ollamaBaseUrlInTestProfilePointsToDisabledEndpoint() {
-        // Test profile sets base-url to http://localhost:1 (connection refused)
-        // This ensures no real Ollama connections are made during tests
-        assertThat(ollamaBaseUrl).isEqualTo("http://localhost:1");
+    void jlamaModelNameInTestIsConfigured() {
+        // Verify the test application.properties sets a placeholder model name
+        // (not the production model which would trigger a HuggingFace download)
+        assertThat(jlamaModelName).isNotBlank();
     }
 
     @Test

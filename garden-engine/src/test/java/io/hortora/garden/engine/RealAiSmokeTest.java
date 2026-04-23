@@ -14,14 +14,15 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * Real AI inference tests — automatically skipped when Ollama is not running at localhost:11434.
+ * Real AI inference tests — automatically skipped when the JLama model is not cached locally.
  * Calls Ollama directly via HTTP (no Quarkus CDI) to avoid MockReasoningService interception.
  *
- * To run: ensure Ollama is running, then:
- *   mvn test -Dgroups=ai-smoke -Dtest=RealAiSmokeTest
+ * JLama model auto-downloads on first inference; tests skip if model not in ~/.jlama/
+ * To cache: run any inference once (JLama downloads automatically on first use).
  *
  * These tests are excluded from the default mvn test run (they require real LLM
- * inference which is too slow for CI). Run manually when validating Ollama integration.
+ * inference which is too slow for CI). Run manually when validating AI integration:
+ *   mvn test -Dgroups=ai-smoke -Dtest=RealAiSmokeTest
  */
 @Tag("ai-smoke")
 class RealAiSmokeTest {
@@ -36,7 +37,7 @@ class RealAiSmokeTest {
         .build();
 
     @Test
-    @RequiresOllama
+    @RequiresJlamaModel
     void qwenRespondsToPatternNamingPrompt() throws Exception {
         var context = PatternNamingService.buildClusterContext(
             List.of("quarkus", "hibernate-orm"),
@@ -70,7 +71,7 @@ class RealAiSmokeTest {
     }
 
     @Test
-    @RequiresOllama
+    @RequiresJlamaModel
     void qwenClassifiesDuplicateEntriesCorrectly() throws Exception {
         var entries = TestFixtures.duplicateEntryPair();
         var prompt = """
@@ -94,7 +95,7 @@ class RealAiSmokeTest {
     }
 
     @Test
-    @RequiresOllama
+    @RequiresJlamaModel
     void qwenClassifiesDistinctEntriesCorrectly() throws Exception {
         var entries = TestFixtures.distinctEntryPair();
         var prompt = """

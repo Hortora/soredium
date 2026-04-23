@@ -67,6 +67,10 @@
     <!-- Langchain4j AI service wiring -->
     <dependency>
       <groupId>io.quarkiverse.langchain4j</groupId>
+      <artifactId>quarkus-langchain4j-jlama</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkiverse.langchain4j</groupId>
       <artifactId>quarkus-langchain4j-ollama</artifactId>
     </dependency>
     <dependency>
