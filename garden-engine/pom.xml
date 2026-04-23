@@ -64,7 +64,7 @@
       <artifactId>jackson-dataformat-yaml</artifactId>
     </dependency>
 
-    <!-- Langchain4j AI service wiring -->
+    <!-- Langchain4j AI service wiring (1.9.1 via BOM) -->
     <dependency>
       <groupId>io.quarkiverse.langchain4j</groupId>
       <artifactId>quarkus-langchain4j-jlama</artifactId>
