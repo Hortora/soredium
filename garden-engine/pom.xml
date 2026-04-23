@@ -120,6 +120,9 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.5.2</version>
         <configuration>
+          <!-- Exclude ai-smoke tests by default — they require real LLM inference.
+               Run with: mvn test -Dgroups=ai-smoke -Dtest=RealAiSmokeTest -->
+          <excludedGroups>ai-smoke</excludedGroups>
           <systemPropertyVariables>
             <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
             <maven.home>${maven.home}</maven.home>
