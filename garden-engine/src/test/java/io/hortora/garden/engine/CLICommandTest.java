@@ -70,6 +70,19 @@ class CLICommandTest {
         assertThat(result.getOutput()).contains("Agreement rate");
     }
 
+    @Test
+    @Launch({"qe", "--matrix", "--tasks=dedup", "--sample=1"})
+    void qeMatrixFlagProducesComparisonReport(LaunchResult result) {
+        assertThat(result.exitCode()).isEqualTo(0);
+        assertThat(result.getOutput()).contains("Matrix").contains("Model");
+    }
+
+    @Test
+    @Launch({"qe", "--matrix"})
+    void qeMatrixWithDefaultsRunsCleanly(LaunchResult result) {
+        assertThat(result.exitCode()).isEqualTo(0);
+    }
+
     // --- deferred tests ---
 
     @Test
