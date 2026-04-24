@@ -33,6 +33,9 @@ class PipelineQuarkusTest {
     @Inject
     FingerprintIndexer indexer;
 
+    @Inject
+    SemanticDeduplicator deduplicator;
+
     // --- CDI injection happy path ---
 
     @Test
@@ -154,14 +157,40 @@ class PipelineQuarkusTest {
     // --- Phase 4 items ---
 
     @Test
-    @Disabled("Phase 4 — semantic harvest pipeline")
     void harvestCommandWithTwoDuplicateEntries() {
-        // Will run full harvest cycle against a real Qdrant collection
+        mockReasoning.willReturnDecision(new DedupeDecision(
+            DedupeDecision.Classification.DUPLICATE, "same topic", "GE-001", "fix from GE-002"));
+        mockReasoning.willReturnMerge("---\nid: GE-merged\ntitle: Merged\nscore: 11\n---\nbody");
+
+        var entries = TestFixtures.duplicateEntryPair();
+        var result = deduplicator.process(entries[0], entries[1]);
+
+        assertThat(result.classification()).isEqualTo(DedupeDecision.Classification.DUPLICATE);
+        assertThat(result.mergedEntry()).isNotNull();
+        assertThat(result.mergedEntry()).contains("---");
     }
 
     @Test
-    @Disabled("Phase 4 — semantic harvest pipeline")
     void mineToHarvestQdrantContainsMergedEntry() {
-        // Will verify end-to-end mine → harvest → Qdrant merged entry round-trip
+        mockReasoning.willReturnDecision(new DedupeDecision(
+            DedupeDecision.Classification.RELATED, "same area", null, null));
+
+        var entries = TestFixtures.relatedEntryPair();
+        var result = deduplicator.process(entries[0], entries[1]);
+
+        assertThat(result.classification()).isEqualTo(DedupeDecision.Classification.RELATED);
+        assertThat(result.mergedEntry()).isNull(); // no merge for RELATED
+    }
+
+    @Test
+    void harvestDistinctEntriesProducesNoMerge() {
+        mockReasoning.willReturnDecision(new DedupeDecision(
+            DedupeDecision.Classification.DISTINCT, "unrelated", null, null));
+
+        var entries = TestFixtures.distinctEntryPair();
+        var result = deduplicator.process(entries[0], entries[1]);
+
+        assertThat(result.classification()).isEqualTo(DedupeDecision.Classification.DISTINCT);
+        assertThat(result.mergedEntry()).isNull();
     }
 }
