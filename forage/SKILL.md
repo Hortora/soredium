@@ -6,6 +6,23 @@ description: >
   workarounds found only via multiple failed approaches, techniques a skilled developer wouldn't
   naturally reach for. Session-time operations: CAPTURE (specific entry), SWEEP (systematic session
   scan), SEARCH (retrieve entries), REVISE (enrich existing entry). For DEDUPE use harvest.
+required-permissions:
+  allow:
+    - "Bash(git -C * add *)"
+    - "Bash(git -C * commit *)"
+    - "Bash(git -C * push *)"
+    - "Bash(git -C * pull *)"
+    - "Bash(git -C * rebase *)"
+    - "Bash(git -C * grep *)"
+    - "Bash(git -C * ls-files *)"
+    - "Bash(git -C * remote *)"
+    - "Bash(git -C * show *)"
+    - "Bash(git -C * log *)"
+    - "Bash(git -C * status *)"
+    - "Bash(git -C * diff *)"
+    - "Bash(git -C * cat-file *)"
+    - "Bash(python3 */validate_pr.py *)"
+    - "Bash(python3 */validate_garden.py *)"
 ---
 
 # Forage — Session-Time Garden Operations
