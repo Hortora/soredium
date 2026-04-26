@@ -326,25 +326,27 @@ Fix any CRITICAL issues before continuing.
 
 **Step 8 — Deliver**
 
-Detect the garden's remote:
+**Resolve the garden path first** — evaluate `HORTORA_GARDEN` env var once, fall back to
+`~/.hortora/garden`. Use the **concrete resolved path** in every subsequent git command.
+Never assign `GARDEN=...` inside a Bash block — that triggers shell expansion prompts.
+
+Detect the garden's remote (replace `/concrete/path` with the resolved path):
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} remote get-url origin 2>/dev/null
+git -C /concrete/path remote get-url origin 2>/dev/null
 ```
 
 **If the URL contains `github.com`** → commit directly to main and push:
 ```bash
-GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
-git -C $GARDEN add <domain>/$GE_ID.md
-git -C $GARDEN commit -m "submit($GE_ID): <slug>"
-git -C $GARDEN pull --rebase origin main
-git -C $GARDEN push origin main
+git -C /concrete/path add <domain>/$GE_ID.md
+git -C /concrete/path commit -m "submit($GE_ID): <slug>"
+git -C /concrete/path pull --rebase origin main
+git -C /concrete/path push origin main
 ```
 
 **If no GitHub remote** → commit directly to main:
 ```bash
-GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
-git -C $GARDEN add <domain>/$GE_ID.md
-git -C $GARDEN commit -m "submit($GE_ID): <slug>"
+git -C /concrete/path add <domain>/$GE_ID.md
+git -C /concrete/path commit -m "submit($GE_ID): <slug>"
 ```
 
 **Step 9 — Check for other untracked entries**
@@ -352,7 +354,7 @@ git -C $GARDEN commit -m "submit($GE_ID): <slug>"
 Before reporting back, scan for any other untracked entry files in the garden:
 
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} ls-files --others --exclude-standard \
+git -C /concrete/path ls-files --others --exclude-standard \
   | grep -E "^[^/]+/GE-[0-9]{8}-[0-9a-f]{6}\.md$"
 ```
 
@@ -430,25 +432,26 @@ Fix any CRITICAL issues before continuing.
 
 **Deliver**
 
+**Resolve the garden path first** (same rule as CAPTURE Step 8 — use the concrete path,
+no shell variable assignment in Bash blocks).
+
 Detect the garden's remote:
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} remote get-url origin 2>/dev/null
+git -C /concrete/path remote get-url origin 2>/dev/null
 ```
 
 **GitHub remote** — single commit to main and push:
 ```bash
-GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
-git -C $GARDEN add <all written entry files>
-git -C $GARDEN commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
-git -C $GARDEN pull --rebase origin main
-git -C $GARDEN push origin main
+git -C /concrete/path add <all written entry files>
+git -C /concrete/path commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
+git -C /concrete/path pull --rebase origin main
+git -C /concrete/path push origin main
 ```
 
 **No GitHub remote** — single commit to main:
 ```bash
-GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
-git -C $GARDEN add <all written entry files>
-git -C $GARDEN commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
+git -C /concrete/path add <all written entry files>
+git -C /concrete/path commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
 ```
 
 **Step 5 — Staleness spot-check (domain-filtered)**
