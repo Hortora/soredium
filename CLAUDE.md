@@ -52,6 +52,9 @@ echo "Y" | python3 scripts/claude-skill sync-local
 # List installed skills
 python3 scripts/claude-skill list
 
+# Install test dependencies (first time, or after adding packages)
+pip install pytest mcp pyyaml sentence-transformers numpy
+
 # Run the test suite
 python3 -m pytest tests/ -v   # 836 tests
 
