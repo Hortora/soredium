@@ -364,7 +364,7 @@ def validate():
             for _e in _s_errors:
                 log_error(f"SCHEMA.md: {_e}")
             for _w in _s_warnings:
-                log_info(f"SCHEMA.md: {_w}")
+                log_warning(f"SCHEMA.md: {_w}")
 
     # 1. Scan garden entry IDs
     entry_ids = scan_garden_entry_ids()

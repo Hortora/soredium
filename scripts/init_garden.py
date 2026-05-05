@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """init_garden.py — Initialize a new Hortora knowledge garden.
 
-Creates GARDEN.md, SCHEMA.md, CHECKED.md, DISCARDED.md, domain directories
+Creates GARDEN.md, SCHEMA.md, garden.db, .gitattributes, domain directories
 with INDEX.md, and .github/workflows/validate_pr.yml.
+Child gardens also get _augment/ for private annotations on parent entries.
 
 Usage:
   init_garden.py <garden_path> --name NAME --description DESC \\
@@ -31,7 +32,7 @@ def create_garden_md(root: Path, name: str, ge_prefix: str) -> None:
         f'# {name}\n\n'
         f'**Last assigned ID:** GE-0000\n'
         f'**Last full DEDUPE sweep:** {TODAY}\n'
-        f'Entries merged since last sweep: 0\n'
+        f'**Entries merged since last sweep:** 0\n'
         f'**Drift threshold:** 10\n'
         f'**Last staleness review:** never\n'
         f'\n## By Technology\n\n---\n\n'
@@ -61,30 +62,6 @@ def create_schema_md(root: Path, name: str, description: str, role: str,
             lines.append(f'  - {url}')
     lines.extend(['---', ''])
     path.write_text('\n'.join(lines), encoding='utf-8')
-
-
-def create_checked_md(root: Path) -> None:
-    path = root / 'CHECKED.md'
-    if path.exists():
-        return
-    path.write_text(
-        '# Garden Duplicate Check Log\n\n'
-        '| Pair | Result | Date | Notes |\n'
-        '|------|--------|------|-------|\n',
-        encoding='utf-8',
-    )
-
-
-def create_discarded_md(root: Path) -> None:
-    path = root / 'DISCARDED.md'
-    if path.exists():
-        return
-    path.write_text(
-        '# Discarded Submissions\n\n'
-        '| Discarded | Conflicts With | Date | Reason |\n'
-        '|-----------|----------------|------|--------|\n',
-        encoding='utf-8',
-    )
 
 
 def create_garden_db(root: Path) -> None:

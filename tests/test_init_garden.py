@@ -9,8 +9,7 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from init_garden import (
-    create_garden_md, create_schema_md, create_checked_md,
-    create_discarded_md, create_garden_db, create_gitattributes,
+    create_garden_md, create_schema_md, create_garden_db, create_gitattributes,
     create_domain, create_ci_workflow, init_garden,
 )
 from validate_schema import parse_schema, validate_schema
@@ -59,7 +58,7 @@ class TestCreateGardenMd(unittest.TestCase):
     def test_drift_counter_starts_at_zero(self):
         create_garden_md(self.root, name='jvm-garden', ge_prefix='JE-')
         content = (self.root / 'GARDEN.md').read_text()
-        self.assertIn('Entries merged since last sweep: 0', content)
+        self.assertIn('**Entries merged since last sweep:** 0', content)
 
     def test_contains_drift_threshold(self):
         create_garden_md(self.root, name='jvm-garden', ge_prefix='JE-')
@@ -143,55 +142,6 @@ class TestCreateSchemaMd(unittest.TestCase):
         create_schema_md(self.root, name='jvm-garden', description='JVM garden',
                          role='canonical', ge_prefix='JE-', domains=['java'])
         self.assertIn('sentinel', p.read_text())
-
-
-class TestCreateCheckedMd(unittest.TestCase):
-
-    def setUp(self):
-        self.tmp = TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_creates_file(self):
-        create_checked_md(self.root)
-        self.assertTrue((self.root / 'CHECKED.md').exists())
-
-    def test_has_table_header(self):
-        create_checked_md(self.root)
-        content = (self.root / 'CHECKED.md').read_text()
-        self.assertIn('| Pair |', content)
-        self.assertIn('| Result |', content)
-
-    def test_no_data_rows(self):
-        create_checked_md(self.root)
-        content = (self.root / 'CHECKED.md').read_text()
-        data_rows = [
-            l for l in content.splitlines()
-            if l.startswith('|') and '---' not in l and 'Pair' not in l
-        ]
-        self.assertEqual(data_rows, [])
-
-
-class TestCreateDiscardedMd(unittest.TestCase):
-
-    def setUp(self):
-        self.tmp = TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_creates_file(self):
-        create_discarded_md(self.root)
-        self.assertTrue((self.root / 'DISCARDED.md').exists())
-
-    def test_has_table_header(self):
-        create_discarded_md(self.root)
-        content = (self.root / 'DISCARDED.md').read_text()
-        self.assertIn('| Discarded |', content)
-        self.assertIn('| Conflicts With |', content)
 
 
 class TestCreateDomain(unittest.TestCase):

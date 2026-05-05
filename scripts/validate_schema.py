@@ -60,6 +60,13 @@ def _parse_frontmatter(fm: str) -> dict:
     return result
 
 
+def validate_description(schema: dict) -> list:
+    description = schema.get('description', '')
+    if not description:
+        return ["'description' is required and must be non-empty"]
+    return []
+
+
 def validate_name(schema: dict) -> list:
     name = schema.get('name', '')
     if not name:
@@ -120,6 +127,7 @@ def validate_schema(schema: dict) -> tuple:
     errors = []
     warnings = []
     errors.extend(validate_name(schema))
+    errors.extend(validate_description(schema))
     errors.extend(validate_role(schema))
     errors.extend(validate_ge_prefix(schema))
     errors.extend(validate_domains(schema))

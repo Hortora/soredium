@@ -20,7 +20,9 @@ The engine for Hortora gardens — validators, CI scripts, GitHub Actions workfl
 | Script | Purpose |
 |--------|---------|
 | `scripts/validate_pr.py` | Validates a single garden entry. Checks required fields, score threshold (≥ 8), prompt injection patterns, Jaccard duplicate scan (≥ 0.4 = warning), vocabulary compliance. Exits 1 on CRITICAL failures. Called by forage before committing. |
-| `scripts/validate_garden.py` | Full garden validation — structural checks, entry format, index consistency (GARDEN.md vs actual files). Recognises both legacy `**ID:**` body format and current YAML `id:` frontmatter. |
+| `scripts/validate_schema.py` | Validates a garden's `SCHEMA.md` federation config — role, ge_prefix, domains, upstream rules. Exits 0 (valid) or 1 (invalid). |
+| `scripts/init_garden.py` | Initializes a new canonical/child/peer garden — creates `GARDEN.md`, `SCHEMA.md`, `garden.db`, domain directories, CI workflow. Idempotent. |
+| `scripts/validate_garden.py` | Full garden validation — structural checks, entry format, index consistency (GARDEN.md vs actual files). Also validates `SCHEMA.md` when present. |
 | `scripts/dedupe_scanner.py` | Scans all entry pairs for semantic similarity. Outputs ranked unchecked pairs. Records classifications (distinct / related / duplicate-discarded) in `CHECKED.md`. |
 | `scripts/garden-agent-install.sh` | Installs the autonomous garden agent into a local garden clone. Idempotent — safe to re-run. See [Garden Agent](#garden-agent) below. |
 | `scripts/garden-setup.sh` | One-time sparse blobless clone setup. Index files materialised; entry bodies fetched on demand via `git cat-file`. |

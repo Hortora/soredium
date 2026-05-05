@@ -9,8 +9,8 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from validate_schema import (
-    parse_schema, validate_name, validate_role, validate_ge_prefix,
-    validate_domains, validate_upstream, validate_schema,
+    parse_schema, validate_name, validate_description, validate_role,
+    validate_ge_prefix, validate_domains, validate_upstream, validate_schema,
 )
 
 VALIDATOR = Path(__file__).parent.parent / 'scripts' / 'validate_schema.py'
@@ -109,6 +109,21 @@ class TestParseSchema(unittest.TestCase):
             'https://github.com/Hortora/jvm-garden',
             'https://github.com/Hortora/tools-garden',
         ])
+
+
+class TestValidateDescription(unittest.TestCase):
+
+    def test_valid_description(self):
+        self.assertEqual(validate_description({'description': 'JVM ecosystem garden'}), [])
+
+    def test_missing_description(self):
+        errors = validate_description({})
+        self.assertEqual(len(errors), 1)
+        self.assertIn('description', errors[0])
+
+    def test_empty_description(self):
+        errors = validate_description({'description': ''})
+        self.assertEqual(len(errors), 1)
 
 
 class TestValidateName(unittest.TestCase):

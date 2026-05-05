@@ -9,7 +9,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 **Name:** soredium
 **GitHub:** [Hortora/soredium](https://github.com/Hortora/soredium)
 **Marketplace:** `/plugin marketplace add github.com/Hortora/soredium`
-**Status:** Phase 4 complete — `forage`, `harvest` deployed; CI live; ecosystem mining pipeline (registry, extractor, clustering, delta analysis, validation gate) shipped.
+**Status:** Phase 5 complete — `forage`, `harvest` deployed; CI live; ecosystem mining pipeline shipped; `validate_schema.py` + `init_garden.py` + garden.db migration complete.
 
 ## Repository Purpose
 
@@ -53,7 +53,7 @@ echo "Y" | python3 scripts/claude-skill sync-local
 python3 scripts/claude-skill list
 
 # Run the test suite
-python3 -m pytest tests/ -v   # 826 tests
+python3 -m pytest tests/ -v   # 836 tests
 
 # Validate a garden entry locally (same as CI)
 python3 scripts/validate_pr.py <entry_file> ${HORTORA_GARDEN:-~/.hortora/garden}
@@ -67,6 +67,12 @@ bash scripts/garden-setup.sh
 # Ecosystem mining pipeline
 python3 scripts/run_pipeline.py          # orchestrate: registry → extract → cluster → delta → report
 python3 scripts/validate_candidates.py   # human validation gate (accept/reject/skip candidates)
+
+# Ecosystem tooling (Phase 5)
+python3 scripts/validate_schema.py <garden_path>   # validate SCHEMA.md federation config
+python3 scripts/init_garden.py <path> --name NAME --description DESC \
+  --role canonical|child|peer --ge-prefix PREFIX --domains d1 d2 [--upstream URL]
+python3 scripts/validate_garden.py <garden_path>   # now also checks SCHEMA.md when present
 
 # Registry management
 # scripts/project_registry.py    — CRUD for monitored projects (registry/projects.yaml)
