@@ -125,7 +125,7 @@ def make_empty_garden(tmp: Path) -> Path:
 
 def _server_params(garden: Path) -> StdioServerParameters:
     return StdioServerParameters(
-        command='python3',
+        command=sys.executable,
         args=[str(SERVER)],
         env={**os.environ, 'HORTORA_GARDEN': str(garden)},
     )
