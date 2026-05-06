@@ -735,8 +735,39 @@ to customise it later, they can edit the section directly.
 ```bash
 cat > "$BASE/.gitignore" << 'EOF'
 .DS_Store
+proj
 EOF
 ```
+
+### Step 7b — Create bidirectional navigation symlinks
+
+Create a `proj` symlink in the workspace pointing to the project, and a `wksp`
+symlink in the project pointing to the workspace. These let you `cd proj` or
+`cd wksp` to jump between the two without remembering the full path.
+
+```bash
+# workspace/proj → project directory
+ln -sf "<project-path>" "$BASE/proj"
+
+# project/wksp → workspace directory
+ln -sf "$BASE" "<project-path>/wksp"
+```
+
+Add `wksp` to the project `.gitignore` so the symlink is never accidentally
+staged. Use the committed `.gitignore`, not `.git/info/exclude`, so the
+convention is visible to anyone working on the repo:
+
+```bash
+# Add wksp to project .gitignore (append if not already present)
+grep -q "^wksp$" "<project-path>/.gitignore" 2>/dev/null || echo "wksp" >> "<project-path>/.gitignore"
+
+# Stage and commit .gitignore update
+git -C "<project-path>" add .gitignore
+git -C "<project-path>" diff --cached --quiet || git -C "<project-path>" commit -m "chore: ignore wksp symlink"
+```
+
+`proj` is already covered by the workspace `.gitignore` written in Step 7.
+Neither symlink is tracked by git in either repo.
 
 ### Step 8 — Initialise git and push
 
@@ -872,8 +903,12 @@ more recent file as `workspace/HANDOFF.md` and discard the older one.
 > 1. Open Claude in `~/claude/<privacy>/<project>/`
 > 2. CLAUDE.md will instruct Claude to run `add-dir` on the project automatically
 >
-> **Symlink status:** CLAUDE.md in the project points to this workspace CLAUDE.md.
-> Opening Claude in the project by mistake will still load full config.
+> **Navigation symlinks:**
+> - In workspace: `proj/` → project directory (`cd proj` to jump to the project)
+> - In project: `wksp/` → workspace directory (`cd wksp` to jump to the workspace)
+>
+> **CLAUDE.md:** workspace CLAUDE.md symlinks to the project's committed CLAUDE.md.
+> Opening Claude in either location loads the same config.
 >
 > **Tip:** This skill is large and one-off. Run `/clear` now to free up context
 > before starting real work.
@@ -948,7 +983,10 @@ If n → skip. Do not ask again this session.
 - [ ] `HANDOFF.md` and `IDEAS.md` exist as stubs
 - [ ] `snapshots/INDEX.md`, `adr/INDEX.md`, `blog/INDEX.md` exist
 - [ ] `specs/` and `plans/` directories exist
-- [ ] `.gitignore` exists
+- [ ] `.gitignore` exists and includes `proj`
+- [ ] `proj` symlink in workspace → project directory
+- [ ] `wksp` symlink in project → workspace directory
+- [ ] `wksp` added to project `.gitignore` (committed)
 - [ ] CLAUDE.md handled: migrated (symlink + .git/info/exclude) or left committed per user choice
 - [ ] `## Project Artifacts` section written to project CLAUDE.md (Step 6b): derived from project-knowledge paths; skipped if section already present
 - [ ] Claude session history and memory migrated to workspace-keyed path (`~/.claude/projects/`)
