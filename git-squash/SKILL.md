@@ -433,17 +433,24 @@ Read all commit messages in the group (subjects **and** bodies). Ask: does the
 KEEP subject line fully describe what this group represents after absorption?
 
 Assessment logic:
-1. Identify what meaningful context absorbed commits contribute — not noise (Javadoc,
-   style, CI retrigger, stale refs), but real capabilities wired in, constraints
-   surfaced, structural changes made, or approaches documented in commit bodies.
-2. If absorbed commits add context not captured in the KEEP subject → **synthesize
-   an enhanced subject** that incorporates it. Keep it concise.
-3. If the KEEP subject genuinely covers the whole group → write
+1. If absorbed commits add meaningful structural context not in the KEEP subject
+   (rename sweep absorbing source moves + CI fixes, MERGE of two capability halves)
+   → synthesize an enhanced subject. **The result must be richer than either message
+   alone — not concatenation.** One coherent thought, not two stapled with a semicolon.
+2. If the KEEP subject genuinely covers the whole group → write
    `*(message adequate — unchanged)*` to confirm the assessment happened.
-4. **Never silently echo the original KEEP message** in the Curated result column.
-   Either an enhanced subject or an explicit adequacy assessment — nothing else.
+3. **Never silently echo the original KEEP message** in the Curated result column.
 
-**Plain SQUASH group:**
+**When the curated message differs from the original — Final message line:**
+Surface the enhanced subject as a `**Final message:**` line above the table so it
+isn't truncated by the table cell. The KEEP row then says `*(see Final message above)*`.
+
+**Body snippets from absorbed commits:**
+Non-trivial body content (rationale, constraints, approach notes) belongs as a
+`📝` annotation line immediately after its table row — NOT inside the Curated result
+cell. This keeps the cell clean and the body visible for review.
+
+**Plain SQUASH group (message adequate):**
 ```markdown
 ## <semantic group title>
 *Compaction group — <N> commits → 1*
@@ -451,25 +458,35 @@ Assessment logic:
 | Commit | Action | Curated result |
 |--------|--------|----------------|
 | `<sha>` <KEEP message> | ✅ KEEP | *(message adequate — unchanged)* |
-| `<sha>` <absorbed message> | 🔽 SQUASH ↑ | *(absorbed — <reason>; body: <note if non-trivial body>)* |
+| `<sha>` <absorbed message> | 🔽 SQUASH ↑ | *(absorbed — <reason>)* |
+📝 *body: <condensed body if non-trivial>*
 
 > **Result:** 1 commit.
 ```
 
-Or with enhancement:
+**SQUASH group with enhanced subject (Final message above table):**
 ```markdown
-| `<sha>` <KEEP message> | ✅ KEEP | `<enhanced subject incorporating absorbed context>` |
-| `<sha>` <absorbed message> | 🔽 SQUASH ↑ | *(absorbed — <reason>; context reflected in curated subject)* |
+## <semantic group title>
+*Compaction group — <N> commits → 1*
+**Final message:** `<synthesized subject — one coherent thought, richer than any individual message>`
+
+| Commit | Action | Curated result |
+|--------|--------|----------------|
+| `<sha>` <KEEP message> | ✅ KEEP | *(see Final message above)* |
+| `<sha>` <absorbed message> | 🔽 SQUASH ↑ | *(absorbed — <reason>; context reflected in Final message)* |
+
+> **Result:** 1 commit.
 ```
 
 **MERGE group:**
 ```markdown
 ## <semantic group title>
 *Compaction group — <N> commits → 1*
+**Final message:** `<unified subject — combines both messages, richer than either alone>`
 
 | Commit | Action | Curated result |
 |--------|--------|----------------|
-| `<sha>` <KEEP message> | ✅ KEEP | `<unified subject — combines both messages, richer than either alone>` |
+| `<sha>` <KEEP message> | ✅ KEEP | *(see Final message above)* |
 | `<sha>` <merged message> | 🔀 MERGE ↑ | *(unified — <what combining adds that neither message alone captured>)* |
 
 > **Result:** 1 commit.
