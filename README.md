@@ -14,6 +14,7 @@ The engine for Hortora gardens — validators, CI scripts, GitHub Actions workfl
 |-------|---------|
 | `forage` | Session-time capture, search, and retrieval. CAPTURE writes the entry, validates locally, commits, and pushes directly to main. SWEEP scans a session for all three entry types (gotchas, techniques, undocumented) and delivers as a single batch commit. SEARCH uses `git grep` for fast on-demand retrieval. REVISE enriches an existing entry in place. |
 | `harvest` | Dedicated maintenance sessions. DEDUPE sweeps the full garden for near-duplicates. REVIEW surfaces stale entries overdue for a freshness check. |
+| `protocol` | Session-time operations for project-level protocol files (`docs/protocols/`). CAPTURE scaffolds a new protocol entry with YAML frontmatter. SWEEP scans a session for rules worth formalising. SEARCH finds protocols by keyword. HEALTH validates schema completeness and ref integrity. DEEP-SCAN stubbed until audits complete. |
 
 ### Scripts
 
