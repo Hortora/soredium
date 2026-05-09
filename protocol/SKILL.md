@@ -11,15 +11,51 @@ description: >
 
 # Protocol — Project-Level Rule Operations
 
-Project protocols are the authoritative, formalized layer of rules and constraints that
-apply within a specific project. They live in `docs/protocols/` and use YAML frontmatter
-for machine-readability and RAG retrieval.
+## What Protocols Are
 
-Three things protocols are NOT:
+Protocols capture the architectural guidance, design patterns, and conventions that keep
+the platform coherent and consistent. Their purpose is platform consolidation: maximising
+modularity by enforcing clear boundaries between capabilities, minimising overlap by
+establishing canonical ways to solve recurring problems, and preventing duplication of
+code and functionality across modules. Without protocols, each session — human or LLM —
+risks making locally reasonable choices that quietly diverge from the platform's
+established patterns, eroding the consistency that makes the codebase navigable and
+predictable. A protocol answers the question "how do we do this consistently across
+the platform?" — not "how do I avoid this library gotcha?"
+
+## Development Posture
+
+Protocols are hypotheses about what keeps the platform coherent, not permanent law.
+Always test them against the problem at hand — if a protocol doesn't fit, update it
+and record why.
+
+When developing within a platform that has protocols, actively pursue these sub-goals:
+
+- **Consolidate** — when similar code exists across modules, consolidate it. Don't
+  accept duplication as a given; find the right shared abstraction and move it there.
+  Creating a new module or SPI to own a shared capability is the right call when no
+  existing module is the natural owner.
+- **Clean APIs and abstractions** — prioritise well-designed interfaces over expedient
+  ones. A clean API is worth the extra module. If an existing abstraction is the wrong
+  shape for the problem, improve it rather than working around it.
+- **Readability and debuggability** — code should be easy to read, follow, and debug.
+  Rewriting a method or class to improve clarity is always a valid choice when the
+  problem justifies it — isolate it in its own commit rather than bundling it with
+  the functional change. The codebase is a shared reasoning surface for both humans
+  and LLMs; comprehensibility is a first-class concern.
+
+These sub-goals extend — and do not conflict with — the java-dev coding standards.
+java-dev governs how to write correct Java; these govern what the platform should
+look like.
+
+## What Protocols Are Not
+
 - **Not a garden entry** — protocols are project-specific rules; universal technical
   knowledge (silent failures, undocumented API behaviour) belongs in forage.
 - **Not an ADR** — ADRs record one-off architectural decisions with rationale and
   alternatives. Protocols are standing rules that recur across the project's lifetime.
+- **Not gotchas** — if you'd hit it developing any Quarkus project, it belongs in
+  the garden. Protocols are about platform coherence, not library behaviour.
 - **Not inline comments** — if the rule applies globally and repeatedly, it's a protocol.
   If it only applies in one file, it's a comment.
 
