@@ -512,6 +512,16 @@ Run `add-dir <absolute-path-to-project>` before any other work.
 - `adr/` — architecture decision records with INDEX.md
 - `blog/` — project diary entries with INDEX.md
 
+## Git Discipline
+
+Two git repositories are active in every session:
+- **Workspace** (`<absolute-path-to-workspace>`) — methodology artifacts: handover, blog, specs, plans, ADRs
+- **Project repo** (`<absolute-path-to-project>`) — source code
+
+Before any git operation, run `git rev-parse --show-toplevel` to confirm which repo is currently active. Do not assume — the session may have opened in either. cd to the correct repo before staging:
+- Source code commits → project repo
+- Methodology artifacts → workspace
+
 ## Rules
 
 - All methodology artifacts go here, not in the project repo
