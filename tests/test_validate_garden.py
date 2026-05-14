@@ -795,5 +795,127 @@ class TestCheckDb(unittest.TestCase):
         self.assertIn('ERROR', output)
 
 
+class TestVariantConsistencyGarden(unittest.TestCase):
+    """Check 8: same-title entries in the same domain must all have variant:."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        GardenFixture(self.root)  # creates garden.db, submissions/, _index/
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write_entry(self, ge_id: str, title: str, domain: str,
+                     variant: str = None) -> Path:
+        """Write a YAML-frontmatter convention entry."""
+        domain_dir = self.root / domain
+        domain_dir.mkdir(exist_ok=True)
+        path = domain_dir / f"{ge_id}.md"
+        lines = [
+            "---",
+            f"id: {ge_id}",
+            f'title: "{title}"',
+            "type: convention",
+            f"domain: {domain}",
+            'stack: "Test Stack"',
+            "tags: [test]",
+            "score: 9",
+            "verified: true",
+            "staleness_threshold: 3650",
+            "submitted: 2026-05-14",
+        ]
+        if variant:
+            lines.append(f'variant: "{variant}"')
+        lines += ["---", "", f"## {title}", ""]
+        path.write_text("\n".join(lines))
+        return path
+
+    def _garden_md(self, entries):
+        """Write GARDEN.md with entries in By Technology section.
+
+        entries = [(ge_id, title, domain), ...]
+        get_by_technology_ids() parses content between '## By Technology\\n'
+        and '\\n---', so we include a trailing '\\n---'.
+        """
+        last_id = entries[-1][0] if entries else "GE-20260514-000000"
+        lines = [
+            f"**Last assigned ID:** {last_id}",
+            "**Last full DEDUPE sweep:** 2026-05-14",
+            "**Entries merged since last sweep:** 0",
+            "**Drift threshold:** 10",
+            "",
+            "## By Technology",
+            "",
+        ]
+        for ge_id, title, domain in entries:
+            lines.append(f"- {ge_id} [{title}]({domain}/{ge_id}.md)")
+        lines += ["", "---", "", "## By Symptom / Type", "", "---", "", "## By Label", ""]
+        (self.root / "GARDEN.md").write_text("\n".join(lines))
+
+    def test_solo_convention_no_variant_passes(self):
+        """Single convention entry with no sibling — no variant: required."""
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming", "jvm")
+        self._garden_md([("GE-20260514-aaaaaa", "Maven submodule naming", "jvm")])
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 0,
+                         f"Expected clean garden:\n{result.stdout}\n{result.stderr}")
+
+    def test_sibling_pair_both_have_variant_passes(self):
+        """Two same-title entries in same domain, both with variant: → clean."""
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming", "jvm",
+                          variant="api/runtime/deployment — Quarkus style")
+        self._write_entry("GE-20260514-bbbbbb", "Maven submodule naming", "jvm",
+                          variant="core/web/persistence — Spring style")
+        self._garden_md([
+            ("GE-20260514-aaaaaa", "Maven submodule naming", "jvm"),
+            ("GE-20260514-bbbbbb", "Maven submodule naming", "jvm"),
+        ])
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 0,
+                         f"Expected clean garden:\n{result.stdout}\n{result.stderr}")
+
+    def test_sibling_missing_variant_is_error(self):
+        """One of two same-title entries missing variant: → ERROR listing that GE-ID."""
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming", "jvm",
+                          variant="api/runtime/deployment — Quarkus style")
+        self._write_entry("GE-20260514-bbbbbb", "Maven submodule naming", "jvm")
+        self._garden_md([
+            ("GE-20260514-aaaaaa", "Maven submodule naming", "jvm"),
+            ("GE-20260514-bbbbbb", "Maven submodule naming", "jvm"),
+        ])
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 1,
+                         f"Expected error exit:\n{result.stdout}\n{result.stderr}")
+        self.assertIn("GE-20260514-bbbbbb", result.stdout)
+        self.assertIn("variant", result.stdout)
+
+    def test_both_siblings_missing_variant_error_lists_both(self):
+        """Both same-title entries missing variant: → ERROR listing both GE-IDs."""
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming", "jvm")
+        self._write_entry("GE-20260514-bbbbbb", "Maven submodule naming", "jvm")
+        self._garden_md([
+            ("GE-20260514-aaaaaa", "Maven submodule naming", "jvm"),
+            ("GE-20260514-bbbbbb", "Maven submodule naming", "jvm"),
+        ])
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 1,
+                         f"Expected error exit:\n{result.stdout}\n{result.stderr}")
+        self.assertIn("GE-20260514-aaaaaa", result.stdout)
+        self.assertIn("GE-20260514-bbbbbb", result.stdout)
+
+    def test_same_title_different_domains_not_grouped(self):
+        """Same title in different domains — no variant: required."""
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming", "jvm")
+        self._write_entry("GE-20260514-bbbbbb", "Maven submodule naming", "tools")
+        self._garden_md([
+            ("GE-20260514-aaaaaa", "Maven submodule naming", "jvm"),
+            ("GE-20260514-bbbbbb", "Maven submodule naming", "tools"),
+        ])
+        result = run_validator(self.root)
+        self.assertEqual(result.returncode, 0,
+                         f"Expected clean garden:\n{result.stdout}\n{result.stderr}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

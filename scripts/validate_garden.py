@@ -196,6 +196,11 @@ if '--check-db' in sys.argv:
         print(f"ERROR: garden.db is corrupt or unreadable: {_e}")
         sys.exit(1)
 
+try:
+    import yaml as _yaml
+except ImportError:
+    _yaml = None
+
 import os
 # Garden root: first non-flag positional argument, $HORTORA_GARDEN env var, or default
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
@@ -424,6 +429,45 @@ def validate():
                       if not re.search(r'\*\*Submission ID:\*\*', f.read_text())]
         if missing_id:
             log_warning(f"Submissions missing Submission ID header: {', '.join(missing_id)}")
+
+    # 8. Check variant: consistency for same-title entries
+    if _yaml is None:
+        log_warning("PyYAML not installed — skipping variant consistency check (pip install pyyaml)")
+    else:
+        from collections import defaultdict
+        _title_groups: dict = defaultdict(list)   # (domain, title) -> [ge_ids]
+        _variant_by_id: dict = {}                  # ge_id -> bool
+        _vskip = {'GARDEN.md', 'CHECKED.md', 'DISCARDED.md'}
+        for _vpath in GARDEN_ROOT.rglob('*.md'):
+            if any(part in EXCLUDE_DIRS for part in _vpath.parts):
+                continue
+            if _vpath.name in _vskip:
+                continue
+            _vraw = _vpath.read_text(encoding='utf-8')
+            if not _vraw.startswith('---'):
+                continue
+            _vfm_end = _vraw.find('\n---', 3)
+            if _vfm_end < 0:
+                continue
+            try:
+                _vfm = _yaml.safe_load(_vraw[3:_vfm_end]) or {}
+            except Exception:
+                continue
+            _vge_id = _vfm.get('id')
+            _vtitle = _vfm.get('title')
+            _vdomain = _vfm.get('domain')
+            if not _vge_id or not _vtitle or not _vdomain:
+                continue
+            _title_groups[(_vdomain, _vtitle)].append(_vge_id)
+            _variant_by_id[_vge_id] = 'variant' in _vfm
+        for (_vdomain, _vtitle), _vge_ids in _title_groups.items():
+            if len(_vge_ids) > 1:
+                _missing = [gid for gid in _vge_ids if not _variant_by_id.get(gid)]
+                if _missing:
+                    log_error(
+                        f"Same-title entries in domain {_vdomain!r} share title {_vtitle!r} "
+                        f"but lack 'variant:': {', '.join(sorted(_missing))}"
+                    )
 
     # Report
     print("\n".join(info))
