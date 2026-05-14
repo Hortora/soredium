@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-from validate_pr import validate, detect_mode
+from validate_pr import validate, detect_mode, find_same_title_siblings
 from validate_pr import compute_bonus, bonus_points, BONUS_RULES
 
 VALID_ENTRY = """\
@@ -705,3 +705,155 @@ class TestConventionType(unittest.TestCase):
         result = validate(str(path))
         self.assertEqual(result['criticals'], [],
                          f"Expected no CRITICALs for convention with variant:, got: {result['criticals']}")
+
+
+class TestFindSameTitleSiblings(unittest.TestCase):
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.garden = Path(self.tmp.name)
+        self.domain_dir = self.garden / "jvm"
+        self.domain_dir.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write_entry(self, stem: str, title: str) -> Path:
+        path = self.domain_dir / f"{stem}.md"
+        path.write_text(
+            f'---\ntitle: "{title}"\ntype: convention\ndomain: jvm\n'
+            f'stack: "Test"\ntags: [test]\nscore: 9\nverified: true\n'
+            f'staleness_threshold: 730\nsubmitted: 2026-05-14\n---\n'
+        )
+        return path
+
+    def test_returns_stems_with_matching_title(self):
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming")
+        self._write_entry("GE-20260514-bbbbbb", "Maven submodule naming")
+        result = find_same_title_siblings(
+            "Maven submodule naming", "jvm", self.garden, "GE-20260514-cccccc"
+        )
+        self.assertIn("GE-20260514-aaaaaa", result)
+        self.assertIn("GE-20260514-bbbbbb", result)
+
+    def test_excludes_self(self):
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming")
+        result = find_same_title_siblings(
+            "Maven submodule naming", "jvm", self.garden, "GE-20260514-aaaaaa"
+        )
+        self.assertNotIn("GE-20260514-aaaaaa", result)
+
+    def test_empty_domain_returns_empty(self):
+        result = find_same_title_siblings(
+            "Anything", "nonexistent", self.garden, "GE-xxx"
+        )
+        self.assertEqual(result, [])
+
+    def test_title_mismatch_not_returned(self):
+        self._write_entry("GE-20260514-aaaaaa", "Different title")
+        result = find_same_title_siblings(
+            "Maven submodule naming", "jvm", self.garden, "GE-xxx"
+        )
+        self.assertEqual(result, [])
+
+    def test_unparseable_file_skipped_silently(self):
+        bad = self.domain_dir / "GE-20260514-cccccc.md"
+        bad.write_text("not valid yaml at all {\n")
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming")
+        result = find_same_title_siblings(
+            "Maven submodule naming", "jvm", self.garden, "GE-20260514-zzzzzz"
+        )
+        self.assertIn("GE-20260514-aaaaaa", result)
+        self.assertNotIn("GE-20260514-cccccc", result)
+
+
+class TestVariantConsistencyPR(unittest.TestCase):
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.garden = Path(self.tmp.name)
+        self.domain = self.garden / "jvm"
+        self.domain.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, stem: str, content: str) -> Path:
+        path = self.domain / f"{stem}.md"
+        path.write_text(content)
+        return path
+
+    def test_solo_convention_no_variant_passes(self):
+        """Single convention entry with no sibling — no CRITICAL or variant WARNING."""
+        path = self._write("GE-20260514-aaaaaa", CONVENTION_ENTRY_BASE)
+        result = validate(str(path), str(self.garden))
+        self.assertEqual(result['criticals'], [],
+                         f"Unexpected CRITICAL: {result['criticals']}")
+        orphan_warnings = [w for w in result['warnings'] if "variant" in w.lower()]
+        self.assertEqual(orphan_warnings, [],
+                         f"Unexpected variant WARNING: {orphan_warnings}")
+
+    def test_sibling_exists_no_variant_is_critical(self):
+        """Convention entry + same-title sibling in domain, no variant: → CRITICAL."""
+        self._write("GE-20260514-bbbbbb", CONVENTION_ENTRY_BASE)
+        path = self._write("GE-20260514-aaaaaa", CONVENTION_ENTRY_BASE)
+        result = validate(str(path), str(self.garden))
+        self.assertTrue(
+            any("variant" in c.lower() for c in result['criticals']),
+            f"Expected CRITICAL about variant:, got: {result['criticals']}"
+        )
+
+    def test_sibling_exists_with_variant_passes(self):
+        """Convention entry with variant: + sibling → no CRITICAL."""
+        self._write("GE-20260514-bbbbbb", CONVENTION_ENTRY_BASE)
+        path = self._write("GE-20260514-aaaaaa", CONVENTION_ENTRY_WITH_VARIANT)
+        result = validate(str(path), str(self.garden))
+        self.assertFalse(
+            any("variant" in c.lower() for c in result['criticals']),
+            f"Unexpected CRITICAL: {result['criticals']}"
+        )
+
+    def test_orphan_variant_no_sibling_is_warning(self):
+        """Convention entry with variant: but no sibling → WARNING, not CRITICAL."""
+        path = self._write("GE-20260514-aaaaaa", CONVENTION_ENTRY_WITH_VARIANT)
+        result = validate(str(path), str(self.garden))
+        self.assertFalse(
+            any("variant" in c.lower() for c in result['criticals']),
+            f"Unexpected CRITICAL: {result['criticals']}"
+        )
+        self.assertTrue(
+            any("variant" in w.lower() for w in result['warnings']),
+            f"Expected orphan-variant WARNING, got: {result['warnings']}"
+        )
+
+    def test_non_convention_same_title_sibling_is_warning_not_critical(self):
+        """Non-convention type with same-title sibling → WARNING, no CRITICAL."""
+        technique = CONVENTION_ENTRY_BASE.replace("type: convention", "type: technique")
+        self._write("GE-20260514-bbbbbb", technique)
+        path = self._write("GE-20260514-aaaaaa", technique)
+        result = validate(str(path), str(self.garden))
+        self.assertFalse(
+            any("add 'variant:'" in c for c in result['criticals']),
+            f"Unexpected CRITICAL: {result['criticals']}"
+        )
+        self.assertTrue(
+            any("same title" in w.lower() for w in result['warnings']),
+            f"Expected same-title WARNING, got: {result['warnings']}"
+        )
+
+    def test_convention_siblings_jaccard_warning_suppressed(self):
+        """Convention entry with variant: + sibling → Jaccard 'possible duplicate' moved to info."""
+        self._write("GE-20260514-bbbbbb", CONVENTION_ENTRY_BASE)
+        path = self._write("GE-20260514-aaaaaa", CONVENTION_ENTRY_WITH_VARIANT)
+        result = validate(str(path), str(self.garden))
+        duplicate_warnings = [
+            w for w in result['warnings']
+            if "possible duplicate" in w and "GE-20260514-bbbbbb" in w
+        ]
+        self.assertEqual(
+            duplicate_warnings, [],
+            f"Expected no 'possible duplicate' warning for convention sibling, got: {duplicate_warnings}"
+        )
+        convention_infos = [i for i in result['infos'] if "convention sibling" in i]
+        self.assertGreater(
+            len(convention_infos), 0,
+            f"Expected 'convention sibling' info, got infos: {result['infos']}"
+        )

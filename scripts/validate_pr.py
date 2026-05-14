@@ -256,6 +256,24 @@ def detect_mode(garden_root: str) -> str:
     return 'local'
 
 
+def find_same_title_siblings(title: str, domain: str, garden_root: Path, exclude_stem: str) -> list:
+    """Return stems of GE-*.md files in domain whose title matches (case-sensitive)."""
+    results = []
+    domain_path = garden_root / domain
+    if not domain_path.exists():
+        return results
+    for f in domain_path.glob('GE-*.md'):
+        if f.stem == exclude_stem:
+            continue
+        try:
+            fm, _, _ = parse_entry(f)
+            if fm.get('title', '') == title:
+                results.append(f.stem)
+        except Exception:
+            continue
+    return results
+
+
 def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = None) -> dict:
     result = {'file': entry_path, 'criticals': [], 'warnings': [], 'infos': []}
     path = Path(entry_path)
@@ -340,6 +358,38 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
                     result['warnings'].append(
                         f"Tag '{tag}' not in controlled vocabulary (labels/)"
                     )
+
+        # Variant: consistency check (type-gated on 'convention')
+        _title = fm.get('title', '')
+        _siblings = find_same_title_siblings(_title, domain, Path(garden_root), path.stem)
+        _has_variant = 'variant' in fm
+        if entry_type == 'convention':
+            if _siblings and not _has_variant:
+                result['criticals'].append(
+                    f"Convention shares title {_title!r} with {', '.join(_siblings)}: "
+                    f"add 'variant:' to distinguish this entry"
+                )
+            elif _has_variant and not _siblings:
+                result['warnings'].append(
+                    f"'variant:' is set but no sibling with title {_title!r} found in "
+                    f"domain {domain!r} — verify title matches, or omit 'variant:'"
+                )
+            if _siblings and _has_variant:
+                _sibling_set = set(_siblings)
+                _updated_warnings = []
+                for w in result['warnings']:
+                    if 'possible duplicate' in w and any(f'with {s}:' in w for s in _sibling_set):
+                        result['infos'].append(
+                            w.replace('possible duplicate', 'convention sibling — expected overlap')
+                        )
+                    else:
+                        _updated_warnings.append(w)
+                result['warnings'] = _updated_warnings
+        elif _siblings:
+            result['warnings'].append(
+                f"Same title as {', '.join(_siblings)} in domain {domain!r} — "
+                f"verify this is intentional or use 'variant:' to distinguish"
+            )
 
     # Upstream garden dedup check
     if upstream_gardens:
