@@ -12,7 +12,7 @@ The engine for Hortora gardens — validators, CI scripts, GitHub Actions workfl
 
 | Skill | Purpose |
 |-------|---------|
-| `forage` | Session-time capture, search, and retrieval. CAPTURE writes the entry, validates locally, commits, and pushes directly to main. SWEEP scans a session for all three entry types (gotchas, techniques, undocumented) and delivers as a single batch commit. SEARCH uses `git grep` for fast on-demand retrieval. REVISE enriches an existing entry in place. |
+| `forage` | Session-time capture, search, and retrieval. CAPTURE writes the entry, validates locally, commits, and pushes directly to main. SWEEP scans a session for all four entry types (gotchas, techniques, undocumented, conventions) and delivers as a single batch commit. SEARCH uses `git grep` for fast on-demand retrieval. REVISE enriches an existing entry in place. |
 | `harvest` | Dedicated maintenance sessions. DEDUPE sweeps the full garden for near-duplicates. REVIEW surfaces stale entries overdue for a freshness check. |
 | `protocol` | Session-time operations for project-level protocol files (`docs/protocols/`). CAPTURE scaffolds a new protocol entry with YAML frontmatter. SWEEP scans a session for rules worth formalising. SEARCH finds protocols by keyword. HEALTH validates schema completeness and ref integrity. DEEP-SCAN stubbed until audits complete. |
 
@@ -20,10 +20,10 @@ The engine for Hortora gardens — validators, CI scripts, GitHub Actions workfl
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/validate_pr.py` | Validates a single garden entry. Checks required fields, score threshold (≥ 8), prompt injection patterns, Jaccard duplicate scan (≥ 0.4 = warning), vocabulary compliance. Exits 1 on CRITICAL failures. Called by forage before committing. |
+| `scripts/validate_pr.py` | Validates a single garden entry. Checks required fields, score threshold (≥ 8), prompt injection patterns, Jaccard duplicate scan (≥ 0.4 = warning), vocabulary compliance, and variant: consistency for `convention` entries (CRITICAL when same-title sibling exists without `variant:`). Exits 1 on CRITICAL failures. Called by forage before committing. |
 | `scripts/validate_schema.py` | Validates a garden's `SCHEMA.md` federation config — role, ge_prefix, domains, upstream rules. Exits 0 (valid) or 1 (invalid). |
 | `scripts/init_garden.py` | Initializes a new canonical/child/peer garden — creates `GARDEN.md`, `SCHEMA.md`, `garden.db`, domain directories, CI workflow. Idempotent. |
-| `scripts/validate_garden.py` | Full garden validation — structural checks, entry format, index consistency (GARDEN.md vs actual files). Also validates `SCHEMA.md` when present. |
+| `scripts/validate_garden.py` | Full garden validation — structural checks, entry format, index consistency (GARDEN.md vs actual files), and same-title `variant:` consistency (check 8). Also validates `SCHEMA.md` when present. |
 | `scripts/dedupe_scanner.py` | Scans all entry pairs for semantic similarity. Outputs ranked unchecked pairs. Records classifications (distinct / related / duplicate-discarded) in `CHECKED.md`. |
 | `scripts/garden-agent-install.sh` | Installs the autonomous garden agent into a local garden clone. Idempotent — safe to re-run. See [Garden Agent](#garden-agent) below. |
 | `scripts/garden-setup.sh` | One-time sparse blobless clone setup. Index files materialised; entry bodies fetched on demand via `git cat-file`. |
