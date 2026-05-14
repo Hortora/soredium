@@ -688,11 +688,8 @@ class TestConventionType(unittest.TestCase):
     def test_convention_accepted_in_discovery_garden(self):
         path = self._write("GE-20260514-aaaaaa", CONVENTION_ENTRY_BASE)
         result = validate(str(path))
-        self.assertFalse(
-            any("convention" in c.lower() and "invalid" in c.lower()
-                for c in result['criticals']),
-            f"Unexpected CRITICAL: {result['criticals']}"
-        )
+        self.assertEqual(result['criticals'], [],
+                         f"Expected no CRITICALs, got: {result['criticals']}")
 
     def test_convention_rejected_in_patterns_garden(self):
         entry = CONVENTION_ENTRY_BASE.replace("garden: discovery", "garden: patterns")
@@ -702,3 +699,9 @@ class TestConventionType(unittest.TestCase):
             any("convention" in c.lower() for c in result['criticals']),
             f"Expected type-rejection CRITICAL, got: {result['criticals']}"
         )
+
+    def test_convention_with_variant_accepted_in_discovery_garden(self):
+        path = self._write("GE-20260514-bbbbbb", CONVENTION_ENTRY_WITH_VARIANT)
+        result = validate(str(path))
+        self.assertEqual(result['criticals'], [],
+                         f"Expected no CRITICALs for convention with variant:, got: {result['criticals']}")
