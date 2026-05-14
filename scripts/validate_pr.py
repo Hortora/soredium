@@ -54,7 +54,7 @@ GARDEN_DEFAULT = 'discovery'
 
 GARDEN_TYPES = {
     'discovery': {
-        'valid_types': ['gotcha', 'technique', 'undocumented'],
+        'valid_types': ['gotcha', 'technique', 'undocumented', 'convention'],
         'required_extra': [],
         'staleness_default': 730,
     },

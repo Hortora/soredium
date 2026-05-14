@@ -144,6 +144,68 @@ The fix.
 The insight.
 """
 
+CONVENTION_ENTRY_BASE = """\
+---
+title: "Maven submodule naming"
+garden: discovery
+type: convention
+domain: jvm
+stack: "Maven, Quarkus"
+tags: [maven]
+score: 9
+verified: true
+staleness_threshold: 3650
+submitted: 2026-05-14
+---
+
+## Maven submodule naming
+
+### The convention
+Use api/runtime/deployment for Quarkus extension modules.
+
+### Why this style
+Matches Quarkus extension conventions.
+
+### Trade-offs
+Less familiar to Spring developers.
+
+### When not to use it
+When adopting Spring Boot layered naming.
+"""
+
+CONVENTION_ENTRY_WITH_VARIANT = """\
+---
+title: "Maven submodule naming"
+variant: "api/runtime/deployment — Quarkus extension style"
+garden: discovery
+type: convention
+domain: jvm
+stack: "Maven, Quarkus"
+tags: [maven]
+score: 9
+verified: true
+staleness_threshold: 3650
+submitted: 2026-05-14
+---
+
+## api/runtime/deployment — Quarkus extension style
+
+**Topic:** Maven submodule naming
+**Alternatives exist:** yes
+
+### The convention
+Use api/runtime/deployment for Quarkus extension modules.
+
+### Why this style
+Matches Quarkus extension conventions.
+
+### Trade-offs
+Less familiar to Spring developers.
+
+### When not to use it
+When adopting Spring Boot layered naming.
+"""
+
 UPSTREAM_ENTRY = """\
 ---
 id: GE-20260414-parent1
@@ -608,3 +670,35 @@ class TestUpstreamGardenDedup(unittest.TestCase):
         result = self._run_validator(entry)  # no --upstream-garden
         # Should pass because we only check the child garden (which has no entries)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class TestConventionType(unittest.TestCase):
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, stem: str, content: str) -> Path:
+        p = self.dir / f"{stem}.md"
+        p.write_text(content)
+        return p
+
+    def test_convention_accepted_in_discovery_garden(self):
+        path = self._write("GE-20260514-aaaaaa", CONVENTION_ENTRY_BASE)
+        result = validate(str(path))
+        self.assertFalse(
+            any("convention" in c.lower() and "invalid" in c.lower()
+                for c in result['criticals']),
+            f"Unexpected CRITICAL: {result['criticals']}"
+        )
+
+    def test_convention_rejected_in_patterns_garden(self):
+        entry = CONVENTION_ENTRY_BASE.replace("garden: discovery", "garden: patterns")
+        path = self._write("GE-20260514-aaaaaa", entry)
+        result = validate(str(path))
+        self.assertTrue(
+            any("convention" in c.lower() for c in result['criticals']),
+            f"Expected type-rejection CRITICAL, got: {result['criticals']}"
+        )
