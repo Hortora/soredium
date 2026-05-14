@@ -411,7 +411,7 @@ Review the session for:
 For each candidate, compute the Garden Score then present:
 *"We discovered [X] — it exists and works but there's no documentation for it. Scored [N]/15 — worth submitting as undocumented?"*
 
-**Score threshold during SWEEP:** Only propose candidates scoring ≥8.
+**Score threshold during SWEEP:** Only propose candidates scoring ≥8. **Exception — conventions:** the editorial bar applies rather than the score gate mechanically; a score of 6–8 is typical for a well-articulated convention with clear alternatives. See "The bar for conventions" above.
 
 **Step 4 — Scan for Conventions** (deliberate style choices with known alternatives)
 
@@ -421,7 +421,7 @@ Review the session for:
 - Moments where alternatives were compared and one was chosen for explicit reasons
 
 For each candidate, compute the Garden Score then present:
-*"We chose [X] for [concern] — an alternative is [Y]. Scored [N]/15 — worth submitting as a convention entry?"*
+*"We chose [X] for [concern] — an alternative is [Y]. Scored [N]/15 — worth submitting as a convention entry?"* (propose if scoring ≥6 and editorial bar is met)
 
 **Step 5 — Submit confirmed entries (batched delivery)**
 
