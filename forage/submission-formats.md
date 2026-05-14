@@ -33,6 +33,7 @@ These fields can be added to any entry type. The validator accepts but does not 
 | `author` | string | Your initials or handle — appears on the contributor scoreboard. Set automatically by forage at CAPTURE time from `~/.claude/settings.json` `initials`. Example: `"mdp"` |
 | `constraints` | string or list | What conditions must hold for this fix to apply. Freetext: `"requires Java 17+, not applicable to reactive pipelines"`. Structured: `[{applies_when: "java.version >= 17", note: "uses sealed classes"}]`. Each format earns the same +1 bonus. |
 | `invalidation_triggers` | string or list | What changes would make this entry wrong. Freetext: `"revisit if Spring Boot 4.0 changes auto-configuration"`. Structured: `[{library: "spring-boot", version: ">= 4.0", reason: "model may change"}]`. Earns +1 bonus. |
+| `variant` | string | Distinguishes this entry from same-title alternatives in the same domain. Required when two or more entries share `title:` in the same domain. Omit for a solo entry with no known alternatives — add it (and add it to the existing sibling via REVISE) when a second entry for this title is submitted. Convention entries use `staleness_threshold: 3650` (10 years) rather than the discovery default of 730 — style choices change slowly. |
 
 **Bonus scoring:** `validate_pr.py` awards +1 per WHY field present (up to +3 effective bonus). The base score gate (≥8) applies to the self-reported score only — bonus points don't bypass it. Effective score = base + bonus and is used by the contributor scoreboard.
 
@@ -202,6 +203,58 @@ Only mentioned in a GitHub issue? Only in an old commit message?
 Any limitations, version constraints, or risks from relying on undocumented behaviour.
 
 *Score: N/15 · Included because: [why this belongs] · Reservation: [none / brief reason]*
+```
+
+---
+
+## Convention Template
+
+A deliberate style choice where alternatives exist and are equally valid. Not universally true — another project could legitimately choose a different style.
+
+**Editorial bar:** Is this a deliberate style choice that another project could meaningfully adopt? Is there at least one known valid alternative?
+
+**Staleness note:** Convention entries use `staleness_threshold: 3650` (10 years). This intentionally overrides the discovery garden default of 730 — style conventions change slowly.
+
+```markdown
+---
+id: GE-YYYYMMDD-xxxxxx
+garden: discovery
+title: "The decision space — e.g. Maven submodule naming"
+variant: "This specific style — e.g. api/runtime/deployment (Quarkus extension)"
+# Omit variant: if this is the only entry for this title in the domain.
+# Add it (and REVISE the sibling to add its variant:) when a second entry is submitted.
+type: convention
+domain: jvm
+stack: "Technology, Version"
+tags: [tag1, tag2]
+score: N
+verified: true
+staleness_threshold: 3650
+submitted: YYYY-MM-DD
+author: mdp
+---
+
+## [variant title — same as the variant: field above]
+
+**Topic:** [title]
+**Alternatives exist:** yes — see other entries with title `[title]`
+
+Note: convention entries use the variant as the H1 (not the title) so two entries
+for the same topic have distinguishable headings.
+
+### The convention
+Concrete description. What to name/structure/configure and how.
+
+### Why this style
+What problem does it solve? What does it optimise for?
+
+### Trade-offs
+What does this make harder? When would you choose a different style?
+
+### When not to use it
+Conditions where an alternative convention is better.
+
+*Score: N/15 · Included because: [why this convention is worth recording] · Reservation: [none / brief reason]*
 ```
 
 ---
