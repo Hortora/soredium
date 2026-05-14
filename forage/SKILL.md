@@ -28,11 +28,12 @@ required-permissions:
 # Forage — Session-Time Garden Operations
 
 A cross-project, machine-wide library of hard-won technical knowledge —
-three kinds of entries:
+four kinds of entries:
 
 - **Gotchas** — bugs that silently fail, behaviours that contradict documentation, and workarounds that took hours to find
 - **Techniques** — the umbrella for all non-obvious positive knowledge: specific how-to methods, strategic design philosophy, cross-cutting patterns. A skilled developer wouldn't naturally reach for it, but would immediately value it once shown.
 - **Undocumented** — behaviours, options, or features that exist and work but simply aren't written down anywhere; only discoverable via source code, trial and error, or word of mouth
+- **Conventions** — deliberate style choices where alternatives exist and are equally valid (e.g. Maven submodule naming: `api/runtime/deployment` vs `core/web/persistence`). Not universally true — another project could legitimately choose differently.
 
 Stored at `${HORTORA_GARDEN:-~/.hortora/garden}/` so any Claude instance on this machine can read and contribute to it.
 
@@ -46,6 +47,8 @@ For DEDUPE (finding duplicates across existing entries), use the `harvest` skill
 **The bar for techniques:** Would a skilled developer be surprised this approach exists, or would they have reached for something more complex? If yes — it belongs.
 
 **The bar for undocumented:** Does it exist, does it work, and would you have no reasonable way to discover it from the official docs? If yes — it belongs.
+
+**The bar for conventions:** Is this a deliberate style choice that another project could meaningfully adopt? Is there at least one known valid alternative? If yes — it belongs. Convention entries typically score lower on Pain/Impact and Non-obviousness than gotchas — a score of 6–9 is expected for a well-articulated convention. Apply the editorial bar rather than the score gate mechanically.
 
 ---
 
@@ -117,7 +120,7 @@ All entries use YAML frontmatter. See [submission-formats.md](submission-formats
 ---
 id: GE-YYYYMMDD-xxxxxx
 title: "Short descriptive title"
-type: gotcha | technique | undocumented
+type: gotcha | technique | undocumented | convention
 domain: tools          # directory name (tools, quarkus, java, etc.)
 stack: "Technology, Version"
 tags: [tag1, tag2]
@@ -155,7 +158,9 @@ Format: `GE-YYYYMMDD-xxxxxx` (date + 6 lowercase hex chars). Collision probabili
 
 **Step 1 — Classify, score, and filter**
 
-Classify the type: **gotcha**, **technique**, or **undocumented**.
+Classify the type: **gotcha**, **technique**, **undocumented**, or **convention**.
+
+**Convention:** A deliberate style choice where alternatives exist and are equally valid. Not universally true — another project could legitimately choose a different style. Examples: naming schemes, module structures, config strategy choices. If same-title alternatives will exist, each entry carries `variant:`. Solo convention entries (first of their title) omit `variant:` and add it via REVISE when a second entry is submitted.
 
 Is it cross-project? (Not tied to one specific codebase's logic.) If no → skip.
 
@@ -226,7 +231,7 @@ First, select the garden based on knowledge type:
 
 | Knowledge type | Garden |
 |---------------|--------|
-| Non-obvious behaviour, silent failure, undocumented feature | `discovery` |
+| Non-obvious behaviour, silent failure, undocumented feature, or deliberate style choice with known alternatives | `discovery` |
 | Reusable architectural or structural solution | `patterns` |
 | Minimal working code example, copy-paste ready | `examples` |
 | Breaking change, deprecation, or new capability in a version | `evolution` |
@@ -237,7 +242,7 @@ First, select the garden based on knowledge type:
 
 | Garden | Bar |
 |--------|-----|
-| `discovery` | Would a skilled developer familiar with the technology still have spent significant time on this? |
+| `discovery` | Gotcha/technique/undocumented: Would a skilled developer familiar with the technology still have spent significant time on this? Convention: Is this a deliberate style choice another project could meaningfully adopt, with at least one known valid alternative? |
 | `patterns` | Would a practitioner reach for something more complex or less elegant without this pattern? |
 | `examples` | Is this minimal, working, and demonstrating a real use case — not a toy? |
 | `evolution` | Does this describe a breaking change, deprecation, or capability shift that would change code correctness for someone on that version? |
@@ -369,11 +374,11 @@ Tell the user the entry path and confirm it was pushed to main.
 
 ---
 
-### SWEEP (scan the current session for all three entry types)
+### SWEEP (scan the current session for all four entry types)
 
 Use when: "sweep", "garden sweep", "scan for garden entries", or at the end of a session.
 
-Unlike CAPTURE (where you provide the specific knowledge), SWEEP reviews the session from conversation memory and proposes findings. It covers all three categories explicitly.
+Unlike CAPTURE (where you provide the specific knowledge), SWEEP reviews the session from conversation memory and proposes findings. It covers all four categories explicitly.
 
 **Step 1 — Scan for Gotchas** (non-obvious things that went wrong)
 
@@ -408,7 +413,17 @@ For each candidate, compute the Garden Score then present:
 
 **Score threshold during SWEEP:** Only propose candidates scoring ≥8.
 
-**Step 4 — Submit confirmed entries (batched delivery)**
+**Step 4 — Scan for Conventions** (deliberate style choices with known alternatives)
+
+Review the session for:
+- Naming or structuring decisions made deliberately where a different valid choice existed
+- Patterns adopted as a team/project style that another project could consciously adopt or reject
+- Moments where alternatives were compared and one was chosen for explicit reasons
+
+For each candidate, compute the Garden Score then present:
+*"We chose [X] for [concern] — an alternative is [Y]. Scored [N]/15 — worth submitting as a convention entry?"*
+
+**Step 5 — Submit confirmed entries (batched delivery)**
 
 For each confirmed entry, run CAPTURE steps 0–6 (GE-ID generation through writing the file). Work from session context — do NOT ask the user to re-describe things you already know. Track the list of written entry paths as you go.
 
@@ -454,7 +469,7 @@ git -C /concrete/path add <all written entry files>
 git -C /concrete/path commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
 ```
 
-**Step 5 — Staleness spot-check (domain-filtered)**
+**Step 6 — Staleness spot-check (domain-filtered)**
 
 Derive session domains from:
 - The `domain` field of entries submitted in Steps 1–4 of this SWEEP
@@ -494,13 +509,13 @@ Otherwise:
 
 If no overdue entries are found in session domains, omit this step from the report entirely (no noise for fresh gardens).
 
-**Step 6 — Report**
+**Step 7 — Report**
 
 Tell the user:
 - How many candidates were found in each category
 - How many were confirmed and submitted
 - If staleness spot-check ran: N overdue entries found in session domains, M resolved
-- If nothing was found: "Nothing garden-worthy surfaced in this session across gotchas, techniques, or undocumented items."
+- If nothing was found: "Nothing garden-worthy surfaced in this session across gotchas, techniques, undocumented items, or conventions."
 
 ---
 
@@ -708,10 +723,15 @@ Fire **without being asked** when:
 **For undocumented:** found by reading source code, not docs; works but unexplained. User says: "this isn't in the docs".
 
 Offer, don't assume:
-> "This was non-obvious — want me to submit it to the garden as a [gotcha / technique / undocumented]?"
+> "This was non-obvious — want me to submit it to the garden as a [gotcha / technique / undocumented / convention]?"
 
 **Also fire for REVISE** when a solution surfaces for a previously-unsolved gotcha:
 > "This looks like a solution to an existing garden entry — want me to submit a REVISE to enrich '[entry title]' with the fix?"
+
+**For conventions:** a naming or structural choice was discussed with alternatives considered. User says "we always do it this way", "we chose X over Y", "that's our style for this".
+
+Offer, don't assume:
+> "That looks like a deliberate style choice — want me to record it as a convention entry in the garden?"
 
 ---
 
@@ -728,9 +748,9 @@ Offer, don't assume:
 | Gotcha: title describes the fix not the weird thing | Can't find it by symptom | Title = the surprising behaviour, not the solution |
 | Technique: no "why non-obvious" section | Just becomes documentation | Must explain what developers would normally do instead |
 | SWEEP: asking the user what was discovered | Claude has the context | Scan session memory and propose specific candidates |
-| SWEEP: only checking gotchas | Techniques and undocumented items are easy to miss | Always check all three categories explicitly |
+| SWEEP: only checking gotchas | Techniques, undocumented items, and conventions are easy to miss | Always check all four categories explicitly |
 | CAPTURE: omitting garden field | New entries need explicit garden declaration | Always include `garden: <type>` in frontmatter |
-| CAPTURE: using gotcha/technique/undocumented in non-discovery garden | Type vocabulary is per-garden | patterns uses architectural/migration/integration/testing; examples uses code |
+| CAPTURE: using gotcha/technique/undocumented/convention in non-discovery garden | Type vocabulary is per-garden | patterns uses architectural/migration/integration/testing; examples uses code; convention belongs in discovery |
 
 ---
 
@@ -753,7 +773,7 @@ CAPTURE is complete when:
 - ✅ For patterns-garden entries: optional extended fields (`observed_in`, `suitability`, `variants`, `variant_frequency`, `authors`, `stability`) included where known from context; no extended-field warnings from `validate_pr.py`
 
 SWEEP is complete when:
-- ✅ All three categories checked from session memory
+- ✅ All four categories checked from session memory (gotchas, techniques, undocumented, conventions)
 - ✅ Each finding proposed explicitly with type and description
 - ✅ Confirmed entries written via CAPTURE steps 0–6; validated (parallel if ≥3 entries) and delivered as a single batch commit + PR
 - ✅ Staleness spot-check run for session domains (if identifiable)
