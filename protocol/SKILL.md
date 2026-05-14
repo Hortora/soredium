@@ -95,7 +95,7 @@ Work from what's already known in context. Ask only for what's genuinely unclear
 |-------|-------------|
 | `title` | The directive itself — imperative, one line |
 | `type` | `rule` if a concrete prescription; `principle` if directional |
-| `scope` | `platform` if it applies across the whole project family; `repo` if one repo |
+| `scope` | `universal` if any Java/Quarkus project benefits; `platform` if specific to this platform's foundation; `repo` if one repo within the platform; `application` if for apps built on this platform |
 | `applies_to` | Which modules, contexts, or conditions trigger this rule |
 | `severity` | `critical` if violations cause bugs; `important` if costly; `guidance` otherwise |
 | `refs` | Any design docs or related protocols mentioned in context |
@@ -117,25 +117,42 @@ Wait for confirmation before writing.
 
 **Step 5 — Write the entry file**
 
+Route to the correct subfolder based on `scope`:
+- `scope: universal` → `docs/protocols/universal/<slug>.md`
+- `scope: platform` or `scope: repo` → `docs/protocols/casehub/<slug>.md`
+- `scope: application` → `docs/protocols/casehub/<slug>.md`
+
 ```bash
-# Write $PROTOCOLS_DIR/<slug>.md
+# Write to the correct subfolder
 ```
 
 **Step 6 — Commit**
 
 ```bash
-git -C $PROJECT_ROOT add docs/protocols/<slug>.md
+git -C $PROJECT_ROOT add docs/protocols/universal/<slug>.md  # or casehub/
 git -C $PROJECT_ROOT commit -m "protocol(PP-YYYYMMDD-xxxxxx): <slug>"
 ```
 
-**Step 7 — Update INDEX.md**
+**Step 7 — Update the correct index**
 
-Add a row to the table in `docs/protocols/INDEX.md`:
+Route by the `scope` field:
+
+| scope value | Index to update |
+|-------------|----------------|
+| `universal` | `docs/protocols/universal/INDEX.md` — add row under the appropriate category section |
+| `platform` or `repo` | `docs/protocols/casehub/FOUNDATION-INDEX.md` — add row to the Protocols table |
+| `application` | `docs/protocols/casehub/HARNESS-INDEX.md` — add row to the Protocols table |
+
+Row format:
 ```markdown
 | [slug.md](slug.md) | One-line rule summary | applies_to value |
 ```
 
-Commit the INDEX.md update alongside or immediately after the entry.
+For `universal/INDEX.md`, place the row under the most relevant category section
+(Maven / Build, Java / Architecture, Quarkus, Application Design). Add a new section
+if none fits.
+
+Commit the index update in the same commit as the protocol file.
 
 **Step 8 — Report**
 
@@ -318,7 +335,7 @@ casehub-specific) and Audit 3 (folder structure validation).
 | Capturing a universal gotcha as a protocol | Protocols are project-specific | If it applies outside this project, use forage instead |
 | Capturing an ADR as a protocol | ADRs are one-off decisions; protocols are standing rules | Use `adr` skill for architectural decision records |
 | Leaving refs pointing to non-existent files | HEALTH will flag these; context for future sessions is broken | Run HEALTH and fix broken refs before committing |
-| Not updating INDEX.md after CAPTURE | Index is the fast-path for SEARCH | Always update INDEX.md in the same commit |
+| Not updating the correct index after CAPTURE | Index is the fast-path for SEARCH | Route by scope: universal→universal/INDEX.md, platform/repo→casehub/FOUNDATION-INDEX.md, application→casehub/HARNESS-INDEX.md |
 | Writing implementation detail in the protocol body | Protocols are directives, not tutorials | refs: out to design docs; keep body to one paragraph |
 | Using type=rule for a high-level principle | Misleads readers about expected specificity | `principle` for directional; `rule` for specific + example |
 
@@ -328,10 +345,10 @@ casehub-specific) and Audit 3 (folder structure validation).
 
 CAPTURE is complete when:
 - ✅ PP-ID generated (`PP-YYYYMMDD-xxxxxx` format)
-- ✅ Entry file written to `docs/protocols/<slug>.md` with all required frontmatter fields
+- ✅ Entry file written to `docs/protocols/universal/<slug>.md` or `docs/protocols/casehub/<slug>.md` based on scope
 - ✅ User confirmed the draft before writing
 - ✅ Entry committed to the project repo
-- ✅ INDEX.md updated and committed
+- ✅ Correct index updated and committed (routed by scope field)
 
 SWEEP is complete when:
 - ✅ Session reviewed for implicit rules and re-enforced constraints
