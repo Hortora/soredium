@@ -30,7 +30,7 @@ def test_each_garden_has_staleness_default():
 
 def test_discovery_valid_types():
     assert set(GARDEN_TYPES['discovery']['valid_types']) == {
-        'gotcha', 'technique', 'undocumented'
+        'convention', 'gotcha', 'technique', 'undocumented'
     }
 
 
