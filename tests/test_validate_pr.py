@@ -802,14 +802,12 @@ class TestVariantConsistencyPR(unittest.TestCase):
         )
 
     def test_sibling_exists_with_variant_passes(self):
-        """Convention entry with variant: + sibling → no CRITICAL."""
+        """Convention entry with variant: + sibling → no CRITICALs."""
         self._write("GE-20260514-bbbbbb", CONVENTION_ENTRY_BASE)
         path = self._write("GE-20260514-aaaaaa", CONVENTION_ENTRY_WITH_VARIANT)
         result = validate(str(path), str(self.garden))
-        self.assertFalse(
-            any("variant" in c.lower() for c in result['criticals']),
-            f"Unexpected CRITICAL: {result['criticals']}"
-        )
+        self.assertEqual(result['criticals'], [],
+                         f"Unexpected CRITICALs: {result['criticals']}")
 
     def test_orphan_variant_no_sibling_is_warning(self):
         """Convention entry with variant: but no sibling → WARNING, not CRITICAL."""
@@ -825,15 +823,13 @@ class TestVariantConsistencyPR(unittest.TestCase):
         )
 
     def test_non_convention_same_title_sibling_is_warning_not_critical(self):
-        """Non-convention type with same-title sibling → WARNING, no CRITICAL."""
+        """Non-convention type with same-title sibling → WARNING, no CRITICALs."""
         technique = CONVENTION_ENTRY_BASE.replace("type: convention", "type: technique")
         self._write("GE-20260514-bbbbbb", technique)
         path = self._write("GE-20260514-aaaaaa", technique)
         result = validate(str(path), str(self.garden))
-        self.assertFalse(
-            any("add 'variant:'" in c for c in result['criticals']),
-            f"Unexpected CRITICAL: {result['criticals']}"
-        )
+        self.assertEqual(result['criticals'], [],
+                         f"Unexpected CRITICALs: {result['criticals']}")
         self.assertTrue(
             any("same title" in w.lower() for w in result['warnings']),
             f"Expected same-title WARNING, got: {result['warnings']}"
