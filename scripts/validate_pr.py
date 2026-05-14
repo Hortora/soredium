@@ -367,7 +367,8 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
             if _siblings and not _has_variant:
                 result['criticals'].append(
                     f"Convention shares title {_title!r} with {', '.join(_siblings)}: "
-                    f"add 'variant:' to distinguish this entry"
+                    f"add 'variant:' to distinguish this entry, "
+                    f"then REVISE {', '.join(_siblings)} to add their own 'variant:'"
                 )
             elif _has_variant and not _siblings:
                 result['warnings'].append(

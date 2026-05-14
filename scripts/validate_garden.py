@@ -437,11 +437,8 @@ def validate():
         from collections import defaultdict
         _title_groups: dict = defaultdict(list)   # (domain, title) -> [ge_ids]
         _variant_by_id: dict = {}                  # ge_id -> bool
-        _vskip = {'GARDEN.md', 'CHECKED.md', 'DISCARDED.md'}
-        for _vpath in GARDEN_ROOT.rglob('*.md'):
+        for _vpath in GARDEN_ROOT.rglob('GE-*.md'):
             if any(part in EXCLUDE_DIRS for part in _vpath.parts):
-                continue
-            if _vpath.name in _vskip:
                 continue
             _vraw = _vpath.read_text(encoding='utf-8')
             if not _vraw.startswith('---'):
