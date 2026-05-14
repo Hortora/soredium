@@ -181,8 +181,10 @@ git commit -m "init(<epic-name>): scaffold workspace branch"
 
 Prompt: "Start a brainstorm for this epic? (y/n)"
 
-- Yes → invoke `brainstorming` skill
+- Yes → invoke `brainstorming` skill. Brainstorming output (specs) must be written to `specs/<epic-name>/` not `specs/` — pass the epic name as context so specs are scoped to this epic.
 - No → done
+
+> **Note on spec scoping:** Specs created during an epic must live in `specs/<epic-name>/` so epic close can promote only this epic's specs, not specs from previous epics. Brainstorming is responsible for writing to the correct subdirectory when an epic is active.
 
 ---
 
@@ -263,7 +265,7 @@ Use `<design-repo>` throughout B3, B7a, and B7b for all DESIGN.md operations.
 ls adr/ 2>/dev/null | grep -v INDEX.md          # ADRs
 ls blog/ 2>/dev/null | grep -v INDEX.md         # Blog entries
 ls snapshots/ 2>/dev/null | grep -v INDEX.md    # Snapshots
-ls specs/ 2>/dev/null                            # Specs (user selects)
+ls specs/<epic-name>/ 2>/dev/null                 # Specs for this epic only
 ls plans/ 2>/dev/null | grep -v "^attic$"        # Plans (exclude attic/)
 cat design/JOURNAL.md 2>/dev/null               # Journal
 ```
@@ -301,7 +303,7 @@ If `design/JOURNAL.md` has no `§Section` entries → skip journal merge in the 
 
 If an issue number exists in `design/.meta` and issue tracking is enabled:
 
-Present list of files in `specs/`:
+Present list of files in `specs/<epic-name>/`:
 
 ```
 Select specs to post to GitHub issue #<N>:
@@ -476,6 +478,13 @@ ${BODY}
 ```bash
 gh issue close <issue> --repo <owner>/<repo>
 ```
+
+**Offer publish-blog** (if any blog entries were promoted to workspace during this epic):
+```
+Blog entries were staged to workspace during this epic.
+Publish them to mdproctor.github.io now? (y/n)
+```
+If yes → invoke `publish-blog` for the entries promoted in this epic.
 
 **Final report:**
 ```
