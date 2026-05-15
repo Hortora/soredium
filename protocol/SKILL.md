@@ -254,7 +254,7 @@ import pathlib, yaml
 
 REQUIRED = {"id", "title", "type", "scope", "applies_to", "severity", "created"}
 VALID_TYPES = {"rule", "principle"}
-VALID_SCOPES = {"platform", "repo"}
+VALID_SCOPES = {"universal", "platform", "repo", "application"}
 VALID_SEVERITIES = {"critical", "important", "guidance"}
 
 protocols_dir = pathlib.Path("docs/protocols")
