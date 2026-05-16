@@ -314,17 +314,20 @@ Wait for confirmation before writing.
 > "What initials should identify your garden entries on the contributor scoreboard? (e.g. 'mdp')"
 Save the answer to `~/.claude/settings.json` as `"initials": "<answer>"` and include `author: "<answer>"` in frontmatter.
 
+Resolve `HORTORA_GARDEN` to its concrete path (e.g. `/Users/mdproctor/.hortora/garden`) — read from the env var if set, fall back to `~/.hortora/garden`. Write using the literal resolved path:
+
 ```bash
-GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
-# write $GARDEN/<domain>/$GE_ID.md with YAML frontmatter + body
+# write /concrete/garden/<domain>/$GE_ID.md with YAML frontmatter + body
 ```
 
 **Step 7 — Validate**
 
+Resolve `HORTORA_GARDEN` and `SOREDIUM_PATH` to concrete paths first (same rule as Step 8 — no shell variable assignment inside Bash blocks). Then run with the literal resolved paths:
+
 ```bash
-python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-  ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/$GE_ID.md \
-  ${HORTORA_GARDEN:-~/.hortora/garden}
+python3 /concrete/soredium/scripts/validate_pr.py \
+  /concrete/garden/<domain>/$GE_ID.md \
+  /concrete/garden
 ```
 
 Fix any CRITICAL issues before continuing.
@@ -431,12 +434,13 @@ After all entry files are written, validate and deliver as a single batch:
 
 **Validate**
 
+Resolve `HORTORA_GARDEN` and `SOREDIUM_PATH` to concrete paths first — no shell variable assignment inside Bash blocks.
+
 If 3 or more entries were written, run validation in parallel (faster for typical 6–8 entry sweeps):
 ```bash
-GARDEN=${HORTORA_GARDEN:-~/.hortora/garden}
 for ENTRY_PATH in <list of written entry paths>; do
-  python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-    "$ENTRY_PATH" "$GARDEN" &
+  python3 /concrete/soredium/scripts/validate_pr.py \
+    "$ENTRY_PATH" /concrete/garden &
 done
 wait
 ```
