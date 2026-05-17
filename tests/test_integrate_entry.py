@@ -1,3 +1,5 @@
+import json
+import subprocess
 import pytest
 import re
 from pathlib import Path
@@ -314,3 +316,81 @@ class TestEntriesIndexIntegration:
         with patch('garden_db.upsert_entry', side_effect=Exception('db error')):
             result = self._run(entry, garden)
         assert result['status'] == 'ok'
+
+
+INTEGRATE_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'integrate_entry.py'
+
+
+class TestSkipFlags:
+    """Tests for --skip-validate and --skip-commit flags on integrate()."""
+
+    def test_no_flags_calls_both(self, garden, entry):
+        with patch('integrate_entry.run_validate') as mock_validate, \
+             patch('integrate_entry.git_commit') as mock_commit:
+            integrate(str(entry), str(garden))
+        mock_validate.assert_called_once()
+        mock_commit.assert_called_once()
+
+    def test_skip_validate_only(self, garden, entry):
+        with patch('integrate_entry.run_validate') as mock_validate, \
+             patch('integrate_entry.git_commit') as mock_commit:
+            integrate(str(entry), str(garden), skip_validate=True)
+        mock_validate.assert_not_called()
+        mock_commit.assert_called_once()
+
+    def test_skip_commit_only(self, garden, entry):
+        with patch('integrate_entry.run_validate') as mock_validate, \
+             patch('integrate_entry.git_commit') as mock_commit:
+            integrate(str(entry), str(garden), skip_commit=True)
+        mock_validate.assert_called_once()
+        mock_commit.assert_not_called()
+
+    def test_both_flags_skip_both(self, garden, entry):
+        with patch('integrate_entry.run_validate') as mock_validate, \
+             patch('integrate_entry.git_commit') as mock_commit:
+            integrate(str(entry), str(garden), skip_validate=True, skip_commit=True)
+        mock_validate.assert_not_called()
+        mock_commit.assert_not_called()
+
+    def test_skip_commit_still_updates_indexes(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
+        with patch('integrate_entry.run_validate'), \
+             patch('integrate_entry.git_commit'):
+            integrate(str(entry), str(garden), skip_commit=True)
+        assert (garden / '_summaries' / 'quarkus' / 'cdi' / 'GE-0123.md').exists()
+        assert 'GE-0123' in (garden / 'quarkus' / 'cdi' / 'INDEX.md').read_text()
+        assert (garden / 'labels' / 'quarkus.md').exists()
+        content = (garden / 'GARDEN.md').read_text()
+        assert re.search(r'\*\*Entries merged since last sweep:\*\*\s*1', content)
+
+    def test_cli_both_skip_flags_exits_0(self, tmp_path):
+        """Both flags together: CLI exits 0 and returns valid JSON (no git needed)."""
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
+        result = subprocess.run(
+            [sys.executable, str(INTEGRATE_SCRIPT),
+             str(entry), str(garden), '--skip-validate', '--skip-commit'],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        data = json.loads(result.stdout)
+        assert data == {'status': 'ok', 'ge_id': 'GE-0123', 'domain': 'quarkus/cdi'}
+
+    def test_cli_skip_validate_flag_accepted(self, tmp_path):
+        """--skip-validate is accepted by argparse (exit != 2 means not an argparse error)."""
+        result = subprocess.run(
+            [sys.executable, str(INTEGRATE_SCRIPT), '/nonexistent.md', '--skip-validate'],
+            capture_output=True, text=True
+        )
+        assert result.returncode != 2, f"argparse rejected --skip-validate: {result.stderr}"
+
+    def test_cli_skip_commit_flag_accepted(self, tmp_path):
+        """--skip-commit is accepted by argparse (exit != 2 means not an argparse error)."""
+        result = subprocess.run(
+            [sys.executable, str(INTEGRATE_SCRIPT), '/nonexistent.md', '--skip-commit'],
+            capture_output=True, text=True
+        )
+        assert result.returncode != 2, f"argparse rejected --skip-commit: {result.stderr}"
