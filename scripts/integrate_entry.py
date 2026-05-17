@@ -136,7 +136,8 @@ def git_commit(garden: Path, ge_id: str):
     )
 
 
-def integrate(entry_path: str, garden_root: str = None) -> dict:
+def integrate(entry_path: str, garden_root: str = None,
+              skip_validate: bool = False, skip_commit: bool = False) -> dict:
     path = Path(entry_path)
     garden = Path(garden_root) if garden_root else path.parent.parent
     fm, _ = parse_entry(path)
@@ -149,19 +150,32 @@ def integrate(entry_path: str, garden_root: str = None) -> dict:
     update_global_index(domain, garden)
     increment_drift_counter(garden)
     upsert_entry_index(garden, path, domain)
-    run_validate(garden)
-    git_commit(garden, ge_id)
+    if not skip_validate:
+        run_validate(garden)
+    if not skip_commit:
+        git_commit(garden, ge_id)
 
     return {'status': 'ok', 'ge_id': ge_id, 'domain': domain}
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(json.dumps({'error': 'Usage: integrate_entry.py <entry_file> [garden_root]'}))
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Update all garden indexes after an entry is submitted.'
+    )
+    parser.add_argument('entry_file', help='Path to the garden entry file')
+    parser.add_argument('garden_root', nargs='?',
+                        help='Path to the garden root (default: parent.parent of entry_file)')
+    parser.add_argument('--skip-validate', action='store_true',
+                        help='Skip structural validation (already done by validate_pr.py)')
+    parser.add_argument('--skip-commit', action='store_true',
+                        help='Update indexes on disk without committing (caller handles commit)')
+    args = parser.parse_args()
     result = integrate(
-        sys.argv[1],
-        sys.argv[2] if len(sys.argv) > 2 else None,
+        args.entry_file,
+        args.garden_root,
+        skip_validate=args.skip_validate,
+        skip_commit=args.skip_commit,
     )
     print(json.dumps(result, indent=2))
 
