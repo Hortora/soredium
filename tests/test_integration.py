@@ -1190,3 +1190,151 @@ class TestCaptureDeliverFlow(unittest.TestCase):
         m = re.search(r'\*\*Entries merged since last sweep:\*\*\s*(\d+)', content)
         self.assertIsNotNone(m)
         self.assertEqual(int(m.group(1)), 1)
+
+
+_SWEEP_ENTRY_A = textwrap.dedent("""\
+    ---
+    id: GE-20260517-sw0001
+    title: "SWEEP batch test entry A"
+    type: gotcha
+    domain: python
+    score: 10
+    tags: [python, sweep, batch]
+    stack: "Python (all versions)"
+    submitted: 2026-05-17
+    staleness_threshold: 730
+    ---
+
+    Body A.
+""")
+
+_SWEEP_ENTRY_B = textwrap.dedent("""\
+    ---
+    id: GE-20260517-sw0002
+    title: "SWEEP batch test entry B"
+    type: technique
+    domain: python
+    score: 11
+    tags: [python, testing]
+    stack: "Python (all versions)"
+    submitted: 2026-05-17
+    staleness_threshold: 730
+    ---
+
+    Body B.
+""")
+
+_SWEEP_ENTRY_C = textwrap.dedent("""\
+    ---
+    id: GE-20260517-sw0003
+    title: "SWEEP batch test entry C"
+    type: gotcha
+    domain: tools
+    score: 9
+    tags: [tools, git]
+    stack: "Git (all versions)"
+    submitted: 2026-05-17
+    staleness_threshold: 730
+    ---
+
+    Body C.
+""")
+
+
+class TestSweepDeliverFlow(unittest.TestCase):
+    """
+    Integration tests for the revised SWEEP Step 5 batch deliver flow.
+
+    Verifies that calling integrate(skip_validate=True, skip_commit=True) per entry
+    then issuing one batch commit preserves the single-commit sweep behaviour while
+    keeping all indexes current.
+    """
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.garden = GitGarden(Path(self.tmp.name))
+        self.garden.init_garden("GE-0100")
+        for domain in ['python', 'tools']:
+            d = self.garden.root / domain
+            d.mkdir()
+            (d / 'INDEX.md').write_text(
+                '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+            )
+        (self.garden.root / '_index').mkdir()
+        (self.garden.root / '_index' / 'global.md').write_text(
+            '| Domain | Index |\n|--------|-------|\n'
+        )
+        self.garden.commit_all("init: add python and tools domains")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_sweep_produces_single_batch_commit(self):
+        """3 entries → integrate(skip_validate, skip_commit) × 3 → exactly 1 new commit."""
+        path_a = self.garden.root / 'python' / 'GE-20260517-sw0001.md'
+        path_b = self.garden.root / 'python' / 'GE-20260517-sw0002.md'
+        path_c = self.garden.root / 'tools' / 'GE-20260517-sw0003.md'
+        path_a.write_text(_SWEEP_ENTRY_A)
+        path_b.write_text(_SWEEP_ENTRY_B)
+        path_c.write_text(_SWEEP_ENTRY_C)
+
+        sha_before = self.garden.head_sha()
+
+        for path in [path_a, path_b, path_c]:
+            _integrate(str(path), str(self.garden.root),
+                       skip_validate=True, skip_commit=True)
+
+        # Single batch commit (as SWEEP Step 5 does)
+        git(self.garden.root, 'add',
+            str(path_a), str(path_b), str(path_c),
+            '_summaries/', '_index/', 'labels/', 'GARDEN.md')
+        git(self.garden.root, 'add', '--update')
+        git(self.garden.root, 'commit', '-m',
+            'sweep: 3 entries — sweep-batch-a, sweep-batch-b, sweep-batch-c')
+
+        # Exactly 1 new commit (not 3)
+        log = git_out(self.garden.root, 'log', '--oneline',
+                      f'{sha_before}..HEAD')
+        self.assertEqual(len(log.strip().splitlines()), 1,
+                         "Expected exactly 1 new commit from sweep batch")
+
+        show = git_out(self.garden.root, 'show', '--name-only', 'HEAD')
+        self.assertIn('python/GE-20260517-sw0001.md', show)
+        self.assertIn('python/GE-20260517-sw0002.md', show)
+        self.assertIn('tools/GE-20260517-sw0003.md', show)
+        self.assertIn('python/INDEX.md', show)
+        self.assertIn('tools/INDEX.md', show)
+        self.assertIn('GARDEN.md', show)
+
+    def test_drift_counter_incremented_by_three(self):
+        """SWEEP of 3 entries increments GARDEN.md drift counter by 3."""
+        for path, entry in [
+            (self.garden.root / 'python' / 'GE-20260517-sw0001.md', _SWEEP_ENTRY_A),
+            (self.garden.root / 'python' / 'GE-20260517-sw0002.md', _SWEEP_ENTRY_B),
+            (self.garden.root / 'tools' / 'GE-20260517-sw0003.md', _SWEEP_ENTRY_C),
+        ]:
+            path.write_text(entry)
+            _integrate(str(path), str(self.garden.root),
+                       skip_validate=True, skip_commit=True)
+
+        content = (self.garden.root / 'GARDEN.md').read_text()
+        m = re.search(r'\*\*Entries merged since last sweep:\*\*\s*(\d+)', content)
+        self.assertIsNotNone(m)
+        self.assertEqual(int(m.group(1)), 3)
+
+    def test_mixed_domain_both_index_files_updated(self):
+        """Entries in python/ and tools/ both get their INDEX.md updated before commit."""
+        path_a = self.garden.root / 'python' / 'GE-20260517-sw0001.md'
+        path_c = self.garden.root / 'tools' / 'GE-20260517-sw0003.md'
+        path_a.write_text(_SWEEP_ENTRY_A)
+        path_c.write_text(_SWEEP_ENTRY_C)
+
+        _integrate(str(path_a), str(self.garden.root),
+                   skip_validate=True, skip_commit=True)
+        _integrate(str(path_c), str(self.garden.root),
+                   skip_validate=True, skip_commit=True)
+
+        self.assertIn('GE-20260517-sw0001',
+                      (self.garden.root / 'python' / 'INDEX.md').read_text())
+        self.assertIn('GE-20260517-sw0003',
+                      (self.garden.root / 'tools' / 'INDEX.md').read_text())
