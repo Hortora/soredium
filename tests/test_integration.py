@@ -1305,6 +1305,10 @@ class TestSweepDeliverFlow(unittest.TestCase):
         self.assertIn('python/INDEX.md', show)
         self.assertIn('tools/INDEX.md', show)
         self.assertIn('GARDEN.md', show)
+        self.assertTrue(
+            any('_summaries' in line for line in show.splitlines()),
+            f"_summaries/ not found in sweep batch commit:\n{show}"
+        )
 
     def test_drift_counter_incremented_by_three(self):
         """SWEEP of 3 entries increments GARDEN.md drift counter by 3."""
