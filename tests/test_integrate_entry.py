@@ -324,28 +324,40 @@ INTEGRATE_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'integrate_entry.p
 class TestSkipFlags:
     """Tests for --skip-validate and --skip-commit flags on integrate()."""
 
-    def test_no_flags_calls_both(self, garden, entry):
+    def test_no_flags_calls_both(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
         with patch('integrate_entry.run_validate') as mock_validate, \
              patch('integrate_entry.git_commit') as mock_commit:
             integrate(str(entry), str(garden))
         mock_validate.assert_called_once()
         mock_commit.assert_called_once()
 
-    def test_skip_validate_only(self, garden, entry):
+    def test_skip_validate_only(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
         with patch('integrate_entry.run_validate') as mock_validate, \
              patch('integrate_entry.git_commit') as mock_commit:
             integrate(str(entry), str(garden), skip_validate=True)
         mock_validate.assert_not_called()
         mock_commit.assert_called_once()
 
-    def test_skip_commit_only(self, garden, entry):
+    def test_skip_commit_only(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
         with patch('integrate_entry.run_validate') as mock_validate, \
              patch('integrate_entry.git_commit') as mock_commit:
             integrate(str(entry), str(garden), skip_commit=True)
         mock_validate.assert_called_once()
         mock_commit.assert_not_called()
 
-    def test_both_flags_skip_both(self, garden, entry):
+    def test_both_flags_skip_both(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
         with patch('integrate_entry.run_validate') as mock_validate, \
              patch('integrate_entry.git_commit') as mock_commit:
             integrate(str(entry), str(garden), skip_validate=True, skip_commit=True)
@@ -379,7 +391,7 @@ class TestSkipFlags:
         data = json.loads(result.stdout)
         assert data == {'status': 'ok', 'ge_id': 'GE-0123', 'domain': 'quarkus/cdi'}
 
-    def test_cli_skip_validate_flag_accepted(self, tmp_path):
+    def test_cli_skip_validate_flag_accepted(self):
         """--skip-validate is accepted by argparse (exit != 2 means not an argparse error)."""
         result = subprocess.run(
             [sys.executable, str(INTEGRATE_SCRIPT), '/nonexistent.md', '--skip-validate'],
@@ -387,7 +399,7 @@ class TestSkipFlags:
         )
         assert result.returncode != 2, f"argparse rejected --skip-validate: {result.stderr}"
 
-    def test_cli_skip_commit_flag_accepted(self, tmp_path):
+    def test_cli_skip_commit_flag_accepted(self):
         """--skip-commit is accepted by argparse (exit != 2 means not an argparse error)."""
         result = subprocess.run(
             [sys.executable, str(INTEGRATE_SCRIPT), '/nonexistent.md', '--skip-commit'],
