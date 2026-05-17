@@ -77,21 +77,34 @@ Preserves the single-commit sweep behaviour. No N×validate penalty.
 
 ## Section 4 — Testing
 
-**Unit tests for `integrate_entry.py`:**
-- `--skip-validate`: assert `run_validate` not called
-- `--skip-commit`: assert `git_commit` not called
-- Both flags: neither called; index files updated on disk
-- No flags: existing behaviour unchanged (regression guard)
+All new tests live in the existing `tests/` directory alongside the current suite. Unit tests extend `test_integrate_entry.py`; integration tests add a new `TestCaptureDeliverFlow` and `TestSweepDeliverFlow` class using the `GitGarden` fixture from `tests/garden_fixture.py`.
 
-Mock `run_validate` and `git_commit` — no real garden needed.
+### Unit tests — flag behaviour (`test_integrate_entry.py`)
 
-**CAPTURE integration test** (scratch garden):
-- Write a valid entry, run revised Step 8
-- Assert: entry committed, GARDEN.md drift counter +1, domain `INDEX.md` updated, `labels/` updated
+7 new tests, all mock `run_validate` and/or `git_commit`:
 
-**SWEEP integration test** (scratch garden):
-- Write 3 entries, run revised SWEEP Deliver
-- Assert: single commit contains all 3 entries + all index updates, GARDEN.md drift counter +3
+- `test_no_flags_calls_both` — regression guard: both `run_validate` and `git_commit` are called when no flags passed
+- `test_skip_validate_only` — `run_validate` NOT called; `git_commit` IS called
+- `test_skip_commit_only` — `git_commit` NOT called; `run_validate` IS called
+- `test_both_flags_skip_both` — neither called
+- `test_skip_commit_still_updates_indexes` — with `skip_commit=True`, `_summaries/`, domain `INDEX.md`, `labels/`, `GARDEN.md` are all written to disk (flag skips commit only, not index work)
+- `test_cli_skip_validate_flag` — subprocess call with `--skip-validate`; assert exit 0
+- `test_cli_skip_commit_flag` — subprocess call with `--skip-commit`; assert exit 0
+
+### Integration tests — CAPTURE flow (`TestCaptureDeliverFlow`)
+
+Uses `GitGarden` (real git repo, no mocks):
+
+- `test_capture_flow_entry_and_indexes_in_same_commit` — stage entry → `integrate(skip_validate=True)` → assert single commit contains entry file + all index files (`_summaries/`, `INDEX.md`, `labels/`, `GARDEN.md`); drift counter +1
+- `test_capture_flow_local_garden_no_push` — no remote; integration commits locally, no push attempted
+
+### Integration tests — SWEEP batch flow (`TestSweepDeliverFlow`)
+
+Uses `GitGarden`:
+
+- `test_sweep_flow_single_batch_commit` — 3 entries → `integrate(skip_validate=True, skip_commit=True)` × 3 → batch commit → assert exactly 1 commit (not 3), all entry files present, all index updates present; GARDEN.md drift +3
+- `test_sweep_preserves_batch_commit_message` — commit message matches `sweep: N entries — slug1, slug2, ...` format
+- `test_sweep_mixed_domain` — entries in 2 different domains; both domain `INDEX.md` files updated in the single batch commit
 
 ## Out of Scope
 
