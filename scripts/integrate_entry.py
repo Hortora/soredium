@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """integrate_entry.py — Update all garden indexes after a PR is merged."""
 
-import sys
 import re
 import json
 import subprocess
@@ -11,7 +10,7 @@ try:
     import yaml
 except ImportError:
     print(json.dumps({'error': 'PyYAML not installed: pip install pyyaml'}))
-    sys.exit(1)
+    exit(1)
 
 
 def parse_entry(path: Path) -> tuple:
