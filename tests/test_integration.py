@@ -698,6 +698,10 @@ _sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from integrate_entry import integrate as _integrate
 from unittest.mock import patch as _patch
 
+import sys as _sys2
+_sys2.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+from integrate_entry import integrate as _integrate_direct
+
 _INTEGRATE_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'integrate_entry.py'
 _SCANNER_SCRIPT   = Path(__file__).parent.parent / 'scripts' / 'dedupe_scanner.py'
 _VALIDATOR_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'validate_garden.py'
@@ -1094,3 +1098,91 @@ class TestE2EInitGardenPipeline(unittest.TestCase):
         self._init()
         result = _run_schema_validator(self.garden)
         self.assertEqual(result.returncode, 0)
+
+
+# ── Phase 6 E2E: CAPTURE deliver flow ─────────────────────────────────────────
+
+_CAPTURE_ENTRY = textwrap.dedent("""\
+    ---
+    id: GE-20260517-cap001
+    title: "CAPTURE flow integration test entry"
+    type: gotcha
+    domain: python
+    score: 10
+    tags: [python, testing, integration]
+    submitted: 2026-05-17
+    staleness_threshold: 730
+    ---
+
+    ## CAPTURE flow integration test entry
+
+    **ID:** GE-20260517-cap001
+    **Stack:** Python (all versions)
+    **Symptom:** Test symptom for CAPTURE flow.
+    **Context:** Integration test only.
+
+    ### Root cause
+    Integration test root cause.
+
+    ### Fix
+    Integration test fix.
+
+    ### Why this is non-obvious
+    Used only in integration tests.
+
+    *Score: 10/15 · Included because: test coverage · Reservation: none*
+""")
+
+
+class TestCaptureDeliverFlow(unittest.TestCase):
+    """
+    Integration tests for the revised CAPTURE Step 8 deliver flow.
+
+    Verifies that staging an entry file then calling integrate(skip_validate=True)
+    produces a single commit containing both the entry and all index files.
+    Uses a real git repository — no mocks.
+    """
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.garden = GitGarden(Path(self.tmp.name))
+        self.garden.init_garden("GE-0100")
+        domain = self.garden.root / 'python'
+        domain.mkdir()
+        (domain / 'INDEX.md').write_text(
+            '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+        )
+        (self.garden.root / '_index').mkdir()
+        (self.garden.root / '_index' / 'global.md').write_text(
+            '| Domain | Index |\n|--------|-------|\n'
+        )
+        self.garden.commit_all("init: add python domain")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_entry_and_indexes_land_in_same_commit(self):
+        """Stage entry → integrate(skip_validate=True) → one commit with entry + all index files."""
+        entry = self.garden.root / 'python' / 'GE-20260517-cap001.md'
+        entry.write_text(_CAPTURE_ENTRY)
+
+        git(self.garden.root, 'add', str(entry))
+        _integrate_direct(str(entry), str(self.garden.root), skip_validate=True)
+
+        show = git_out(self.garden.root, 'show', '--name-only', 'HEAD')
+        self.assertIn('python/GE-20260517-cap001.md', show)
+        self.assertIn('python/INDEX.md', show)
+        self.assertIn('GARDEN.md', show)
+        self.assertIn('GE-20260517-cap001', show)  # _summaries entry
+
+    def test_drift_counter_incremented_by_one(self):
+        """CAPTURE integration increments GARDEN.md drift counter by 1."""
+        entry = self.garden.root / 'python' / 'GE-20260517-cap001.md'
+        entry.write_text(_CAPTURE_ENTRY)
+        git(self.garden.root, 'add', str(entry))
+        _integrate_direct(str(entry), str(self.garden.root), skip_validate=True)
+
+        content = (self.garden.root / 'GARDEN.md').read_text()
+        m = re.search(r'\*\*Entries merged since last sweep:\*\*\s*(\d+)', content)
+        self.assertIsNotNone(m)
+        self.assertEqual(int(m.group(1)), 1)
