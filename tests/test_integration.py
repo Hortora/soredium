@@ -698,10 +698,6 @@ _sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from integrate_entry import integrate as _integrate
 from unittest.mock import patch as _patch
 
-import sys as _sys2
-_sys2.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-from integrate_entry import integrate as _integrate_direct
-
 _INTEGRATE_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'integrate_entry.py'
 _SCANNER_SCRIPT   = Path(__file__).parent.parent / 'scripts' / 'dedupe_scanner.py'
 _VALIDATOR_SCRIPT = Path(__file__).parent.parent / 'scripts' / 'validate_garden.py'
@@ -1109,6 +1105,7 @@ _CAPTURE_ENTRY = textwrap.dedent("""\
     type: gotcha
     domain: python
     score: 10
+    stack: "Python (all versions)"
     tags: [python, testing, integration]
     submitted: 2026-05-17
     staleness_threshold: 730
@@ -1166,21 +1163,28 @@ class TestCaptureDeliverFlow(unittest.TestCase):
         entry = self.garden.root / 'python' / 'GE-20260517-cap001.md'
         entry.write_text(_CAPTURE_ENTRY)
 
+        sha_before = self.garden.head_sha()
         git(self.garden.root, 'add', str(entry))
-        _integrate_direct(str(entry), str(self.garden.root), skip_validate=True)
+        _integrate(str(entry), str(self.garden.root), skip_validate=True)
+
+        log = git_out(self.garden.root, 'log', '--oneline', f'{sha_before}..HEAD')
+        self.assertEqual(len(log.strip().splitlines()), 1, "Expected exactly 1 new commit")
 
         show = git_out(self.garden.root, 'show', '--name-only', 'HEAD')
         self.assertIn('python/GE-20260517-cap001.md', show)
         self.assertIn('python/INDEX.md', show)
         self.assertIn('GARDEN.md', show)
-        self.assertIn('GE-20260517-cap001', show)  # _summaries entry
+        self.assertTrue(
+            any('_summaries' in line and 'GE-20260517-cap001' in line for line in show.splitlines()),
+            f"_summaries/python/GE-20260517-cap001.md not found in commit:\n{show}"
+        )
 
     def test_drift_counter_incremented_by_one(self):
         """CAPTURE integration increments GARDEN.md drift counter by 1."""
         entry = self.garden.root / 'python' / 'GE-20260517-cap001.md'
         entry.write_text(_CAPTURE_ENTRY)
         git(self.garden.root, 'add', str(entry))
-        _integrate_direct(str(entry), str(self.garden.root), skip_validate=True)
+        _integrate(str(entry), str(self.garden.root), skip_validate=True)
 
         content = (self.garden.root / 'GARDEN.md').read_text()
         m = re.search(r'\*\*Entries merged since last sweep:\*\*\s*(\d+)', content)
