@@ -336,26 +336,34 @@ Fix any CRITICAL issues before continuing.
 **Step 8 — Deliver**
 
 **Resolve the garden path first** — evaluate `HORTORA_GARDEN` env var once, fall back to
-`~/.hortora/garden`. Use the **concrete resolved path** in every subsequent git command.
+`~/.hortora/garden`. Use the **concrete resolved path** in every subsequent command.
 Never assign `GARDEN=...` inside a Bash block — that triggers shell expansion prompts.
 
-Detect the garden's remote (replace `/concrete/path` with the resolved path):
+**Use the soredium path resolved in Step 7** (`SOREDIUM_PATH` env var, or the path used
+for `validate_pr.py`).
+
+Detect the garden's remote (replace `/concrete/garden` and `/concrete/soredium` with resolved paths):
 ```bash
-git -C /concrete/path remote get-url origin 2>/dev/null
+git -C /concrete/garden remote get-url origin 2>/dev/null
 ```
 
-**If the URL contains `github.com`** → commit directly to main and push:
+Stage the entry file, then run integration (validation already done in Step 7 — skip it here):
 ```bash
-git -C /concrete/path add <domain>/$GE_ID.md
-git -C /concrete/path commit -m "submit($GE_ID): <slug>"
-git -C /concrete/path pull --rebase origin main
-git -C /concrete/path push origin main
+git -C /concrete/garden add <domain>/$GE_ID.md
+python3 /concrete/soredium/scripts/integrate_entry.py \
+  /concrete/garden/<domain>/$GE_ID.md \
+  /concrete/garden \
+  --skip-validate
 ```
 
-**If no GitHub remote** → commit directly to main:
+`integrate_entry.py` updates all indexes (`_summaries/`, domain `INDEX.md`, `labels/`,
+`_index/global.md`, `GARDEN.md` drift counter, `garden.db`) and commits the entry file
+plus all index changes in a single commit. Commit message: `index: integrate <GE_ID>`.
+
+**If the URL contains `github.com`** → pull and push:
 ```bash
-git -C /concrete/path add <domain>/$GE_ID.md
-git -C /concrete/path commit -m "submit($GE_ID): <slug>"
+git -C /concrete/garden pull --rebase origin main
+git -C /concrete/garden push origin main
 ```
 
 **Step 9 — Check for other untracked entries**
