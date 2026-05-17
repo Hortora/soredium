@@ -256,6 +256,7 @@ Then, select the coarse domain (Qdrant partition key):
 | AppKit, WKWebView, NSTextField | `macos-native-appkit` |
 | Panama FFM, jextract, GraalVM native | `java-panama-ffm` |
 | Quarkus, Java, Drools, JVM | `jvm` |
+| Quarkus (legacy entries pre-2026-05) | `quarkus/` — **do not use for new entries; route to `jvm/` instead** |
 | Python | `python` |
 | Git, tmux, Docker, CLI tools, cross-cutting patterns | `tools` |
 | Web, frontend, Node.js | `web` |
