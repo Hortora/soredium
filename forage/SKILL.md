@@ -639,9 +639,35 @@ python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
   ${HORTORA_GARDEN:-~/.hortora/garden}
 ```
 
-Then deliver the same way as CAPTURE Step 8: PR (GitHub remote) or direct commit to main (local).
+Then deliver. **Resolve the garden path** (same rule as CAPTURE Step 8 — concrete path, no shell variable assignment). **Use the soredium path** from the validation step above.
 
-Commit message: `revise(GE-XXXX): <revision-kind> — <brief description>`
+Detect the garden's remote:
+```bash
+git -C /concrete/garden remote get-url origin 2>/dev/null
+```
+
+Update all indexes on disk without committing (the modified entry is already tracked — `git add --update` will stage it in the commit below):
+```bash
+python3 /concrete/soredium/scripts/integrate_entry.py \
+  /concrete/garden/<domain>/GE-XXXX.md \
+  /concrete/garden \
+  --skip-validate --skip-commit
+```
+
+Commit with the REVISE-specific message:
+```bash
+git -C /concrete/garden add <domain>/GE-XXXX.md _summaries/ _index/ labels/ GARDEN.md
+git -C /concrete/garden add --update
+git -C /concrete/garden commit -m "revise(GE-XXXX): <revision-kind> — <brief description>"
+```
+
+**If the URL contains `github.com`** → pull and push:
+```bash
+git -C /concrete/garden pull --rebase origin main
+git -C /concrete/garden push origin main
+```
+
+**If no GitHub remote** → commit above is sufficient.
 
 ---
 
