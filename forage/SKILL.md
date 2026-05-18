@@ -373,7 +373,7 @@ git -C /concrete/garden push origin main
 Before reporting back, scan for any other untracked entry files in the garden:
 
 ```bash
-git -C /concrete/path ls-files --others --exclude-standard \
+git -C /concrete/garden ls-files --others --exclude-standard \
   | grep -E "^[^/]+/GE-[0-9]{8}-[0-9a-f]{6}\.md$"
 ```
 
