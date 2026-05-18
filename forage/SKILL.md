@@ -347,7 +347,7 @@ Detect the garden's remote (replace `/concrete/garden` and `/concrete/soredium` 
 git -C /concrete/garden remote get-url origin 2>/dev/null
 ```
 
-Stage the entry file, then run integration (validation already done in Step 7 — skip it here):
+Stage the entry file first (it is a new untracked file — `integrate_entry.py` uses `git add --update` internally which only covers tracked files), then run integration (validation already done in Step 7 — skip it here):
 ```bash
 git -C /concrete/garden add <domain>/$GE_ID.md
 python3 /concrete/soredium/scripts/integrate_entry.py \
@@ -359,6 +359,8 @@ python3 /concrete/soredium/scripts/integrate_entry.py \
 `integrate_entry.py` updates all indexes (`_summaries/`, domain `INDEX.md`, `labels/`,
 `_index/global.md`, `GARDEN.md` drift counter, `garden.db`) and commits the entry file
 plus all index changes in a single commit. Commit message: `index: integrate <GE_ID>`.
+
+**If no GitHub remote** → integration is complete. `integrate_entry.py` already committed the entry and all index files. Proceed to Step 9.
 
 **If the URL contains `github.com`** → pull and push:
 ```bash
