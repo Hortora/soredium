@@ -27,7 +27,7 @@ The engine for Hortora gardens — validators, CI scripts, GitHub Actions workfl
 | `scripts/dedupe_scanner.py` | Scans all entry pairs for semantic similarity. Outputs ranked unchecked pairs. Records classifications (distinct / related / duplicate-discarded) in `CHECKED.md`. |
 | `scripts/garden-agent-install.sh` | Installs the autonomous garden agent into a local garden clone. Idempotent — safe to re-run. See [Garden Agent](#garden-agent) below. |
 | `scripts/garden-setup.sh` | One-time sparse blobless clone setup. Index files materialised; entry bodies fetched on demand via `git cat-file`. |
-| `scripts/integrate_entry.py` | Updates garden indexes after entry changes: domain `INDEX.md`, `labels/`, `_index/global.md`. |
+| `scripts/integrate_entry.py` | Updates all garden indexes after an entry is submitted: `_summaries/`, domain `INDEX.md`, `labels/`, `_index/global.md`, `GARDEN.md` drift counter, and `garden.db`. Commits the result. Supports `--skip-validate` (skip structural validation when already done by `validate_pr.py`) and `--skip-commit` (update indexes on disk only — caller handles commit, used by SWEEP batch delivery). |
 | `scripts/claude-skill` | Skill installer — `install`, `sync-local`, `uninstall`. |
 
 ---
@@ -35,11 +35,20 @@ The engine for Hortora gardens — validators, CI scripts, GitHub Actions workfl
 ## How submissions work
 
 ```
-forage CAPTURE / SWEEP
+forage CAPTURE
   → write GE-YYYYMMDD-xxxxxx.md
-  → validate_pr.py           # format, score, Jaccard, injection check
-  → git commit + git pull --rebase origin main + git push origin main
+  → validate_pr.py               # format, score, Jaccard, injection check
+  → git add <entry>
+  → integrate_entry.py --skip-validate  # updates _summaries/, INDEX.md, labels/, GARDEN.md, garden.db; commits entry + indexes
+  → git pull --rebase origin main + git push origin main
   → post-commit hook fires garden agent (async)
+
+forage SWEEP
+  → write N entries
+  → validate_pr.py × N
+  → integrate_entry.py --skip-validate --skip-commit × N  # update indexes on disk only
+  → git add <all entries + index dirs> + git commit "sweep: N entries — ..."
+  → git pull --rebase origin main + git push origin main
     → git pull               # pull any other concurrent entries
     → dedupe_scanner.py      # sweep top-50 unchecked pairs
     → classify + commit      # "dedupe: sweep N pairs — ..."
