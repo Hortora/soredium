@@ -162,6 +162,7 @@ Session wrap — create before writing the handover?
 [x] 4  forage sweep      check for gotchas, techniques, undocumented
 [x] 5  protocol sweep    check for project rules worth formalising
 [?] 6  journal-entry     document any design changes this session not yet in design/JOURNAL.md  ← ON if mid-epic (design/.meta exists), OFF otherwise
+[?] 7  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
 
 Type numbers to toggle (e.g. "2 6"), "all" to toggle all on/off, or "go" to proceed:
 ```
@@ -170,17 +171,24 @@ Type numbers to toggle (e.g. "2 6"), "all" to toggle all on/off, or "go" to proc
 - **design-snapshot is off by default** — the project model is a single authoritative design document updated in place, not a growing snapshot chain. Only tick it for an explicit, intentional design freeze (e.g. a major milestone or architectural pivot worth preserving immutably). Without a workspace configured, the skill will fail or create the wrong directory.
 - **protocol sweep is on by default** — scans the session for project-specific rules worth formalising. Skip it for sessions that worked purely in universal tools with no project-specific rules established or re-enforced. The protocol skill creates `docs/protocols/` if it does not exist — never skip the sweep because the directory is absent.
 - **journal-entry is ON by default when on an epic branch** — check `ls design/.meta 2>/dev/null` before showing the checklist. If `.meta` exists the session is mid-epic and design reasoning is about to be lost; default journal-entry to ON. If not on an epic branch, default to OFF.
+- **epic hygiene is ON by default when a workspace is configured** — check `**Workspace:**` in CLAUDE.md. Runs these checks and surfaces any issues before the session ends:
+  1. Orphaned `.meta` on main (epic closed without cleanup)
+  2. Workspace/project branch misalignment
+  3. Open epic branches with no commits in the last 7 days (stale)
+  4. Mid-epic: journal exists but has no `§Section` anchors (entries will not merge at close)
+  Report findings — do not auto-fix, just surface them so they can be addressed or noted in the handover.
 - **"all":** if all are on → turn all off; if any are off → turn all on
 - **Numbers:** toggle individual items
 - **"go" (or "ok", "yes", blank Enter if the UI allows it):** proceed with current selections
 
 Run checked items **in this order** before continuing:
-1. Forage sweep — done while context is full (findings may feed the blog)
-2. Protocol sweep — done while context is full; catches project-specific rules before context is lost
-3. update-claude-md — sync new conventions first
-4. design-snapshot — only if explicitly ticked; requires workspace configured
-5. journal-entry — write any missing JOURNAL.md entries before the handover
-6. write-blog — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
+1. Epic hygiene — run first so any issues surface early and can be mentioned in blog/handover
+2. Forage sweep — done while context is full (findings may feed the blog)
+3. Protocol sweep — done while context is full; catches project-specific rules before context is lost
+4. update-claude-md — sync new conventions first
+5. design-snapshot — only if explicitly ticked; requires workspace configured
+6. journal-entry — write any missing JOURNAL.md entries before the handover
+7. write-blog — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
 
 After all checked items complete, continue to Step 1.
 
