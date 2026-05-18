@@ -462,27 +462,41 @@ Fix any CRITICAL issues before continuing.
 
 **Deliver**
 
-**Resolve the garden path first** (same rule as CAPTURE Step 8 — use the concrete path,
-no shell variable assignment in Bash blocks).
+**Resolve the garden path** (same rule as CAPTURE Step 8 — concrete path, no shell variable
+assignment in Bash blocks). **Use the soredium path resolved above** (same `SOREDIUM_PATH`
+used for `validate_pr.py` in the Validate step).
 
 Detect the garden's remote:
 ```bash
-git -C /concrete/path remote get-url origin 2>/dev/null
+git -C /concrete/garden remote get-url origin 2>/dev/null
 ```
 
-**GitHub remote** — single commit to main and push:
+For each written entry, update all indexes on disk without committing yet (the entry file
+is already tracked or will be staged before the batch commit — `--skip-commit` defers the
+git operation to the caller):
 ```bash
-git -C /concrete/path add <all written entry files>
-git -C /concrete/path commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
-git -C /concrete/path pull --rebase origin main
-git -C /concrete/path push origin main
+python3 /concrete/soredium/scripts/integrate_entry.py \
+  /concrete/garden/<domain>/$GE_ID.md \
+  /concrete/garden \
+  --skip-validate --skip-commit
 ```
 
-**No GitHub remote** — single commit to main:
+Run this sequentially for each entry. Then issue a single batch commit containing all entry
+files and all index updates:
 ```bash
-git -C /concrete/path add <all written entry files>
-git -C /concrete/path commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
+git -C /concrete/garden add <all written entry files>
+git -C /concrete/garden add _summaries/ _index/ labels/ GARDEN.md
+git -C /concrete/garden add --update
+git -C /concrete/garden commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
 ```
+
+**If the URL contains `github.com`** → pull and push:
+```bash
+git -C /concrete/garden pull --rebase origin main
+git -C /concrete/garden push origin main
+```
+
+**If no GitHub remote** → batch commit above is sufficient. Proceed to Step 6.
 
 **Step 6 — Staleness spot-check (domain-filtered)**
 
