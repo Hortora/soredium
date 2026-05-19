@@ -46,7 +46,43 @@ git log -1 --format="%ar" -- HANDOFF.md
 If more than a week old, flag it before using the context:
 > "HANDOFF.md is N days old — some context may be stale. Verify key assumptions before building on it."
 
-Then read the file and summarise the session state to the user.
+Then read the file and present the resume output using this structure:
+
+---
+
+**## Last Session**
+2–3 lines: what was done and the key outcome.
+
+**## Immediate Next Step**
+Single specific action right now — procedural or unblocking (e.g. "run /epic", "delete branches", "fix X in Y").
+
+**## Cross-Module**
+Only include if HANDOFF.md contains cross-module dependencies. Omit the section entirely if there are none.
+
+**We're blocking** (other modules waiting on us — treat as high priority):
+- `<module>` — what they need from us · Scale · Complexity
+
+**Blocked by** (can't proceed until):
+- `<module>` — what we need from them (gates #N) · Scale · Complexity
+
+**## What's Left**
+Trailing obligations from current/recent work — in-flight, filed, or owed. Each item carries tags. Omit if none.
+- `<description>` · Scale · Complexity
+
+**## What's Next**
+Discretionary new work. Items blocked by other modules are flagged in Notes.
+
+| # | Description | Scale | Complexity | Notes |
+|---|-------------|-------|------------|-------|
+| #N | ... | S | Low | ... |
+
+---
+
+**Tag definitions (infer from issue description, HANDOFF.md context, and any referenced specs):**
+- **Scale**: XS (lines) / S (single class) / M (multi-class) / L (substantial feature) / XL (major rework)
+- **Complexity**: Low (clear path, no unknowns) / Med (some design or unknowns) / High (significant unknowns, design required)
+
+Be directionally honest — don't inflate Complexity to seem thorough.
 
 ### Common Mistake
 
@@ -214,8 +250,10 @@ the diff, not from loading the full previous file.
 From the current session, recall:
 - What changed from the last handover? (only write these)
 - What decisions were made? What was tried and didn't work?
-- What's blocking or uncertain?
-- What's the single most important next action?
+- What cross-module dependencies exist? Are we blocking any other module? Is anything blocking us?
+- What's trailing from this session that feels owed (What's Left)?
+- What new discrete work could be picked up next (What's Next)?
+- What's the single most important next action (Immediate Next Step)?
 
 Do NOT read any project files to answer these. Work from conversation memory.
 
@@ -392,6 +430,31 @@ fi
 
 Committing is mandatory. It's what makes git history the archive.
 
+### Step 7 — Session close summary
+
+After the commit, output a single tick-list summary showing what was done and what was skipped. This gives the user a clean signal that the wrap is complete and nothing was missed.
+
+```
+Session wrap complete.
+
+✅ Epic hygiene          (or ⏭ skipped — [reason])
+✅ Forage sweep          N entries submitted  (or: nothing garden-worthy found)
+✅ Protocol sweep        N protocols captured (or: nothing new)
+✅ update-claude-md      (or ⏭ skipped)
+✅ design-snapshot       (or ⏭ skipped — off by default)
+✅ journal-entry         (or ⏭ skipped — not mid-epic)
+✅ write-blog            <entry filename>
+✅ HANDOFF.md committed  <workspace>/HANDOFF.md → main
+```
+
+Rules:
+- Show every checklist item — both ticked and skipped
+- For skipped items, include a brief reason in parentheses
+- For forage sweep, show the count of entries submitted (or "nothing garden-worthy found" if the sweep was clean)
+- For write-blog, show the actual filename written
+- For HANDOFF.md, show the resolved workspace path
+- Keep each line to one line — no multi-line elaboration
+
 ---
 
 ---
@@ -488,6 +551,9 @@ Handover is complete when:
 - ✅ Readable in under 500 tokens
 - ✅ Unchanged sections reference git history, not repeated content
 - ✅ Immediate next step is specific enough to act on without asking
+- ✅ Cross-Module section present if deps exist; omitted entirely if none
+- ✅ What's Left items carry Scale · Complexity tags
+- ✅ What's Next table carries Scale / Complexity / Notes columns
 - ✅ References table uses paths only — no file content inline
 - ✅ Nothing from CLAUDE.md is duplicated
 - ✅ User confirmed before writing
