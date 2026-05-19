@@ -69,6 +69,7 @@ These extend universal categories with TypeScript-specific items (tier 2+):
 ### `artifacts` augmentations
 
 **Quality:**
+- [ ] `docs/DESIGN.md` exists — if missing, offer to create a stub using the typescript DESIGN.md template from `workspace-init` Step 6b, commit it, and note it needs content
 - [ ] `tsconfig.json` exists at the project root
 - [ ] `tsconfig.json` has `"strict": true` enabled (or individual strict flags all enabled)
 - [ ] Lock file is committed and present (`package-lock.json`, `yarn.lock`, or `pnpm-lock.yaml`)

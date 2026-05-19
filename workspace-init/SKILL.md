@@ -707,7 +707,88 @@ Start with standard project-knowledge paths:
 - `CLAUDE.md` — project conventions (build commands, test patterns, naming)
 - `docs/adr/` — architecture decision records (always project knowledge)
 
-Then detect additional project-knowledge paths:
+**Create DESIGN.md stub if missing (java / typescript / python projects only):**
+
+Read the project type from CLAUDE.md:
+```bash
+grep -E "^\*\*Type:\*\*|^type:" "<project-path>/CLAUDE.md" 2>/dev/null | head -1
+```
+
+If type is `java`, `typescript`, or `python` AND `docs/DESIGN.md` does not exist:
+
+```bash
+mkdir -p "<project-path>/docs"
+```
+
+Write a minimal stub suited to the project type. For **java**:
+
+```markdown
+# [Repo Name] — Design
+
+## Architecture
+
+_To be documented._
+
+## Module Structure
+
+| Module | Type | Purpose |
+|--------|------|---------|
+| _(add modules)_ | | |
+
+## Key Abstractions
+
+_To be documented._
+
+## SPI Contracts
+
+_To be documented._
+
+## Data Model
+
+_To be documented._
+
+## Configuration
+
+_To be documented._
+```
+
+For **typescript** or **python**:
+
+```markdown
+# [Repo Name] — Design
+
+## Architecture
+
+_To be documented._
+
+## Module Structure
+
+_To be documented._
+
+## Key Abstractions
+
+_To be documented._
+
+## Data Flow
+
+_To be documented._
+
+## Configuration
+
+_To be documented._
+```
+
+Replace `[Repo Name]` with the actual repo name (read from the project directory name or CLAUDE.md).
+
+Commit the stub to the project repo:
+```bash
+git -C "<project-path>" add docs/DESIGN.md
+git -C "<project-path>" commit -m "chore: add DESIGN.md stub"
+```
+
+Do not create DESIGN.md for `custom`, `blog`, or `skills` project types — those are either self-documenting (skills) or use a different primary doc structure (custom/blog).
+
+**Then detect additional project-knowledge paths:**
 ```bash
 # Check for common project docs
 [ -f "<project-path>/docs/DESIGN.md" ]     && echo "docs/DESIGN.md"
@@ -742,7 +823,7 @@ filtering or dropping commits that touch these paths.
 |------|------------|
 | `CLAUDE.md` | Project conventions (build, test, naming) |
 | `docs/adr/` | Architecture decision records |
-| `docs/DESIGN.md` | Design document |  ← only if file exists
+| `docs/DESIGN.md` | Design document |
 ```
 
 Do not show this section to the user or ask for confirmation — it is derived

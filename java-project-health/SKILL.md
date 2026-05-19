@@ -68,7 +68,7 @@ These extend universal categories with Java-specific items (tier 2+):
 ### `artifacts` augmentations
 
 **Quality:**
-- [ ] `docs/DESIGN.md` exists (required by `java-git-commit` workflow)
+- [ ] `docs/DESIGN.md` exists (required by `java-git-commit` workflow) — if missing, offer to create a stub using the java DESIGN.md template from `workspace-init` Step 6b, commit it, and note it needs content
 - [ ] Root `pom.xml` or `build.gradle` is present and parseable
 - [ ] All Maven modules declared in parent `pom.xml` have corresponding directories
 
