@@ -47,7 +47,7 @@ Named after the lichen's dispersal unit: a self-contained bundle that carries ev
 
 ```bash
 # Sync skills to ~/.claude/skills/ (after any skill change)
-echo "Y" | python3 scripts/claude-skill sync-local
+python3 scripts/claude-skill sync-local --all -y
 
 # List installed skills
 python3 scripts/claude-skill list
@@ -132,6 +132,16 @@ forage/
   SKILL.md                 ← lean workflow (loads always)
   submission-formats.md    ← heavy format reference (loaded on demand)
 ```
+
+---
+
+## Protocols
+
+`docs/protocols/` holds standing rules for soredium's codebase — constraints and conventions that apply when working on scripts, validation, or skills. Read the index before filing issues that touch validation scripts.
+
+| File | Rule |
+|------|------|
+| [validate-schema-vs-validate-pr.md](docs/protocols/validate-schema-vs-validate-pr.md) | GE frontmatter validation belongs in validate_pr.py, not validate_schema.py |
 
 ---
 
