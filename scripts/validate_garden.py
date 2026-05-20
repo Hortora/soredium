@@ -20,6 +20,7 @@ Exit codes: 0=clean, 1=errors found, 2=warnings only
 
 import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 # --structural <garden_root>: early-exit structural check
@@ -435,7 +436,6 @@ def validate():
     if _yaml is None:
         log_warning("PyYAML not installed — skipping variant consistency check (pip install pyyaml)")
     else:
-        from collections import defaultdict
         _title_groups: dict = defaultdict(list)   # (domain, title) -> [ge_ids]
         _variant_by_id: dict = {}                  # ge_id -> bool
         for _vpath in GARDEN_ROOT.rglob('GE-*.md'):

@@ -6,6 +6,7 @@ Tests all 8 validation checks using temporary garden fixtures.
 Never touches the real ~/claude/knowledge-garden/.
 """
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -915,6 +916,26 @@ class TestVariantConsistencyGarden(unittest.TestCase):
         result = run_validator(self.root)
         self.assertEqual(result.returncode, 0,
                          f"Expected clean garden:\n{result.stdout}\n{result.stderr}")
+
+    def test_pyyaml_absent_logs_warning_and_skips(self):
+        """When PyYAML is unavailable, check 8 emits a warning and exits 2 (no errors)."""
+        self._write_entry("GE-20260514-aaaaaa", "Maven submodule naming", "jvm")
+        self._garden_md([("GE-20260514-aaaaaa", "Maven submodule naming", "jvm")])
+        with TemporaryDirectory() as fake_yaml_dir:
+            (Path(fake_yaml_dir) / 'yaml.py').write_text(
+                "raise ImportError('yaml not available in test')\n"
+            )
+            env = os.environ.copy()
+            env['PYTHONPATH'] = f"{fake_yaml_dir}:{env.get('PYTHONPATH', '')}"
+            result = subprocess.run(
+                [sys.executable, str(VALIDATOR), str(self.root)],
+                capture_output=True, text=True, env=env
+            )
+        self.assertEqual(result.returncode, 2,
+                         f"Expected exit 2 (warnings only):\n{result.stdout}\n{result.stderr}")
+        output = result.stdout + result.stderr
+        self.assertIn("PyYAML", output)
+        self.assertNotIn("ERROR", output)
 
 
 if __name__ == "__main__":
