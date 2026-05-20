@@ -33,7 +33,7 @@ These fields can be added to any entry type. The validator accepts but does not 
 | `author` | string | Your initials or handle — appears on the contributor scoreboard. Set automatically by forage at CAPTURE time from `~/.claude/settings.json` `initials`. Example: `"mdp"` |
 | `constraints` | string or list | What conditions must hold for this fix to apply. Freetext: `"requires Java 17+, not applicable to reactive pipelines"`. Structured: `[{applies_when: "java.version >= 17", note: "uses sealed classes"}]`. Each format earns the same +1 bonus. |
 | `invalidation_triggers` | string or list | What changes would make this entry wrong. Freetext: `"revisit if Spring Boot 4.0 changes auto-configuration"`. Structured: `[{library: "spring-boot", version: ">= 4.0", reason: "model may change"}]`. Earns +1 bonus. |
-| `variant` | string | Distinguishes this entry from same-title alternatives in the same domain. Required when two or more entries share `title:` in the same domain. Omit for a solo entry with no known alternatives — add it (and add it to the existing sibling via REVISE) when a second entry for this title is submitted. Convention entries use `staleness_threshold: 3650` (10 years) rather than the discovery default of 730 — style choices change slowly. |
+| `variant` | string | Distinguishes this entry from same-title alternatives in the same domain. Required when two or more entries share `title:` in the same domain. Omit for a solo entry with no known alternatives — add it (and add it to the existing sibling via REVISE) when a second entry for this title is submitted. |
 
 **Bonus scoring:** `validate_pr.py` awards +1 per WHY field present (up to +3 effective bonus). The base score gate (≥8) applies to the self-reported score only — bonus points don't bypass it. Effective score = base + bonus and is used by the contributor scoreboard.
 
@@ -237,7 +237,7 @@ author: mdp
 ## [variant title — same as the variant: field above]
 
 **Topic:** [title]
-**Alternatives exist:** yes — see other entries with title `[title]`
+**Alternatives exist:** [yes — see other entries with title `[title]` / no known alternatives yet]
 
 Note: convention entries use the variant as the H1 (not the title) so two entries
 for the same topic have distinguishable headings.

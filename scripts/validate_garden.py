@@ -212,6 +212,7 @@ CHECKED_MD = GARDEN_ROOT / "CHECKED.md"
 DISCARDED_MD = GARDEN_ROOT / "DISCARDED.md"
 SUBMISSIONS_DIR = GARDEN_ROOT / "submissions"
 EXCLUDE_DIRS = {'.git', 'submissions', 'scripts'}
+SKIP_NAMES = {'GARDEN.md', 'CHECKED.md', 'DISCARDED.md'}  # exact-case; garden conventions enforce this
 
 # Legacy format: GE-NNNN (sequential counter, entries GE-0001 through GE-0172)
 # New format: GE-YYYYMMDD-xxxxxx (date + 6 hex chars, ADR-0003)
@@ -292,7 +293,7 @@ def scan_garden_entry_ids() -> dict[str, list[str]]:
     for path in GARDEN_ROOT.rglob("*.md"):
         if any(part in EXCLUDE_DIRS for part in path.parts):
             continue
-        if path.name in ("GARDEN.md", "CHECKED.md", "DISCARDED.md"):
+        if path.name in SKIP_NAMES:
             continue
         raw = path.read_text()
         rel = str(path.relative_to(GARDEN_ROOT))
