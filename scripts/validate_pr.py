@@ -277,6 +277,7 @@ def find_same_title_siblings(title: str, domain: str, garden_root: Path, exclude
 def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = None) -> dict:
     result = {'file': entry_path, 'criticals': [], 'warnings': [], 'infos': []}
     path = Path(entry_path)
+    garden_path = Path(garden_root) if garden_root else None
 
     try:
         fm, body, raw_content = parse_entry(path)
@@ -342,7 +343,7 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
         domain = fm.get('domain', '')
         target_text = f"{fm.get('title', '')} {' '.join(fm.get('tags', []))} {fm.get('summary', '')}"
         target_tokens = tokenise(target_text)
-        for stem, tokens in scan_domain(domain, Path(garden_root), path.stem):
+        for stem, tokens in scan_domain(domain, garden_path, path.stem):
             j = jaccard(target_tokens, tokens)
             if j >= JACCARD_WARNING:
                 result['warnings'].append(f"Jaccard {j:.2f} >= 0.4 with {stem}: possible duplicate")
@@ -350,7 +351,7 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
                 result['infos'].append(f"Jaccard {j:.2f} with {stem}: related entry")
 
         # Vocabulary check
-        labels_path = Path(garden_root) / 'labels'
+        labels_path = garden_path / 'labels'
         if labels_path.exists():
             known = {f.stem for f in labels_path.glob('*.md')}
             for tag in fm.get('tags', []):
@@ -361,7 +362,7 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
 
         # Variant: consistency check (type-gated on 'convention')
         _title = fm.get('title', '')
-        _siblings = find_same_title_siblings(_title, domain, Path(garden_root), path.stem)
+        _siblings = find_same_title_siblings(_title, domain, garden_path, path.stem)
         _has_variant = 'variant' in fm
         if entry_type == 'convention':
             if _siblings and not _has_variant:
@@ -379,7 +380,7 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
                 _sibling_set = set(_siblings)
                 _updated_warnings = []
                 for w in result['warnings']:
-                    if 'possible duplicate' in w and any(f'with {s}:' in w for s in _sibling_set):
+                    if 'possible duplicate' in w and any(f' {s}:' in w for s in _sibling_set):
                         result['infos'].append(
                             w.replace('possible duplicate', 'convention sibling — expected overlap')
                         )
@@ -387,10 +388,12 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
                         _updated_warnings.append(w)
                 result['warnings'] = _updated_warnings
         elif _siblings:
-            result['warnings'].append(
-                f"Same title as {', '.join(_siblings)} in domain {domain!r} — "
-                f"verify this is intentional or use 'variant:' to distinguish"
-            )
+            _jaccard_covered = {s for s in _siblings if any(f' {s}:' in w for w in result['warnings'])}
+            if not _jaccard_covered:
+                result['warnings'].append(
+                    f"Same title as {', '.join(_siblings)} in domain {domain!r} — "
+                    f"verify this is intentional or use 'variant:' to distinguish"
+                )
 
     # Upstream garden dedup check
     if upstream_gardens:

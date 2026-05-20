@@ -822,17 +822,20 @@ class TestVariantConsistencyPR(unittest.TestCase):
             f"Expected orphan-variant WARNING, got: {result['warnings']}"
         )
 
-    def test_non_convention_same_title_sibling_is_warning_not_critical(self):
-        """Non-convention type with same-title sibling → WARNING, no CRITICALs."""
+    def test_non_convention_same_title_sibling_high_jaccard_emits_jaccard_not_same_title(self):
+        """Non-convention sibling with high Jaccard → Jaccard warning fires; same-title suppressed."""
         technique = CONVENTION_ENTRY_BASE.replace("type: convention", "type: technique")
         self._write("GE-20260514-bbbbbb", technique)
         path = self._write("GE-20260514-aaaaaa", technique)
         result = validate(str(path), str(self.garden))
-        self.assertEqual(result['criticals'], [],
-                         f"Unexpected CRITICALs: {result['criticals']}")
+        self.assertEqual(result['criticals'], [], f"Unexpected CRITICALs: {result['criticals']}")
         self.assertTrue(
+            any("possible duplicate" in w for w in result['warnings']),
+            f"Expected Jaccard warning, got: {result['warnings']}"
+        )
+        self.assertFalse(
             any("same title" in w.lower() for w in result['warnings']),
-            f"Expected same-title WARNING, got: {result['warnings']}"
+            f"Same-title warning should be suppressed when Jaccard fires: {result['warnings']}"
         )
 
     def test_convention_siblings_jaccard_warning_suppressed(self):
