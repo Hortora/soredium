@@ -856,3 +856,51 @@ class TestVariantConsistencyPR(unittest.TestCase):
             len(convention_infos), 0,
             f"Expected 'convention sibling' info, got infos: {result['infos']}"
         )
+
+
+class TestProtocolField(unittest.TestCase):
+    """Optional protocol: frontmatter field validation."""
+
+    def _entry_with_protocol(self, protocol_value: str) -> str:
+        return VALID_ENTRY.replace(
+            "staleness_threshold: 180",
+            f"staleness_threshold: 180\nprotocol: {protocol_value}"
+        )
+
+    def _validate(self, entry_text: str):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "GE-20260514-aaaaaa.md"
+            path.write_text(entry_text)
+            return validate(str(path))
+
+    def test_valid_protocol_id_passes(self):
+        result = self._validate(self._entry_with_protocol('"PP-20260514-f41258"'))
+        self.assertEqual(
+            [w for w in result['warnings'] if 'protocol' in w], [],
+            f"Valid PP-ID should not warn: {result['warnings']}"
+        )
+
+    def test_invalid_protocol_id_warns(self):
+        result = self._validate(self._entry_with_protocol('"not-a-protocol-id"'))
+        self.assertTrue(
+            any('protocol' in w and 'PP-YYYYMMDD' in w for w in result['warnings']),
+            f"Malformed PP-ID should warn: {result['warnings']}"
+        )
+
+    def test_protocol_list_all_valid_passes(self):
+        result = self._validate(self._entry_with_protocol(
+            '["PP-20260514-f41258", "PP-20260517-abc123"]'
+        ))
+        self.assertEqual(
+            [w for w in result['warnings'] if 'protocol' in w], [],
+            f"Valid PP-ID list should not warn: {result['warnings']}"
+        )
+
+    def test_protocol_list_one_invalid_warns(self):
+        result = self._validate(self._entry_with_protocol(
+            '["PP-20260514-f41258", "bad-id"]'
+        ))
+        self.assertTrue(
+            any('protocol' in w and 'bad-id' in w for w in result['warnings']),
+            f"Invalid item in PP-ID list should warn: {result['warnings']}"
+        )

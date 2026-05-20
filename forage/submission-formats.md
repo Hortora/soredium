@@ -34,6 +34,7 @@ These fields can be added to any entry type. The validator accepts but does not 
 | `constraints` | string or list | What conditions must hold for this fix to apply. Freetext: `"requires Java 17+, not applicable to reactive pipelines"`. Structured: `[{applies_when: "java.version >= 17", note: "uses sealed classes"}]`. Each format earns the same +1 bonus. |
 | `invalidation_triggers` | string or list | What changes would make this entry wrong. Freetext: `"revisit if Spring Boot 4.0 changes auto-configuration"`. Structured: `[{library: "spring-boot", version: ">= 4.0", reason: "model may change"}]`. Earns +1 bonus. |
 | `variant` | string | Distinguishes this entry from same-title alternatives in the same domain. Required when two or more entries share `title:` in the same domain. Omit for a solo entry with no known alternatives — add it (and add it to the existing sibling via REVISE) when a second entry for this title is submitted. |
+| `protocol` | string or list | Links this entry to a project-level protocol derived from it. Use the PP-ID(s) of the protocol(s). Example: `"PP-20260514-f41258"` or `["PP-20260514-f41258", "PP-20260517-abc123"]`. Add via REVISE when the protocol is created. Allows forage SEARCH to surface the protocol alongside the entry. |
 
 **Bonus scoring:** `validate_pr.py` awards +1 per WHY field present (up to +3 effective bonus). The base score gate (≥8) applies to the self-reported score only — bonus points don't bypass it. Effective score = base + bonus and is used by the contributor scoreboard.
 

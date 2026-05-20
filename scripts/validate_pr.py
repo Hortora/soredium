@@ -30,6 +30,8 @@ except ImportError:
 REQUIRED_FIELDS = [
     'title', 'type', 'domain', 'score', 'tags', 'verified', 'staleness_threshold'
 ]
+PROTOCOL_ID_RE = re.compile(r'^PP-\d{8}-[0-9a-f]{6}$')
+
 SCORE_MIN = 8
 SCORE_AUTO_APPROVE = 12
 JACCARD_WARNING = 0.4
@@ -333,6 +335,20 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
     # patterns-garden: validate optional extended fields
     if garden == 'patterns':
         result['warnings'].extend(validate_patterns_extended(fm))
+
+    # Optional protocol: field — must match PP-YYYYMMDD-xxxxxx if present
+    _protocol = fm.get('protocol')
+    if _protocol is not None:
+        if isinstance(_protocol, list):
+            for _p in _protocol:
+                if not PROTOCOL_ID_RE.match(str(_p)):
+                    result['warnings'].append(
+                        f"protocol: '{_p}' does not match PP-YYYYMMDD-xxxxxx format"
+                    )
+        elif not PROTOCOL_ID_RE.match(str(_protocol)):
+            result['warnings'].append(
+                f"protocol: '{_protocol}' does not match PP-YYYYMMDD-xxxxxx format"
+            )
 
     if score >= SCORE_AUTO_APPROVE:
         result['infos'].append(f"Score {score} >= {SCORE_AUTO_APPROVE}: auto-approve eligible")

@@ -590,6 +590,7 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<domain>/GE-XXXX.md
 | Additional context, edge cases, or discovery | `update` |
 | Bug fixed in a newer version | `resolved` |
 | Feature removed or approach obsolete | `deprecated` |
+| Fix codified as a project protocol | `protocol-link` — add `protocol: "PP-YYYYMMDD-xxxxxx"` to frontmatter |
 
 **Step 3 — Draft the modification and confirm**
 
