@@ -222,7 +222,17 @@ For each entry in the overdue list, present:
 > Domain: {domain} | Submitted: {submitted} | Last reviewed: {last_reviewed or "never"} | Age: {N} days | Threshold: {T} days
 > **CONFIRM** still valid / **REVISE** / **RETIRE** / **Skip**?
 
-- **CONFIRM**: add `last_reviewed: YYYY-MM-DD` to YAML frontmatter in working tree (or update if already present).
+If the entry has `invalidation_triggers`, always display them:
+
+> Invalidation triggers: {invalidation_triggers}
+
+If `invalidation_status: pending` is set, replace the standard prompt with a focused one:
+
+> 🔍 **Previously flagged** — this entry's trigger describes a structural fix that hadn't been found. Has it been resolved?
+> **RESOLVED** (retire the entry) / **STILL OPEN** (re-confirm pending) / **REVISE** / **Skip**?
+
+- **CONFIRM** / **STILL OPEN**: add `last_reviewed: YYYY-MM-DD` to YAML frontmatter in working tree (or update if already present). If the trigger looks like an open structural fix and `invalidation_status` is not yet set, offer: "Set `invalidation_status: pending` via REVISE so this gets a focused prompt next time? (y/n)"
+- **RESOLVED**: run RETIRE — the structural fix was found. Remove `invalidation_status: pending`; add `**Deprecated:** resolved — [brief note] — {date}`.
 - **REVISE**: run the REVISE workflow for this entry in-place.
 - **RETIRE**: add `**Deprecated:** [reason] — {date}` near the top of the entry body. Keep content intact — users on older versions still need it.
 - **Skip**: no action. Entry will appear on the next REVIEW.

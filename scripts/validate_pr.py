@@ -31,6 +31,7 @@ REQUIRED_FIELDS = [
     'title', 'type', 'domain', 'score', 'tags', 'verified', 'staleness_threshold'
 ]
 PROTOCOL_ID_RE = re.compile(r'^PP-\d{8}-[0-9a-f]{6}$')
+VALID_INVALIDATION_STATUSES = {'pending', 'resolved'}
 
 SCORE_MIN = 8
 SCORE_AUTO_APPROVE = 12
@@ -349,6 +350,13 @@ def validate(entry_path: str, garden_root: str = None, upstream_gardens: list = 
             result['warnings'].append(
                 f"protocol: '{_protocol}' does not match PP-YYYYMMDD-xxxxxx format"
             )
+
+    # Optional invalidation_status: must be 'pending' or 'resolved' if present
+    _inv_status = fm.get('invalidation_status')
+    if _inv_status is not None and str(_inv_status) not in VALID_INVALIDATION_STATUSES:
+        result['warnings'].append(
+            f"invalidation_status: '{_inv_status}' is not valid. Use 'pending' or 'resolved'."
+        )
 
     if score >= SCORE_AUTO_APPROVE:
         result['infos'].append(f"Score {score} >= {SCORE_AUTO_APPROVE}: auto-approve eligible")

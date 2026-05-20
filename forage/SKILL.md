@@ -591,6 +591,8 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<domain>/GE-XXXX.md
 | Bug fixed in a newer version | `resolved` |
 | Feature removed or approach obsolete | `deprecated` |
 | Fix codified as a project protocol | `protocol-link` — add `protocol: "PP-YYYYMMDD-xxxxxx"` to frontmatter |
+| Trigger describes a structural fix not yet found | `flag-pending` — add `invalidation_status: pending` to frontmatter so harvest REVIEW shows a focused prompt |
+| Previously-flagged structural fix confirmed found | `flag-resolved` — remove `invalidation_status: pending`; use RETIRE to deprecate the entry |
 
 **Step 3 — Draft the modification and confirm**
 

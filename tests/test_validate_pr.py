@@ -904,3 +904,50 @@ class TestProtocolField(unittest.TestCase):
             any('protocol' in w and 'bad-id' in w for w in result['warnings']),
             f"Invalid item in PP-ID list should warn: {result['warnings']}"
         )
+
+
+class TestInvalidationStatusField(unittest.TestCase):
+    """Optional invalidation_status field validation."""
+
+    def _entry_with_status(self, status_value: str) -> str:
+        return VALID_ENTRY.replace(
+            "staleness_threshold: 180",
+            f"staleness_threshold: 180\ninvalidation_status: {status_value}"
+        )
+
+    def _validate(self, entry_text: str):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "GE-20260514-aaaaaa.md"
+            path.write_text(entry_text)
+            return validate(str(path))
+
+    def test_pending_passes(self):
+        result = self._validate(self._entry_with_status('pending'))
+        self.assertFalse(
+            any('invalidation_status' in w for w in result['warnings']),
+            f"'pending' should not warn: {result['warnings']}"
+        )
+
+    def test_resolved_passes(self):
+        result = self._validate(self._entry_with_status('resolved'))
+        self.assertFalse(
+            any('invalidation_status' in w for w in result['warnings']),
+            f"'resolved' should not warn: {result['warnings']}"
+        )
+
+    def test_invalid_value_warns(self):
+        result = self._validate(self._entry_with_status('unknown'))
+        self.assertTrue(
+            any('invalidation_status' in w for w in result['warnings']),
+            f"Invalid status should warn: {result['warnings']}"
+        )
+
+    def test_absent_field_passes(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "GE-20260514-aaaaaa.md"
+            path.write_text(VALID_ENTRY)
+            result = validate(str(path))
+        self.assertFalse(
+            any('invalidation_status' in w for w in result['warnings']),
+            f"Absent field should not warn: {result['warnings']}"
+        )
