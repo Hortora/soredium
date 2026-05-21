@@ -15,10 +15,12 @@ except ImportError:
 
 def parse_entry(path: Path) -> tuple:
     content = path.read_text(encoding='utf-8')
-    parts = content.split('---', 2)
-    if len(parts) < 3:
+    # Split on line-boundary --- to avoid splitting inside quoted YAML values.
+    # A bare split('---', 2) breaks when '---' appears in a quoted title string.
+    m = re.match(r'^---\n(.*?)\n---\n?(.*)', content, re.DOTALL)
+    if not m:
         return {}, content.strip()  # no YAML frontmatter — legacy markdown-style entry
-    return yaml.safe_load(parts[1]) or {}, parts[2].strip()
+    return yaml.safe_load(m.group(1)) or {}, m.group(2).strip()
 
 
 def generate_summary(fm: dict, ge_id: str) -> str:
