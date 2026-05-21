@@ -490,6 +490,8 @@ git -C /concrete/garden add --update
 git -C /concrete/garden commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
 ```
 
+**Note on `garden.db`:** `--update` only stages already-tracked files. If `garden.db` is new (first integration on this garden), add it explicitly: `git -C /concrete/garden add garden.db` before the `--update` line.
+
 **If the URL contains `github.com`** → pull and push:
 ```bash
 git -C /concrete/garden pull --rebase origin main

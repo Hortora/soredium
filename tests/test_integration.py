@@ -1109,6 +1109,8 @@ _CAPTURE_ENTRY = textwrap.dedent("""\
     tags: [python, testing, integration]
     submitted: 2026-05-17
     staleness_threshold: 730
+    verified: true
+    garden: discovery
     ---
 
     ## CAPTURE flow integration test entry
@@ -1131,6 +1133,25 @@ _CAPTURE_ENTRY = textwrap.dedent("""\
 """)
 
 
+def _make_git_garden(domains: list) -> tuple:
+    """Return (TemporaryDirectory, GitGarden) pre-seeded with the given domain dirs."""
+    tmp = TemporaryDirectory()
+    garden = GitGarden(Path(tmp.name))
+    garden.init_garden("GE-0100")
+    for domain in domains:
+        d = garden.root / domain
+        d.mkdir()
+        (d / 'INDEX.md').write_text(
+            '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+        )
+    (garden.root / '_index').mkdir()
+    (garden.root / '_index' / 'global.md').write_text(
+        '| Domain | Index |\n|--------|-------|\n'
+    )
+    garden.commit_all(f"init: add {', '.join(domains)} domain(s)")
+    return tmp, garden
+
+
 class TestCaptureDeliverFlow(unittest.TestCase):
     """
     Integration tests for the revised CAPTURE Step 8 deliver flow.
@@ -1141,19 +1162,7 @@ class TestCaptureDeliverFlow(unittest.TestCase):
     """
 
     def setUp(self):
-        self.tmp = TemporaryDirectory()
-        self.garden = GitGarden(Path(self.tmp.name))
-        self.garden.init_garden("GE-0100")
-        domain = self.garden.root / 'python'
-        domain.mkdir()
-        (domain / 'INDEX.md').write_text(
-            '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
-        )
-        (self.garden.root / '_index').mkdir()
-        (self.garden.root / '_index' / 'global.md').write_text(
-            '| Domain | Index |\n|--------|-------|\n'
-        )
-        self.garden.commit_all("init: add python domain")
+        self.tmp, self.garden = _make_git_garden(['python'])
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -1178,6 +1187,10 @@ class TestCaptureDeliverFlow(unittest.TestCase):
             any('_summaries' in line and 'GE-20260517-cap001' in line for line in show.splitlines()),
             f"_summaries/python/GE-20260517-cap001.md not found in commit:\n{show}"
         )
+        self.assertTrue(
+            any('labels/' in line for line in show.splitlines()),
+            f"labels/ not found in commit:\n{show}"
+        )
 
     def test_drift_counter_incremented_by_one(self):
         """CAPTURE integration increments GARDEN.md drift counter by 1."""
@@ -1191,6 +1204,16 @@ class TestCaptureDeliverFlow(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertEqual(int(m.group(1)), 1)
 
+    def test_capture_flow_local_garden_no_push(self):
+        """CAPTURE on a local garden with no remote completes without error."""
+        entry = self.garden.root / 'python' / 'GE-20260517-cap001.md'
+        entry.write_text(_CAPTURE_ENTRY)
+        git(self.garden.root, 'add', str(entry))
+        result = _integrate(str(entry), str(self.garden.root), skip_validate=True)
+        self.assertEqual(result['status'], 'ok')
+        log = git_out(self.garden.root, 'log', '--oneline', '-1')
+        self.assertIn('GE-20260517-cap001', log)
+
 
 _SWEEP_ENTRY_A = textwrap.dedent("""\
     ---
@@ -1203,6 +1226,8 @@ _SWEEP_ENTRY_A = textwrap.dedent("""\
     stack: "Python (all versions)"
     submitted: 2026-05-17
     staleness_threshold: 730
+    verified: true
+    garden: discovery
     ---
 
     Body A.
@@ -1219,6 +1244,8 @@ _SWEEP_ENTRY_B = textwrap.dedent("""\
     stack: "Python (all versions)"
     submitted: 2026-05-17
     staleness_threshold: 730
+    verified: true
+    garden: discovery
     ---
 
     Body B.
@@ -1235,6 +1262,8 @@ _SWEEP_ENTRY_C = textwrap.dedent("""\
     stack: "Git (all versions)"
     submitted: 2026-05-17
     staleness_threshold: 730
+    verified: true
+    garden: discovery
     ---
 
     Body C.
@@ -1251,20 +1280,7 @@ class TestSweepDeliverFlow(unittest.TestCase):
     """
 
     def setUp(self):
-        self.tmp = TemporaryDirectory()
-        self.garden = GitGarden(Path(self.tmp.name))
-        self.garden.init_garden("GE-0100")
-        for domain in ['python', 'tools']:
-            d = self.garden.root / domain
-            d.mkdir()
-            (d / 'INDEX.md').write_text(
-                '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
-            )
-        (self.garden.root / '_index').mkdir()
-        (self.garden.root / '_index' / 'global.md').write_text(
-            '| Domain | Index |\n|--------|-------|\n'
-        )
-        self.garden.commit_all("init: add python and tools domains")
+        self.tmp, self.garden = _make_git_garden(['python', 'tools'])
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -1342,3 +1358,26 @@ class TestSweepDeliverFlow(unittest.TestCase):
                       (self.garden.root / 'python' / 'INDEX.md').read_text())
         self.assertIn('GE-20260517-sw0003',
                       (self.garden.root / 'tools' / 'INDEX.md').read_text())
+
+    def test_sweep_preserves_batch_commit_message(self):
+        """Sweep batch commit message matches 'sweep: N entries — slug1, slug2, ...' format."""
+        path_a = self.garden.root / 'python' / 'GE-20260517-sw0001.md'
+        path_b = self.garden.root / 'python' / 'GE-20260517-sw0002.md'
+        path_c = self.garden.root / 'tools' / 'GE-20260517-sw0003.md'
+        path_a.write_text(_SWEEP_ENTRY_A)
+        path_b.write_text(_SWEEP_ENTRY_B)
+        path_c.write_text(_SWEEP_ENTRY_C)
+
+        for path in [path_a, path_b, path_c]:
+            _integrate(str(path), str(self.garden.root),
+                       skip_validate=True, skip_commit=True)
+
+        slugs = 'GE-20260517-sw0001, GE-20260517-sw0002, GE-20260517-sw0003'
+        git(self.garden.root, 'add',
+            str(path_a), str(path_b), str(path_c),
+            '_summaries/', '_index/', 'labels/', 'GARDEN.md')
+        git(self.garden.root, 'add', '--update')
+        git(self.garden.root, 'commit', '-m', f'sweep: 3 entries — {slugs}')
+
+        log = git_out(self.garden.root, 'log', '--format=%s', '-1')
+        self.assertRegex(log.strip(), r'^sweep: \d+ entries — .+$')
