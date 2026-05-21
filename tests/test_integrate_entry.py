@@ -535,3 +535,138 @@ class TestByTechnologyIndex:
         assert '## By Symptom / Type' in content
         assert '*(stub)*' in content
         assert '**Drift threshold:** 10' in content
+
+
+# Shared convention entry content builders
+def _convention_entry(ge_id, title, variant='', extra=''):
+    v = f'variant: "{variant}"\n' if variant else ''
+    return (
+        f'---\nid: {ge_id}\ntitle: "{title}"\ntype: convention\n'
+        f'domain: jvm\nscore: 9\ntags: [maven]\n{v}{extra}---\n\nBody.\n'
+    )
+
+
+GARDEN_MD_CONVENTION = (
+    "**Entries merged since last sweep:** 0\n"
+    "**Drift threshold:** 10\n"
+    "\n"
+    "## By Technology\n"
+    "\n"
+    "### jvm/\n"
+    "- GE-0001 [Unrelated entry](jvm/GE-0001.md)\n"
+    "\n"
+    "---\n"
+    "\n"
+    "## By Symptom / Type\n"
+    "\n"
+    "*(stub)*\n"
+)
+
+
+def _garden_with_convention(tmp_path, garden_md=None):
+    (tmp_path / 'jvm').mkdir(parents=True, exist_ok=True)
+    (tmp_path / 'jvm' / 'INDEX.md').write_text(
+        '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+    )
+    (tmp_path / '_index').mkdir(exist_ok=True)
+    (tmp_path / '_index' / 'global.md').write_text('| Domain | Index |\n|--------|-------|\n')
+    (tmp_path / 'GARDEN.md').write_text(garden_md or GARDEN_MD_CONVENTION)
+    return tmp_path
+
+
+class TestTwoLevelRendering:
+
+    def _run(self, entry, garden):
+        with patch('integrate_entry.run_validate'), \
+             patch('integrate_entry.git_commit'):
+            return integrate(str(entry), str(garden))
+
+    def test_convention_no_variant_adds_flat(self, tmp_path):
+        garden = _garden_with_convention(tmp_path)
+        entry = tmp_path / 'jvm' / 'GE-AAA.md'
+        entry.write_text(_convention_entry('GE-AAA', 'Maven naming'))
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        assert '- GE-AAA [Maven naming](jvm/GE-AAA.md)' in content
+
+    def test_non_convention_always_flat(self, tmp_path):
+        garden = _garden_with_convention(tmp_path)
+        entry = tmp_path / 'jvm' / 'GE-AAA.md'
+        entry.write_text(
+            '---\nid: GE-AAA\ntitle: "Maven naming"\ntype: gotcha\n'
+            'domain: jvm\nscore: 9\ntags: [maven]\nvariant: "api"\n---\n\nBody.\n'
+        )
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        assert '- GE-AAA [Maven naming](jvm/GE-AAA.md)' in content
+
+    def test_convention_with_variant_no_sibling_adds_flat(self, tmp_path):
+        garden = _garden_with_convention(tmp_path)
+        entry = tmp_path / 'jvm' / 'GE-AAA.md'
+        entry.write_text(_convention_entry('GE-AAA', 'Maven naming', variant='api/runtime/deployment'))
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        assert '- GE-AAA [Maven naming](jvm/GE-AAA.md)' in content
+
+    def test_convention_second_entry_converts_to_group(self, tmp_path):
+        # First entry: flat convention (no variant yet — as-submitted, pre-REVISE)
+        existing_flat = (
+            "**Entries merged since last sweep:** 0\n"
+            "**Drift threshold:** 10\n"
+            "\n"
+            "## By Technology\n"
+            "\n"
+            "### jvm/\n"
+            "- GE-AAA [Maven naming](jvm/GE-AAA.md)\n"
+            "\n"
+            "---\n"
+            "\n"
+            "## By Symptom / Type\n\n*(stub)*\n"
+        )
+        # Write GE-AAA with variant (REVISE already happened)
+        garden = _garden_with_convention(tmp_path, garden_md=existing_flat)
+        (tmp_path / 'jvm' / 'GE-AAA.md').write_text(
+            _convention_entry('GE-AAA', 'Maven naming', variant='api/runtime/deployment')
+        )
+        # Now add GE-BBB with same title + different variant
+        entry = tmp_path / 'jvm' / 'GE-BBB.md'
+        entry.write_text(_convention_entry('GE-BBB', 'Maven naming', variant='core/web/persistence'))
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        # Flat entry should be gone
+        assert '- GE-AAA [Maven naming](jvm/GE-AAA.md)' not in content
+        assert '- GE-BBB [Maven naming](jvm/GE-BBB.md)' not in content
+        # Group header present
+        assert '- Maven naming\n' in content
+        # Both variants as sub-bullets
+        assert '  - api/runtime/deployment → jvm/GE-AAA.md\n' in content
+        assert '  - core/web/persistence → jvm/GE-BBB.md\n' in content
+
+    def test_convention_third_entry_appends_to_group(self, tmp_path):
+        existing_group = (
+            "**Entries merged since last sweep:** 0\n"
+            "**Drift threshold:** 10\n"
+            "\n"
+            "## By Technology\n"
+            "\n"
+            "### jvm/\n"
+            "- Maven naming\n"
+            "  - api/runtime/deployment → jvm/GE-AAA.md\n"
+            "  - core/web/persistence → jvm/GE-BBB.md\n"
+            "\n"
+            "---\n"
+            "\n"
+            "## By Symptom / Type\n\n*(stub)*\n"
+        )
+        garden = _garden_with_convention(tmp_path, garden_md=existing_group)
+        (tmp_path / 'jvm' / 'GE-AAA.md').write_text(
+            _convention_entry('GE-AAA', 'Maven naming', variant='api/runtime/deployment')
+        )
+        entry = tmp_path / 'jvm' / 'GE-CCC.md'
+        entry.write_text(_convention_entry('GE-CCC', 'Maven naming', variant='layered/service/repo'))
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        assert '- Maven naming\n' in content
+        assert '  - api/runtime/deployment → jvm/GE-AAA.md\n' in content
+        assert '  - core/web/persistence → jvm/GE-BBB.md\n' in content
+        assert '  - layered/service/repo → jvm/GE-CCC.md\n' in content

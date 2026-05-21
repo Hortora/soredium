@@ -101,6 +101,14 @@ def upsert_entry_index(garden: Path, entry_path: Path, domain: str) -> None:
         pass  # index failure never blocks integration
 
 
+def _read_entry_variant(garden: Path, entry_rel_path: str) -> str:
+    try:
+        fm, _ = parse_entry(garden / entry_rel_path)
+        return fm.get('variant', '')
+    except Exception:
+        return ''
+
+
 def update_garden_by_technology(domain: str, ge_id: str, fm: dict, garden: Path):
     """Add entry to the By Technology section of GARDEN.md."""
     garden_md = garden / 'GARDEN.md'
@@ -113,7 +121,6 @@ def update_garden_by_technology(domain: str, ge_id: str, fm: dict, garden: Path)
         return
 
     title = fm.get('title', '')
-    entry_line = f"- {ge_id} [{title}]({domain}/{ge_id}.md)\n"
     domain_header = f"### {domain}/\n"
 
     by_tech_body_start = by_tech.end()
@@ -121,24 +128,57 @@ def update_garden_by_technology(domain: str, ge_id: str, fm: dict, garden: Path)
     by_tech_body_end = by_tech_body_start + (next_h2.start() if next_h2 else len(content) - by_tech_body_start)
     by_tech_body = content[by_tech_body_start:by_tech_body_end]
 
-    if domain_header in by_tech_body:
-        domain_pos = by_tech_body.index(domain_header)
-        after_header = domain_pos + len(domain_header)
-        next_domain = re.search(r'^### ', by_tech_body[after_header:], re.MULTILINE)
-        if next_domain:
-            insert_in_body = after_header + next_domain.start()
-        else:
-            sep = re.search(r'\n\n---\n', by_tech_body[after_header:])
-            if sep:
-                insert_in_body = after_header + sep.start() + 1
-            else:
-                insert_in_body = len(by_tech_body)
-    else:
+    if domain_header not in by_tech_body:
+        flat_line = f"- {ge_id} [{title}]({domain}/{ge_id}.md)\n"
         sep = re.search(r'\n\n---\n', by_tech_body)
         insert_in_body = sep.start() + 1 if sep else len(by_tech_body)
-        entry_line = domain_header + entry_line
+        garden_md.write_text(
+            content[:by_tech_body_start + insert_in_body] +
+            domain_header + flat_line +
+            content[by_tech_body_start + insert_in_body:]
+        )
+        return
 
-    garden_md.write_text(content[:by_tech_body_start + insert_in_body] + entry_line + content[by_tech_body_start + insert_in_body:])
+    domain_pos = by_tech_body.index(domain_header)
+    section_start = domain_pos + len(domain_header)
+    next_domain = re.search(r'^### ', by_tech_body[section_start:], re.MULTILINE)
+    section_end = section_start + next_domain.start() if next_domain else len(by_tech_body)
+    domain_section = by_tech_body[section_start:section_end]
+
+    variant = fm.get('variant', '') if fm.get('type') == 'convention' else ''
+    if variant:
+        flat_re = re.compile(r'^- (GE-\S+) \[' + re.escape(title) + r'\]\(([^)]+)\)\n', re.MULTILINE)
+        existing_flat = flat_re.search(domain_section)
+        if existing_flat:
+            existing_variant = _read_entry_variant(garden, existing_flat.group(2))
+            group = (
+                f"- {title}\n"
+                f"  - {existing_variant or existing_flat.group(1)} → {existing_flat.group(2)}\n"
+                f"  - {variant} → {domain}/{ge_id}.md\n"
+            )
+            new_section = domain_section.replace(existing_flat.group(0), group, 1)
+            new_body = by_tech_body[:section_start] + new_section + by_tech_body[section_end:]
+            garden_md.write_text(content[:by_tech_body_start] + new_body + content[by_tech_body_end:])
+            return
+
+        group_re = re.compile(r'^- ' + re.escape(title) + r'\n((?:  - .+\n)+)', re.MULTILINE)
+        existing_group = group_re.search(domain_section)
+        if existing_group:
+            new_item = f"  - {variant} → {domain}/{ge_id}.md\n"
+            new_section = domain_section[:existing_group.end()] + new_item + domain_section[existing_group.end():]
+            new_body = by_tech_body[:section_start] + new_section + by_tech_body[section_end:]
+            garden_md.write_text(content[:by_tech_body_start] + new_body + content[by_tech_body_end:])
+            return
+
+    flat_line = f"- {ge_id} [{title}]({domain}/{ge_id}.md)\n"
+    if next_domain:
+        insert_in_section = len(domain_section)
+    else:
+        sep = re.search(r'\n\n---\n', domain_section)
+        insert_in_section = sep.start() + 1 if sep else len(domain_section)
+    new_section = domain_section[:insert_in_section] + flat_line + domain_section[insert_in_section:]
+    new_body = by_tech_body[:section_start] + new_section + by_tech_body[section_end:]
+    garden_md.write_text(content[:by_tech_body_start] + new_body + content[by_tech_body_end:])
 
 
 def increment_drift_counter(garden: Path):
