@@ -169,6 +169,12 @@ ls "$WORKSPACE/plans/" 2>/dev/null | grep -v "^attic$"
 cat "$WORKSPACE/design/JOURNAL.md"
 ```
 
+Compute and store the blog count for use in Steps 7 and 8g:
+
+```bash
+BLOG_COUNT=$(ls "$WORKSPACE/blog/" 2>/dev/null | grep -v INDEX.md | grep "\.md$" | wc -l | tr -d ' ')
+```
+
 ---
 
 ## Step 5 — Journal validation
@@ -223,7 +229,7 @@ work-end close plan — <branch-name>
   Journal merge      → DESIGN.md  (<N> sections)
   Spec posting       → #<N>  (<filenames>)
   Issue              → close #<N>
-  Publish blog       → publish-blog (N entries staged)
+  Publish blog       → publish-blog ($BLOG_COUNT entries)   ← omit line if BLOG_COUNT=0
 
 Approve all, or step by step? (all / step)
 ```
@@ -345,7 +351,21 @@ Only if tracking enabled and `$ISSUE_N` is non-empty:
 
 ### 8g — Publish blog
 
-If blog entries were staged to workspace, invoke `publish-blog` automatically.
+**Mandatory when `$BLOG_COUNT > 0`. Must complete before 8h and 8j — not optional, not deferrable.**
+
+```bash
+[ "$BLOG_COUNT" -gt 0 ] && echo "Publishing $BLOG_COUNT blog entries" || echo "No blog entries — skip"
+```
+
+If `$BLOG_COUNT > 0`: invoke `publish-blog`. The skill handles routing, destination
+validation, and the git commit/push to the publishing repo. Do not proceed to 8h until
+`publish-blog` confirms the entries are committed and pushed.
+
+If `$BLOG_COUNT = 0`: skip silently.
+
+**Why this is mandatory:** blog entries promoted to workspace main in 8a are not yet
+published. Without this step they sit in the workspace repo indefinitely. The close plan
+shows the count explicitly so there is no ambiguity about whether entries exist.
 
 ### 8h — Final report
 
@@ -356,8 +376,12 @@ If blog entries were staged to workspace, invoke `publish-blog` automatically.
 ✅ Plans → attic
 ✅ Journal merged → DESIGN.md (N sections)
 ✅ Specs posted to #N, issue closed
+✅ Blog published → <destination path> (N entries)   ← required if BLOG_COUNT > 0; omit if 0
 ❌ Push failed — <path>. Run: git -C <path> push
 ```
+
+**The `Blog published` line is required when `$BLOG_COUNT > 0`.** If it is missing from
+the report, 8g was skipped — do not proceed to 8i/8j; go back and run 8g first.
 
 ### 8i — Offer hygiene scan
 
