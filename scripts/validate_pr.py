@@ -127,10 +127,12 @@ def parse_entry(path: Path) -> tuple:
     content = path.read_text(encoding='utf-8')
     if not content.startswith('---'):
         raise ValueError("No YAML frontmatter")
-    parts = content.split('---', 2)
-    if len(parts) < 3:
+    # Use regex to split on line-boundary '---' markers; str.split('---') breaks
+    # when '---' appears inside a quoted YAML value (e.g. in a title string).
+    m = re.match(r'^---\n(.*?)\n---\n?(.*)', content, re.DOTALL)
+    if not m:
         raise ValueError("Incomplete frontmatter — missing closing '---'")
-    return yaml.safe_load(parts[1]) or {}, parts[2].strip(), content
+    return yaml.safe_load(m.group(1)) or {}, m.group(2).strip(), content
 
 
 def check_injection(content: str) -> list:
