@@ -101,6 +101,46 @@ def upsert_entry_index(garden: Path, entry_path: Path, domain: str) -> None:
         pass  # index failure never blocks integration
 
 
+def update_garden_by_technology(domain: str, ge_id: str, fm: dict, garden: Path):
+    """Add entry to the By Technology section of GARDEN.md."""
+    garden_md = garden / 'GARDEN.md'
+    if not garden_md.exists():
+        return
+    content = garden_md.read_text(encoding='utf-8')
+
+    by_tech = re.search(r'^## By Technology\n', content, re.MULTILINE)
+    if not by_tech:
+        return
+
+    title = fm.get('title', '')
+    entry_line = f"- {ge_id} [{title}]({domain}/{ge_id}.md)\n"
+    domain_header = f"### {domain}/\n"
+
+    by_tech_body_start = by_tech.end()
+    next_h2 = re.search(r'^## ', content[by_tech_body_start:], re.MULTILINE)
+    by_tech_body_end = by_tech_body_start + (next_h2.start() if next_h2 else len(content) - by_tech_body_start)
+    by_tech_body = content[by_tech_body_start:by_tech_body_end]
+
+    if domain_header in by_tech_body:
+        domain_pos = by_tech_body.index(domain_header)
+        after_header = domain_pos + len(domain_header)
+        next_domain = re.search(r'^### ', by_tech_body[after_header:], re.MULTILINE)
+        if next_domain:
+            insert_in_body = after_header + next_domain.start()
+        else:
+            sep = re.search(r'\n\n---\n', by_tech_body[after_header:])
+            if sep:
+                insert_in_body = after_header + sep.start() + 1
+            else:
+                insert_in_body = len(by_tech_body)
+    else:
+        sep = re.search(r'\n\n---\n', by_tech_body)
+        insert_in_body = sep.start() + 1 if sep else len(by_tech_body)
+        entry_line = domain_header + entry_line
+
+    garden_md.write_text(content[:by_tech_body_start + insert_in_body] + entry_line + content[by_tech_body_start + insert_in_body:])
+
+
 def increment_drift_counter(garden: Path):
     """Increment 'Entries merged since last sweep' in GARDEN.md by 1."""
     garden_md = garden / 'GARDEN.md'
@@ -147,6 +187,7 @@ def integrate(entry_path: str, garden_root: str = None,
     update_domain_index(domain, ge_id, fm, garden)
     update_labels(fm, ge_id, garden)
     update_global_index(domain, garden)
+    update_garden_by_technology(domain, ge_id, fm, garden)
     increment_drift_counter(garden)
     upsert_entry_index(garden, path, domain)
     if not skip_validate:

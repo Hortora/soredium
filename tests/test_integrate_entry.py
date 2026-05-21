@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
-from integrate_entry import integrate, generate_summary, parse_entry
+from integrate_entry import integrate, generate_summary, parse_entry, update_garden_by_technology
 
 VALID_ENTRY = """\
 ---
@@ -406,3 +406,132 @@ class TestSkipFlags:
             capture_output=True, text=True
         )
         assert result.returncode != 2, f"argparse rejected --skip-commit: {result.stderr}"
+
+
+GARDEN_MD_WITH_BY_TECH = (
+    "**Entries merged since last sweep:** 0\n"
+    "**Drift threshold:** 10\n"
+    "\n"
+    "## By Technology\n"
+    "\n"
+    "### alpha-domain/\n"
+    "- GE-0001 [Alpha entry one](alpha-domain/GE-0001.md)\n"
+    "- GE-0002 [Alpha entry two](alpha-domain/GE-0002.md)\n"
+    "### tools/\n"
+    "- GE-0010 [Tools entry](tools/GE-0010.md)\n"
+    "\n"
+    "---\n"
+    "\n"
+    "## By Symptom / Type\n"
+    "\n"
+    "*(stub)*\n"
+)
+
+
+def _garden_with_by_technology(tmp_path):
+    for d in ['alpha-domain', 'tools']:
+        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+        (tmp_path / d / 'INDEX.md').write_text(
+            '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+        )
+    (tmp_path / '_index').mkdir()
+    (tmp_path / '_index' / 'global.md').write_text('| Domain | Index |\n|--------|-------|\n')
+    (tmp_path / 'GARDEN.md').write_text(GARDEN_MD_WITH_BY_TECH)
+    return tmp_path
+
+
+class TestByTechnologyIndex:
+
+    def _run(self, entry, garden):
+        with patch('integrate_entry.run_validate'), \
+             patch('integrate_entry.git_commit'):
+            return integrate(str(entry), str(garden))
+
+    def test_entry_added_to_existing_domain(self, tmp_path):
+        garden = _garden_with_by_technology(tmp_path)
+        entry = tmp_path / 'alpha-domain' / 'GE-0003.md'
+        entry.write_text(
+            '---\nid: GE-0003\ntitle: "New alpha entry"\ntype: gotcha\n'
+            'domain: alpha-domain\nscore: 9\ntags: [test]\n---\n\nBody.\n'
+        )
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        alpha_pos = content.index('### alpha-domain/')
+        tools_pos = content.index('### tools/')
+        new_pos = content.index('GE-0003')
+        assert alpha_pos < new_pos < tools_pos
+
+    def test_entry_format_correct(self, tmp_path):
+        garden = _garden_with_by_technology(tmp_path)
+        entry = tmp_path / 'alpha-domain' / 'GE-0003.md'
+        entry.write_text(
+            '---\nid: GE-0003\ntitle: "New alpha entry"\ntype: gotcha\n'
+            'domain: alpha-domain\nscore: 9\ntags: [test]\n---\n\nBody.\n'
+        )
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        assert '- GE-0003 [New alpha entry](alpha-domain/GE-0003.md)' in content
+
+    def test_entry_added_to_last_domain_before_separator(self, tmp_path):
+        garden = _garden_with_by_technology(tmp_path)
+        entry = tmp_path / 'tools' / 'GE-0099.md'
+        entry.write_text(
+            '---\nid: GE-0099\ntitle: "Tools tip"\ntype: technique\n'
+            'domain: tools\nscore: 10\ntags: [tools]\n---\n\nBody.\n'
+        )
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        tools_pos = content.index('### tools/')
+        new_entry_pos = content.index('GE-0099')
+        separator_pos = content.index('---\n\n## By Symptom / Type')
+        assert tools_pos < new_entry_pos < separator_pos
+
+    def test_new_domain_creates_section(self, tmp_path):
+        garden = _garden_with_by_technology(tmp_path)
+        (tmp_path / 'python').mkdir()
+        (tmp_path / 'python' / 'INDEX.md').write_text(
+            '| GE-ID | Title | Type | Score |\n|-------|-------|------|-------|\n'
+        )
+        entry = tmp_path / 'python' / 'GE-0020.md'
+        entry.write_text(
+            '---\nid: GE-0020\ntitle: "Python gotcha"\ntype: gotcha\n'
+            'domain: python\nscore: 9\ntags: [python]\n---\n\nBody.\n'
+        )
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        assert '### python/' in content
+        assert '- GE-0020 [Python gotcha](python/GE-0020.md)' in content
+        by_tech_pos = content.index('## By Technology')
+        new_section_pos = content.index('### python/')
+        by_symptom_pos = content.index('## By Symptom / Type')
+        assert by_tech_pos < new_section_pos < by_symptom_pos
+
+    def test_no_by_technology_section_no_crash(self, tmp_path):
+        garden = _garden_with_drift(tmp_path, drift=0)
+        entry = garden / 'quarkus' / 'cdi' / 'GE-0123.md'
+        entry.write_text(VALID_ENTRY)
+        with patch('integrate_entry.run_validate'), \
+             patch('integrate_entry.git_commit'):
+            result = integrate(str(entry), str(garden))
+        assert result['status'] == 'ok'
+
+    def test_no_garden_md_no_crash(self, tmp_path):
+        (tmp_path / 'tools').mkdir()
+        entry = tmp_path / 'tools' / 'GE-0001.md'
+        entry.write_text(
+            '---\nid: GE-0001\ntitle: "t"\ntype: gotcha\ndomain: tools\nscore: 9\ntags: []\n---\nBody.\n'
+        )
+        update_garden_by_technology('tools', 'GE-0001', {'title': 't'}, tmp_path)
+
+    def test_other_sections_preserved(self, tmp_path):
+        garden = _garden_with_by_technology(tmp_path)
+        entry = tmp_path / 'alpha-domain' / 'GE-0003.md'
+        entry.write_text(
+            '---\nid: GE-0003\ntitle: "New entry"\ntype: gotcha\n'
+            'domain: alpha-domain\nscore: 9\ntags: [test]\n---\n\nBody.\n'
+        )
+        self._run(entry, garden)
+        content = (tmp_path / 'GARDEN.md').read_text()
+        assert '## By Symptom / Type' in content
+        assert '*(stub)*' in content
+        assert '**Drift threshold:** 10' in content
