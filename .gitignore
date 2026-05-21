@@ -22,3 +22,4 @@ __pycache__/
 # Third-party tool cache (superpowers:brainstorm, etc.)
 .superpowers/
 .venv
+wksp
