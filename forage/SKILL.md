@@ -162,6 +162,8 @@ Classify the type: **gotcha**, **technique**, **undocumented**, or **convention*
 
 **Convention:** A deliberate style choice where alternatives exist and are equally valid. Not universally true — another project could legitimately choose a different style. Examples: naming schemes, module structures, config strategy choices. If same-title alternatives will exist, each entry carries `variant:`. Solo convention entries (first of their title) omit `variant:` and add it via REVISE when a second entry is submitted.
 
+**Technique → protocol promotion:** A technique that a specific project decides to enforce consistently should become a project protocol. The garden entry stays as universal knowledge (descriptive, optional); the protocol (in `docs/protocols/`) is the project-specific commitment (prescriptive, enforced). When that happens, link the two: add `protocol: "PP-ID"` to the garden entry via REVISE (`protocol-link` kind), and set `garden_ref: "GE-ID"` in the protocol frontmatter.
+
 Is it cross-project? (Not tied to one specific codebase's logic.) If no → skip.
 
 Compute the Garden Score (see [submission-formats.md](submission-formats.md)):
@@ -592,7 +594,7 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} show HEAD:<domain>/GE-XXXX.md
 | Additional context, edge cases, or discovery | `update` |
 | Bug fixed in a newer version | `resolved` |
 | Feature removed or approach obsolete | `deprecated` |
-| Fix codified as a project protocol | `protocol-link` — add `protocol: "PP-YYYYMMDD-xxxxxx"` to frontmatter |
+| Fix codified as a project protocol | `protocol-link` — add `protocol: "PP-YYYYMMDD-xxxxxx"` to frontmatter. After writing, offer to scaffold the protocol entry via the protocol skill if not already done: "Want me to create the protocol entry referencing this GE?" |
 | Trigger describes a structural fix not yet found | `flag-pending` — add `invalidation_status: pending` to frontmatter so harvest REVIEW shows a focused prompt |
 | Previously-flagged structural fix confirmed found | `flag-resolved` — remove `invalidation_status: pending`; use RETIRE to deprecate the entry |
 

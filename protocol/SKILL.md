@@ -23,6 +23,19 @@ the problem at hand; update them when they don't fit.
 - One-off architectural decision → use `adr`
 - Rule that only applies in one file → use an inline comment
 
+**Garden techniques as upstream sources:**
+A garden technique is a candidate for promotion to a protocol. The difference:
+- **Technique** (garden/forage): "this works and most developers wouldn't reach for it" — descriptive, universal, optional
+- **Protocol**: "we have evaluated this and committed to applying it consistently here" — prescriptive, project-specific, enforced
+
+Not every technique becomes a protocol. Situational or context-dependent knowledge stays as a technique. Techniques that have been validated in the project and need consistent enforcement become protocols.
+
+When a protocol is derived from a garden technique, record the upstream link in both directions:
+- Set `garden_ref` in the protocol frontmatter to the GE-ID of the technique
+- Add `protocol: "PP-ID"` to the garden entry via forage REVISE (`protocol-link` kind)
+
+A protocol without a garden technique backing it is a rule with no rationale — fragile, because nobody knows why it exists. A technique without a protocol is available but optional.
+
 ---
 
 ## Protocol Entry Format
@@ -38,6 +51,7 @@ severity: critical | important | guidance
 refs:
   - path/to/relevant/doc.md
 violation_hint: "optional — what a violation looks like"
+garden_ref: "GE-YYYYMMDD-xxxxxx"  # optional — GE-ID of the garden technique this protocol was derived from
 created: YYYY-MM-DD
 ---
 
@@ -100,6 +114,7 @@ Work from what's already known in context. Ask only for what's genuinely unclear
 | `severity` | `critical` if violations cause bugs; `important` if costly; `guidance` otherwise |
 | `refs` | Any design docs or related protocols mentioned in context |
 | `violation_hint` | What a violation looks like — derive from the problem description |
+| `garden_ref` | If the rule was distilled from a known garden technique, note its GE-ID. After writing the protocol, offer to add `protocol: "PP-ID"` to the garden entry via forage REVISE (protocol-link kind). |
 
 **Step 3 — Choose a filename**
 
@@ -375,7 +390,7 @@ HEALTH is complete when:
 - `handover` — protocol SWEEP is added to the wrap checklist alongside forage sweep
 
 **Complements:**
-- `forage` — universal technical knowledge; protocol handles project-specific rules
+- `forage` — garden techniques are the upstream source for protocol decisions. When a protocol is derived from a technique, link back via `garden_ref` in the protocol frontmatter and add `protocol: "PP-ID"` to the garden entry via forage REVISE (protocol-link kind).
 - `adr` — one-off architectural decisions; protocol handles recurring standing rules
 
 **Does NOT handle:**
