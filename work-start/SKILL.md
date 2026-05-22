@@ -168,16 +168,30 @@ If no matches: proceed silently.
 
 If tracking enabled (CLAUDE.md `## Work Tracking` with `Issue tracking: enabled`):
 
+Read the project's GitHub repo:
 ```bash
-gh issue list --state open --repo <owner/repo> --limit 10
+PROJECT_GITHUB_REPO=$(grep "GitHub repo:" "$PROJECT/CLAUDE.md" | head -1 | sed 's/.*GitHub repo: *//')
 ```
 
-- Search for an existing open issue matching the work description.
+**Cross-repo detection:** If the work description or invocation argument contains a ref of the
+form `<repo-name>#N` (e.g., `cc-praxis#94`) where `<repo-name>` does not match the project repo
+name, this is a cross-repo issue:
+- Extract `ISSUE_N = N`, `ISSUE_REPO_NAME = <repo-name>`
+- Resolve: `ISSUE_REPO_GITHUB = "<org>/$ISSUE_REPO_NAME"` using the org from `$PROJECT_GITHUB_REPO`
+  (e.g., `casehubio/parent` → org `casehubio` → `casehubio/cc-praxis`)
+- Confirm with the user: "Tracking cross-repo issue $ISSUE_REPO_GITHUB#$ISSUE_N — correct? (y/n)"
+
+Otherwise: search for an existing open issue in the project repo:
+```bash
+gh issue list --state open --repo "$PROJECT_GITHUB_REPO" --limit 10
+```
 - If found: confirm — "Found #N: `<title>`. Use this? (y/n)"
 - If not found: offer to create — wait for result.
-- Record `ISSUE_N` and `ISSUE_TITLE` for Step 5.
+- Set `ISSUE_REPO_GITHUB = $PROJECT_GITHUB_REPO`
 
-If tracking disabled: skip silently.
+Record `ISSUE_N`, `ISSUE_TITLE`, and `ISSUE_REPO_GITHUB` for Steps 5, 8, and 9.
+
+If tracking disabled: skip silently. Set `ISSUE_REPO_GITHUB` to blank.
 
 Do not proceed without resolving this step.
 
@@ -216,7 +230,21 @@ Confirm both commands succeeded before continuing.
 
 ### Step 8 — Resolve design routing and SHA baseline
 
-Read routing config (3-layer cascade) for `design` artifact:
+**Layer 0 (cross-repo issue override — checked first):**
+
+If `ISSUE_REPO_GITHUB` is non-blank and differs from `PROJECT_GITHUB_REPO`:
+```bash
+ISSUE_REPO_NAME=$(echo "$ISSUE_REPO_GITHUB" | sed 's|.*/||')
+CANDIDATE="$(dirname "$PROJECT")/$ISSUE_REPO_NAME"
+```
+- If `$CANDIDATE/.git` exists:
+  - `DESIGN_REPO="$CANDIDATE"`, `DESIGN_REPO_KEY="cross-repo:$ISSUE_REPO_NAME"`
+  - Skip Layers 1–2 entirely.
+- If not found: warn — *"Cross-repo issue ($ISSUE_REPO_GITHUB) — local path not found at
+  $CANDIDATE. Falling through to routing config. Journal will target routing-config destination."*
+  Continue to Layers 1–2.
+
+Read routing config (3-layer cascade) for `design` artifact (only if Layer 0 did not match):
 
 **Layer 1 (global default — `~/.claude/CLAUDE.md`):**
 ```bash
@@ -264,8 +292,9 @@ branch: <branch-name>
 project-sha: <baseline SHA from Step 8>
 date: <YYYY-MM-DD>
 issue: <N or blank>
+issue-repo: <ISSUE_REPO_GITHUB | blank>
 flyway-next-v: <N | none | unknown>
-design-repo: <workspace | project>
+design-repo: <workspace | project | cross-repo:<repo-name>>
 design-section-hashes: <pipe-separated hash:heading pairs, or blank>
 ```
 

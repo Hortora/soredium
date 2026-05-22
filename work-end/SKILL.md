@@ -67,6 +67,7 @@ cat "$WORKSPACE/design/.meta"
 BRANCH_NAME=$(grep "^branch:" "$WORKSPACE/design/.meta" | sed 's/branch: //')
 PROJECT_SHA=$(grep "^project-sha:" "$WORKSPACE/design/.meta" | sed 's/project-sha: //')
 ISSUE_N=$(grep "^issue:" "$WORKSPACE/design/.meta" | sed 's/issue: //')
+ISSUE_REPO_GITHUB=$(grep "^issue-repo:" "$WORKSPACE/design/.meta" | sed 's/issue-repo: //')
 ```
 
 `$BRANCH_NAME`, `$PROJECT_SHA`, and `$ISSUE_N` are used throughout Steps 3–10.
@@ -114,7 +115,25 @@ with a warning: "Specs routing overridden to project — not user-configurable."
 **`$DESIGN_REPO` — read from `.meta`, do NOT re-derive from routing config:**
 ```bash
 DESIGN_REPO_KEY=$(grep "^design-repo:" "$WORKSPACE/design/.meta" | sed 's/design-repo: //')
-[ "$DESIGN_REPO_KEY" = "workspace" ] && DESIGN_REPO="$WORKSPACE" || DESIGN_REPO="$PROJECT"
+case "$DESIGN_REPO_KEY" in
+  workspace)
+    DESIGN_REPO="$WORKSPACE" ;;
+  project)
+    DESIGN_REPO="$PROJECT" ;;
+  cross-repo:*)
+    CROSS_REPO_NAME="${DESIGN_REPO_KEY#cross-repo:}"
+    CANDIDATE="$(dirname "$PROJECT")/$CROSS_REPO_NAME"
+    if [ -d "$CANDIDATE/.git" ]; then
+      DESIGN_REPO="$CANDIDATE"
+    else
+      echo "⚠️ Cross-repo path not found at $CANDIDATE — cannot merge journal."
+      echo "Options: [S]kip journal merge  [A]bort close"
+      # Wait for user response before continuing
+    fi ;;
+  *)
+    echo "⚠️ Unknown design-repo key '$DESIGN_REPO_KEY' — defaulting to project."
+    DESIGN_REPO="$PROJECT" ;;
+esac
 ```
 
 `$DESIGN_REPO` must remain available through Step 8d. Do not recalculate it in
@@ -373,7 +392,8 @@ Post selected specs (from Step 6) as collapsible comments on the GitHub issue.
 
 Only if tracking enabled and `$ISSUE_N` is non-empty:
 ```bash
-[ -n "$ISSUE_N" ] && gh issue close "$ISSUE_N" --repo "$OWNER_REPO"
+CLOSE_REPO="${ISSUE_REPO_GITHUB:-$OWNER_REPO}"
+[ -n "$ISSUE_N" ] && gh issue close "$ISSUE_N" --repo "$CLOSE_REPO"
 ```
 
 ### 8g — Publish blog (runs inside 8a — not a separate step)
