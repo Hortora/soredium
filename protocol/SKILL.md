@@ -1,12 +1,14 @@
 ---
 name: protocol
 description: >
-  Use when working with project-level protocol files — project-specific rules, architectural
-  constraints, and conventions that apply within a single project. Session-time operations:
-  CAPTURE (create a new protocol entry), SWEEP (scan session for rules worth formalising),
-  SEARCH (find protocols by keyword), HEALTH (validate schema completeness and ref integrity).
-  DEEP-SCAN is stubbed — requires Hortora audits 1–4 to implement. NOT for universal technical
-  knowledge (use forage for that). NOT for architectural decisions (use adr).
+  Use when working with protocol files — standing rules, architectural constraints, and
+  conventions that keep a project or platform coherent. Protocols may live in the current
+  project or in a shared garden repo (e.g. casehub/garden) — the skill resolves the correct
+  location automatically. Session-time operations: CAPTURE (create a new protocol entry),
+  SWEEP (scan session for rules worth formalising), SEARCH (find protocols by keyword),
+  HEALTH (validate schema completeness and ref integrity). DEEP-SCAN is stubbed — requires
+  Hortora audits 1–4 to implement. NOT for universal technical knowledge (use forage for
+  that). NOT for architectural decisions (use adr).
 ---
 
 # Protocol — Project-Level Rule Operations
@@ -32,7 +34,7 @@ the problem at hand; update them when they don't fit.
 id: PP-YYYYMMDD-xxxxxx
 title: "Short directive title"
 type: principle | rule
-scope: platform | repo
+scope: universal | platform | repo | application
 applies_to: "which modules / contexts"
 severity: critical | important | guidance
 refs:
@@ -139,9 +141,13 @@ Route to the correct subfolder based on `scope`:
 
 **Step 6 — Commit**
 
+Commit to the protocols garden repo, not the current project repo. Resolve the git root
+from the protocols directory:
+
 ```bash
-git -C $PROJECT_ROOT add docs/protocols/universal/<slug>.md  # or casehub/
-git -C $PROJECT_ROOT commit -m "protocol(PP-YYYYMMDD-xxxxxx): <slug>"
+PROTOCOLS_GIT_ROOT=$(git -C "$PROTOCOLS_DIR" rev-parse --show-toplevel)
+git -C "$PROTOCOLS_GIT_ROOT" add docs/protocols/universal/<slug>.md  # or casehub/
+git -C "$PROTOCOLS_GIT_ROOT" commit -m "protocol(PP-YYYYMMDD-xxxxxx): <slug>"
 ```
 
 **Step 7 — Update the correct index**
@@ -217,10 +223,9 @@ whether a constraint is already formalised.
 
 **Step 1 — Resolve path and search**
 
-```bash
-PROJECT_ROOT=$(git rev-parse --show-toplevel)
-PROTOCOLS_DIR="$PROJECT_ROOT/docs/protocols"
+Resolve `PROTOCOLS_DIR` using the Locating section above, then search:
 
+```bash
 # Search title, applies_to, violation_hint in all protocol files
 grep -rli "<keyword>" "$PROTOCOLS_DIR" --include="*.md" | grep -v INDEX | grep -v PENDING
 ```
@@ -250,9 +255,10 @@ or as a periodic sanity check.
 
 **Step 1 — Count entries**
 
+Resolve `PROTOCOLS_DIR` using the Locating section above, then:
+
 ```bash
-PROJECT_ROOT=$(git rev-parse --show-toplevel)
-ls "$PROJECT_ROOT/docs/protocols/"*.md | grep -v INDEX | grep -v PENDING | wc -l
+ls "$PROTOCOLS_DIR"/**/*.md | grep -v INDEX | grep -v PENDING | wc -l
 ```
 
 **Step 2 — Check required fields**
@@ -268,7 +274,7 @@ VALID_TYPES = {"rule", "principle"}
 VALID_SCOPES = {"universal", "platform", "repo", "application"}
 VALID_SEVERITIES = {"critical", "important", "guidance"}
 
-protocols_dir = pathlib.Path("docs/protocols")
+protocols_dir = pathlib.Path(os.environ["PROTOCOLS_DIR"])  # resolved via Locating section
 issues = []
 
 for f in sorted(protocols_dir.glob("*.md")):
@@ -356,10 +362,10 @@ casehub-specific) and Audit 3 (folder structure validation).
 
 CAPTURE is complete when:
 - ✅ PP-ID generated (`PP-YYYYMMDD-xxxxxx` format)
-- ✅ Entry file written to `docs/protocols/universal/<slug>.md` or `docs/protocols/casehub/<slug>.md` based on scope
+- ✅ Entry file written to the resolved `PROTOCOLS_DIR/universal/<slug>.md` or `PROTOCOLS_DIR/casehub/<slug>.md` based on scope
 - ✅ User confirmed the draft before writing
-- ✅ Entry committed to the project repo
-- ✅ Correct index updated and committed (routed by scope field)
+- ✅ Entry committed to the protocols garden repo (not necessarily the current project repo)
+- ✅ Correct index updated and committed in the same commit (routed by scope field)
 
 SWEEP is complete when:
 - ✅ Session reviewed for implicit rules and re-enforced constraints
@@ -394,4 +400,4 @@ HEALTH is complete when:
 - Architectural decision records (use `adr`)
 - Content classification or gap analysis (DEEP-SCAN — not yet implemented)
 
-**Protocols location:** `<project-root>/docs/protocols/`
+**Protocols location:** Resolved via the Locating section — may be a sibling garden repo (e.g. `casehub/garden/docs/protocols/`), not the current project root. Always commit to the garden repo's git root, not the current project.
