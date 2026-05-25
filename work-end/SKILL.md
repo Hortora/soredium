@@ -269,6 +269,8 @@ work-end close plan — <branch-name>
   Spec posting       → #<N>  (<filenames>)
   Issue              → close #<N>
   Publish blog       → 8g (N unpublished entries → destination)
+  Project rebase     <branch> → <base-branch>, push origin (automatic)
+  Blessed repo       → prompt: push / PR / skip  (upstream remote, if present)
 
 Approve all, or step by step? (all / step)
 ```
@@ -464,7 +466,7 @@ was involved on this branch).
 **3. Stale workspace branches** — list open branches (no `design/EPIC-CLOSED.md` in
 `design/`) with no commits in the last 7 days. Report only; do not act.
 
-### 8j — Rebase project branch onto project base branch, push, offer upstream PR
+### 8j — Rebase project branch onto project base branch, push to fork, prompt for blessed repo
 
 **This step is mandatory.** Implementation commits on the project branch must land on `$PROJECT_BASE_BRANCH` before the branch is marked closed.
 
@@ -494,27 +496,33 @@ git -C "$PROJECT" rebase "$BRANCH_NAME"
 - **Stop. Do not proceed to Step 9.**
 - Instruct the user: resolve conflicts on `$PROJECT_BASE_BRANCH`, then re-run `work end` to complete the close.
 
-**Push to fork remote:**
-
-> "Push `$PROJECT_BASE_BRANCH` to `$FORK_REMOTE`? (y/n)"
+**Push to fork remote (automatic — no prompt):**
 
 ```bash
 git -C "$PROJECT" push "$FORK_REMOTE" "$PROJECT_BASE_BRANCH"
 ```
 
-**Offer upstream PR (fork model only):**
+**Blessed repo delivery (fork model only):**
 
-If `$BLESSED_REMOTE` is non-empty:
-> "Open a PR from `$FORK_REMOTE/$PROJECT_BASE_BRANCH` → `$BLESSED_REMOTE/$PROJECT_BASE_BRANCH`? (y/n)"
+If `$BLESSED_REMOTE` is non-empty, always prompt — three choices:
 
-If yes:
-```bash
-gh pr create --base "$PROJECT_BASE_BRANCH" --head "$(git -C "$PROJECT" remote get-url "$FORK_REMOTE" \
-  | sed 's|.*github.com[:/]\(.*\)\.git|\1|'):$PROJECT_BASE_BRANCH" \
-  --title "<issue title>" --body "Closes #$ISSUE_N"
-```
+> "Deliver to `$BLESSED_REMOTE/$PROJECT_BASE_BRANCH`?
+>   [P] Push directly   [R] Open PR   [N] Skip"
 
-If no `$BLESSED_REMOTE`: no PR step — the push to `origin/$PROJECT_BASE_BRANCH` is the final delivery.
+- **P — Push directly:**
+  ```bash
+  git -C "$PROJECT" push "$BLESSED_REMOTE" "$PROJECT_BASE_BRANCH"
+  ```
+- **R — Open PR:**
+  ```bash
+  gh pr create --base "$PROJECT_BASE_BRANCH" \
+    --head "$(git -C "$PROJECT" remote get-url "$FORK_REMOTE" \
+      | sed 's|.*github.com[:/]\(.*\)\.git|\1|'):$PROJECT_BASE_BRANCH" \
+    --title "<issue title>" --body "Closes #$ISSUE_N"
+  ```
+- **N — Skip:** leave upstream for later; note it in the 8h report.
+
+If no `$BLESSED_REMOTE`: no prompt — fork push is the final delivery.
 
 **Why rebase and not merge --no-ff?** Rebase keeps the project base branch history linear and avoids a merge commit that references a branch consumers never saw. Fast-forward is a safe subset — `git rebase` fast-forwards when possible, replays commits otherwise.
 
