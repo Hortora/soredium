@@ -171,6 +171,8 @@ If no matches: proceed silently.
 
 ### Step 4 — Issue
 
+If tracking disabled: skip silently. Set `ISSUE_N`, `ISSUE_TITLE`, `ISSUE_REPO_GITHUB` to blank. Proceed to Step 5.
+
 If tracking enabled (CLAUDE.md `## Work Tracking` with `Issue tracking: enabled`):
 
 Read the project's GitHub repo:
@@ -178,27 +180,32 @@ Read the project's GitHub repo:
 PROJECT_GITHUB_REPO=$(grep "GitHub repo:" "$PROJECT/CLAUDE.md" | head -1 | sed 's/.*GitHub repo: *//')
 ```
 
-**Cross-repo detection:** If the work description or invocation argument contains a ref of the
-form `<repo-name>#N` (e.g., `cc-praxis#94`) where `<repo-name>` does not match the project repo
-name, this is a cross-repo issue:
+**Cross-repo detection (work-start owns this — workspace concern):**
+
+If the work description or invocation argument contains a ref of the form `<repo-name>#N`
+(e.g., `cc-praxis#94`) where `<repo-name>` does not match the project repo name:
 - Extract `ISSUE_N = N`, `ISSUE_REPO_NAME = <repo-name>`
 - Resolve: `ISSUE_REPO_GITHUB = "<org>/$ISSUE_REPO_NAME"` using the org from `$PROJECT_GITHUB_REPO`
-  (e.g., `casehubio/parent` → org `casehubio` → `casehubio/cc-praxis`)
 - Confirm with the user: "Tracking cross-repo issue $ISSUE_REPO_GITHUB#$ISSUE_N — correct? (y/n)"
+- Record `ISSUE_N`, `ISSUE_TITLE`, `ISSUE_REPO_GITHUB` and proceed to Step 5.
 
-Otherwise: search for an existing open issue in the project repo:
-```bash
-gh issue list --state open --repo "$PROJECT_GITHUB_REPO" --limit 10
-```
-- If found: confirm — "Found #N: `<title>`. Use this? (y/n)"
-- If not found: offer to create — wait for result.
-- Set `ISSUE_REPO_GITHUB = $PROJECT_GITHUB_REPO`
+**Same-repo issue resolution — delegate to issue-workflow Phase 2:**
 
-Record `ISSUE_N`, `ISSUE_TITLE`, and `ISSUE_REPO_GITHUB` for Steps 5, 8, and 9.
+Do not search for or create issues here. Instead invoke `issue-workflow` Phase 2
+(Task Intake), passing the work description as context. issue-workflow Phase 2 owns:
+- Finding an existing open issue that covers this work
+- Drafting and creating a new issue if none exists
+- Cross-cutting detection across concerns
+- Epic placement for ad-hoc issues
 
-If tracking disabled: skip silently. Set `ISSUE_REPO_GITHUB` to blank.
+When Phase 2 completes, it returns the resolved `ISSUE_N` and `ISSUE_TITLE`.
+Record these plus `ISSUE_REPO_GITHUB = $PROJECT_GITHUB_REPO` for Steps 5, 8, and 9.
 
-Do not proceed without resolving this step.
+Do not proceed without a resolved issue number (or explicit user skip from Phase 2).
+
+> **Why delegation:** issue-workflow is the single owner of GitHub issue lifecycle.
+> work-start owns branch + workspace lifecycle. Cross-repo detection stays here
+> because it is a workspace routing concern, not an issue management concern.
 
 ### Step 5 — Branch name
 

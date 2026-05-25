@@ -130,21 +130,29 @@ Confirm:
 
 ### Step 5b — Install commit-msg hook
 
-Install the hook that hard-blocks commits without an issue reference:
+Install the hook that hard-blocks commits without an issue reference.
+The hook is committed to `.githooks/` so it survives clones and is visible
+to all contributors. `core.hooksPath` activates it on the current machine.
 
 ```bash
 PROJECT_PATH=$(readlink -f proj 2>/dev/null || echo ".")
 
 HOOK_SRC="$HOME/.claude/skills/issue-workflow/hooks/commit-msg"
-HOOK_DEST="$PROJECT_PATH/.git/hooks/commit-msg"
+GITHOOKS_DIR="$PROJECT_PATH/.githooks"
+HOOK_DEST="$GITHOOKS_DIR/commit-msg"
 
 if [ -f "$HOOK_DEST" ]; then
-  echo "⚠️  .git/hooks/commit-msg already exists — skipping install."
-  echo "   Review manually: $HOOK_DEST"
+  echo "ℹ️  .githooks/commit-msg already present — skipping."
+elif [ ! -f "$HOOK_SRC" ]; then
+  echo "⚠️  issue-workflow skill not installed — cannot find hook source."
 else
+  mkdir -p "$GITHOOKS_DIR"
   cp "$HOOK_SRC" "$HOOK_DEST"
   chmod +x "$HOOK_DEST"
-  echo "✅ commit-msg hook installed."
+  git -C "$PROJECT_PATH" config core.hooksPath .githooks
+  git -C "$PROJECT_PATH" add .githooks/commit-msg
+  git -C "$PROJECT_PATH" commit -m "chore: add commit-msg hook — require issue ref on every commit"
+  echo "✅ commit-msg hook installed and committed to .githooks/"
 fi
 ```
 
@@ -152,6 +160,9 @@ The hook blocks any commit that lacks both an issue reference (`Refs #N`,
 `Closes #N`, `Fixes #N`, `Resolves #N`) and the explicit bypass token
 `no-issue`. Use `no-issue` with a brief reason for commits that genuinely
 don't need an issue (e.g. `chore: update .gitignore  no-issue: tooling only`).
+
+> **New machine setup:** the hook file ships in `.githooks/` but `core.hooksPath`
+> must be set per machine: `git config core.hooksPath .githooks`
 
 ### Step 6 — Past work reconstruction (if user chose option 2)
 
@@ -540,7 +551,7 @@ If YES: proceed without a footer. If anything else: return to issue selection.
 - ✅ GitHub remote detected and `gh` authenticated
 - ✅ All standard labels created (including `epic`)
 - ✅ `## Work Tracking` written to CLAUDE.md with all automatic behaviours
-- ✅ `commit-msg` hook installed in `.git/hooks/` (or existing hook noted)
+- ✅ `commit-msg` hook committed to `.githooks/commit-msg` and `core.hooksPath` set (or existing hook noted)
 - ✅ User confirmed setup complete
 
 ### Phase 1 (Pre-Implementation) is complete when:

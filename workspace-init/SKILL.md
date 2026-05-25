@@ -869,47 +869,59 @@ git -C "<project-path>" diff --cached --quiet || git -C "<project-path>" commit 
 `proj` is already covered by the workspace `.gitignore` written in Step 7.
 Neither symlink is tracked by git in either repo.
 
-### Step 7c — Install pre-push git hook in project repo
+### Step 7c — Install git hooks in project repo
 
-Check if the git-squash skill is installed and offer to wire its pre-push hook
-into the project repo. This ensures squash candidate detection fires on every
-push — no manual intervention needed.
+Check which hooks are available and offer to install them into `.githooks/`
+(committed, survives clones). Both hooks go in a single commit if both are installed.
 
 ```bash
-HOOK_SRC="$HOME/.claude/skills/git-squash/hooks/pre-push"
 GITHOOKS_DIR="<project-path>/.githooks"
-HOOK_DEST="$GITHOOKS_DIR/pre-push"
+PREPUSH_SRC="$HOME/.claude/skills/git-squash/hooks/pre-push"
+COMMITMSG_SRC="$HOME/.claude/skills/issue-workflow/hooks/commit-msg"
+
+HAS_PREPUSH=false
+HAS_COMMITMSG=false
+[ -f "$PREPUSH_SRC" ] && [ ! -f "$GITHOOKS_DIR/pre-push" ]   && HAS_PREPUSH=true
+[ -f "$COMMITMSG_SRC" ] && [ ! -f "$GITHOOKS_DIR/commit-msg" ] && HAS_COMMITMSG=true
+
+# Also check if Work Tracking is enabled for commit-msg
+WORK_TRACKING=$(grep -q "Issue tracking.*enabled" "<project-path>/CLAUDE.md" 2>/dev/null && echo yes || echo no)
+[ "$WORK_TRACKING" = "no" ] && HAS_COMMITMSG=false
 ```
 
-**If `$HOOK_SRC` does not exist** (git-squash not installed) → skip silently.
+**If both `$HAS_PREPUSH` and `$HAS_COMMITMSG` are false** → skip silently (nothing to install or already present).
 
-**If `$HOOK_DEST` already exists** → skip silently (idempotent).
+**Otherwise**, offer:
 
-**If `$HOOK_SRC` exists and `$HOOK_DEST` is absent**, offer:
-
-> "Install pre-push hook from git-squash? Detects squash candidates before every
-> push — fires on the branch before it lands on main.
+> "Install git hooks into `.githooks/` (committed to repo)?
 >
-> Adds `.githooks/pre-push` to the project repo (committed) and sets
-> `core.hooksPath = .githooks` so it activates on this machine. (YES / n)"
+> `pre-push` — squash candidate detection (git-squash) `[available / already installed / skill missing]`
+> `commit-msg` — require issue ref on every commit (issue-workflow) `[available / already installed / skill missing / Work Tracking not enabled]`
+>
+> Both are committed so all clones get them. `core.hooksPath` activated on this machine. (YES / n)"
 
 If YES:
 ```bash
 mkdir -p "$GITHOOKS_DIR"
-cp "$HOOK_SRC" "$HOOK_DEST"
-chmod +x "$HOOK_DEST"
 
-# Activate on this machine
+if $HAS_PREPUSH; then
+  cp "$PREPUSH_SRC" "$GITHOOKS_DIR/pre-push"
+  chmod +x "$GITHOOKS_DIR/pre-push"
+  git -C "<project-path>" add .githooks/pre-push
+fi
+
+if $HAS_COMMITMSG; then
+  cp "$COMMITMSG_SRC" "$GITHOOKS_DIR/commit-msg"
+  chmod +x "$GITHOOKS_DIR/commit-msg"
+  git -C "<project-path>" add .githooks/commit-msg
+fi
+
 git -C "<project-path>" config core.hooksPath .githooks
-
-# Commit the hook file so all clones get it
-git -C "<project-path>" add .githooks/pre-push
-git -C "<project-path>" commit -m "chore: add pre-push git hook for squash candidate detection"
+git -C "<project-path>" commit -m "chore: add git hooks — squash detection and issue ref enforcement"
 ```
 
-> **Note for new clones:** the hook file ships in `.githooks/` but `core.hooksPath`
-> must be set per machine. Add to project onboarding:
-> `git config core.hooksPath .githooks`
+> **New machine setup:** hook files ship in `.githooks/` but `core.hooksPath`
+> must be set per machine: `git config core.hooksPath .githooks`
 
 If n → skip. Do not ask again this session.
 
@@ -1137,7 +1149,7 @@ If n → skip. Do not ask again this session.
 - [ ] Existing methodology artifacts offered for migration; selected ones copied and `git rm`'d with single commit
 - [ ] Git repo initialised with initial commit
 - [ ] Remote set and pushed (if URL provided)
-- [ ] Pre-push git hook offered (Step 7c): if git-squash installed, `.githooks/pre-push` copied, committed, and `core.hooksPath` set; skipped silently if git-squash absent or hook already present
+- [ ] Git hooks offered (Step 7c): `pre-push` (git-squash) and/or `commit-msg` (issue-workflow, if Work Tracking enabled) copied to `.githooks/`, committed in one commit, `core.hooksPath` set; skipped silently if skills absent or hooks already present
 - [ ] Issue tracking offered; configured via `issue-workflow` Phase 0 if accepted
 - [ ] Superpowers offered; install command shown if not already installed
 
