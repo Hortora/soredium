@@ -13,12 +13,24 @@ runs pre-checks. **Never skip this skill — even for small changes.**
 
 ---
 
-## Path Resolution (run first, always)
+## Step 0 — Project initialisation
+
+**Invoke `project-init` before anything else.**
+
+project-init verifies CLAUDE.md, workspace, work tracking, and superpowers
+are set up. If anything is missing it walks the user through setup and returns
+before proceeding. On the fast path (everything set up) it returns immediately.
+
+Only continue to path resolution once project-init returns clean.
+
+---
+
+## Path Resolution (run after project-init)
 
 ```bash
 WORKSPACE=$(git rev-parse --show-toplevel 2>/dev/null)
 PROJECT=$(readlink -f proj 2>/dev/null)
-[ -z "$PROJECT" ] && { echo "⚠️ No proj/ symlink found. Run workspace-init to set up."; exit 1; }
+[ -z "$PROJECT" ] && { echo "⚠️ No proj/ symlink found — workspace-init may have been declined. Proceeding in single-repo mode."; }
 PROJECT_BASE_BRANCH=$(grep "^\*\*Project base branch:\*\*" CLAUDE.md 2>/dev/null | head -1 | sed 's/.*`\(.*\)`.*/\1/')
 [ -z "$PROJECT_BASE_BRANCH" ] && PROJECT_BASE_BRANCH="main"
 ```
@@ -50,8 +62,7 @@ fi
 
 PROJECT_BRANCH=$(git -C "$PROJECT" branch --show-current)
 WORKSPACE_BRANCH=$(git -C "$WORKSPACE" branch --show-current)
-[ "$PROJECT_BRANCH" = "$WORKSPACE_BRANCH" ] \
-  || { echo "⚠️ Mismatch after switch. Manual alignment required."; exit 1; }
+[ "$PROJECT_BRANCH" = "$WORKSPACE_BRANCH" ] || { echo "⚠️ Mismatch after switch. Manual alignment required."; exit 1; }
 echo "✅ Both repos on: $PROJECT_BRANCH"
 ```
 
@@ -158,8 +169,7 @@ Search the garden for GEs relevant to the domain being worked. This step surface
 Extract 2–4 keywords from the work description (domain name, library, framework, or key concept). Then:
 
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -i "<keyword1>\|<keyword2>" HEAD -- '*.md' \
-  ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md' \
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -i "<keyword1>\|<keyword2>" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md' \
   | grep -i "^[^:]*:" | head -20
 ```
 
@@ -260,8 +270,7 @@ Read routing config (3-layer cascade) for `design` artifact (only if Layer 0 did
 
 **Layer 1 (global default — `~/.claude/CLAUDE.md`):**
 ```bash
-grep -A 5 "^## Routing$" "$HOME/.claude/CLAUDE.md" 2>/dev/null \
-  | grep "^\*\*Default destination:\*\*" | sed 's/\*\*Default destination:\*\* *//'
+grep -A 5 "^## Routing$" "$HOME/.claude/CLAUDE.md" 2>/dev/null | grep "^\*\*Default destination:\*\*" | sed 's/\*\*Default destination:\*\* *//'
 ```
 Valid values: `workspace` or `project`. Anything else: warn, treat as absent.
 
@@ -282,8 +291,7 @@ from routing config — which may have changed between sessions.
 
 Compute section hashes (single pipe-separated line):
 ```bash
-HASHES=$(grep "^## " "$DESIGN_REPO/DESIGN.md" 2>/dev/null \
-  | while read h; do printf "%s:%s|" "$(printf '%s' "$h" | shasum -a 256 | cut -c1-8)" "$h"; done)
+HASHES=$(grep "^## " "$DESIGN_REPO/DESIGN.md" 2>/dev/null | while read h; do printf "%s:%s|" "$(printf '%s' "$h" | shasum -a 256 | cut -c1-8)" "$h"; done)
 ```
 Leave blank if `$DESIGN_REPO/DESIGN.md` does not exist yet.
 

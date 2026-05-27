@@ -218,10 +218,8 @@ user to fill in fields — infer and propose.
 - ❌ "WKWebView work" / "Plan 5b"
 
 ```bash
-gh issue create \
-  --title "{epic title}" \
-  --label "epic,{type-label}" \
-  --repo {owner/repo} \
+gh issue create --title "{epic title}" \
+  --label "epic,{type-label}" --repo {owner/repo} \
   --body "$(cat <<'EOF'
 ## Overview
 {What this epic delivers and why. 2–4 sentences.}
@@ -279,10 +277,8 @@ merged, and reverted on its own.
 - ❌ "JavaScript stuff" / "Task 3" / "Phase 2 work"
 
 ```bash
-gh issue create \
-  --title "{child title}" \
-  --label "{type-label}" \
-  --repo {owner/repo} \
+gh issue create --title "{child title}" \
+  --label "{type-label}" --repo {owner/repo} \
   --body "$(cat <<'EOF'
 ## Context
 Part of epic #{epic-number} — {epic title}. {Note any dependency on sibling issues.}

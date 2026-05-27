@@ -54,7 +54,7 @@ Then read the file and present the resume output using this structure:
 2–3 lines: what was done and the key outcome.
 
 **## Immediate Next Step**
-Single specific action right now — procedural or unblocking (e.g. "run /epic", "delete branches", "fix X in Y").
+Single specific action right now — procedural or unblocking (e.g. "run /work", "delete branches", "fix X in Y").
 
 **## Cross-Module**
 Only include if HANDOFF.md contains cross-module dependencies. Omit the section entirely if there are none.
@@ -146,8 +146,7 @@ git diff HEAD~1 HEAD -- HANDOFF.md
 git show HEAD~1:HANDOFF.md | grep -A 10 "## Open Questions"
 
 # Find a handover from a specific date
-git log --before="2026-04-03" -1 --format="%H" -- HANDOFF.md \
-  | xargs -I{} git show {}:HANDOFF.md
+git log --before="2026-04-03" -1 --format="%H" -- HANDOFF.md | xargs -I{} git show {}:HANDOFF.md
 ```
 
 These commands are cheap — use them rather than loading full files when only

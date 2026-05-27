@@ -12,7 +12,7 @@ Routes blog entries from the workspace blog directory to external publishing
 destinations based on `blog-routing.yaml` routing rules.
 
 This is a **second-level routing** step, independent of the workspace `## Routing`
-config used by `epic`. That config controls where the `blog/` directory lives.
+config. That config controls where the `blog/` directory lives.
 This skill controls where individual entries are cross-posted to blog platforms.
 
 ---
@@ -280,6 +280,6 @@ rules:
 
 **No external scripts required** — routing logic is applied inline from the config YAML.
 
-**Related:** `epic` — Level 1 routing (where the `blog/` directory lives).
+**Related:** workspace `## Routing` config — Level 1 routing (where the `blog/` directory lives).
 This skill is Level 2 routing (per-entry cross-posting to platforms). The two are
-independent; `epic` does not invoke `publish-blog`.
+independent.

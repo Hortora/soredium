@@ -40,8 +40,7 @@ case "$INFERRED_PARENT" in
     INFERRED_PARENT="" ;;
 esac
 
-GITHUB_OWNER=$(git -C "$PROJECT_PATH" remote get-url origin 2>/dev/null \
-  | sed 's|.*github.com[:/]\([^/]*\)/.*|\1|')
+GITHUB_OWNER=$(git -C "$PROJECT_PATH" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]\([^/]*\)/.*|\1|')
 ```
 
 ### Step 1 — Input collection (single AskUserQuestion batch)
@@ -107,16 +106,10 @@ gh repo view <owner>/<REPO_NAME> --json name,description 2>/dev/null && echo "ex
 **Q7 — CLAUDE.md handling:**
 
 For each repo in scope, detect its CLAUDE.md status:
+Check each repo individually with separate commands — no loop:
 ```bash
-for repo in $ALL_REPOS; do
-  if git -C "$repo" ls-files --error-unmatch CLAUDE.md 2>/dev/null; then
-    echo "$repo: committed"
-  elif [ -f "$repo/CLAUDE.md" ]; then
-    echo "$repo: untracked"
-  else
-    echo "$repo: missing"
-  fi
-done
+git -C /concrete/path/to/repo1 ls-files --error-unmatch CLAUDE.md 2>/dev/null && echo "committed" || echo "not committed"
+git -C /concrete/path/to/repo2 ls-files --error-unmatch CLAUDE.md 2>/dev/null && echo "committed" || echo "not committed"
 ```
 
 Present one question showing all repos and their status, asking for the handling
@@ -157,23 +150,35 @@ If `INFERRED_PARENT` is non-empty, run two checks in order:
 
 **Check A — Existing family workspace folder:**
 
+Use Python to list subdirectories — avoids `find -exec` and shell variable expansion:
 ```bash
-FAMILY_PATH=~/claude/<privacy>/$INFERRED_PARENT
-FAMILY_MEMBERS=""
-if [ -d "$FAMILY_PATH" ]; then
-  FAMILY_MEMBERS=$(find "$FAMILY_PATH" -maxdepth 1 -mindepth 1 -type d -exec basename {} \; | sort | tr '\n' ', ' | sed 's/,$//')
-fi
+python3 /tmp/ws_family_check.py
 ```
 
-If `$FAMILY_MEMBERS` is non-empty (the family folder already exists with at least one member):
+Write `/tmp/ws_family_check.py` with the Write tool before running:
+```python
+import os, sys
+from pathlib import Path
 
-Find repos in the family directory that don't yet have a child workspace:
-```bash
-MISSING=$(find "$PROJECT_PARENT_DIR" -maxdepth 1 -mindepth 1 -type d | while read d; do
-  name=$(basename "$d")
-  [ -d "$d/.git" ] && [ ! -d "$FAMILY_PATH/$name" ] && echo "$name"
-done | sort)
+family_path = Path.home() / "claude" / "<privacy>" / "<INFERRED_PARENT>"
+project_parent = Path("<PROJECT_PARENT_DIR>")
+
+# List existing child workspaces
+if family_path.is_dir():
+    members = sorted(d.name for d in family_path.iterdir() if d.is_dir())
+    print("FAMILY_MEMBERS:", ", ".join(members) if members else "")
+else:
+    print("FAMILY_MEMBERS:")
+
+# Find git repos in project parent without a workspace
+missing = []
+for d in sorted(project_parent.iterdir()):
+    if d.is_dir() and (d / ".git").is_dir() and not (family_path / d.name).is_dir():
+        missing.append(d.name)
+print("MISSING:", ", ".join(missing) if missing else "")
 ```
+
+Substitute concrete values for `<privacy>`, `<INFERRED_PARENT>`, and `<PROJECT_PARENT_DIR>` before writing.
 
 Present:
 
@@ -197,20 +202,16 @@ List what's already cloned locally AND check GitHub for repos in the family that
 haven't been cloned yet. The goal is always "clone missing peers" — whether that's
 all of them or just a few.
 
+Use separate commands — no shell variables or loops:
 ```bash
-# Local siblings already present
-LOCAL_SIBLINGS=$(find "$PROJECT_PARENT_DIR" -maxdepth 1 -mindepth 1 -type d | while read d; do
-  [ -d "$d/.git" ] && basename "$d"
-done | sort)
-LOCAL_COUNT=$(echo "$LOCAL_SIBLINGS" | grep -c .)
-
-# GitHub repos in the family not yet cloned locally
-# Derive family pattern from INFERRED_PARENT (e.g. "casehub" → match "casehub-*" and exact "casehub")
-GITHUB_REPOS=$(gh repo list "$GITHUB_OWNER" --json name --jq '.[].name' 2>/dev/null \
-  | grep -E "^${INFERRED_PARENT}(-|$)|^${INFERRED_PARENT}$" | sort)
-UNCLONED=$(comm -23 <(echo "$GITHUB_REPOS") <(echo "$LOCAL_SIBLINGS") | grep -v "^$")
-UNCLONED_COUNT=$(echo "$UNCLONED" | grep -c .)
+ls -d /concrete/project/parent/dir/*/
 ```
+and:
+```bash
+gh repo list <GITHUB_OWNER> --json name --jq '.[].name' 2>/dev/null
+```
+
+Compute LOCAL_SIBLINGS, GITHUB_REPOS, UNCLONED, and their counts manually from the output — do not use shell variables or pipes between these commands.
 
 If `$LOCAL_COUNT` is greater than 1 OR `$UNCLONED_COUNT` is greater than 0, present:
 
@@ -227,11 +228,10 @@ If `$LOCAL_COUNT` is greater than 1 OR `$UNCLONED_COUNT` is greater than 0, pres
 > 4. **Flat** — no family grouping, use `~/claude/<privacy>/<project>/`"
 
 **If 1 (All):**
-Clone any uncloned repos first:
+Clone each uncloned repo with a separate git clone command per repo — no loop:
 ```bash
-for repo in $UNCLONED; do
-  git clone git@github.com:$GITHUB_OWNER/$repo.git "$PROJECT_PARENT_DIR/$repo"
-done
+git clone git@github.com:<GITHUB_OWNER>/<repo1>.git /concrete/project/parent/<repo1>
+git clone git@github.com:<GITHUB_OWNER>/<repo2>.git /concrete/project/parent/<repo2>
 ```
 Then set `BATCH_REPOS=<all local siblings including current project>`. Set `BASE=~/claude/<privacy>/<INFERRED_PARENT>/<project>`. Run Step 1b to create the family root, then run the full workspace-init workflow (Steps 2–10) for each repo in `BATCH_REPOS` **one repo at a time, in strict sequence**. Complete all steps (including Step 5 CLAUDE.md gate and Step 6 CLAUDE.md decision) for one repo before starting the next. Never parallelise across repos — each repo's CLAUDE.md decision must be individually confirmed. Skip any repo that already has a workspace.
 
@@ -336,12 +336,11 @@ FAMILY_CLAUDE="$FAMILY_ROOT/CLAUDE.md"
 
 **If `FAMILY_CLAUDE` does not exist — create it:**
 
-Scan for all sibling git repos in the same parent directory:
+List sibling git repos using ls (concrete path, no variables):
 ```bash
-SIBLINGS=$(find "$PROJECT_PARENT_DIR" -maxdepth 1 -mindepth 1 -type d | while read d; do
-  [ -d "$d/.git" ] && basename "$d"
-done | sort | tr '\n' ' ')
+ls -d /concrete/project/parent/dir/*/
 ```
+Filter to those containing `.git/` manually from the output.
 
 Draft the family CLAUDE.md and show to user for acceptance before writing:
 
@@ -381,27 +380,23 @@ Per-repo artifacts live in each child workspace.
 
 Create the standard artifact directories at the family root too:
 ```bash
-mkdir -p "$FAMILY_ROOT/adr" "$FAMILY_ROOT/snapshots" "$FAMILY_ROOT/blog" \
-         "$FAMILY_ROOT/specs" "$FAMILY_ROOT/plans"
+mkdir -p "$FAMILY_ROOT/adr" "$FAMILY_ROOT/snapshots" "$FAMILY_ROOT/blog" "$FAMILY_ROOT/specs" "$FAMILY_ROOT/plans"
 ```
 
 Write the family root `.gitignore` — ignores all child workspace directories so
 the family repo tracks only family-level artifacts, not the nested repos:
 
-```bash
-# Collect all sibling repo names (the same list used in the member repos table)
-SIBLING_NAMES=$(find "$PROJECT_PARENT_DIR" -maxdepth 1 -mindepth 1 -type d | while read d; do
-  [ -d "$d/.git" ] && basename "$d"
-done | sort)
+Write `.gitignore` using the Write tool with the concrete sibling names derived from the ls output above — no shell variables or heredoc expansion:
 
-cat > "$FAMILY_ROOT/.gitignore" << EOF
+```
 # Child workspace repos — each has its own git history
-$(echo "$SIBLING_NAMES" | sed 's|^|/|')
+/<sibling1>
+/<sibling2>
+/<sibling3>
 
 # OS / editor noise
 .DS_Store
 *.swp
-EOF
 ```
 
 This prevents git from seeing child workspace directories as untracked content
@@ -448,8 +443,8 @@ EOF
 
 (`specs/`, `plans/`, and `design/` need no INDEX.md — superpowers and design skills manage them directly.)
 
-The `design/` directory is intentionally left empty at workspace init. `epic`
-creates `design/JOURNAL.md` and `design/.meta` when an epic branch begins.
+The `design/` directory is intentionally left empty at workspace init. `work-start`
+creates `design/JOURNAL.md` and `design/.meta` when a work branch begins.
 
 ### Step 4 — Create HANDOFF.md and IDEAS.md stubs
 
@@ -498,7 +493,7 @@ Run `add-dir <absolute-path-to-project>` and `add-dir <absolute-path-to-workspac
 | handover | `HANDOFF.md` |
 | idea-log | `IDEAS.md` |
 | design-snapshot | `snapshots/` |
-| java-update-design / update-primary-doc | `design/JOURNAL.md` (created by `epic`) |
+| java-update-design / update-primary-doc | `design/JOURNAL.md` (created by `work-start`) |
 | adr | `adr/` |
 | write-blog | `blog/` |
 
@@ -537,9 +532,9 @@ Per-artifact routing destinations (optional). If absent, all artifacts route to 
 
 | Artifact   | Destination | Notes |
 |------------|-------------|-------|
-| adr        | project     | lands in `docs/adr/` — promoted at epic close |
-| specs      | project     | lands in `docs/specs/` — promoted at epic close |
-| blog       | workspace   | staged here; published to mdproctor.github.io via publish-blog at epic close |
+| adr        | project     | lands in `docs/adr/` — promoted at work end |
+| specs      | project     | lands in `docs/specs/` — promoted at work end |
+| blog       | workspace   | staged here; published to mdproctor.github.io via publish-blog at work end |
 | plans      | workspace   | stay in workspace permanently |
 | design     | workspace   | epic journal stays in workspace |
 | snapshots  | workspace   | stay in workspace permanently |
@@ -559,9 +554,9 @@ To set a global default across all workspaces, add to `~/.claude/CLAUDE.md`:
 Global valid values: `workspace` or `project` only (no alternative at global level).
 ```
 
-> **Note:** `epic` reads the routing config at branch creation time. If `design → workspace`,
+> **Note:** `work-start` reads the routing config at branch creation time. If `design → workspace`,
 > it records the workspace/main HEAD SHA as the design baseline instead of the project HEAD SHA.
-> Configure routing before starting your first epic.
+> Configure routing before starting your first work branch.
 
 Present to the user:
 > "Here is the proposed workspace CLAUDE.md. Accept, or tell me what to change:
@@ -996,7 +991,7 @@ FOUND=()
 # Note: specs/ excluded — design specs are project knowledge; they explain why the
 #   code is shaped the way it is and are useful for future contributors. New specs
 #   are written to the workspace during active work, then merged to the project repo
-#   via epic-close when the work ships.
+#   via work-end when the work ships.
 [ -d "<project-path>/blog" ]        && FOUND+=("blog/ → blog/")
 [ -d "<project-path>/plans" ]       && FOUND+=("plans/ → plans/")
 [ -d "<project-path>/snapshots" ]   && FOUND+=("snapshots/ → snapshots/")
