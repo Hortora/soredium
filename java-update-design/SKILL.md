@@ -2,8 +2,9 @@
 name: java-update-design
 description: >
   Use when the user invokes /update-design, asks to "update the design doc",
-  "sync DESIGN.md", "reflect code changes in the design", or when another
-  skill (java-git-commit) requests a design document update.
+  "sync DESIGN.md", "sync ARC42STORIES.MD", "reflect code changes in the design",
+  or when another skill (java-git-commit) requests a design document update.
+  Routes to ARC42STORIES.MD §10 when that file exists; falls back to DESIGN.md.
 ---
 
 # Update Design Document
@@ -59,6 +60,24 @@ This skill is invoked by `java-git-commit` when:
 - Do not mention AI, LLMs, or any tooling attribution in the document itself.
 
 ## Workflow
+
+### Step 0: Detect target document
+
+Before anything else, check whether `ARC42STORIES.MD` exists in the workspace root:
+
+```bash
+WORKSPACE=$(git rev-parse --show-toplevel 2>/dev/null)
+ls "$WORKSPACE/ARC42STORIES.MD" 2>/dev/null && echo "arc42=yes" || echo "arc42=no"
+```
+
+| State | Target document | Behaviour |
+|---|---|---|
+| `ARC42STORIES.MD` present | ARC42STORIES.MD | Cross-cutting decisions → §10. Layer-specific decisions → the relevant §9.4 Layer entry. Journal anchors use `§10` or `§9.4·[LayerName]` (see Step 7). |
+| `ARC42STORIES.MD` absent | DESIGN.md | Continue as before — all existing workflow steps apply unchanged. |
+
+**Rule:** Never write to both. If `ARC42STORIES.MD` exists, it is the sole architectural record. DESIGN.md is a transitional artifact — if it still exists alongside ARC42STORIES.MD, it is pending retirement. Do not update it; if a user asks why, explain that ARC42STORIES.MD is now the target.
+
+---
 
 ### Step 1: Detect workspace mode
 
@@ -227,10 +246,9 @@ Focus on reasoning and context — not implementation details. 2-6 sentences.]
 ```
 
 **Rules:**
-- Use the exact section name from the project `DESIGN.md` in the `§` anchor
-  (e.g. `§Architecture`, `§Data Model`) — this is the merge map at branch close (work-end)
-- If an entry for this `§Section` already exists in `JOURNAL.md` → update it
-  in place (the journal is a living document; git history preserves the evolution)
+- **If ARC42STORIES.MD exists:** use `§10` for cross-cutting decisions (e.g. SPI placement, module boundary choices) and `§9.4·[LayerName]` for layer-specific decisions (e.g. `§9.4·casehub-work`). These anchors map to where `work-end` will merge the entry in ARC42STORIES.MD.
+- **If DESIGN.md is the target:** use the exact section name from `DESIGN.md` (e.g. `§Architecture`, `§Data Model`) — this is the merge map at branch close.
+- If an entry for this `§Section` already exists in `JOURNAL.md` → update it in place (the journal is a living document; git history preserves the evolution)
 - If this is a new section affected → append a new entry at the end
 - If the change generated an ADR → include it in the header: `· ADR-0042`
 - Do not summarise the code change — explain the *design reasoning*
@@ -279,6 +297,8 @@ Avoid these mistakes when updating DESIGN.md:
 | Not reading existing DESIGN.md first | Proposals conflict with structure | Always read full file before proposing |
 | Mentioning AI/tools in DESIGN.md | Breaks professional documentation standards | Never mention Claude, AI, or tooling in the doc itself |
 | Writing to design/DESIGN.md directly | Bypasses the journal; merge at branch close (work-end) loses context | Always write to design/JOURNAL.md with §Section anchors |
+| Updating DESIGN.md when ARC42STORIES.MD exists | DESIGN.md is a transitional artifact — ARC42STORIES.MD is the sole target | Run Step 0 first; if ARC42STORIES.MD present, write there only |
+| Using DESIGN.md §Section anchors in journal when ARC42STORIES.MD exists | work-end cannot merge to ARC42STORIES.MD using DESIGN.md section names | Use `§10` or `§9.4·[LayerName]` anchors when ARC42STORIES.MD is the target |
 
 ## Document Structure Check
 
@@ -321,7 +341,16 @@ Then update CLAUDE.md:
 
 ## Success Criteria
 
-**In direct mode** (no `design/JOURNAL.md` present):
+**In direct mode — ARC42STORIES.MD present:**
+
+- ✅ `ARC42STORIES.MD` located and §10 read
+- ✅ Architectural changes identified from staged diff
+- ✅ Cross-cutting decisions proposed for §10; layer-specific decisions routed to correct §9.4 Layer entry
+- ✅ User confirmed with explicit **YES**
+- ✅ Changes applied to `ARC42STORIES.MD`
+- ✅ File ready for staging
+
+**In direct mode — DESIGN.md only (no ARC42STORIES.MD):**
 
 - ✅ `design/DESIGN.md` located and read
 - ✅ Architectural changes identified from staged diff
@@ -334,7 +363,7 @@ Then update CLAUDE.md:
 **In workspace mode** (`design/JOURNAL.md` exists):
 
 - ✅ Architectural changes identified from staged diff
-- ✅ Journal entry has `· §SectionName` anchor in the header — validated before commit (Step 7b)
+- ✅ Journal entry has `· §SectionName` anchor in the header — `§10` or `§9.4·[LayerName]` if ARC42STORIES.MD present; DESIGN.md section name otherwise — validated before commit (Step 7b)
 - ✅ User confirmed with explicit **YES**
 - ✅ Entry appended to `design/JOURNAL.md`
 - ✅ File ready for staging (or user confirmed no changes needed)
