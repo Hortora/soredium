@@ -328,16 +328,24 @@ git -C "$WORKSPACE" push  # non-fatal if fails; warn and continue
 
 ### Step 11 — IntelliJ MCPs
 
-Call `mcp__intellij-index__ide_index_status` and `mcp__intellij__get_project_modules`.
+Call `ide_index_status` to confirm the MCP server is reachable.
 
-**If either is unavailable:**
-- Stop immediately — tell the user which MCP is missing
+**If the MCP server itself is unavailable** (connection error, tool not found):
+- Stop immediately — tell the user the MCP is missing
 - Do not proceed with any semantic operation
-- Do not fall back to bash, grep, or sed as substitutes
 - Wait for the user to reconnect via `/mcp`
 
-IntelliJ can also drop mid-task. If a semantic operation fails because an MCP
-is unavailable at any point, stop and tell the user rather than silently falling back.
+**If the MCP is reachable but the project isn't open:**
+- Do NOT stop and do NOT ask the user to open the project manually
+- Call `ide_project_status` to see all managed projects and their paths
+- Pass `project_path: <path>` to the first semantic tool you need — the plugin
+  opens the project automatically (5–30s), then runs the tool
+- Never use `get_project_modules` to check what's open — it only sees the currently
+  focused window and will mislead you when multiple projects are managed
+
+IntelliJ can also drop mid-task. If a semantic operation fails because the MCP
+server is unavailable at any point, stop and tell the user rather than silently
+falling back.
 
 ### Step 12 — Offer brainstorming
 
@@ -371,7 +379,7 @@ Platform doc: [read / not found]
 Coherence Protocol: [any concerns raised, or "clear"]
 Protocols checked: [list any relevant ones read]
 Garden search: [N GEs surfaced for <domain> / no matches / skipped]
-IntelliJ: ✅ both connected / ⚠️ [missing — stopped]
+IntelliJ: ✅ connected / ✅ connected, project auto-opened / ⚠️ MCP unavailable — stopped
 
 Proceeding to brainstorming.  (or: Ready for work.)
 ```
