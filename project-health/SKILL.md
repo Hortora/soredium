@@ -1019,7 +1019,7 @@ These extend universal categories with blog-specific items (tier 2+):
 
 **Quality:**
 - [ ] Jekyll conventions are documented in CLAUDE.md
-- [ ] Blog commit types are valid (post/edit/draft/asset/config) — see `blog-git-commit`
+- [ ] Blog commit types are valid (post/edit/draft/asset/config) — see `git-commit`
 - [ ] Commit subject line 72-char limit enforced (blog convention)
 
 **Refinement (tier 4):**
@@ -1096,7 +1096,7 @@ These extend universal categories with blog-specific items (tier 2+):
 | Flagging every unused asset | Images may be used by external links or layouts | Check layouts AND posts before calling an asset orphaned |
 | Reporting Liquid errors without context | Template errors cascade | Report the root file first, note secondary effects separately |
 
-**Related skills:** `blog-git-commit`, `project-refine`
+**Related skills:** `git-commit`, `project-refine`
 
 ---
 

@@ -51,7 +51,7 @@ Extract the type (skills | java | blog | custom | generic).
   > `/java-git-commit` or say "java commit"
 
 - **type: blog** → STOP and tell user:
-  > This is a type: blog project. Please use `blog-git-commit` instead:
+  > This is a type: blog project. Please use `git-commit` instead:
   > `/blog-git-commit` or say "blog commit"
 
 - **type: custom** → STOP and tell user:
