@@ -94,15 +94,9 @@
   ],
   "plugins": [
     {
-      "name": "cc-praxis-ui",
-      "source": "./cc-praxis-ui",
-      "description": "Launch the cc-praxis skill manager UI \u2014 browse, install, update, and uninstall skills",
-      "version": "1.0.0"
-    },
-    {
-      "name": "cc-praxis-check",
-      "source": "./cc-praxis-check",
-      "description": "Use when something seems wrong with cc-praxis \u2014 diagnoses CLAUDE.md, installed skills, session hook, and DESIGN.md with specific recovery steps for each issue",
+      "name": "cc-praxis",
+      "source": "./cc-praxis",
+      "description": "cc-praxis management: diagnose setup problems or launch the skill manager UI",
       "version": "1.0.0"
     },
     {
