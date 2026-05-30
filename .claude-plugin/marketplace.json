@@ -178,12 +178,6 @@
       "version": "1.0.0"
     },
     {
-      "name": "update-primary-doc",
-      "source": "./update-primary-doc",
-      "description": "Generic primary document synchronization",
-      "version": "1.0.0"
-    },
-    {
       "name": "update-claude-md",
       "source": "./update-claude-md",
       "description": "CLAUDE.md workflow documentation sync",

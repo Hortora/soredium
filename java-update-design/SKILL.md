@@ -28,7 +28,7 @@ This skill is invoked by `java-git-commit` when:
 
 ## Prerequisites
 
-**This skill extends `update-primary-doc`** with Java-specific knowledge:
+**This skill extends `custom-git-commit`** with Java-specific knowledge:
 
 - **update-primary-doc**: Generic document sync patterns (read path, match files, propose updates, validate)
 

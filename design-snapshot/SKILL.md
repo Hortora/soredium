@@ -320,4 +320,4 @@ Snapshot is complete when:
 
 **Can be followed by:** [`write-content`] — after a major milestone snapshot, the user may want to write a diary entry narrating how the project reached that state (offered in write-content, not automatic here)
 
-**Does NOT invoke:** `java-update-design` or `update-primary-doc` — those update *living* docs that change over time; a snapshot is an *immutable* record. Both coexist: update the living doc with one, freeze the moment with the other.
+**Does NOT invoke:** `java-update-design` or `custom-git-commit` — those update *living* docs that change over time; a snapshot is an *immutable* record. Both coexist: update the living doc with one, freeze the moment with the other.
