@@ -11,7 +11,7 @@ reader to decide whether to go deeper — before they commit to reading.
 
 | Form | What scanning gives the reader |
 |------|-------------------------------|
-| InfoBrief | The complete picture — scanning IS the experience |
+| Brief | The complete picture — scanning IS the experience |
 | Note | Enough to know if it's relevant |
 | Article | The argument skeleton — enough to decide to read |
 | Essay | The position and structure — enough to commit |
@@ -73,7 +73,7 @@ The dominant corner of Kinneavy's communication triangle determines register:
 |------|----------------|----------------------------|
 | Note | Encoder | Write encoder-first. Assume shared context. Don't over-explain. |
 | Article | Decoder | Write decoder-first. Provide context. Structure for cold readers. |
-| InfoBrief | Reality | Information dominates. Neither encoder nor decoder foregrounded. |
+| Brief | Reality | Information dominates. Neither encoder nor decoder foregrounded. |
 | News | Reality | Facts dominate. External event, not author's perspective. |
 
 **Note vs Article test:** Did you write this quickly without heavy audience

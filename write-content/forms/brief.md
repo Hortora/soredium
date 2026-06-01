@@ -1,4 +1,4 @@
-# Form: InfoBrief (Informative Brief)
+# Form: Brief (Informative Brief)
 
 Maximum information density, minimum prose. Fully scannable — scanning IS the
 experience. There is no deeper layer to pull the reader into. What you see
@@ -62,18 +62,18 @@ Not every piece needs all sections. Use what's needed; omit the rest.
 
 ## The navigation layer (optional)
 
-When a longer form exists (an article or essay), the InfoBrief can link its
+When a longer form exists (an article or essay), the Brief can link its
 sections, paragraphs, and bullets to the corresponding deeper content.
-The InfoBrief becomes the TLDR with links throughout — a navigable entry point.
+The Brief becomes the TLDR with links throughout — a navigable entry point.
 
-Each section of the InfoBrief links to the relevant section of the article.
+Each section of the Brief links to the relevant section of the article.
 The reader who is satisfied by the scan stops there.
 The reader who wants more clicks through to exactly what they need.
 
-**The navigation layer is opt-in, not a requirement.** A standalone InfoBrief
+**The navigation layer is opt-in, not a requirement.** A standalone Brief
 is complete on its own — no deeper layer needed.
 
-**Cross-post format:** `InfoBrief + Article/explanation` or `InfoBrief + Article/essay`
+**Cross-post format:** `Brief + Article/explanation` or `Brief + Article/essay`
 
 ---
 
@@ -102,6 +102,6 @@ to go further — never required reading.
 
 ## Historical note
 
-InfoBrief is nearly absent from the historical corpus (3 instances in 577 posts).
+Brief is nearly absent from the historical corpus (3 instances in 577 posts).
 It is a new form — not in the historical writing style. Do not force posts
-into InfoBrief. Only use when maximum density is the actual goal.
+into Brief. Only use when maximum density is the actual goal.

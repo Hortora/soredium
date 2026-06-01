@@ -48,7 +48,7 @@ Use the intent test to classify what is being written:
 | "I want you to understand why X works" | **Article/explanation** |
 | "I want to share my take on something" | **Article/commentary** |
 | "I want to argue a position to a conclusion" | **Article/essay** |
-| "I want maximum information density, minimum prose" | **InfoBrief** |
+| "I want maximum information density, minimum prose" | **Brief** |
 | "I want to announce a release / event / industry news" | **News** |
 
 **Diary signals:** "write a diary entry", "log what we built today", "document this pivot", "blog all the work to date", "catch the blog up", "write a retrospective series", or invoked with no argument when context is a project diary.
@@ -74,7 +74,7 @@ Load the appropriate form file from `write-content/forms/`:
 | Note (any subtype) | `forms/note.md` |
 | Article (any subtype) | `forms/article.md` |
 | Article/essay specifically | also load `forms/essay.md` |
-| Brief | `forms/infobrief.md` |
+| Brief | `forms/brief.md` |
 | News | `forms/news.md` |
 
 ---

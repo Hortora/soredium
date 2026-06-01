@@ -339,6 +339,62 @@ This resolved a false tension between "structured" and "readable" content. You d
 
 ---
 
+## The Structure–Prose Spectrum `[BOTH]`
+
+All writing sits on a spectrum from pure structure to pure prose. Our taxonomy, and the five frameworks, cover different portions of it:
+
+```
+Pure structure                                                   Pure prose
+     |                                                                |
+  JSON   Brief   Reference   How-to   Tutorial   Explanation   Essay   Narration   Novel
+```
+
+The far structure end (JSON, YAML) is maximally machine-readable — zero natural language. The far prose end (literary fiction, the novel) has no structure signal at all: no headings, no labels, no lists. The reader is carried entirely by prose.
+
+Our taxonomy stops at Essay on the prose side. It does not address narrative or literary writing — by design. But Essay is not the far end.
+
+### Where each mode sits
+
+| Mode | Position | Defining characteristic |
+|---|---|---|
+| JSON / YAML | Far structure | No natural language; pure data |
+| Brief | Structure-dominant | Scanning IS the experience; prose absent or minimal |
+| Reference | Structure-dominant | Look-up tables, lists; no narrative |
+| How-to | Structure-leaning | Numbered steps + short explanations; task-oriented |
+| Tutorial | Middle-left | Steps + narrative context; learner needs to build a model |
+| Structural (sweet spot) | Middle | Labelled entries + 1–3 sentence bodies; label is the fact |
+| Explanation | Middle-right | Teaching narrative; before/after contrast; prose carries the argument |
+| Commentary | Middle-right | Personal take; structured but voice-forward |
+| Essay / Argumentation | Prose-leaning | Argued position; headings hold structure but prose does the work |
+| Narration / Description | Prose-dominant | Story or description; structure recedes |
+| Literary / Novel | Far prose | No structure signal; pure prose; reader carried entirely by language |
+
+### How the five frameworks cover the range
+
+| Framework | Range covered | What's excluded |
+|---|---|---|
+| Diátaxis | Reference → Explanation (middle band) | Essay, narration, literary, pure structure |
+| Newman | Description/Narration → Argumentation (nearly full) | Far structure end (JSON, Brief) |
+| Kinneavy | Literary → Referential (nearly full) | Far structure end |
+| Britton | Expressive → Transactional (middle to prose) | Far structure end |
+| Our taxonomy | Brief → Essay (wide, not full) | Far structure (JSON), far prose (literary/novel) |
+
+Newman and Kinneavy are the broadest. Diátaxis is narrowest — deliberately, because it was developed for practical documentation, not general writing.
+
+### The LLM implication
+
+LLMs default to the prose end — dense, connected paragraphs. This is the statistical pressure of the training corpus, dominated by prose. Anti-slop guidance is a correction that pushes generated content from the prose end toward the structure end, to the mode actually required.
+
+The "AI trigger problem" is a spectrum mismatch: content that requires How-to or Reference mode is generated in Explanation or Narration mode. Readers reject it before evaluating the content.
+
+This framing makes the anti-slop problem tractable: instead of a list of banned words, the fix is **identify the required mode first, then generate to that mode's structural constraints**. The banned words are symptoms of the wrong mode, not the root cause.
+
+### Research question
+
+Does the spectrum have natural break-points — positions where the reading experience changes qualitatively — or is it continuous? The five frameworks suggest break-points exist (Kinneavy's four aims, Diátaxis's four types), but none characterise the full spectrum from JSON to novel. A unified framework would need to explain both ends and the transitions between them.
+
+---
+
 ## Act 5 — The Taxonomy Emerges From Intent `[BOTH]`
 
 Tried to name the forms by their characteristics (prose vs structured, long vs short). Kept running into edge cases. "Structured" describes how something looks, not why it exists. Length is irrelevant — a note can be long if the session had a lot going on; an essay can be short if the argument is tight.
@@ -501,6 +557,45 @@ No academic work has:
 - Used rhetorical theory to improve LLM content generation guidance
 
 Diátaxis is practitioner-originated and has not yet generated substantial peer-reviewed academic literature.
+
+**Additional gap — the multi-mode document:** Every framework treats mode as a property of the whole document. Documents that contain multiple modes across sections (arc42stories, CLAUDE.md files, platform guides) are not addressed by any framework. See: The Multi-Mode Document section below.
+
+---
+
+## The Multi-Mode Document — A Gap in All Five Frameworks `[PAPER]`
+
+Arc42stories is a single document whose sections operate in genuinely different modes:
+
+| Section | Mode |
+|---|---|
+| §8 Crosscutting pointer table | Reference/pointer |
+| §8 Anti-patterns | How-to/diagnostic |
+| §9.3 "What this delivers" | Explanation/comparative |
+| §9.4 Key files | Reference/inventory |
+| §9.4 Key wiring | Reference/lookup |
+| §9.4 "What it adds" | Explanation/comparative |
+| §9.4 Gotchas | How-to/diagnostic |
+| §9.4 Pattern to replicate | Tutorial |
+| §9.4 Architectural decisions | Argumentation/rationale |
+| §10 ADRs | Argumentation/decision |
+| §13 Glossary | Reference/lookup |
+
+This required naming mode as a layer independent of form — the document IS one form, but it CONTAINS multiple modes. Neither concept can do the other's work.
+
+Every framework treats mode as a property of the whole document — a text is a tutorial, or an explanation, or a reference. None address documents that contain multiple modes across sections.
+
+This is not a marginal case. It applies to:
+- Arc42stories (Tutorial + How-to + Explanation + Reference within one document)
+- CLAUDE.md files (conventions + commands + workflow narrative)
+- System design documents (context prose + decision records + wiring tables)
+- Platform guides (explanation + reference tables + anti-patterns)
+- Technical specifications (requirements + examples + implementation notes)
+
+The multi-mode document may be the dominant form in technical documentation — more common than single-mode documents — yet none of the five frameworks address it.
+
+### Research question
+
+Is the multi-mode document a distinct content form the unified framework should recognise? Or a meta-form — a container that sequences single-mode documents? If a form, it belongs in the taxonomy alongside Note, Article, Brief. If a meta-form, it belongs at a different layer: the architecture of documentation systems rather than the taxonomy of individual documents.
 
 ---
 
@@ -1000,6 +1095,40 @@ Nobody has explicitly connected these frameworks. The literature review alone �
 A complete model: **intent × mode × reader need × form**. Any piece of technical content can be fully specified along all four dimensions. The four content types (note, article, essay, InfoBrief) emerge naturally from this four-dimensional space. Scannability is proposed as a cross-cutting structural requirement that applies across all dimensions.
 
 Whether the paper proposes the full theory or stops at the literature review is a scope decision. Either is publishable. The literature review is the foundation; the theory is the superstructure.
+
+---
+
+## Form, Mode, Voice — Three Distinct Layers `[BOTH]`
+
+Three concepts that are often conflated under "writing style," each operating at a different level:
+
+| Term | What it covers | Examples |
+|---|---|---|
+| **Form** | What kind of content it is | Note, Article, Brief, Diary, arc42stories |
+| **Mode** | How it presents information | Tutorial, Explanation, Reference, How-to, Argumentation |
+| **Voice** | How it sounds | Personal fingerprint, common voice, register |
+
+Mode is the layer missing from practical writing guidance. "Style" was doing the work of all three. Mode clarifies the middle layer: not what the content is (form) nor how the author sounds (voice), but how information is structured and presented to the reader.
+
+**Terminological note:** the concept of mode converges across all five frameworks, but the term does not. Newman and Anker call it "mode." Kinneavy calls it "aim." Britton calls it "function." Diátaxis calls it "type." "Mode" is the right choice — deepest lineage (Newman 1827) and already in our four-dimension framework (Anker) — but it is a deliberate terminological choice, not a claim of universal agreement.
+
+### Mode sub-types
+
+At a first level, modes map to the Diátaxis types + Newman's argumentation. At a second level, constraint sets differ enough within some modes to require sub-types:
+
+| Mode | Sub-types | Distinguishing criterion |
+|---|---|---|
+| **Explanation** | discursive / comparative | Author-centric (journey of understanding) vs system-centric (before/after state change) |
+| **How-to** | procedural / diagnostic | Steps to accomplish a task vs Symptom → Cause → Fix |
+| **Reference** | lookup / pointer / inventory | Find a specific term / point to authority elsewhere / enumerate what exists |
+| **Argumentation** | decision / rationale | ADR format (context/decision/consequences) vs inline reasoning |
+| **Tutorial** | — | Single sub-type for now |
+
+Sub-types inherit the parent mode's rules and add tighter constraints. Explanation/comparative adds: no personal voice, no process narration, Before/After contrast as the organising principle, hard length cap (2–4 sentences + bullets).
+
+### The practical use
+
+A form declares the expected mode (and sub-type) per section. Writers and LLMs apply the mode's constraint set before generating. The form answers *what to write*; the mode answers *how to structure it*; voice answers *how it should sound*.
 
 ---
 
@@ -2082,4 +2211,3 @@ Add to section A (skill and writing work):
 **A9. Run linguistic fingerprint (Pass 3)**
 - Requires: completed catalogue.tsv (for stratified sampling)
 - Output: writing-styles/mark-proctor-voice.md
-
