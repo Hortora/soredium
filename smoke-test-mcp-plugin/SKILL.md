@@ -46,6 +46,7 @@ Flag any FAIL that indicates a new protocol gap (the protocol didn't anticipate 
 
 | Pitfall | What happens | Fix |
 |---------|-------------|-----|
+| Skipping companion skill reinstall | AI uses wrong IntelliJ MCP (`mcp__intellij__*` instead of `mcp__intellij-index__*`) | After every restart: click "Get Companion Skill" in the tool window or copy skill files manually |
 | Using Claude's MCP schema | Stale tool list from session start, missing new tools | Call via curl directly |
 | Not checking restarter.log | `ide_restart` appears to work but old code still runs | Always verify log entry |
 | Testing before indexing completes | `ide_index_status` returns `isDumbMode: true`, tool calls fail | Wait for `isDumbMode: false` |
