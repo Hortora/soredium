@@ -8,3 +8,9 @@ Standing rules and principles for the cc-praxis skill collection.
 |------|---------|------------|
 | [taxonomy-values-reflect-content-character.md](taxonomy-values-reflect-content-character.md) | Subtype values must match content character, not naming convention tidiness | Any taxonomy value additions or renames |
 | [taxonomy-rename-idempotent-script.md](taxonomy-rename-idempotent-script.md) | Taxonomy renames require a permanent idempotent cleanup script in scripts/ | Any frontmatter taxonomy value changes across repos |
+
+## write-content Skill
+
+| File | Summary | Applies to |
+|------|---------|------------|
+| [write-content-three-layer-taxonomy.md](write-content-three-layer-taxonomy.md) | form files carry what/why only; mode files carry how; voice files carry register and anti-slop | write-content/forms/, modes/, voice/ |
