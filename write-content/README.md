@@ -188,20 +188,17 @@ The Gotchas and Pattern to replicate sections in devtown's ARC42STORIES.MD were 
 
 ---
 
-## The Seven Steps
+## The Five Steps
 
 ```
-Step 0 — Load voice       (personal style or common-voice; anti-slop; mandatory-rules; mandatory-gates)
-Step 1 — Determine form   (intent table; encoder/decoder theory; cross-post rules)
-Step 2 — Load form file   (for technical documentation: identify mode from mode map here)
-Step 3 — Determine mode   (from form + sub-type; or from mode map for technical documentation)
-Step 4 — Load mode files  (_universal.md always; specific mode file if applicable)
-Step 5 — Pre-draft gate   (voice classification; content focus; factual accuracy)
-Step 6 — Write            (generate raw; edit ruthlessly)
-Step 7 — Quality check    (scan test; mode check; human-sound check; third-party review)
+Step 0 — Load voice         (anti-slop; mandatory-rules; mandatory-gates)
+Step 1 — Guided routing     (Q&A picks Form + Mode + Voice; loads all files; shows routing confirmation)
+Step 2 — Pre-draft gate     (voice classification; content focus; factual accuracy)
+Step 3 — Write              (generate raw; edit ruthlessly)
+Step 4 — Quality check      (scan test; mode check; human-sound check; third-party review)
 ```
 
-For technical documentation, mode selection happens at **Step 2** — when the form file is loaded. The mode map in `forms/technical-documentation.md` identifies which mode applies to the target section. Steps 3–4 confirm and load the mode. This prevents mid-generation mode switching.
+Step 1 is a guided Q&A: form picker → sub-type picker → mode disambiguation (explanation/how-to only) → voice picker. The full Form+Mode+Voice combination is confirmed before any file is loaded. For technical documentation, the section picker maps directly to the mode — no separate disambiguation needed.
 
 ---
 
