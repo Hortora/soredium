@@ -547,20 +547,21 @@ Check project type:
 grep -i "^type:\|^\*\*Type:\*\*" "$PROJECT/CLAUDE.md" 2>/dev/null | head -1
 ```
 
-If type is `java`, prompt:
+If type is `java`, prompt with a single choice:
 
-> **Run final build verification?**
->
-> Default: `mvn install -DskipTests -DskipITs` (no tests — fast)
->
-> Include unit tests? **(y/n, default n)**
-> Include integration tests? **(y/n, default n)**
+> **Build verification level?**
+> **[F]** fast — `mvn install -DskipTests -DskipITs` (default)
+> **[U]** unit tests — `mvn install -DskipITs`
+> **[I]** integration tests — `mvn install -DskipTests`
+> **[A]** all tests — `mvn install`
+> **[S]** skip
 
-Build the command from the answers:
-- Both skipped (default): `mvn install -DskipTests -DskipITs`
-- Unit tests only: `mvn install -DskipITs`
-- Integration tests only: `mvn install -DskipTests`
-- Both included: `mvn install`
+Map the answer to a command:
+- F or Enter: `mvn install -DskipTests -DskipITs`
+- U: `mvn install -DskipITs`
+- I: `mvn install -DskipTests`
+- A: `mvn install`
+- S: skip step entirely
 
 Run from project root:
 ```bash
