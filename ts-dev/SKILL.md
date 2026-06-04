@@ -456,7 +456,7 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 
 ## Skill Chaining
 
-- **Before committing:** invoke `ts-code-review` to catch type safety, async, and error handling issues
-- **For security-critical code:** invoke `ts-security-audit` when handling authentication, authorization, payment, or PII
-- **For dependency updates:** invoke `npm-dependency-update` when adding or upgrading packages
+- **Before committing:** invoke `code-review` to catch type safety, async, and error handling issues
+- **For security-critical code:** invoke `security-audit` when handling authentication, authorization, payment, or PII
+- **For dependency updates:** invoke `dependency-update` when adding or upgrading packages
 - **For architectural decisions:** suggest running `adr` to document significant design choices

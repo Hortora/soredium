@@ -441,7 +441,7 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 
 ## Skill Chaining
 
-- **Before committing:** invoke `python-code-review` to catch safety, type, and async issues before they reach the repository
-- **For security-critical code:** invoke `python-security-audit` when handling authentication, authorisation, user input, or PII
-- **For dependency updates:** invoke `pip-dependency-update` when adding or upgrading packages
+- **Before committing:** invoke `code-review` to catch safety, type, and async issues before they reach the repository
+- **For security-critical code:** invoke `security-audit` when handling authentication, authorisation, user input, or PII
+- **For dependency updates:** invoke `dependency-update` when adding or upgrading packages
 - **For architectural decisions:** suggest running `adr` to document significant design choices

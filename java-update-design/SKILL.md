@@ -3,7 +3,7 @@ name: java-update-design
 description: >
   Use when the user invokes /update-design, asks to "update the design doc",
   "sync DESIGN.md", "sync ARC42STORIES.MD", "reflect code changes in the design",
-  or when another skill (java-git-commit) requests a design document update.
+  or when another skill (git-commit) requests a design document update.
   Routes to ARC42STORIES.MD §10 when that file exists; falls back to DESIGN.md.
 ---
 
@@ -16,7 +16,7 @@ concise. Your job is to detect architectural drift and propose updates.
 
 **Only for type: java repositories.**
 
-This skill is invoked by `java-git-commit` when:
+This skill is invoked by `git-commit` when:
 - CLAUDE.md declares `type: java`
 - design/DESIGN.md exists (or is being created)
 - Staged changes may affect architecture
@@ -28,7 +28,7 @@ This skill is invoked by `java-git-commit` when:
 
 ## Prerequisites
 
-**This skill extends `custom-git-commit`** with Java-specific knowledge:
+**This skill extends `git-commit`** with Java-specific knowledge:
 
 - **update-primary-doc**: Generic document sync patterns (read path, match files, propose updates, validate)
 
@@ -372,7 +372,7 @@ Then update CLAUDE.md:
 
 ## Skill Chaining
 
-**Invoked by:** [`java-git-commit`] alongside [`update-claude-md`], [`adr`] suggests running this when an ADR documents a new component or integration
+**Invoked by:** [`git-commit`] alongside [`update-claude-md`], [`adr`] suggests running this when an ADR documents a new component or integration
 
 **Invokes:** None (terminal skill in the chain)
 

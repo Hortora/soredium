@@ -1,12 +1,3 @@
----
-name: pip-dependency-update
-description: >
-  Use when updating Python packages, bumping versions, adding dependencies,
-  or running pip audit in a Python project. Applies to pip, poetry, and
-  pipenv projects.
-slash-command: false
----
-
 # pip / Poetry / pipenv Dependency Update Helper
 
 You are an expert in Python ecosystem dependency management. Your primary

@@ -1,10 +1,10 @@
 ---
 name: git-commit
 description: >
-  Use when user wants to create a commit NOW - says "commit this", "commit
-  these changes", "create a commit", or invokes /git-commit. Does NOT
-  apply to discussions about past commits or questions about whether to commit.
-slash-command: false
+  Use when user wants to create a commit NOW — says "commit this", "commit
+  these changes", "create a commit". Routes to Java or custom project workflows
+  when CLAUDE.md declares those types; falls back to generic commit for all others.
+  Does NOT apply to discussions about past commits or questions about whether to commit.
 ---
 
 # Git Commit Helper
@@ -34,32 +34,19 @@ Commit messages describe **WHAT changed and WHY**. Not who or what wrote them. T
 
 ## Workflow
 
-### Step 0 — Verify or Setup Project Type
+### Step 0 — Route by project type
 
 **Read CLAUDE.md for project type:**
 ```bash
-cat CLAUDE.md 2>/dev/null | grep -A 2 "## Project Type"
+grep -A 2 "## Project Type" CLAUDE.md 2>/dev/null | grep "^type:\|^\*\*Type:\*\*"
 ```
 
-**If CLAUDE.md exists and has Project Type declaration:**
-
-Extract the type (skills | java | blog | custom | generic).
-
-**Route based on type:**
-- **type: skills** → Continue with Step 1 (this skill handles skills repos)
-- **type: java** → STOP and tell user:
-  > This is a type: java project. Please use `java-git-commit` instead:
-  > `/java-git-commit` or say "java commit"
-
-- **type: blog** → STOP and tell user:
-  > This is a type: blog project. Please use `git-commit` instead:
-  > `/blog-git-commit` or say "blog commit"
-
-- **type: custom** → STOP and tell user:
-  > This is a type: custom project. Please use `custom-git-commit` instead:
-  > `/custom-git-commit` or say "custom commit"
-
-- **type: generic** → Continue with Step 1 (this skill handles generic repos)
+| Type | Action |
+|------|--------|
+| `java` | Read `~/.claude/skills/git-commit/java.md` and follow that workflow |
+| `custom` | Read `~/.claude/skills/git-commit/custom.md` and follow that workflow |
+| `blog` | STOP and tell user: "This is a type: blog project. Please use `/blog-git-commit` or say 'blog commit'." |
+| `skills`, `generic`, all others | Continue with generic workflow below |
 
 **If CLAUDE.md missing or no Project Type section:**
 
@@ -386,9 +373,9 @@ Commit is complete when:
 
 **Invoked by:** User says "commit", "make a commit", or invokes `/git-commit`; [`adr`] to commit a new ADR; [`idea-log`] to commit IDEAS.md additions; [`write-content`] to commit a new blog entry; [`python-code-review`] and [`ts-code-review`] after review approval when user wants to commit
 
-**Routes to specialized skills based on CLAUDE.md declaration:**
-- type: java → Redirects to `java-git-commit`
-- type: custom → Redirects to `custom-git-commit`
+**Routes to specialized workflows based on CLAUDE.md declaration:**
+- type: java → Reads `~/.claude/skills/git-commit/java.md` and follows Java workflow
+- type: custom → Reads `~/.claude/skills/git-commit/custom.md` and follows custom workflow
 - type: skills → Handles directly (this skill)
 - type: generic → Handles directly (this skill)
 

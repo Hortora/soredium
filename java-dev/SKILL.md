@@ -5,7 +5,7 @@ description: >
   Quarkus applications — user says "implement", "fix", "refactor", or "add
   tests", or is editing .java files, pom.xml, or build.gradle. Does NOT apply
   to reading/discussing code without changes. For code review use
-  java-code-review; for commits use java-git-commit.
+  code-review; for commits use git-commit.
 slash-command: false
 ---
 
@@ -433,9 +433,9 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 
 ## Skill Chaining
 
-- **Before committing:** invoke `java-code-review` to catch safety, concurrency, and performance issues
+- **Before committing:** invoke `code-review` to catch safety, concurrency, and performance issues
 - **After implementing or refactoring:** if the user wants to commit, invoke
-  `java-git-commit`, which will also sync DESIGN.md via `java-update-design`
+  `git-commit`, which will also sync DESIGN.md via `java-update-design`
 - **For architectural decisions:** suggest running `adr` to document significant decisions
-- **For security-critical code:** invoke `java-security-audit` when handling authentication, authorization, payment, or PII
+- **For security-critical code:** invoke `security-audit` when handling authentication, authorization, payment, or PII
 - **If architectural impact without commit:** suggest running `java-update-design` independently

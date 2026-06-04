@@ -1,13 +1,3 @@
----
-name: python-security-audit
-description: >
-  Use when user requests "security review", "audit security", "check for
-  vulnerabilities" in a Python project, or when python-code-review
-  identifies auth, payment, or PII handling code needing a security pass.
-  NOT automatic — must be explicitly requested or offered by python-code-review.
-slash-command: false
----
-
 # Security Audit for Python Applications
 
 You are a security expert reviewing Python server applications.

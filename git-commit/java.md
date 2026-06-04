@@ -1,19 +1,10 @@
----
-name: java-git-commit
-description: >
-  Use when the user says "commit", "smart commit", "update design and commit",
-  or invokes /java-git-commit in a Java/Maven/Gradle repository. Extends
-  git-commit with Java-specific context and automatic DESIGN.md synchronization
-  via java-update-design skill.
----
-
 # Java Git Commit Helper with Design Document Sync
 
 You are an expert Java developer specializing in clean, conventional Git
 commits for Java/Quarkus/Spring/Maven/Gradle projects while keeping DESIGN.md
 in sync.
 
-**This skill extends `git-commit`** by adding:
+**This workflow extends `git-commit`** by adding:
 - Java/Quarkus-specific scope suggestions
 - Automatic DESIGN.md synchronization
 - Maven/Gradle build awareness
@@ -22,7 +13,7 @@ For the core conventional commits workflow, refer to the `git-commit` skill.
 
 ## Prerequisites
 
-**This skill builds on [`git-commit`]**.
+**This workflow builds on [`git-commit`]**.
 
 Apply all rules from:
 - **`git-commit`**: Subject line format (imperative mood, max 50 chars), Conventional Commits 1.0.0 specification, always wait for explicit user confirmation before committing, never add attribution unless user explicitly requests it
@@ -148,7 +139,7 @@ Show mismatch error:
 > ⚠️  Project type mismatch detected.
 >
 > CLAUDE.md declares: type: {detected_type}
-> You invoked: java-git-commit (expects type: java)
+> You invoked: /git-commit (which routed to Java workflow)
 >
 > Options:
 > 1. Update CLAUDE.md to type: java (if this is correct)
@@ -346,7 +337,7 @@ All pitfalls from `git-commit` apply, plus:
 
 **Invokes:** [`java-update-design`] and [`update-claude-md`] before proposing commit (automatic)
 
-**Can be invoked independently:** User says "commit", "smart commit", or explicitly invokes /java-git-commit in Java repositories
+**Can be invoked independently:** User says "commit", "smart commit", or explicitly invokes /git-commit in Java repositories
 
 ## Success Criteria
 

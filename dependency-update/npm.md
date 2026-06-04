@@ -1,12 +1,3 @@
----
-name: npm-dependency-update
-description: >
-  Use when updating npm packages, bumping versions, adding dependencies, or
-  running npm audit in a TypeScript or JavaScript project. Applies to npm,
-  yarn, and pnpm projects.
-slash-command: false
----
-
 # npm Dependency Update Helper
 
 You are an expert in npm ecosystem dependency management for TypeScript and

@@ -1,12 +1,3 @@
----
-name: custom-git-commit
-description: >
-  Use when the user says "commit" in a type: custom project (working groups,
-  research, documentation, etc.). Only applies to type: custom — all other
-  project types route elsewhere.
-slash-command: false
----
-
 # Custom Project Commit
 
 Conventional commit workflow for type: custom projects. Follows the same
@@ -14,7 +5,7 @@ conventions as `git-commit` with CLAUDE.md sync.
 
 ## Prerequisites
 
-**This skill builds on [`git-commit`]**.
+**This workflow builds on [`git-commit`]**.
 
 Apply all rules from:
 - **`git-commit`**: Subject line format (imperative mood, max 50 chars), Conventional Commits 1.0.0 specification, always wait for explicit user confirmation before committing, never add attribution unless user explicitly requests it

@@ -1,11 +1,3 @@
----
-name: maven-dependency-update
-description: >
-  Use when the user says "bump a version", "upgrade Quarkus", "check for newer
-  versions", or "add a dependency" in a Java/Quarkus project, or when pom.xml
-  dependency changes are needed.
----
-
 # Maven Dependency Update Helper
 
 You are an expert in Maven dependency management for Quarkus and quarkus-flow

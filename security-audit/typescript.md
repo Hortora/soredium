@@ -1,13 +1,3 @@
----
-name: ts-security-audit
-description: >
-  Use when user requests "security review", "audit security", "check for
-  vulnerabilities" in a TypeScript or Node.js project, or when ts-code-review
-  identifies auth, payment, or PII handling code needing a security pass.
-  NOT automatic — must be explicitly requested or offered by ts-code-review.
-slash-command: false
----
-
 # Security Audit for TypeScript / Node.js Applications
 
 You are a security expert reviewing TypeScript and Node.js server applications.
