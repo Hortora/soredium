@@ -3,7 +3,7 @@ name: adr
 description: >
   Use when recording architectural decisions: user says "create an ADR",
   "document why we chose X", significant technical choices are made,
-  dependency-update proposes major version upgrades, or java-update-design
+  dependency-update proposes major version upgrades, or update-design
   captures new components.
 ---
 
@@ -68,7 +68,7 @@ If the user hasn't provided enough context, ask for:
 - What alternatives were considered and why were they rejected?
 - Any consequences or tradeoffs worth noting?
 
-For decisions arising from **dependency-update** or **java-update-design**,
+For decisions arising from **dependency-update** or **update-design**,
 extract context from those proposals automatically.
 
 ### Step 3 — Draft the ADR
@@ -250,7 +250,7 @@ ADR creation is complete when:
 
 ## Skill Chaining
 
-**Invoked by:** [`dependency-update`] when major version upgrades or new extensions are proposed, [`java-update-design`] when significant new components are captured, [`idea-log`] when a parked idea is promoted to a formal decision
+**Invoked by:** [`dependency-update`] when major version upgrades or new extensions are proposed, [`update-design`] when significant new components are captured, [`idea-log`] when a parked idea is promoted to a formal decision
 
 **Invokes:** [`git-commit`] to stage and commit the ADR (routes to `git-commit`, `git-commit`, etc. per CLAUDE.md project type)
 

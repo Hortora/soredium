@@ -41,7 +41,7 @@ flowchart TD
     SKILL_md_files_{SKILL.md files?}
     Review_skills[Review skills]
     Generate_commit_message[Generate commit message]
-    Invoke_java_update_design[Invoke java-update-design]
+    Invoke_java_update_design[Invoke update-design]
     Present_consolidated_proposal[Present consolidated proposal]
     User_confirms_{User confirms?}
     Apply_DESIGN_md_changes[Apply DESIGN.md changes]
@@ -201,7 +201,7 @@ If DESIGN.md doesn't exist, stop and tell the user:
 >
 > This file should live at `docs/DESIGN.md`. I can help you create it.
 >
-> Would you like me to invoke `java-update-design` to generate a starter DESIGN.md,
+> Would you like me to invoke `update-design` to generate a starter DESIGN.md,
 > or would you prefer to create it manually first?"
 
 Do not proceed with the commit until DESIGN.md exists.
@@ -215,7 +215,7 @@ Hold it — don't show it yet.
 ### Step 3 — Sync documentation
 
 **Always invoke both:**
-1. Invoke `java-update-design` skill, passing the staged diff
+1. Invoke `update-design` skill, passing the staged diff
    - Returns proposed DESIGN.md changes (if docs/DESIGN.md exists)
 2. Invoke `update-claude-md` skill, passing the staged diff
    - Returns proposed CLAUDE.md changes (if CLAUDE.md exists)
@@ -233,7 +233,7 @@ Show the user a single consolidated proposal:
 <as per git-commit skill>
 
 ## Proposed DESIGN.md updates
-<output from java-update-design skill, if any>
+<output from update-design skill, if any>
 
 ## Proposed CLAUDE.md updates
 <output from update-claude-md skill, if any>
@@ -250,8 +250,8 @@ Follow `git-commit` Step 4 (commit), with this enhancement:
 **Before committing:** Apply any proposed documentation changes.
 Read `**Project repo:**` from CLAUDE.md to get the absolute project path. Use `git -C` for all operations:
 
-1. If java-update-design proposed DESIGN.md changes:
-   - Let java-update-design apply its changes to `docs/DESIGN.md`
+1. If update-design proposed DESIGN.md changes:
+   - Let update-design apply its changes to `docs/DESIGN.md`
    - Stage: `git -C <Project repo> add docs/DESIGN.md`
 2. If update-claude-md proposed CLAUDE.md changes:
    - Let update-claude-md apply its changes to `CLAUDE.md`
@@ -269,12 +269,12 @@ git -C <Project repo> log --oneline -1   # confirm
 
 | Situation | Action |
 |---|---|
-| DESIGN.md missing | STOP — offer to create it via java-update-design or manually |
+| DESIGN.md missing | STOP — offer to create it via update-design or manually |
 | Only test files staged | Suggest `test` type, note DESIGN.md likely unchanged |
 | Only `pom.xml` / `build.gradle` changed | Suggest `build` type, check for new deps that need design doc mention |
-| New `@Entity`, `@Service`, `@Repository` | Ensure java-update-design captures architectural significance |
+| New `@Entity`, `@Service`, `@Repository` | Ensure update-design captures architectural significance |
 | Large diff (10+ files) | Summarize by layer/module (controller, service, repository) |
-| java-update-design finds no changes needed | Note this clearly, skip DESIGN.md staging |
+| update-design finds no changes needed | Note this clearly, skip DESIGN.md staging |
 
 ---
 
@@ -324,7 +324,7 @@ All pitfalls from `git-commit` apply, plus:
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
 | Committing without DESIGN.md | Java projects need architectural docs | Check for docs/DESIGN.md first, create if missing |
-| Skipping DESIGN.md sync | Design doc drifts from code | Always invoke java-update-design first |
+| Skipping DESIGN.md sync | Design doc drifts from code | Always invoke update-design first |
 | Committing pom.xml changes without testing | Build may be broken | Run `mvn compile` before committing |
 | Generic scope when Java-specific exists | Less context for reviewers | Use `repository` not `data`, `rest` not `api` |
 | Not mentioning BOM impact in build commits | Version conflicts surprise teammates | Note if dependency overrides BOM |
@@ -335,7 +335,7 @@ All pitfalls from `git-commit` apply, plus:
 
 **Invoked by:** [`java-code-review`] after all critical issues resolved; [`maven-dependency-update`] after successful dependency updates; [`adr`] when committing an ADR alongside related changes; [`idea-log`] to commit IDEAS.md additions; [`write-content`] to commit a blog entry
 
-**Invokes:** [`java-update-design`] and [`update-claude-md`] before proposing commit (automatic)
+**Invokes:** [`update-design`] and [`update-claude-md`] before proposing commit (automatic)
 
 **Can be invoked independently:** User says "commit", "smart commit", or explicitly invokes /git-commit in Java repositories
 

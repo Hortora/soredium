@@ -1,12 +1,3 @@
----
-name: java-update-design
-description: >
-  Use when the user invokes /update-design, asks to "update the design doc",
-  "sync DESIGN.md", "sync ARC42STORIES.MD", "reflect code changes in the design",
-  or when another skill (git-commit) requests a design document update.
-  Routes to ARC42STORIES.MD §10 when that file exists; falls back to DESIGN.md.
----
-
 # Update Design Document
 
 You are an expert software architect who keeps DESIGN.md files accurate and
