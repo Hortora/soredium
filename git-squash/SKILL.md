@@ -277,20 +277,74 @@ On **"skip":** proceed directly to Step 2.
 
 **Resolve AFTER filter-repo completes** — filter-repo rewrites all SHAs.
 
+**When called with an explicit range:** use it directly. Record and proceed.
+
+**When called without a range** (direct `/git-squash` invocation): auto-detect the three candidate ranges, show commit counts, and offer a choice.
+
 ```bash
-git log --oneline @{u}..HEAD 2>/dev/null || git log --oneline origin/HEAD..HEAD 2>/dev/null
+CURRENT_BRANCH=$(git branch --show-current)
+PROJECT_BASE_BRANCH=$(grep "^\*\*Project base branch:\*\*" CLAUDE.md 2>/dev/null | sed 's/.*`\(.*\)`.*/\1/') 
+[ -z "$PROJECT_BASE_BRANCH" ] && PROJECT_BASE_BRANCH="main"
+
+# Detect upstream remote (the blessed repo — casehubio, upstream, etc.)
+UPSTREAM_REMOTE=$(git remote | grep -E "^upstream$|^casehubio$" | head -1)
+
+# Range 1: Unpushed — commits not yet on your fork's tracking branch
+UNPUSHED_COUNT=$(git log --oneline "@{u}..HEAD" 2>/dev/null | wc -l | tr -d ' ')
+UNPUSHED_RANGE="@{u}..HEAD"
+
+# Range 2: Largest safe — commits not yet on the blessed upstream repo
+if [ -n "$UPSTREAM_REMOTE" ]; then
+  SAFE_COUNT=$(git log --oneline "$UPSTREAM_REMOTE/$PROJECT_BASE_BRANCH..HEAD" 2>/dev/null | wc -l | tr -d ' ')
+  SAFE_RANGE="$UPSTREAM_REMOTE/$PROJECT_BASE_BRANCH..HEAD"
+  SAFE_LABEL="not on $UPSTREAM_REMOTE/$PROJECT_BASE_BRANCH"
+else
+  # No upstream: safe = not on origin base branch
+  SAFE_COUNT=$(git log --oneline "origin/$PROJECT_BASE_BRANCH..HEAD" 2>/dev/null | wc -l | tr -d ' ')
+  SAFE_RANGE="origin/$PROJECT_BASE_BRANCH..HEAD"
+  SAFE_LABEL="not on origin/$PROJECT_BASE_BRANCH"
+fi
+
+# Range 3: All — full branch from .meta PROJECT_SHA
+META_SHA=$(grep "^project-sha:" "$WORKSPACE/design/.meta" 2>/dev/null | sed 's/project-sha: //')
+if [ -n "$META_SHA" ]; then
+  ALL_COUNT=$(git log --oneline "$META_SHA..HEAD" 2>/dev/null | wc -l | tr -d ' ')
+  ALL_RANGE="$META_SHA..HEAD"
+  ALL_LABEL="full branch from start"
+else
+  ALL_COUNT=$(git log --oneline "origin/$PROJECT_BASE_BRANCH..HEAD" 2>/dev/null | wc -l | tr -d ' ')
+  ALL_RANGE="origin/$PROJECT_BASE_BRANCH..HEAD"
+  ALL_LABEL="full branch"
+fi
 ```
 
-If no upstream is configured, ask for the base point. Record the resolved range.
+Present the choice:
 
-**Check for pushed commits in range:**
-```bash
-git log --oneline <range> | while read sha rest; do
-  git branch -r --contains "$sha" 2>/dev/null | grep -v HEAD | head -1
-done
+```
+Squash range?
+
+  [U] Unpushed only      — <N> commits  (not yet on origin/<branch>)
+  [S] Largest safe       ← default — <N> commits  (<safe-label>)
+  [A] All                — <N> commits  (<all-label>)
+  [C] Custom             — enter range manually
 ```
 
-If pushed commits are in range, warn and require YES before continuing.
+Default is **[S] Largest safe** — it's the range that can be reworked without affecting what others have seen.
+
+If [U] count equals [S] count, omit [U] (they're the same range). If [S] count equals [A] count, omit [S].
+
+After selection, confirm the range with a one-line summary:
+```
+Range: <resolved-range>  (<N> commits)
+```
+
+**If pushed commits are in the selected range**, warn explicitly before proceeding:
+```
+⚠️  This range includes N commits already pushed to <remote>.
+    Squashing will require a force-push. Continue? (y/n)
+```
+
+Require explicit YES. Do not proceed silently.
 
 ---
 
