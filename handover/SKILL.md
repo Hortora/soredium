@@ -254,6 +254,7 @@ Session wrap — create before writing the handover?
 [x] 4  protocol sweep    check for project rules worth formalising
 [?] 5  journal-entry     document any design changes this session not yet in design/JOURNAL.md  ← ON if mid-epic (design/.meta exists), OFF otherwise
 [?] 6  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
+[?] 7  arc42 stale scan  check ARC42STORIES.MD for stale statuses, resolved blockers, closed-issue forward refs  ← ON if ARC42STORIES.MD exists
 
 Type numbers to toggle (e.g. "2 6"), "all" to toggle all on/off, or "go" to proceed:
 ```
@@ -269,6 +270,7 @@ Type numbers to toggle (e.g. "2 6"), "all" to toggle all on/off, or "go" to proc
   5. **Project main working tree dirty** — run `git status --short` on the project base branch; any staged or unstaged changes mean an operation was left incomplete
   6. **Project main diverged from remote** — run `git log origin/main..main --oneline` and `git log main..origin/main --oneline`; local commits not on remote = work invisible to next session; remote ahead of local = next session will conflict
   Report findings — do not auto-fix, just surface them so they can be addressed or noted in the handover.
+- **arc42 stale scan is ON by default when ARC42STORIES.MD exists** — check `[ -f "$PROJECT/ARC42STORIES.MD" ]`. Catches stale status drift that accumulates from cross-session and cross-repo work — the three failure modes it targets are: (a) layer/chapter status not updated when the issue closed in a different session, (b) external blocker references (cross-repo issues, foundation PRs) that shipped but were never cleared, (c) forward-tense issue references ("will migrate", "#N will...") where the referenced issue is now CLOSED. Run after epic hygiene so any just-surfaced issues are also reflected. See **Step 2c — ARC42STORIES.MD stale scan** below.
 - **"all":** if all are on → turn all off; if any are off → turn all on
 - **Numbers:** toggle individual items
 - **"go" (or "ok", "yes", blank Enter if the UI allows it):** proceed with current selections
@@ -279,7 +281,8 @@ Run checked items **in this order** before continuing:
 3. Protocol sweep — done while context is full; catches project-specific rules before context is lost
 4. update-claude-md — sync new conventions first
 5. journal-entry — write any missing JOURNAL.md entries before the handover
-6. write-content (diary) — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
+6. arc42 stale scan — run after journal-entry so any layer completions just written are already reflected
+7. write-content (diary) — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
 
 After all checked items complete, continue to Step 1.
 
@@ -354,6 +357,44 @@ The sweep is **always done** (even if it finds nothing). Completeness
 matters — checking all three categories explicitly prevents the common
 failure of only catching the most obvious kind (usually gotchas) and
 missing techniques and undocumented items.
+
+### Step 2c — ARC42STORIES.MD stale scan (if checked)
+
+Only run if `ARC42STORIES.MD` exists in the project repo and was ticked in the checklist. The goal is to catch drift that accumulates across sessions, particularly from cross-repo work — when a foundation module ships or an issue closes in a different session, the references in ARC42STORIES.MD are not automatically updated.
+
+**Three things to scan for:**
+
+**1. Layer/chapter statuses not reflecting closed issues**
+
+Read the layer taxonomy table (§4) and chapter index (§9.2). For each row that shows `🔲 pending (#NNN)`, check the referenced issue:
+```bash
+gh issue view NNN --repo "$GITHUB_REPO" --json state --jq '.state'
+```
+If the issue is CLOSED but the row still says pending, the status is stale.
+
+**2. External blocker references that have resolved**
+
+Scan ARC42STORIES.MD for phrases like `blocked on`, `pending casehubio/`, `waiting on`, `requires`, followed by an external issue reference (e.g. `casehubio/ledger#114`). For each cross-repo reference found:
+```bash
+gh issue view NNN --repo "casehubio/REPO" --json state --jq '.state'
+```
+If the blocker issue is CLOSED, the "blocked on" language is stale.
+
+**3. Forward-tense issue references where the issue is now closed**
+
+Scan for phrases like `#NNN will`, `will migrate`, `will add`, `will replace` followed by or preceded by a `#NNN` issue reference. For each one, check if that issue is now CLOSED. If so, the sentence should be updated to past tense.
+
+**Report and offer to fix:**
+
+Present each finding with the exact line and proposed fix. Apply only on confirmation. After applying fixes, commit to the project repo:
+```bash
+git -C "$PROJECT" add ARC42STORIES.MD
+git -C "$PROJECT" commit -m "docs: sync ARC42STORIES.MD — stale scan at session wrap"
+```
+
+**If nothing stale is found**, proceed silently.
+
+**Why this belongs in wrap, not work-end:** Work-end covers only what changed *this session*. ARC42STORIES.MD staleness accumulates from cross-session and cross-repo work — foundation modules shipping, issues closing in different sessions — so it requires a periodic point-in-time scan, not a per-commit update.
 
 ### Step 3 — Gather cheap orientation
 
@@ -488,6 +529,7 @@ Session wrap complete.
 ✅ Protocol sweep        N protocols captured (or: nothing new)
 ✅ update-claude-md      (or ⏭ skipped)
 ✅ journal-entry         (or ⏭ skipped — not mid-epic)
+✅ arc42 stale scan      N items fixed  (or: nothing stale found)  (or ⏭ skipped — no ARC42STORIES.MD)
 ✅ write-content (diary)  <entry filename>
 ✅ HANDOFF.md committed  <workspace>/HANDOFF.md → main
 ```
@@ -496,6 +538,7 @@ Rules:
 - Show every checklist item — both ticked and skipped
 - For skipped items, include a brief reason in parentheses
 - For forage sweep, show the count of entries submitted (or "nothing garden-worthy found" if the sweep was clean)
+- For arc42 stale scan, show how many items were fixed (or "nothing stale found")
 - For write-content (diary), show the actual filename written
 - For HANDOFF.md, show the resolved workspace path
 - Keep each line to one line — no multi-line elaboration
@@ -598,6 +641,7 @@ Handover is complete when:
 - ✅ What's Next table carries Scale / Complexity / Notes columns
 - ✅ References table uses paths only — no file content inline
 - ✅ Nothing from CLAUDE.md is duplicated
+- ✅ arc42 stale scan performed (if ARC42STORIES.MD exists) — stale statuses, resolved blockers, and closed-issue forward refs checked and fixed
 - ✅ User confirmed before writing
 - ✅ Committed to git (required — this is the archive mechanism)
 
@@ -612,7 +656,7 @@ context marked as "unchanged"? If yes — done.
 **Invoked by:** User directly at end of a session ("create a handover",
 "end of session", "write a handover")
 
-**Invokes:** [`forage`] — forage sweep (Step 2b) to submit any gotchas, techniques, or undocumented items before context is lost; [`protocol`] — protocol sweep to formalise any project-specific rules established this session (if checked); [`write-content`] — diary type for this session's narrative (if checked); [`update-claude-md`] — to sync any new conventions (if checked); journal entry (inline action, not a separate skill) — writes missing `design/JOURNAL.md` entries on epic branches (if checked); `git commit` directly for the handover itself
+**Invokes:** [`forage`] — forage sweep (Step 2b) to submit any gotchas, techniques, or undocumented items before context is lost; [`protocol`] — protocol sweep to formalise any project-specific rules established this session (if checked); [`write-content`] — diary type for this session's narrative (if checked); [`update-claude-md`] — to sync any new conventions (if checked); journal entry (inline action, not a separate skill) — writes missing `design/JOURNAL.md` entries on epic branches (if checked); arc42 stale scan (Step 2c, inline) — checks ARC42STORIES.MD for stale statuses, resolved cross-repo blockers, and closed-issue forward refs (if checked and ARC42STORIES.MD exists); `git commit` directly for the handover itself
 
 **Reads from (surgical, not upfront):**
 - `git diff HEAD -- HANDOFF.md` — what changed from last handover
