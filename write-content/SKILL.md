@@ -2,10 +2,10 @@
 name: write-content
 description: >
   Use when writing any piece of content — project diary entry, blog post,
-  article, note, brief, news item, technical documentation section, or essay.
+  article, note, brief, README, news item, technical documentation section, or essay.
   User says "write", "draft", "write a diary entry", "log what we built",
   "document this pivot", "blog all the work to date", "create a post",
-  "write up", or provides a topic/subject to write about.
+  "write up", "write the README", "rewrite the README", or provides a topic/subject to write about.
   Documentation types (tutorial, how-to, explanation, reference) are in scope.
   NOT for generating code (use java-dev, ts-dev etc.).
 ---
@@ -35,6 +35,7 @@ Always load `voice/anti-slop.md`, `voice/mandatory-rules.md`, and `mandatory-gat
 
 Present questions in sequence. Single-letter answers. `←` marks the default — Enter accepts it.
 Auto-route directly (skip Q1) when the invocation is unambiguous:
+- "write the README", "update the README", "rewrite the README" → **README**
 - "write a diary entry", "document this pivot", "blog all the work", invoked in project diary context → **Diary**
 - "write the Gotchas section for X" → **Tech doc / How-to/diagnostic**
 - "write the Pattern to replicate for X" → **Tech doc / Tutorial**
@@ -48,13 +49,16 @@ What are you writing?
   [N] Note
   [A] Article
   [B] Brief
+  [R] README
   [T] Technical documentation
   [W] News / announcement
 ```
 
 ### Q2 — Sub-type or section
 
-Show only when Q1 result has sub-types. Omit for Diary, Brief, News (fixed mode — go to Q3).
+Show only when Q1 result has sub-types. Omit for Diary, Brief, README, News (fixed mode — go to Q3).
+
+**README skips Q3 (voice).** Always system-centric. Personal style energy and anti-slop apply but not personal register.
 
 **If Note:**
 ```
@@ -147,6 +151,7 @@ After all questions answered, load `modes/_universal.md` first, then:
 | Article/commentary | `forms/article.md` | — |
 | Article/essay | `forms/article.md` | `modes/argumentation.md` |
 | Brief | `forms/brief.md` | `modes/reference.md` |
+| README | `forms/readme.md` | mixed — see section mode map in form file |
 | News | `forms/news.md` | — |
 | Tech doc / "What it adds" | `forms/technical-documentation.md` | `modes/explanations.md` |
 | Tech doc / Gotchas | `forms/technical-documentation.md` | `modes/how-to.md` |
