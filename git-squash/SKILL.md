@@ -1270,6 +1270,7 @@ Only delete on explicit user confirmation.
 
 When invoked in response to the pre-push hook, skip Steps 0, 1, 7, 8, and 9.
 In-place squash is safe — history hasn't been shared yet.
+Range default in this context is **[U] Unpushed** — skip the range picker and use `@{u}..HEAD` directly.
 
 1. **Step 2:** Resolve unpushed range (`@{u}..HEAD`)
 2. **Step 3:** Classify per policy (run all analysis passes, including temporal
