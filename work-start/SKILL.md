@@ -218,6 +218,20 @@ Do not proceed without a resolved issue number (or explicit user skip from Phase
 > work-start owns branch + workspace lifecycle. Cross-repo detection stays here
 > because it is a workspace routing concern, not an issue management concern.
 
+**Multi-issue (batched) detection:**
+
+After `ISSUE_N` is resolved, check whether the invocation argument or work description
+names additional issue numbers to be closed on this same branch — e.g., "do #5, #19,
+#32 on one branch" or "closes #5, #19, #32". Parse all `#N` refs from the input.
+
+- If additional issues are found: build `COVERS` as a comma-separated list of ALL issue
+  numbers (primary first): `COVERS="5,19,32"`. Confirm with the user:
+  > "This branch will close #5 (primary), #19, and #32. Correct? (y/n)"
+- If single issue: `COVERS="$ISSUE_N"` (same as primary).
+
+`COVERS` is written to `.meta` in Step 9 and read by `work-end` to close all issues at
+branch close time. The branch name slug is still derived from the primary `ISSUE_N` only.
+
 ### Step 5 — Branch name
 
 Derive: `issue-NNN-<slug>` (title lowercased, special chars stripped, max 30 chars after prefix).
@@ -314,10 +328,15 @@ project-sha: <baseline SHA from Step 8>
 date: <YYYY-MM-DD>
 issue: <N or blank>
 issue-repo: <ISSUE_REPO_GITHUB | blank>
+covers: <comma-separated issue numbers, e.g. "5,19,32" — always includes primary; equals issue: when single>
 flyway-next-v: <N | none | unknown>
 design-repo: <workspace | project | cross-repo:<repo-name>>
 design-section-hashes: <pipe-separated hash:heading pairs, or blank>
 ```
+
+`covers:` is the authoritative list of all issues this branch will close. `work-end`
+reads it to close every issue at branch close time. When tracking is disabled or no
+issue was resolved, leave `covers:` blank (same as `issue:`).
 
 ### Step 10 — Commit and push scaffold
 
@@ -384,6 +403,7 @@ cascade covers blog/adr/snapshots/plans/design only.
 Surface `.meta`:
 ```
 ⚡ Resuming: <branch-name>  Issue: #<N>  Started: <date>
+   Covers: <comma-separated list from covers: field, or just #N if single>
    Flyway V: <N | none | unknown>
    Project: <branch>  Workspace: <branch>
 ```
@@ -396,7 +416,7 @@ Run Steps 0, 2, 3, 3b, 11 only. Skip all branch creation steps.
 
 ```
 work-start complete.
-Branch: <branch-name>  Issue: #<N>
+Branch: <branch-name>  Issue: #<N>  Covers: <covers field, or just #N>
 Platform doc: [read / not found]
 Coherence Protocol: [any concerns raised, or "clear"]
 Protocols checked: [list any relevant ones read]

@@ -103,10 +103,16 @@ BRANCH_NAME=$(grep "^branch:" "$WORKSPACE/design/.meta" | sed 's/branch: //')
 PROJECT_SHA=$(grep "^project-sha:" "$WORKSPACE/design/.meta" | sed 's/project-sha: //')
 ISSUE_N=$(grep "^issue:" "$WORKSPACE/design/.meta" | sed 's/issue: //')
 ISSUE_REPO_GITHUB=$(grep "^issue-repo:" "$WORKSPACE/design/.meta" | sed 's/issue-repo: //')
+COVERS=$(grep "^covers:" "$WORKSPACE/design/.meta" | sed 's/covers: //')
+[ -z "$COVERS" ] && COVERS="$ISSUE_N"   # backwards compat: pre-covers .meta files
 ```
 
-`$BRANCH_NAME`, `$PROJECT_SHA`, and `$ISSUE_N` are used throughout Steps 3–10.
+`$BRANCH_NAME`, `$PROJECT_SHA`, `$ISSUE_N`, and `$COVERS` are used throughout Steps 3–10.
 Extract once here — never re-read from `.meta` in later steps.
+
+`$COVERS` is a comma-separated list of all issue numbers this branch closes (e.g. `"5,19,32,24"`).
+When the branch was started for a single issue, `COVERS` equals `ISSUE_N`. When absent from
+`.meta` (branches created before this feature), `COVERS` defaults to `ISSUE_N`.
 
 ### Branch summary — always print before proceeding
 
@@ -132,7 +138,8 @@ Output format:
 ```
 ╔══ Branch Summary ═══════════════════════════════════╗
 ║  Branch: <branch-name>
-║  Issue:  #<N> — <title>
+║  Issue:  #<N> — <title>   (primary)
+║  Covers: #<N>, #<M>, #<P>  ← omit if COVERS == ISSUE_N (single issue)
 ║  Started: <date from .meta>
 ║
 ║  Commits (<N>):
@@ -144,6 +151,7 @@ Output format:
 ```
 
 If the issue title cannot be fetched (no network, no tracking), omit that line.
+If `$COVERS` contains more than one issue, fetch and display each title.
 If no commits are found on the branch (work landed directly on base), note that.
 
 This summary is informational only — it does not block the close and requires no user input.
@@ -324,7 +332,7 @@ work-end close plan — <branch-name>
   Plan archiving     → plans/attic/<branch-name>/  [workspace main]
   Journal merge      → DESIGN.md  (<N> sections)
   Spec posting       → #<N>  (<filenames>)
-  Issue              → close #<N>
+  Issues             → close #<all issues from COVERS, e.g. "#5, #19, #32, #24">
   Publish blog       → 8g (N unpublished entries → destination)
   Project rebase     <branch> → <base-branch>
   Squash             <blessed-remote>/main..HEAD (mandatory before any push)
@@ -439,11 +447,22 @@ Post selected specs (from Step 6) as collapsible comments on the GitHub issue.
 
 ### 8f — Issue close
 
-Only if tracking enabled and `$ISSUE_N` is non-empty:
+Only if tracking enabled and `$COVERS` is non-empty. Close every issue in `$COVERS`
+(comma-separated). `COVERS` always includes the primary `ISSUE_N` so no separate
+call for the primary is needed.
+
 ```bash
 CLOSE_REPO="${ISSUE_REPO_GITHUB:-$OWNER_REPO}"
-[ -n "$ISSUE_N" ] && gh issue close "$ISSUE_N" --repo "$CLOSE_REPO"
+if [ -n "$COVERS" ]; then
+  echo "$COVERS" | tr ',' '\n' | while read N; do
+    N=$(echo "$N" | tr -d ' ')
+    [ -n "$N" ] && gh issue close "$N" --repo "$CLOSE_REPO" && echo "✅ Closed #$N"
+  done
+fi
 ```
+
+If a close fails (issue already closed, network error), log the failure and continue —
+do not abort the whole close for a single issue.
 
 ### 8g — Publish blog
 
@@ -713,6 +732,7 @@ cat > "$WORKSPACE/design/EPIC-CLOSED.md" << EOF
 # Branch Closed — $BRANCH_NAME
 **Date:** $CLOSE_DATE
 **Issue:** #$ISSUE_N
+**Covers:** $COVERS
 EOF
 
 git -C "$WORKSPACE" add design/EPIC-CLOSED.md
