@@ -133,10 +133,13 @@ Use the invocation argument if provided. Otherwise prompt:
 
 ### Step 2 — Platform coherence
 
-Locate the platform doc:
+Locate the platform doc — check in order, use first found:
 
 ```bash
-ls "$PROJECT/docs/PLATFORM.md" 2>/dev/null || ls ~/claude/casehub/parent/docs/PLATFORM.md 2>/dev/null
+ls "$PROJECT/docs/PLATFORM.md" 2>/dev/null \
+  || ls "$WORKSPACE/PLATFORM.md" 2>/dev/null \
+  || ls "$WORKSPACE/docs/PLATFORM.md" 2>/dev/null \
+  || ls ~/claude/casehub/parent/docs/PLATFORM.md 2>/dev/null
 ```
 
 Read it. Run the five coherence questions against the work description:
@@ -152,7 +155,10 @@ Surface any concerns to the user before proceeding.
 ### Step 3 — Relevant protocols
 
 ```bash
-ls "$PROJECT/docs/protocols/" 2>/dev/null || ls ~/claude/casehub/parent/docs/protocols/ 2>/dev/null
+ls "$PROJECT/docs/protocols/" 2>/dev/null \
+  || ls "$WORKSPACE/protocols/" 2>/dev/null \
+  || ls "$WORKSPACE/docs/protocols/" 2>/dev/null \
+  || ls ~/claude/casehub/parent/docs/protocols/ 2>/dev/null
 ```
 
 Read any protocols applicable to the described work. Surface violations before proceeding.

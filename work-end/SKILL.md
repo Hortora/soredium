@@ -190,9 +190,11 @@ detect_capability() {
 }
 ```
 
-**Specs routing is non-configurable** — specs always route to `project`
-(`$PROJECT/docs/specs/`). If the cascade resolves `specs → workspace`, override
-with a warning: "Specs routing overridden to project — not user-configurable."
+**Specs routing** — check the CLAUDE.md Routing table for a `specs` row. If present,
+honour it (workspace or project). If absent, default to `project` (`$PROJECT/docs/specs/`).
+Unlike earlier skill versions, specs routing IS configurable — projects that keep all
+methodology artifacts in the workspace should declare `specs → workspace` in their
+CLAUDE.md Routing table and specs will be promoted there instead.
 
 **`$DESIGN_REPO` — read from `.meta`, do NOT re-derive from routing config:**
 ```bash
