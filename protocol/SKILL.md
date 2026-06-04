@@ -38,6 +38,47 @@ A protocol without a garden technique backing it is a rule with no rationale —
 
 ---
 
+## Standard Protocol Structure — Three-Tier Model
+
+Protocols are organised in three tiers. Every project using this skill should have this structure under `$PROTOCOLS_DIR/`:
+
+```
+protocols/
+├── INDEX.md                  ← navigation hub; quick-ref tables pointing into sub-indexes
+├── universal/
+│   ├── INDEX.md              ← rules applicable to any project using this tech stack
+│   └── <slug>.md
+├── <platform>/               ← named after this platform/product (e.g. quarkus/, casehub/)
+│   ├── INDEX.md              ← rules specific to this platform's architecture
+│   └── <slug>.md
+└── <domain>/                 ← topic area within the platform (e.g. agentic/, upstream/, cdi/)
+    ├── INDEX.md              ← optional; use when domain has 4+ rules
+    └── <slug>.md
+```
+
+**Scope maps to tier:**
+
+| `scope` value | Tier | Where to write |
+|---------------|------|----------------|
+| `universal` | Universal — any project using this tech stack | `universal/<slug>.md` |
+| `platform` | Platform — this platform's foundational rules | `<platform>/<slug>.md` |
+| `repo` | Repo-specific rules for one module/repo | `<domain>/<slug>.md` |
+| `application` | App-tier rules (apps built on this platform) | `application/<slug>.md` or `<domain>/<slug>.md` |
+
+**Index table format — always three columns:**
+
+```markdown
+| File | Rule Summary | Applies To |
+|------|-------------|------------|
+| [slug.md](slug.md) | One-line directive | Which modules / when |
+```
+
+The "Applies To" column is the most important — it tells the reader exactly when to check this rule without having to open the file.
+
+**Top-level `INDEX.md` is a navigation hub**, not a full listing. It contains quick-reference rows (5–10 per tier) pointing at the sub-indexes for the full listing. New sessions read `INDEX.md` first to orient; they navigate to sub-indexes for depth.
+
+---
+
 ## Protocol Entry Format
 
 ```yaml
@@ -132,42 +173,39 @@ Wait for confirmation before writing.
 
 **Step 5 — Write the entry file**
 
-Route to the correct subfolder based on `scope`:
-- `scope: universal` → `docs/protocols/universal/<slug>.md`
-- `scope: platform` or `scope: repo` → `docs/protocols/casehub/<slug>.md`
-- `scope: application` → `docs/protocols/casehub/<slug>.md`
+Route to the correct tier directory based on `scope` (see Three-Tier Model above):
+- `universal` → `$PROTOCOLS_DIR/universal/<slug>.md`
+- `platform` → `$PROTOCOLS_DIR/<platform-name>/<slug>.md` (use the platform's name, e.g. `quarkus/`, `casehub/`)
+- `repo` or domain-specific → `$PROTOCOLS_DIR/<domain>/<slug>.md`
 
-```bash
-# Write to the correct subfolder
-```
+Create the subdirectory if needed.
 
 **Step 6 — Commit**
 
 ```bash
-git -C $PROJECT_ROOT add docs/protocols/universal/<slug>.md  # or casehub/
-git -C $PROJECT_ROOT commit -m "protocol(PP-YYYYMMDD-xxxxxx): <slug>"
+PROTOCOLS_GIT_ROOT=$(git -C "$PROTOCOLS_DIR" rev-parse --show-toplevel)
+git -C "$PROTOCOLS_GIT_ROOT" add <relative-path-to-entry>
+git -C "$PROTOCOLS_GIT_ROOT" commit -m "protocol(PP-YYYYMMDD-xxxxxx): <slug>"
 ```
 
-**Step 7 — Update the correct index**
+**Step 7 — Update the indexes**
 
-Route by the `scope` field:
+Two updates required:
 
-| scope value | Index to update |
-|-------------|----------------|
-| `universal` | `docs/protocols/universal/INDEX.md` — add row under the appropriate category section |
-| `platform` or `repo` | `docs/protocols/casehub/FOUNDATION-INDEX.md` — add row to the Protocols table |
-| `application` | `docs/protocols/casehub/HARNESS-INDEX.md` — add row to the Protocols table |
+**7a — Sub-index** (`$PROTOCOLS_DIR/<tier>/INDEX.md`): add a row in the three-column table,
+creating the sub-index file if this is the first entry in this tier:
 
-Row format:
 ```markdown
-| [slug.md](slug.md) | One-line rule summary | applies_to value |
+| File | Rule Summary | Applies To |
+|------|-------------|------------|
+| [slug.md](slug.md) | One-line directive | Which modules / when |
 ```
 
-For `universal/INDEX.md`, place the row under the most relevant category section
-(Maven / Build, Java / Architecture, Quarkus, Application Design). Add a new section
-if none fits.
+**7b — Top-level navigation hub** (`$PROTOCOLS_DIR/INDEX.md`): add a quick-reference row
+under the relevant tier section (5–10 rows per section max; link to sub-index for the full list).
+If this is the first rule in a tier, create the section header and add a link to the sub-index.
 
-Commit the index update in the same commit as the protocol file.
+Commit both index updates in the same commit as the protocol file.
 
 **Step 8 — Report**
 
@@ -350,7 +388,7 @@ casehub-specific) and Audit 3 (folder structure validation).
 | Capturing a universal gotcha as a protocol | Protocols are project-specific | If it applies outside this project, use forage instead |
 | Capturing an ADR as a protocol | ADRs are one-off decisions; protocols are standing rules | Use `adr` skill for architectural decision records |
 | Leaving refs pointing to non-existent files | HEALTH will flag these; context for future sessions is broken | Run HEALTH and fix broken refs before committing |
-| Not updating the correct index after CAPTURE | Index is the fast-path for SEARCH | Route by scope: universal→universal/INDEX.md, platform/repo→casehub/FOUNDATION-INDEX.md, application→casehub/HARNESS-INDEX.md |
+| Not updating the correct index after CAPTURE | Index is the fast-path for SEARCH | Update both the tier sub-index AND the top-level navigation hub (see Three-Tier Model) |
 | Writing implementation detail in the protocol body | Protocols are directives, not tutorials | refs: out to design docs; keep body to one paragraph |
 | Using type=rule for a high-level principle | Misleads readers about expected specificity | `principle` for directional; `rule` for specific + example |
 
@@ -360,10 +398,11 @@ casehub-specific) and Audit 3 (folder structure validation).
 
 CAPTURE is complete when:
 - ✅ PP-ID generated (`PP-YYYYMMDD-xxxxxx` format)
-- ✅ Entry file written to `docs/protocols/universal/<slug>.md` or `docs/protocols/casehub/<slug>.md` based on scope
+- ✅ Entry file written to the correct tier subdirectory under `$PROTOCOLS_DIR` (see Three-Tier Model)
 - ✅ User confirmed the draft before writing
-- ✅ Entry committed to the project repo
-- ✅ Correct index updated and committed (routed by scope field)
+- ✅ Entry committed to the protocols repo
+- ✅ Sub-index (`<tier>/INDEX.md`) updated with three-column row
+- ✅ Top-level `INDEX.md` navigation hub updated with quick-reference row
 
 SWEEP is complete when:
 - ✅ Session reviewed for implicit rules and re-enforced constraints
