@@ -41,18 +41,17 @@ IS_MAIN=$([ "$CURRENT_BRANCH" = "main" ] && echo "yes" || echo "no")
 | Detected state | Action |
 |---------------|--------|
 | On main, stack empty | → **work-start** — begin new work |
-| On main, stack has 1 entry | → **work-resume** automatically |
-| On main, stack has 2+ entries | → show stack picker (Step 3) |
+| On main, stack has 1+ entries | → show stack picker (Step 3) |
 | On a feature branch | → ask: end or pause? (Step 4) |
 
-**Step 3 — Stack picker (on main, 2+ paused branches)**
+**Step 3 — Stack picker (on main, 1+ paused branches)**
 
-Show all paused branches with age and note:
+Show paused branches with age and note. Adapt phrasing to stack depth:
 
 ```
-You have <N> paused branches:
+You have <N> paused branch(es):
   1. <branch>  #<issue>  paused <duration> ago
-  2. <branch>  #<issue>  paused <duration> ago
+  2. <branch>  #<issue>  paused <duration> ago   (if N > 1)
   ...
 
 Resume one, or start something new? (1 / 2 / ... / new)

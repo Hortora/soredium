@@ -141,7 +141,7 @@ Prompt before `pull --rebase` — not automatic.
    WIP committed: project=<yes|no>  workspace=<yes|no>
    Stack depth: <N>
 
-Resume with: work-resume
+You're on main — type work to resume this branch or start new work.
 ```
 
 If stack depth > 3, add: `⚠️  Stack has <N> paused branches — consider closing some.`

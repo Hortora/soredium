@@ -88,7 +88,7 @@ Check in order — first match wins:
 1. $WORKSPACE/design/.pause-stack exists and has entries, AND on main
    → Route to work skill for stack picker. Do not start a new branch until
      the user explicitly chooses "new" from the stack picker.
-     (Stack depth 1: auto-route to work-resume. Stack depth 2+: show picker.)
+     (Stack depth 1+: always show picker — never auto-resume. User chooses resume or new.)
 
 2. $WORKSPACE/design/.meta exists, AND
    META_BRANCH == CURRENT_WORKSPACE == CURRENT_PROJECT (all three match)
