@@ -409,6 +409,49 @@ Add the new repo to the table if not already listed. Show the proposed change an
 ask for acceptance before writing. Never overwrite the whole file — only update the
 member repos table row.
 
+### Step 1b — Clone sibling repos from GitHub org
+
+If the project directory exists and is a git repo with a GitHub remote,
+detect the GitHub organisation and offer to clone all sibling repos into the
+same parent directory.
+
+```bash
+# Detect org from remote
+REMOTE_URL=$(git -C "<project-path>" remote get-url origin 2>/dev/null)
+if [ -n "$REMOTE_URL" ]; then
+  ORG=$(echo "$REMOTE_URL" | sed -E 's|.*github\.com[:/]([^/]+)/.*|\1|')
+  PARENT_DIR=$(dirname "<project-path>")
+fi
+```
+
+If an org is detected, list all repos and identify which are missing locally:
+
+```bash
+ALL_REPOS=$(gh repo list "$ORG" --json name --limit 200 -q '.[].name' | sort)
+MISSING=()
+for repo in $ALL_REPOS; do
+  if [ ! -d "$PARENT_DIR/$repo" ]; then
+    MISSING+=("$repo")
+  fi
+done
+```
+
+If there are missing repos, present the list:
+> "Found **N** repos under `github.com/<org>`. **M** are not yet cloned
+> locally under `<parent-dir>/`:
+> - [list of missing repos]
+>
+> Clone all of them? (YES / no / select)"
+
+If YES (or after selection), clone each one:
+```bash
+for repo in "${SELECTED[@]}"; do
+  gh repo clone "$ORG/$repo" "$PARENT_DIR/$repo"
+done
+```
+
+If no org is detected or no remote exists, skip silently.
+
 ### Step 2 — Create directory structure
 
 ```bash
@@ -1141,6 +1184,7 @@ If n → skip. Do not ask again this session.
 - [ ] `## Project Artifacts` section written to project CLAUDE.md (Step 6b): derived from project-knowledge paths; skipped if section already present
 - [ ] Claude session history and memory migrated to workspace-keyed path (`~/.claude/projects/`)
 - [ ] Existing methodology artifacts offered for migration; selected ones copied and `git rm`'d with single commit
+- [ ] Sibling repos from GitHub org cloned (if org detected and user accepted)
 - [ ] Git repo initialised with initial commit
 - [ ] Remote set and pushed (if URL provided)
 - [ ] Git hooks offered (Step 7c): `pre-push` (git-squash) and/or `commit-msg` (issue-workflow, if Work Tracking enabled) copied to `.githooks/`, committed in one commit, `core.hooksPath` set; skipped silently if skills absent or hooks already present
