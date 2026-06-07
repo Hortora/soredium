@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-Work-end context resolver.
-Prints all values needed by work-end as KEY=value lines.
-Run from the workspace directory: python3 ~/.claude/skills/work-end/ctx.py
+Context resolver for cc-praxis workspace-aware skills.
+Prints KEY=value lines consumed by work-start, work-end, work-pause, work-resume, handover etc.
+Works whether Claude opened in the workspace or the project repo.
+
+  project repo  has wksp/ → workspace
+  workspace     has proj/ → project
+  single-repo   has neither (no separate workspace)
 """
 import subprocess, re, sys
 from pathlib import Path
@@ -10,13 +14,27 @@ from pathlib import Path
 def run(*cmd, cwd=None):
     return subprocess.run(list(cmd), capture_output=True, text=True, cwd=cwd).stdout.strip()
 
-workspace = run("git", "rev-parse", "--show-toplevel")
-if not workspace:
+cwd_root = run("git", "rev-parse", "--show-toplevel")
+if not cwd_root:
     print("ERROR: not in a git repository", file=sys.stderr)
     sys.exit(1)
 
-proj_symlink = Path(workspace) / "proj"
-project = str(proj_symlink.resolve()) if proj_symlink.exists() else workspace
+proj_symlink = Path(cwd_root) / "proj"
+wksp_symlink = Path(cwd_root) / "wksp"
+
+if proj_symlink.exists():
+    # Claude opened in workspace — proj/ points to project
+    workspace = cwd_root
+    project = str(proj_symlink.resolve())
+elif wksp_symlink.exists():
+    # Claude opened in project repo — wksp/ points to workspace
+    project = cwd_root
+    workspace = str(wksp_symlink.resolve())
+else:
+    # Single-repo mode — no separate workspace configured
+    workspace = cwd_root
+    project = cwd_root
+
 single_repo = workspace == project
 
 claude_md = Path(project) / "CLAUDE.md"

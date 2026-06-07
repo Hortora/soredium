@@ -43,6 +43,7 @@ Run this first. If all conditions are met, return immediately — do nothing els
 ```bash
 CLAUDE_OK=$(grep -q "## Project Type" CLAUDE.md 2>/dev/null && echo "yes" || echo "no")
 WORKSPACE_OK=$(  { [ -L "wksp" ] && [ -d "wksp" ]; } \
+              || { [ -L "proj" ] && [ -d "proj" ]; } \
               || grep -q "^workspace: declined" CLAUDE.md 2>/dev/null \
               && echo "yes" || echo "no")
 ISSUES_OK=$(  grep -q "Issue tracking: enabled"  CLAUDE.md 2>/dev/null \
@@ -83,13 +84,14 @@ check can run without a project type.
 ### Check 2 — Workspace
 
 ```bash
-WKSP_CONFIGURED=$([ -L "wksp" ] && [ -d "wksp" ] && echo "yes" || echo "no")
+WKSP_CONFIGURED=$( { [ -L "wksp" ] && [ -d "wksp" ]; } || { [ -L "proj" ] && [ -d "proj" ]; } && echo "yes" || echo "no")
 WKSP_DECLINED=$(grep -q "^workspace: declined" CLAUDE.md 2>/dev/null && echo "yes" || echo "no")
 ```
 
 | State | Action |
 |-------|--------|
-| `wksp/` symlink present | ✅ Continue |
+| `wksp/` symlink present (CWD is project) | ✅ Continue |
+| `proj/` symlink present (CWD is workspace) | ✅ Continue |
 | `workspace: declined` in CLAUDE.md | ✅ Skip silently |
 | Neither | Offer (see below) |
 
