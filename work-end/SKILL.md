@@ -300,9 +300,10 @@ Re-hash H2 headings in `$DESIGN_REPO/DESIGN.md`. Compare against `design-section
 in `.meta`. For each `§Section` anchor in JOURNAL.md, verify its heading still exists
 unchanged in DESIGN.md.
 ```bash
-STORED=$(grep "^design-section-hashes:" "$WORKSPACE/design/.meta" | sed 's/design-section-hashes: //')
-CURRENT=$(grep "^## " "$DESIGN_REPO/DESIGN.md" 2>/dev/null | while read h; do printf "%s:%s|" "$(printf '%s' "$h" | shasum -a 256 | cut -c1-8)" "$h"; done)
+grep "^design-section-hashes:" <WORKSPACE>/design/.meta
+python3 ~/.claude/skills/project-init/section_hashes.py <DESIGN_REPO>/DESIGN.md
 ```
+Use the first command's output as STORED, the second as CURRENT.
 If drift: `[U]` update journal anchors, `[S]` skip drifted sections, `[A]` abort.
 
 **5c — Anchor validation**
@@ -459,18 +460,12 @@ Only if tracking enabled and `$COVERS` is non-empty. Close every issue in `$COVE
 (comma-separated). `COVERS` always includes the primary `ISSUE_N` so no separate
 call for the primary is needed.
 
+Close each issue in COVERS with a separate command per issue number — no loop:
 ```bash
-CLOSE_REPO="${ISSUE_REPO_GITHUB:-$OWNER_REPO}"
-if [ -n "$COVERS" ]; then
-  echo "$COVERS" | tr ',' '\n' | while read N; do
-    N=$(echo "$N" | tr -d ' ')
-    [ -n "$N" ] && gh issue close "$N" --repo "$CLOSE_REPO" && echo "✅ Closed #$N"
-  done
-fi
+gh issue close <N1> --repo <ISSUE_REPO> 2>/dev/null && echo "✅ Closed #<N1>" || echo "⚠️ #<N1> already closed or failed"
+gh issue close <N2> --repo <ISSUE_REPO> 2>/dev/null && echo "✅ Closed #<N2>" || echo "⚠️ #<N2> already closed or failed"
 ```
-
-If a close fails (issue already closed, network error), log the failure and continue —
-do not abort the whole close for a single issue.
+Substitute each issue number from COVERS. If COVERS == ISSUE_N there is only one command.
 
 ### 8g — Publish blog
 
@@ -480,29 +475,17 @@ Resolve the blog destination from `~/.claude/blog-routing.yaml`. For each worksp
 entry not yet present at the destination, copy and commit:
 
 ```bash
-BLOG_DEST=$(python3 -c "
-import yaml, os
-cfg = yaml.safe_load(open(os.path.expanduser('~/.claude/blog-routing.yaml')))
-dest = cfg['destinations'][cfg['defaults']['destinations'][0]]
-print(os.path.expanduser(dest['path'] + dest.get('subdir', '')).rstrip('/'))
-")
-
-# Find unpublished entries (filename comparison — count comparison is wrong because
-# destination accumulates entries from all projects)
-comm -23 <(ls "$WORKSPACE/blog/" | grep "\.md$" | grep -v INDEX | sort) \
-  <(ls "$BLOG_DEST/" | sort) | while read entry; do
-      cp "$WORKSPACE/blog/$entry" "$BLOG_DEST/$entry"
-      git -C "$(dirname "$BLOG_DEST")" add "${BLOG_DEST##*/}/$entry"
-    done
-
-# Commit and push only if new entries were added
-if git -C "$(dirname "$BLOG_DEST")" diff --cached --quiet; then
-  echo "Blog: 0 new entries (all already published)"
-else
-  git -C "$(dirname "$BLOG_DEST")" commit -m "chore: publish blog entries from $BRANCH_NAME"
-  git -C "$(dirname "$BLOG_DEST")" push
-fi
+python3 ~/.claude/skills/work-end/blog_dest.py <WORKSPACE>/blog <BRANCH_NAME>
 ```
+
+The script outputs `BLOG_DEST`, `BLOG_REPO`, `BLOG_SUBDIR`, and `UNPUBLISHED` (comma-separated filenames).
+It also copies unpublished entries to the destination. Then commit and push:
+```bash
+git -C <BLOG_REPO> add <BLOG_SUBDIR>/
+git -C <BLOG_REPO> commit -m "chore: publish blog entries from <BRANCH_NAME>"
+git -C <BLOG_REPO> push
+```
+Skip the commit if UNPUBLISHED is empty.
 
 **Hard stop if blog directory has entries and publish fails.** Do not proceed to 8h until
 every workspace blog entry exists at the destination. Verify with the same `comm` check.
@@ -675,21 +658,23 @@ Check project type:
 grep -i "^type:\|^\*\*Type:\*\*" "$PROJECT/CLAUDE.md" 2>/dev/null | head -1
 ```
 
-If type is `java`, prompt with a single choice:
+If type is `java`, use `AskUserQuestion` with exactly these four options:
 
-> **Build verification level?**
-> **[F]** fast — `mvn install -DskipTests -DskipITs` (default)
-> **[U]** unit tests — `mvn install -DskipITs`
-> **[I]** integration tests — `mvn install -DskipTests`
-> **[A]** all tests — `mvn install`
-> **[S]** skip
+```
+Build verification level?
+  [F] Fast (default)   — mvn install -DskipTests -DskipITs
+  [U] Unit tests       — mvn install -DskipITs
+  [A] All tests        — mvn install
+  [S] Skip
+```
 
 Map the answer to a command:
 - F or Enter: `mvn install -DskipTests -DskipITs`
 - U: `mvn install -DskipITs`
-- I: `mvn install -DskipTests`
 - A: `mvn install`
 - S: skip step entirely
+
+If the user types something else (e.g. "integration tests only"): run `mvn install -DskipTests`.
 
 Run from project root:
 ```bash
