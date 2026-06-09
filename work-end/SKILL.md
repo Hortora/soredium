@@ -16,66 +16,24 @@ branch closed, returns to the workspace base (main).
 
 ## Path Resolution (run first, always)
 
-**Do not use shell variable assignment blocks** — they trigger security checks.
-Instead, write this Python script with the Write tool, then run it:
+Run the bundled context script — installed, version-controlled, no hardcoded paths:
 
-```python
-# Write to /tmp/work_end_ctx.py then run: python3 /tmp/work_end_ctx.py
-import subprocess, re
-from pathlib import Path
-
-workspace = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True).stdout.strip()
-proj_symlink = Path(workspace) / 'proj'
-project = str(proj_symlink.resolve()) if proj_symlink.exists() else workspace
-single_repo = workspace == project
-
-claude_md = Path(project) / 'CLAUDE.md'
-claude_text = claude_md.read_text() if claude_md.exists() else ''
-
-m = re.search(r'GitHub repo:\s*(\S+)', claude_text)
-owner_repo = m.group(1) if m else ''
-
-m = re.search(r'\*\*Project base branch:\*\*\s*`([^`]+)`', claude_text)
-base_branch = m.group(1) if m else 'main'
-
-meta_path = Path(workspace) / 'design' / '.meta'
-meta = {}
-if meta_path.exists():
-    for line in meta_path.read_text().splitlines():
-        if ': ' in line:
-            k, _, v = line.partition(': ')
-            meta[k.strip()] = v.strip()
-
-branch_name = meta.get('branch', '')
-project_sha = meta.get('project-sha', '')
-issue_n = meta.get('issue', '')
-issue_repo = meta.get('issue-repo', owner_repo)
-covers = meta.get('covers', issue_n)
-current_branch = subprocess.run(['git', '-C', workspace, 'branch', '--show-current'], capture_output=True, text=True).stdout.strip()
-
-print(f"WORKSPACE={workspace}")
-print(f"PROJECT={project}")
-print(f"SINGLE_REPO={'yes' if single_repo else 'no'}")
-print(f"OWNER_REPO={owner_repo}")
-print(f"BASE_BRANCH={base_branch}")
-print(f"CURRENT_BRANCH={current_branch}")
-print(f"BRANCH_NAME={branch_name}")
-print(f"PROJECT_SHA={project_sha}")
-print(f"ISSUE_N={issue_n}")
-print(f"ISSUE_REPO={issue_repo}")
-print(f"COVERS={covers}")
+```bash
+python3 ~/.claude/skills/project-init/ctx.py
 ```
 
+**Never write a script to /tmp/ for path resolution.** `/tmp/` is shared across sessions — a stale script from a previous session in a different project will silently return the wrong workspace and project paths, contaminating the entire close operation.
+
 Use the printed values as **concrete strings** in ALL subsequent commands.
-Never re-assign to shell variables. Replace every `$WORKSPACE`, `$PROJECT`, `$BRANCH_NAME`,
-`$PROJECT_SHA`, `$ISSUE_N`, `$COVERS`, `$OWNER_REPO`, `$BASE_BRANCH` placeholder
+Never re-assign to shell variables. Replace every `<WORKSPACE>`, `<PROJECT>`, `<BRANCH_NAME>`,
+`<PROJECT_SHA>`, `<ISSUE_N>`, `<COVERS>`, `<OWNER_REPO>`, `<BASE_BRANCH>` placeholder
 with the actual value from the script output.
 
 ---
 
 ## Pre-conditions
 
-Run the Path Resolution Python script above first. Use `CURRENT_BRANCH` from its output. Check in order:
+Run `python3 ~/.claude/skills/project-init/ctx.py` first. Use `CURRENT_BRANCH` from its output. Check in order:
 
 1. **If `$WORKSPACE/design/.pause-stack` exists and has entries** — check whether
    the target branch is in the stack:
@@ -121,7 +79,7 @@ Run the Path Resolution Python script above first. Use `CURRENT_BRANCH` from its
 ## Step 0 + Step 1 — Context (resolved by Path Resolution script)
 
 All values — `WORKSPACE`, `PROJECT`, `OWNER_REPO`, `BASE_BRANCH`, `BRANCH_NAME`,
-`PROJECT_SHA`, `ISSUE_N`, `ISSUE_REPO`, `COVERS` — come from the Python script output.
+`PROJECT_SHA`, `ISSUE_N`, `ISSUE_REPO`, `COVERS` — come from `ctx.py` output.
 Do not re-extract them with shell commands.
 
 `COVERS` is a comma-separated list of all issue numbers this branch closes (e.g. `"5,19,32,24"`).
