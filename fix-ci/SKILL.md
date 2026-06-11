@@ -157,12 +157,28 @@ git push
 
 ## Step 7 — Verify CI
 
-Wait for CI to complete. If CI is green, done.
+Schedule a wakeup to poll CI status. Typical CI runs take 3-8 minutes.
 
-If CI is red, the failure is environment-specific (Docker availability, OS
-differences, network access, test ordering on a different JVM). Go back to
-Step 1 — gather the new failures, reproduce locally (or on the remote machine
-if the gap is infrastructure), and repeat the full cycle.
+```
+ScheduleWakeup:
+  delaySeconds: 270
+  reason: "waiting for CI run to complete after push"
+  prompt: "/fix-ci"
+```
+
+On wakeup, check CI:
+
+```bash
+gh run list --repo <OWNER_REPO> --limit 1 \
+  --json status,conclusion,headSha \
+  --jq '.[0] | "\(.status) | \(.conclusion // "—") | \(.headSha[:7])"'
+```
+
+- **completed + success** → done. Report green.
+- **completed + failure** → go back to Step 1 with the new failures. The failure
+  is environment-specific (Docker, OS, test ordering on a different JVM).
+  Reproduce locally or on the remote machine and repeat the full cycle.
+- **in_progress / queued** → schedule another wakeup (270s).
 
 ---
 
