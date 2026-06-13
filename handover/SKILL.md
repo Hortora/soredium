@@ -43,22 +43,15 @@ git -C "$WORKSPACE" log -1 --format="%ar" -- HANDOFF.md
 If more than a week old, flag it before using the context:
 > "HANDOFF.md is N days old — some context may be stale. Verify key assumptions before building on it."
 
-Read the file. Then use `AskUserQuestion` to offer the cross-check:
+Read the file, then immediately proceed to Step R3. No prompt — the cross-check always runs. Results appear in the "Cleaned up" section of the resume output.
 
-```
-Check GitHub for issues closed since last session?
-  [Y] Yes — cross-check now  (default)
-  [N] Skip — show handover immediately
-```
+### Step R3 — GitHub issue cross-check (always runs)
 
-If **N**: skip directly to presenting the resume output.
-If **Y** (or default): proceed with Step R3, then present the resume output once — with stale entries already removed if any were found.
+Runs automatically after reading HANDOFF.md.
 
-### Step R3 — GitHub issue cross-check (default on, skippable)
+**If `OWNER_REPO` is empty (no GitHub repo configured):** skip silently — no prompt.
 
-Runs only if user chose Y above.
-
-**If confirmed:**
+**Otherwise:**
 
 Scan HANDOFF.md for `#N` patterns in What's Left and What's Next sections. Deduplicate.
 
