@@ -236,6 +236,55 @@ names additional issue numbers to be closed on this same branch — e.g., "do #5
 `COVERS` is written to `.meta` in Step 9 and read by `work-end` to close all issues at
 branch close time. The branch name slug is still derived from the primary `ISSUE_N` only.
 
+### Step 4b — Stacked PR base detection
+
+Runs after issue resolution. Determines whether the new project branch should stack on
+an existing PR branch instead of branching from `$PROJECT_BASE_BRANCH`.
+
+Two independent checks — either can set `PROJECT_BRANCH_BASE`:
+
+**Check A — project is already on a non-base branch**
+
+```bash
+# CURRENT_PROJECT is already known from detection
+if CURRENT_PROJECT != PROJECT_BASE_BRANCH:
+```
+
+If the project is sitting on a non-base branch from previous session work, surface it:
+
+> "Project is on `<CURRENT_PROJECT>` (not `<PROJECT_BASE_BRANCH>`).
+>  Stack new branch here? (y = stack, n = return to `<PROJECT_BASE_BRANCH>` first)"
+
+- y → `PROJECT_BRANCH_BASE = CURRENT_PROJECT`
+- n → `git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"` then `PROJECT_BRANCH_BASE = PROJECT_BASE_BRANCH`
+
+**Check B — GitHub dependency signal** (only when `ISSUE_REPO` is set, skip if Check A already set a stack base)
+
+```bash
+ISSUE_BODY=$(gh issue view <ISSUE_N> --repo <ISSUE_REPO> --json body --jq '.body' 2>/dev/null)
+```
+
+Scan the issue body for dependency language: `"blocked by #M"`, `"depends on #M"`,
+`"stacked on #M"`, `"requires #M"`. For each blocking issue `M` found:
+
+```bash
+gh pr list --repo <ISSUE_REPO> --state open \
+  --search "closes #M OR fixes #M" \
+  --json headRefName --jq '.[0].headRefName' 2>/dev/null
+```
+
+If an open PR branch is found:
+
+> "Issue #N depends on #M (open PR: `<branch>`).
+>  Stack new branch there? (y/n)"
+
+- y → `git -C "$PROJECT" checkout <branch>` then `PROJECT_BRANCH_BASE = <branch>`
+- n → `PROJECT_BRANCH_BASE = PROJECT_BASE_BRANCH`
+
+If neither check fires, `PROJECT_BRANCH_BASE = PROJECT_BASE_BRANCH` (default — branch from main).
+
+---
+
 ### Step 5 — Branch name
 
 Derive: `issue-NNN-<slug>` (title lowercased, special chars stripped, max 30 chars after prefix).
@@ -262,8 +311,12 @@ Read `NEXT_SAFE_V`, `CONFLICT`, `SCAN_COMPLETE` from output.
 - Set `FLYWAY_NEXT_V=<NEXT_SAFE_V>`
 ### Step 7 — Create branches (atomic)
 
+`PROJECT_BRANCH_BASE` comes from Step 4b (may be an open PR branch for stacked work,
+or `$PROJECT_BASE_BRANCH` for normal work). The project must already be on that branch
+before this step runs — Step 4b handles the checkout.
+
 ```bash
-git -C "$PROJECT" checkout -b <branch-name>
+git -C "$PROJECT" checkout -b <branch-name>   # from PROJECT_BRANCH_BASE
 # If fails → abort (nothing to clean up)
 git -C "$WORKSPACE" checkout -b <branch-name>
 # If fails → git -C "$PROJECT" branch -D <branch-name>, abort, report error
@@ -408,6 +461,7 @@ Run Steps 0, 2, 3, 3b, 11 only. Skip all branch creation steps.
 ```
 work-start complete.
 Branch: <branch-name>  Issue: #<N>  Covers: <covers field, or just #N>
+Stacked on: <PROJECT_BRANCH_BASE>  ← omit this line if PROJECT_BRANCH_BASE == PROJECT_BASE_BRANCH
 Platform doc: [read / not found]
 Coherence Protocol: [any concerns raised, or "clear"]
 Protocols checked: [list any relevant ones read]
