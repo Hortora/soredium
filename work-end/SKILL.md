@@ -12,6 +12,29 @@ Closes the current branch cleanly. Promotes artifacts, merges the journal,
 closes the issue, rebases the project branch onto the project base branch, marks the
 branch closed, returns to the workspace base (main).
 
+<HARD-GATE>
+**Code review is mandatory before any push or PR.** You MUST invoke the
+`code-review` skill on the branch diff before Step 8j (push/PR). There are
+NO exempt branches — not "mechanical" changes, not "tests already pass",
+not "small diff". The review catches what you missed. Skipping it is the #1
+failure mode of this skill.
+
+**Doc sync is mandatory.** `update-claude-md` and `implementation-doc-sync`
+are part of the pre-close sweep and default to ON. They catch convention drift
+and stale documentation that compounds across sessions.
+</HARD-GATE>
+
+### Red Flags — thoughts that mean STOP
+
+| Thought | Reality |
+|---------|---------|
+| "This branch was mechanical" | Mechanical changes have mechanical bugs. Review catches them. |
+| "Tests passed, it's fine" | Tests verify behaviour, not code quality or spec compliance. |
+| "The diff is small" | Small diffs have the highest bug-per-line ratio. |
+| "I'll review after merging" | Post-merge review is post-incident review. |
+| "Doc sync has nothing to sync" | Run it and let the skill decide. Your guess is often wrong. |
+| "CLAUDE.md hasn't changed" | Conventions established during implementation need to be captured. |
+
 ---
 
 ## Path Resolution (run first, always)
@@ -197,23 +220,27 @@ this checklist:
 ```
 Pre-close sweep — create before presenting the close plan?
 
-[x] 1  write-content     capture any work on this branch worth a diary entry
-[x] 2  adr            record any significant architectural decisions without a formal ADR
-[x] 3  protocol sweep formalise any project rules established or re-enforced this branch
-[x] 4  forage sweep   check for gotchas, techniques, or undocumented behaviours
+[x] 1  write-content          capture any work on this branch worth a diary entry
+[x] 2  adr                    record any significant architectural decisions without a formal ADR
+[x] 3  protocol sweep         formalise any project rules established or re-enforced this branch
+[x] 4  forage sweep           check for gotchas, techniques, or undocumented behaviours
+[x] 5  update-claude-md       sync any new workflow conventions to CLAUDE.md
+[x] 6  implementation-doc-sync  sync documentation with code changes this branch made
 
 Type numbers to toggle, "all" to toggle all, or "go" to proceed:
 ```
 
-Defaults: all four on. The user may deselect any that clearly don't apply (e.g. "go"
+Defaults: all six on. The user may deselect any that clearly don't apply (e.g. "go"
 immediately if the branch was a one-line typo fix). Do not auto-skip — the point is
 to make the decision explicit.
 
 Run checked items in this order:
 1. **Forage sweep** — while context is full; findings may feed the blog entry
 2. **Protocol sweep** — while context is full (invoke `protocol` skill with `SWEEP` operation)
-3. **adr** — invoke `adr` skill for each candidate identified
-4. **write-content** — last, so it can synthesise the full branch narrative including any forage/protocol submissions
+3. **update-claude-md** — sync new conventions before doc-sync reads them
+4. **implementation-doc-sync** — sync documentation with code changes
+5. **adr** — invoke `adr` skill for each candidate identified
+6. **write-content** — last, so it can synthesise the full branch narrative including any forage/protocol submissions
 
 **Why this step exists:** Step 4 inventories artifacts that *were written*. Without this
 sweep, the close plan accurately reports "blog: no new entries" when it should say "blog:
@@ -221,7 +248,30 @@ no new entries (and none were considered)." The sweep converts the inventory fro
 snapshot into a verified statement. Only after this step is complete does the close plan
 accurately reflect what the branch leaves behind.
 
-After all checked items complete, proceed to Step 4.
+After all checked items complete, proceed to Step 3c.
+
+---
+
+## Step 3c — Code review (mandatory — HARD GATE)
+
+**This step cannot be skipped.** Invoke the `code-review` skill on the branch diff
+before proceeding. The review covers the full branch — all commits from the base
+branch to HEAD.
+
+```bash
+git -C "$PROJECT" diff "$PROJECT_BASE_BRANCH"..HEAD --stat
+```
+
+Invoke `code-review` with the branch diff. If the review surfaces issues:
+- **Critical/Important issues** → fix before proceeding. Re-run review after fixes.
+- **Minor issues** → fix or note. Do not block on minors alone.
+
+Only proceed to Step 4 after code review passes (no critical/important issues open).
+
+**Why here and not at Step 8j:** By Step 8j you've already built the close plan,
+merged the journal, posted specs, and closed issues. Discovering a code problem
+at that point means unwinding all of that. Reviewing here — before any close
+machinery runs — means fixes are cheap and the close plan reflects reviewed code.
 
 ---
 
