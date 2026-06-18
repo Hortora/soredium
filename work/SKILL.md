@@ -1,0 +1,90 @@
+---
+name: work
+description: >
+  Use when the user says "work", "work end", "work pause", or "work resume" —
+  detects current branch state and routes to the correct work lifecycle skill
+  automatically. "work" alone starts new work or shows the pause stack.
+  "work end" closes the branch. "work pause" saves state. "work resume" shows
+  the stack and returns to a paused branch. Replaces needing to know which
+  lifecycle skill to invoke.
+---
+
+# work
+
+Unified entry point for the work lifecycle. Detects state and routes to the
+correct skill — developer says `work` to begin, `work end` to close,
+`work pause` to save and switch, `work resume` to return to paused work.
+
+---
+
+## Routing
+
+**Step 1 — Parse the invocation**
+
+| Invocation | Route to |
+|------------|---------|
+| `work` or `work start` | → detect state (Step 2) |
+| `work end` | → **work-end** immediately |
+| `work pause` | → **work-pause** immediately |
+| `work resume` | → **work-resume** immediately |
+
+**Step 2 — Detect state (for `work` alone)**
+
+```bash
+python3 ~/.claude/skills/project-init/ctx.py
+```
+
+Read `WORKSPACE` and `CURRENT_BRANCH` from the output, then check pause stack state:
+
+```bash
+STACK_FILE="$WORKSPACE/design/.pause-stack"
+STACK_DEPTH=$(grep -c "^- branch:" "$STACK_FILE" 2>/dev/null || echo 0)
+IS_MAIN=$([ "$CURRENT_BRANCH" = "main" ] && echo "yes" || echo "no")
+```
+
+| Detected state | Action |
+|---------------|--------|
+| On main, stack empty | → **work-start** — begin new work |
+| On main, stack has 1+ entries | → show stack picker (Step 3) |
+| On a feature branch | → ask: end or pause? (Step 4) |
+
+**Step 3 — Stack picker (on main, 1+ paused branches)**
+
+Show paused branches with age and note. Adapt phrasing to stack depth:
+
+```
+You have <N> paused branch(es):
+  1. <branch>  #<issue>  paused <duration> ago
+  2. <branch>  #<issue>  paused <duration> ago   (if N > 1)
+  ...
+
+Resume one, or start something new? (1 / 2 / ... / new)
+```
+
+- Number → **work-resume** with that branch pre-selected
+- `new` → **work-start**
+
+If stack depth > 3, prefix with: `⚠️  Stack has <N> paused branches — consider closing some before adding more.`
+
+**Step 4 — On feature branch: ask once**
+
+> "You're on `<branch-name>`. What do you want to do?
+> 1. **end** — close this branch, merge, push, write handover, return to main
+> 2. **pause** — commit WIP, push to stack, switch to main (resume later)
+> 3. **wrap** — end session but keep branch open (write handover for next session)"
+
+Route to work-end, work-pause, or handover based on answer.
+
+---
+
+## Skill Chaining
+
+**Routes to:**
+- `work-start` — when beginning new work from main
+- `work-resume` — when returning to a paused branch from main
+- `work-end` — when closing a completed branch (includes full wrap + HANDOFF.md)
+- `work-pause` — when saving state to switch to something else
+- `handover` — when ending the session but keeping the branch open (mid-work wrap)
+
+**This skill does not implement the lifecycle itself** — it detects state and
+delegates. All logic lives in the individual lifecycle skills.

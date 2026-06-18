@@ -1,0 +1,463 @@
+---
+name: retro-issues
+description: >
+  Use when mapping an existing git repository's history to GitHub epics and
+  issues — user says "map our history to issues", "retrospectively create
+  issues", "backfill GitHub from git log", or invokes /retro-issues.
+  One-off, on-demand only. Never auto-triggered.
+---
+
+# Retro Issues
+
+Maps a repository's git history to a structured set of GitHub issues and, where
+naturally warranted, epics.
+
+**Priority order — most important first:**
+
+1. **Group similar commits into the right tickets.** This is the primary goal.
+   Commits that belong together should land in one issue, not several.
+2. **Produce useful standalone issues** grouped by feature area.
+3. **Form epics only when structure emerges naturally** — never force an epic
+   to contain unrelated work just because the commits happened at the same time.
+
+If the only output is standalone issues, that is a perfectly correct result.
+
+**This skill is invoked only explicitly.** It is never auto-triggered by
+Work Tracking or any other automatic behaviour. Use `issue-workflow` for
+ongoing lifecycle enforcement.
+
+## Safety contract
+
+All git operations are read-only until the user confirms with YES.
+Git history is never modified by the main flow.
+The optional commit-amendment step (Step 10) is separate, gated, and
+requires explicit team coordination acknowledgement before proceeding.
+
+---
+
+## Step 1 — Check prerequisites
+
+```bash
+git remote get-url origin   # needs a GitHub remote
+gh auth status              # needs gh CLI authenticated
+```
+
+Extract `owner/repo`. If either fails, stop and tell the user.
+
+Check for a very large history and offer to scope it:
+```bash
+git rev-list --count HEAD
+```
+
+If > 500 commits:
+> This repo has {N} commits. Analysing all of them may produce too many
+> groupings to review comfortably.
+>
+> Scope options:
+> - **Date range** — e.g. "from 2024-01-01"
+> - **Last N commits** — e.g. "last 200 commits"
+> - **All** — proceed with full history
+
+Wait for user choice before continuing.
+
+Fetch all existing issues (open and closed) to use as a match pool:
+```bash
+gh issue list --state all --limit 200 --repo {owner/repo} --json number,title,state,body
+```
+
+Store as `existing_issues`. These will be matched against commit clusters in Step 7
+to avoid creating duplicates — a cluster that already has a suitable existing issue
+gets linked to it instead of spawning a new one.
+
+---
+
+## Step 2 — Gather inputs
+
+**Git history:**
+```bash
+git log --no-merges --format="%H|%ad|%s" \
+  --date=short
+```
+
+For each commit hash, get changed files:
+```bash
+git diff-tree --no-commit-id -r --name-only {hash}
+```
+
+**Tags (phase boundary signals):**
+```bash
+git tag -l --sort=version:refname
+```
+
+**Documents (read each that exists):**
+```bash
+ls docs/adr/ 2>/dev/null
+ls docs/diary/ blog/ 2>/dev/null
+cat DESIGN.md 2>/dev/null
+```
+
+For each ADR: extract its date and title.
+For each blog/diary entry: extract date and any milestone language
+("complete", "shipped", "done", "phase", "v1").
+
+---
+
+## Step 3 — Identify phase boundaries
+
+Build a timeline from commit dates. Mark boundary candidates:
+
+| Signal | How to detect |
+|--------|--------------|
+| ADR created | ADR file date within ±3 days of commits |
+| Blog milestone | Blog entry date + milestone language near commit cluster |
+| Git tag | Tag date |
+| Commit gap | >7 days with no commits between clusters |
+
+Group commits into time windows between boundaries. Each window is a candidate
+epic. Name it from the dominant document context (ADR title, blog phase name)
+or from the most-changed directory within it.
+
+If no boundaries are found: skip the epic layer entirely — create issues and
+standalones only.
+
+---
+
+## Step 4 — Classify commits
+
+The default is **functional** — every commit gets a ticket unless it meets the
+narrow trivial definition below. The Excluded Commits table should be small.
+When in doubt, include the commit in a ticket.
+
+**Trivial (no ticket — excluded table only):**
+- Pure typo fix ("fix typo", "spelling")
+- Pure whitespace / formatting ("fix whitespace", "fix formatting", "convert to Mermaid format")
+- Merge commits
+- That's it. If the commit does anything else — adds code, changes logic, updates
+  docs with substance — it belongs in a ticket.
+
+**Dependency bump (standalone ticket — always gets a ticket):**
+- Message contains: "bump" or "upgrade"
+- Gets its own standalone ticket even if it's a one-line change
+
+**Functional (cluster into issues — the vast majority):**
+- Everything that isn't trivial or a bump
+- Includes: refactors, renames, doc updates with content, config changes,
+  test additions, CI changes, chore commits with real work
+
+---
+
+## Step 5 — Cluster functional commits into issues
+
+Within each time window, group functional commits using this priority order:
+
+**Primary: conventional commit scope**
+
+Extract the scope from the commit subject using the pattern `type(scope): description`.
+Commits sharing the same scope form a cluster regardless of which files they touch.
+
+```
+feat(garden): add knowledge garden skill  → scope: garden
+fix(garden): fix garden indexing           → scope: garden
+docs(garden): add examples                 → scope: garden
+feat(marketplace): add plugin install      → scope: marketplace
+```
+
+This is a much stronger signal than file paths for repos using conventional commits —
+it reflects the author's own intent about what feature the commit belongs to.
+
+**Fallback: top-level directory**
+
+If no scope is present in a commit, group it by the top-level directory of its
+changed files. This applies to older commits or repos that don't use conventional
+commits.
+
+**Merge related scope clusters (most important step):**
+
+Before finalising individual issues, look for scopes that represent facets of
+the same feature area and collapse them into one issue:
+
+| Pattern | Example | Collapse to |
+|---------|---------|-------------|
+| Common prefix | `java-dev`, `java-code-review`, `java-git-commit` | "Add Java development skills" |
+| Same feature, split by layer | `marketplace`, `install-skills`, `uninstall-skills` | "Build marketplace and installation" |
+| Same tool, split by concern | `validation`, `validate-cso`, `validate-docs` | "Add skill validation framework" |
+
+The test: could these issues be reviewed and reverted together without leaving
+the repo in a broken state? If yes — they belong in one issue.
+
+Do NOT merge scopes that are genuinely independent features that happen to share
+a time window (`garden` and `marketplace` are separate even if committed on the
+same day).
+
+**Merge small clusters:**
+- A cluster with < 2 commits and a low-signal message ("fix", "wip", "update", "misc")
+  → absorb into the nearest related cluster, or promote to standalone
+
+**Split large clusters:**
+- A single scope with commits clearly spanning two unrelated feature areas
+  → split into two issues if each part is independently releasable
+
+**Naming issues from clusters:**
+- Collapsed multi-scope cluster: title describes the shared feature ("Add {common theme}")
+- Single scope cluster: title reflects the scope feature area ("Add {scope} skill/feature")
+- Directory-based cluster (fallback): title reflects the directory's purpose
+
+---
+
+## Step 6 — Validate epics
+
+An epic is only meaningful when it has a coherent scope that could have a real
+Definition of Done. Three gates must all pass:
+
+**Gate 1 — Minimum children:**
+- Children ≥ 2 → pass
+- Children = 1 → dissolve; child becomes standalone
+- Children = 0 → discard (only trivials in window)
+
+**Gate 2 — Maximum children:**
+- Children ≤ 8 → pass
+- Children > 8 → dissolve all children to standalone; this is a time bucket,
+  not a feature. No Definition of Done could meaningfully cover 9+ independent
+  deliverables.
+
+**Gate 3 — Scope coherence:**
+- Children span ≤ 3 distinct scopes → pass (coherent feature area)
+- Children span ≥ 4 distinct unrelated scopes → dissolve all to standalone;
+  this is a collection bucket formed by a temporal boundary, not a feature.
+
+All three gates must pass. If any fails, dissolve the epic — promote all its
+children to standalone issues.
+
+**Practical consequence:** repos built in a short sprint with one or two weak
+time boundaries (a tag, a single gap) will produce no epics at all. That is
+correct — standalone issues grouped by scope are more honest than artificial
+collection-bucket epics.
+
+**Never create a single-child epic. Never create a time-bucket epic.**
+
+---
+
+## Step 7 — Write the proposal document
+
+Write `docs/retro-issues.md` (create `docs/` if needed) using the structure in [proposal-format.md](proposal-format.md).
+
+For each ticket in the proposal, check `existing_issues` for a title or subject match:
+- **Match found** → use `#N (existing — {title})` as the placeholder; Step 8 will link commits to this issue rather than creating a new one
+- **No match** → use `#TBD` as the placeholder; Step 8 will create a new issue
+
+A match is suitable when the existing issue title covers the same feature area and the commits in the cluster would logically belong under it. Err on the side of linking — creating a duplicate is worse than a slightly loose match.
+
+Every non-trivial commit must appear under exactly one ticket. The Excluded Commits table should be short — if it's long, re-examine the trivial classification.
+
+Tell the user:
+> Proposal written to `docs/retro-issues.md`.
+> Review and edit it directly — adjust groupings, rename, merge, split,
+> or remove sections as needed.
+> When satisfied, say **YES** to create all issues on GitHub.
+
+Wait. Accept:
+- **YES** → read current `docs/retro-issues.md` state and proceed to Step 8
+- Any edit instruction → apply to the file, confirm, wait again
+
+---
+
+## Step 8 — Create issues on GitHub
+
+Read `docs/retro-issues.md` as the authoritative source. For each ticket:
+- **`#N (existing)`** → skip creation; record `#N` as the issue number and proceed to commit linking
+- **`#TBD`** → create a new issue; record the returned number
+
+Never create in parallel — order matters for issue numbers.
+
+**8a. Create epics:**
+
+For each epic, write the body to a temporary file, then:
+```bash
+python3 ~/.claude/skills/retro-issues/retro_create.py create-epic {owner/repo} \
+  --title "{epic title}" \
+  --body-file /tmp/epic-body-{N}.md
+```
+
+**Epic body template** (write to `/tmp/epic-body-{N}.md` before calling):
+```markdown
+## Overview
+{Inferred from doc references and commit summary. 2–4 sentences.}
+
+## Motivation
+{What drove this phase of work.}
+
+## Scope
+{Filled in after child issues are created.}
+
+## Definition of Done
+{Inferred from what was actually delivered — observable outcomes.}
+
+---
+*Retrospectively created. Covers {start-date} → {end-date}.*
+```
+
+Record each epic number from `ISSUE_NUMBER=N` output. Update `#TBD` placeholders in `docs/retro-issues.md`.
+
+**8b. Create child issues:**
+
+For each child issue, write the body to a temporary file, then:
+```bash
+python3 ~/.claude/skills/retro-issues/retro_create.py create-issue {owner/repo} \
+  --title "{child title}" \
+  --body-file /tmp/child-body-{N}.md \
+  --labels "{type-label}" \
+  --close yes
+```
+
+**Child issue body template** (write to `/tmp/child-body-{N}.md` before calling):
+```markdown
+## Context
+Part of epic #{epic-number} — {epic title}.
+Retrospectively created. Covers {start-date} → {end-date}.
+Key commits: {3–5 short hashes and messages}.
+
+## What
+{Inferred from commit messages and changed files. Outcome-focused.}
+
+## Acceptance Criteria
+- [ ] {Observable outcome inferred from what was delivered}
+
+## Notes
+{ADR / blog entry / design doc reference if relevant. Primary file paths changed.}
+```
+
+Output: `ISSUE_NUMBER=N` and `CLOSED=yes`.
+
+**8c. Update each epic's Scope checklist** with real child issue numbers:
+
+Write the updated body to a temporary file (same template as 8a but with real child issue numbers in Scope section), then:
+```bash
+python3 ~/.claude/skills/retro-issues/retro_create.py create-epic {owner/repo} \
+  --title "{epic title}" \
+  --body-file /tmp/epic-update-{N}.md
+```
+
+Note: `gh issue edit` is more appropriate here, but we use create-epic pattern for consistency. In practice, use `gh issue edit {epic-number} --body-file /tmp/epic-update-{N}.md --repo {owner/repo}` directly.
+
+**8d. Create standalone issues:**
+
+For each standalone issue, write the body to a temporary file, then:
+```bash
+python3 ~/.claude/skills/retro-issues/retro_create.py create-issue {owner/repo} \
+  --title "{title}" \
+  --body-file /tmp/standalone-body-{N}.md \
+  --labels "{type-label}" \
+  --close yes
+```
+
+**Standalone issue body template** (write to `/tmp/standalone-body-{N}.md` before calling):
+```markdown
+## Context
+Retrospectively created. Standalone — not part of any epic.
+Covers {date}. Key commits: {short hashes}.
+
+## What
+{Inferred from commit messages.}
+
+## Notes
+{Primary file paths changed.}
+```
+
+Output: `ISSUE_NUMBER=N` and `CLOSED=yes`.
+
+---
+
+## Step 9 — Summarise
+
+```
+✅ Retrospective mapping complete.
+
+Created {N} epics, {N} child issues, {N} standalone issues.
+All issues closed with retrospective note.
+
+Epic summary:
+  #{N} — {title} ({N} children)
+  #{N} — {title} ({N} children)
+
+Run `gh issue list --state closed --label epic` to review.
+```
+
+Then commit `docs/retro-issues.md` as a permanent audit trail:
+
+```bash
+python3 ~/.claude/skills/retro-issues/retro_create.py commit-mapping {project-path} \
+  --file docs/retro-issues.md
+```
+
+Output: `COMMITTED=yes`.
+
+**Why keep it:** GitHub issues record outcomes; `docs/retro-issues.md` records the *reasoning* — how commits were grouped, what was excluded and why. Useful when re-running retro-issues later (avoids re-analysis) and when investigating why a commit isn't linked to a specific issue.
+
+**Never delete it** and **never add it to `.gitignore`** — it is a permanent project artifact.
+
+Then offer the optional commit-amendment step (Step 10).
+
+---
+
+## Step 10 (Optional) — Amend historical commit messages
+
+Offered after Step 9. Rewrites git history to add `Refs #N` / `Closes #N` footers.
+Requires team coordination and a force push. Load [step10-amend.md](step10-amend.md) for the full workflow.
+
+---
+
+## Edge Cases
+
+| Situation | Handling |
+|-----------|---------|
+| No ADRs, blog, or design doc | Pure gap-based analysis; note lower confidence in groupings |
+| All commits in one time window | Skip epics; create issues and standalones only |
+| Existing closed GitHub issues | Warn about potential duplicates before creating |
+| Very large history (>500 commits) | Ask for date range before Step 2 |
+| Commits with no useful message ("wip", "fix") | Use file paths as primary grouping signal; note low-confidence title in proposal |
+| Monorepo with many unrelated areas | Ask which top-level directories to include before analysing |
+
+---
+
+## Common Pitfalls
+
+| Mistake | Why It's Wrong | Fix |
+|---------|----------------|-----|
+| Large Excluded Commits table | Most commits should have a ticket; a big exclusion list means mis-classification | Re-examine anything beyond pure typos, whitespace, and merge commits |
+| Commits with no ticket anywhere | Every non-trivial commit must appear under exactly one ticket | If it doesn't fit an existing cluster, it becomes a standalone |
+| Creating issues before user approves proposal | Permanent GitHub records from wrong groupings | Always write retro-issues.md first; never create until YES |
+| Single-child epic | No value over a standalone issue | Enforce 2-child minimum; dissolve during Step 6 |
+| Treating trivial commits as issues | Noise in issue tracker | Classify first; trivials go to Excluded table only |
+| Amending commits directly on main | If filter-repo fails mid-run, main is in unknown state | Always work on `retro-amended`; swap labels only after `git diff` confirms files identical |
+| Amending without team coordination | Others' local history diverges silently | Show force-push warning; require explicit YES; give `reset --hard` instructions |
+
+---
+
+## Success Criteria
+
+Retrospective mapping is complete when:
+- ✅ `docs/retro-issues.md` written and user confirmed with YES
+- ✅ `docs/retro-issues.md` committed as a permanent audit trail after issues are created
+- ✅ All epics created with 2+ children (none with fewer)
+- ✅ All child issues created, closed, and linked in epic Scope checklists
+- ✅ All standalones created and closed
+- ✅ All trivial commits listed in Excluded table with reasons
+- ✅ If commit amendment chosen: `retro-amended` branch verified with `git diff`, labels swapped, `${branch}-pre-retro` backup retained until team re-synced
+
+**Not complete** until all GitHub issues confirmed closed in `gh issue list`.
+
+---
+
+## Skill Chaining
+
+**Invoked by:** User directly via `/retro-issues`, or says "map history to issues",
+"backfill GitHub from git log", "retrospectively create issues".
+
+**Prerequisite:** Run `issue-workflow` Phase 0 (Setup) first to configure standard
+labels including `epic`. If labels are missing, the `--label "epic,..."` calls
+will fail.
+
+**Invokes:** Nothing — terminal skill.
+
+**Never invoked automatically by:** `issue-workflow`, `git-commit`, Work Tracking,
+or any session-start behaviour. Explicitly on-demand only.
