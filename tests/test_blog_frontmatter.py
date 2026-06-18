@@ -15,7 +15,7 @@ def test_valid_diary_entry():
         'type': 'phase-update',
         'entry_type': 'note',
         'subtype': 'diary',
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
     }
     assert validate_blog_entry_frontmatter(frontmatter) == []
 
@@ -26,7 +26,7 @@ def test_valid_article():
         'title': 'Test Article',
         'date': '2026-04-14',
         'entry_type': 'article',
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
         'tags': ['quarkus'],
     }
     assert validate_blog_entry_frontmatter(frontmatter) == []
@@ -38,7 +38,7 @@ def test_article_with_multiple_projects():
         'title': 'Test Article',
         'date': '2026-04-14',
         'entry_type': 'article',
-        'projects': ['cc-praxis', 'quarkus-flow'],
+        'projects': ['soredium', 'quarkus-flow'],
         'tags': ['quarkus', 'skills'],
     }
     assert validate_blog_entry_frontmatter(frontmatter) == []
@@ -50,7 +50,7 @@ def test_tags_optional():
         'title': 'Test',
         'date': '2026-04-14',
         'entry_type': 'article',
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
     }
     assert validate_blog_entry_frontmatter(frontmatter) == []
 
@@ -61,7 +61,7 @@ def test_missing_entry_type():
         'title': 'Test',
         'date': '2026-04-14',
         'type': 'phase-update',
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
     }
     errors = validate_blog_entry_frontmatter(frontmatter)
     assert any('entry_type' in e for e in errors)
@@ -73,7 +73,7 @@ def test_invalid_entry_type():
         'title': 'Test',
         'date': '2026-04-14',
         'entry_type': 'diary',  # wrong — diary is a subtype, not an entry_type
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
     }
     errors = validate_blog_entry_frontmatter(frontmatter)
     assert any('entry_type' in e for e in errors)
@@ -111,7 +111,7 @@ def test_projects_not_a_list():
         'date': '2026-04-14',
         'entry_type': 'note',
         'subtype': 'diary',
-        'projects': 'cc-praxis',  # should be a list
+        'projects': 'soredium',  # should be a list
     }
     errors = validate_blog_entry_frontmatter(frontmatter)
     assert any('projects' in e for e in errors)
@@ -123,7 +123,7 @@ def test_note_missing_subtype():
         'title': 'Test',
         'date': '2026-04-14',
         'entry_type': 'note',
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
     }
     errors = validate_blog_entry_frontmatter(frontmatter)
     assert any('subtype' in e for e in errors)
@@ -135,7 +135,7 @@ def test_article_no_subtype_required():
         'title': 'Test',
         'date': '2026-04-14',
         'entry_type': 'article',
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
     }
     assert validate_blog_entry_frontmatter(frontmatter) == []
 
@@ -146,7 +146,7 @@ def test_tags_must_be_list():
         'title': 'Test',
         'date': '2026-04-14',
         'entry_type': 'article',
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
         'tags': 'quarkus',  # should be a list
     }
     errors = validate_blog_entry_frontmatter(frontmatter)
@@ -160,6 +160,6 @@ def test_article_no_type_field_required():
         'title': 'Test',
         'date': '2026-04-14',
         'entry_type': 'article',
-        'projects': ['cc-praxis'],
+        'projects': ['soredium'],
     }
     assert validate_blog_entry_frontmatter(frontmatter) == []

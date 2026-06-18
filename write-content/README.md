@@ -314,4 +314,4 @@ The term **mode** comes from Newman and Anker — deepest lineage (1827) and alr
 
 **The multi-mode document** — every framework assumes a document has one mode. Technical documentation (arc42stories, CLAUDE.md, platform guides) has multiple modes across sections. None of the five frameworks address this. write-content addresses it by declaring a mode map per multi-mode form, allowing the correct mode to be selected per section.
 
-Full research notes: `docs/content-taxonomy-article-notes.md` in the cc-praxis project repo.
+Full research notes: `docs/content-taxonomy-article-notes.md` in the soredium project repo.

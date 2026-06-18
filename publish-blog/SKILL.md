@@ -162,7 +162,7 @@ Then commit and push the copied files:
 python3 ~/.claude/skills/publish-blog/blog_publish.py commit-destination \
   "<dest_path>" \
   "files=<subdir>/<filename1>,<subdir>/<filename2>" \
-  "message=chore: publish blog entries from cc-praxis"
+  "message=chore: publish blog entries from soredium"
 ```
 
 Expected output: `COMMITTED=yes, PUSHED=yes` (or `PUSHED=no` if push fails)
@@ -240,13 +240,13 @@ extends: ~/.claude/blog-routing.yaml
 destinations:
   project-blog:
     type: git
-    path: ~/cc-praxis-blog/
+    path: ~/soredium-blog/
     subdir: _posts/
 
 rules:
   - match:
       entry_type: article
-      projects: [cc-praxis]
+      projects: [soredium]
     destinations: [personal-blog, project-blog]
 ```
 
@@ -256,7 +256,7 @@ rules:
 |-------------------|-------------|
 | `entry_type: article` | Exact string match |
 | `tags: [quarkus]` | Entry must have at least one of these tags |
-| `projects: [cc-praxis]` | Entry must belong to at least one of these projects |
+| `projects: [soredium]` | Entry must belong to at least one of these projects |
 | Multiple fields | AND logic — all must match |
 | Multiple matching rules | Destinations are unioned |
 | No matching rules | Entry goes to `defaults.destinations` |

@@ -97,7 +97,7 @@ Do not use CLAUDE.md parsing for path detection. The `proj/` → project and
 
 Verify consistency with:
 ```bash
-grep -l "readlink -f proj" ~/claude/cc-praxis/*/SKILL.md
+grep -l "readlink -f proj" ~/claude/hortora/soredium/*/SKILL.md
 ```
 
 ---

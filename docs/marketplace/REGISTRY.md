@@ -6,13 +6,13 @@ Official Claude Code marketplace using standard `marketplace.json` format.
 
 **Official Claude Code discovery:**
 ```bash
-/plugin marketplace add github.com/mdproctor/cc-praxis
+/plugin marketplace add github.com/Hortora/soredium
 ```
 
 **Install with dependency resolution:**
 ```bash
-git clone https://github.com/mdproctor/cc-praxis
-cd cc-praxis
+git clone https://github.com/Hortora/soredium
+cd soredium
 scripts/claude-skill install java-dev
 scripts/claude-skill install quarkus-flow-dev  # Auto-installs java-dev dependency
 ```
@@ -66,12 +66,12 @@ scripts/claude-skill uninstall java-dev
    ```
 
 3. **Update marketplace:**
-   - Fork `github.com/mdproctor/cc-praxis`
+   - Fork `github.com/Hortora/soredium`
    - Edit `.claude-plugin/marketplace.json`, add plugin entry:
      ```json
      {
        "name": "your-skill-name",
-       "source": "https://github.com/mdproctor/cc-praxis",
+       "source": "https://github.com/Hortora/soredium",
        "path": "your-skill-name",
        "description": "Your skill description",
        "version": "1.0.0"
@@ -89,7 +89,7 @@ scripts/claude-skill uninstall java-dev
 
 ```json
 {
-  "name": "cc-praxis",
+  "name": "soredium",
   "description": "Java/Quarkus development skills for Claude Code",
   "owner": {
     "name": "Mark Proctor",
@@ -98,7 +98,7 @@ scripts/claude-skill uninstall java-dev
   "plugins": [
     {
       "name": "skill-name",
-      "source": "https://github.com/mdproctor/cc-praxis",
+      "source": "https://github.com/Hortora/soredium",
       "path": "skill-name",
       "description": "Skill description",
       "version": "1.0.0"
@@ -146,4 +146,4 @@ Each skill has `.claude-plugin/plugin.json`:
 ## Support
 
 Questions or issues:
-- Marketplace issues: `github.com/mdproctor/cc-praxis/issues`
+- Marketplace issues: `github.com/Hortora/soredium/issues`

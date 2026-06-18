@@ -1859,7 +1859,7 @@ This work was developed iteratively with Claude (Anthropic) as a research and dr
 
 ### A. Skill and Writing Style Work (no research needed — do next)
 
-**A1. Commit uncommitted cc-praxis changes**
+**A1. Commit uncommitted soredium changes**
 Files modified, not yet committed:
 - `docs/prompt-snippets.md` — canonical workflow snippet
 - `writing-styles/blog-technical.md` — bullet/table guidance updates

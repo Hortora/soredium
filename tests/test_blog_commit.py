@@ -149,7 +149,7 @@ class TestPostTypeConventions(unittest.TestCase):
         )
 
     def test_new_post_with_body(self):
-        msg = "post(cc-praxis): introducing the cc-praxis skills collection\n\nOverview of the Java/Quarkus skills and universal principles."
+        msg = "post(soredium): introducing the soredium skills collection\n\nOverview of the Java/Quarkus skills and universal principles."
         self.assertEqual(validate_blog_commit(msg), [])
 
     def test_new_post_no_scope_valid(self):

@@ -415,7 +415,7 @@ def test_sprint_repo_produces_no_epics() -> None:
     """A repo built in a short sprint with one weak boundary (e.g. a tag)
     produces two large windows — both will fail Gate 2 or Gate 3 and dissolve.
     The correct output is standalone issues grouped by scope, not time-bucket epics."""
-    # Simulate the cc-praxis situation: one v1.0.0 tag → 2 windows
+    # Simulate the soredium situation: one v1.0.0 tag → 2 windows
     # Window 1: 121 commits across many scopes
     window_1_scopes = {
         "marketplace", "garden", "write-blog", "validation",

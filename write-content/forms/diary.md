@@ -271,7 +271,7 @@ Does this session contain at least one of:
 - A future idea beginning to crystallise
 - Anything that would be worth reading independently of the action sequence
 
-If the session was a pure action sequence — tasks completed, branches closed, commits landed, cleanup done — with none of the above: **do not write this entry.** Ask first: does the insight actually belong in a different project's diary (e.g. methodology work → cc-praxis diary, tooling discovery → garden entry)?
+If the session was a pure action sequence — tasks completed, branches closed, commits landed, cleanup done — with none of the above: **do not write this entry.** Ask first: does the insight actually belong in a different project's diary (e.g. methodology work → soredium diary, tooling discovery → garden entry)?
 
 If worthiness is confirmed, extract from conversation context. Only ask for what's genuinely unclear:
 - What was the goal?

@@ -1,6 +1,6 @@
 # Prompt Snippets
 
-Ready-to-paste workflow prompts for Claude Code sessions. These apply to any project using cc-praxis skills.
+Ready-to-paste workflow prompts for Claude Code sessions. These apply to any project using soredium skills.
 
 ---
 

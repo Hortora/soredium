@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
-GITHUB_URL = "https://raw.githubusercontent.com/mdproctor/cc-praxis/main/docs/config-architecture.md"
+GITHUB_URL = "https://raw.githubusercontent.com/Hortora/soredium/main/docs/config-architecture.md"
 FRESH_CONTENT = "# Claude Configuration Architecture\n\n> **Source:** " + GITHUB_URL
 STALE_CONTENT = "# Claude Configuration Architecture\n\n> OLD VERSION"
 

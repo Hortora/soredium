@@ -1,4 +1,4 @@
-# cc-praxis — Skills Catalog
+# soredium — Skills Catalog
 
 > For installation and getting started: [README.md](../README.md) · For skills architecture: [architecture.md](architecture.md)
 
@@ -58,7 +58,7 @@ Python-specific health checks extending the universal project-health skill:
 
 ### Setup & Management
 
-#### **cc-praxis-ui**
+#### **soredium-ui**
 Visual skill manager — a local web app for browsing, installing, updating, and uninstalling skills:
 - Browse all 48 skills by bundle with descriptions and chaining relationships
 - Live install state: see what's installed, what's outdated, and what's available
@@ -66,7 +66,7 @@ Visual skill manager — a local web app for browsing, installing, updating, and
 - Auto Execute mode runs commands directly; Manual mode shows commands to copy-paste
 - Context-aware: when served publicly (GitHub Pages) the Install tab is hidden
 
-**Launch:** `/cc-praxis-ui` inside Claude Code, or `cc-praxis` in a terminal (added to PATH on plugin install).
+**Launch:** `/soredium-ui` inside Claude Code, or `soredium` in a terminal (added to PATH on plugin install).
 
 **Server:** `python3 scripts/web_installer.py [--port PORT] [--no-browser]`
 

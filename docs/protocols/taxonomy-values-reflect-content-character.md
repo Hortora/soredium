@@ -3,7 +3,7 @@ id: PP-20260522-6e976f
 title: "Taxonomy subtype values must reflect the character of the content, not technical aesthetics"
 type: principle
 scope: repo
-applies_to: "any taxonomy value additions or renames in cc-praxis blog/note schema"
+applies_to: "any taxonomy value additions or renames in soredium blog/note schema"
 severity: important
 refs:
   - docs/superpowers/specs/2026-05-22-diary-to-log-sweep-design.md

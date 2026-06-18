@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pause stack manager for cc-praxis workspace lifecycle.
+Pause stack manager for soredium workspace lifecycle.
 
 The pause stack is a YAML file (.pause-stack) on workspace main that tracks
 branches paused mid-work. Shared across work-pause, work-resume, the work

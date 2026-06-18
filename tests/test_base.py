@@ -1,5 +1,5 @@
 """
-Shared base classes and helpers for the cc-praxis test suite.
+Shared base classes and helpers for the soredium test suite.
 
 Severity helpers
 ----------------

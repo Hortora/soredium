@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-3-layer artifact routing resolver for cc-praxis workspaces.
+3-layer artifact routing resolver for soredium workspaces.
 
 Layer 1 (built-in default): project
 Layer 2 (global):           ~/.claude/CLAUDE.md  §## Routing **Default destination:**

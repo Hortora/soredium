@@ -112,14 +112,14 @@ class TestClaudeMdParsing:
         claude_md = """
 # Project
 
-GitHub repo: mdproctor/cc-praxis
+GitHub repo: Hortora/soredium
 """
         repo = init_repo(tmp_path / "repo", claude_md)
         result = run_ctx(repo)
         data = parse(result)
 
         assert result.returncode == 0
-        assert data["OWNER_REPO"] == "mdproctor/cc-praxis"
+        assert data["OWNER_REPO"] == "Hortora/soredium"
 
     def test_owner_repo_empty_when_missing(self, tmp_path):
         """OWNER_REPO empty when CLAUDE.md has no GitHub repo."""
@@ -210,7 +210,7 @@ issue: 99
 
     def test_issue_repo_defaults_to_owner_repo(self, tmp_path):
         """ISSUE_REPO falls back to OWNER_REPO when issue-repo absent."""
-        claude_md = "GitHub repo: mdproctor/cc-praxis"
+        claude_md = "GitHub repo: Hortora/soredium"
         meta_content = """branch: issue-123-test
 issue: 123
 """
@@ -222,8 +222,8 @@ issue: 123
         data = parse(result)
 
         assert result.returncode == 0
-        assert data["OWNER_REPO"] == "mdproctor/cc-praxis"
-        assert data["ISSUE_REPO"] == "mdproctor/cc-praxis"
+        assert data["OWNER_REPO"] == "Hortora/soredium"
+        assert data["ISSUE_REPO"] == "Hortora/soredium"
 
     def test_meta_read_from_workspace_not_project(self, tmp_path):
         """Verify .meta is read from workspace, not project, in dual-repo mode."""
@@ -652,11 +652,11 @@ class TestClaudeMdFields:
     def test_blog_dir_extracted(self, tmp_path):
         """BLOG_DIR extracted from '**Blog directory:** `path`'."""
         claude_md = """
-**Blog directory:** `/Users/mdproctor/claude/public/cc-praxis/blog/`
+**Blog directory:** `/Users/mdproctor/claude/public/soredium/blog/`
 """
         repo = init_repo(tmp_path / "repo", claude_md)
         data = parse(run_ctx(repo))
-        assert data["BLOG_DIR"] == "/Users/mdproctor/claude/public/cc-praxis/blog/"
+        assert data["BLOG_DIR"] == "/Users/mdproctor/claude/public/soredium/blog/"
 
     def test_blog_dir_empty_when_missing(self, tmp_path):
         """BLOG_DIR empty when not in CLAUDE.md."""
@@ -665,13 +665,13 @@ class TestClaudeMdFields:
         assert data["BLOG_DIR"] == ""
 
     def test_project_name_extracted(self, tmp_path):
-        """PROJECT_NAME extracted from '**Name:** cc-praxis'."""
+        """PROJECT_NAME extracted from '**Name:** soredium'."""
         claude_md = """
-**Name:** cc-praxis
+**Name:** soredium
 """
         repo = init_repo(tmp_path / "repo", claude_md)
         data = parse(run_ctx(repo))
-        assert data["PROJECT_NAME"] == "cc-praxis"
+        assert data["PROJECT_NAME"] == "soredium"
 
     def test_project_name_empty_when_missing(self, tmp_path):
         """PROJECT_NAME empty when not in CLAUDE.md."""

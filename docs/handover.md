@@ -1,7 +1,7 @@
-# Session Handoff — cc-praxis Health & Refine Trial
+# Session Handoff — soredium Health & Refine Trial
 
 **Date:** 2026-04-02
-**Repository:** github.com/mdproctor/cc-praxis
+**Repository:** github.com/Hortora/soredium
 **Working directory:** /Users/mdproctor/claude/skills
 **Previous session ID:** The long session that designed and implemented health/refine (session ending ~2026-04-02, working directory /Users/mdproctor/claude/skills)
 **Head commit:** `1117346`

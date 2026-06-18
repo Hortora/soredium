@@ -34,7 +34,7 @@ TRAILING_PUNCT = '.,:;!?)}>'
 # HTTP status codes that indicate bot-blocking (treat as OK)
 BOT_BLOCKING_CODES = {403, 429, 503}
 
-USER_AGENT = 'cc-praxis-validator/1.0'
+USER_AGENT = 'soredium-validator/1.0'
 
 URL_PATTERN = re.compile(r'https?://[^\s\)\]\>"\']+')
 

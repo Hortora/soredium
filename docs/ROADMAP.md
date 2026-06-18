@@ -1,4 +1,4 @@
-# cc-praxis Roadmap
+# soredium Roadmap
 
 Planned improvements to the skill collection and validation framework.
 These are aspirational items — not committed timelines.

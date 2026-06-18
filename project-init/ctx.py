@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Context resolver for cc-praxis workspace-aware skills.
+Context resolver for soredium workspace-aware skills.
 Prints KEY=value lines consumed by work-start, work-end, work-pause, work-resume, handover etc.
 Works whether Claude opened in the workspace or the project repo.
 

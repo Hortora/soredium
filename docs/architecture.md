@@ -1,4 +1,4 @@
-# cc-praxis — Skills Architecture
+# soredium — Skills Architecture
 
 > For installation and getting started: [README.md](../README.md) · For the full skill catalog: [skills-catalog.md](skills-catalog.md)
 

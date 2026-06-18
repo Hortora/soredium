@@ -1,4 +1,4 @@
-# Retrospective Issue Mapping — cc-praxis v1.0.0..HEAD
+# Retrospective Issue Mapping — soredium (formerly cc-praxis) v1.0.0..HEAD
 
 **Range:** 2026-03-31 → 2026-04-07
 **Total commits analyzed:** 184
@@ -463,5 +463,5 @@ Total: 184
 
 ---
 
-*Generated: 2026-04-07 | Repo: mdproctor/cc-praxis | Scope: v1.0.0..HEAD*
+*Generated: 2026-04-07 | Repo: Hortora/soredium (formerly mdproctor/cc-praxis) | Scope: v1.0.0..HEAD*
 *This file is a permanent audit trail of the grouping rationale. Do not delete after creating issues.*

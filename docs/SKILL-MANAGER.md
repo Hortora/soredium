@@ -1,6 +1,6 @@
-# cc-praxis Skill Manager — User Guide
+# soredium Skill Manager — User Guide
 
-The skill manager is a web interface for browsing, installing, and managing cc-praxis skills. It gives you a visual overview of all 48 skills, shows what's installed on your machine, and lets you install or remove skills with one click.
+The skill manager is a web interface for browsing, installing, and managing soredium skills. It gives you a visual overview of all 48 skills, shows what's installed on your machine, and lets you install or remove skills with one click.
 
 ---
 
@@ -10,7 +10,7 @@ The skill manager is a web interface for browsing, installing, and managing cc-p
 
 In any Claude Code session:
 
-> "Open cc-praxis" or "launch the skill manager"
+> "Open soredium" or "launch the skill manager"
 
 Claude starts the local server and opens your browser automatically.
 
@@ -20,10 +20,10 @@ Claude starts the local server and opens your browser automatically.
 python3 scripts/web_installer.py
 ```
 
-Or, if the plugin is installed and `cc-praxis` is on your PATH:
+Or, if the plugin is installed and `soredium` is on your PATH:
 
 ```bash
-cc-praxis
+soredium
 ```
 
 Both open `http://localhost:8765`.
@@ -36,11 +36,11 @@ If you visit the skill manager on GitHub Pages, the **Install** tab is hidden. Y
 
 ## The Three Tabs
 
-![The cc-praxis header with About, Browse, and Install tabs](images/header.png)
+![The soredium header with About, Browse, and Install tabs](images/header.png)
 
 | Tab | Purpose |
 |-----|---------|
-| **About** | Overview — what cc-praxis does, how skills work, which languages are supported |
+| **About** | Overview — what soredium does, how skills work, which languages are supported |
 | **Browse** | Explore all 48 skills with descriptions and the interactive chain graph |
 | **Install** | See what's installed on your machine and manage it |
 
@@ -118,7 +118,7 @@ This is the same install flow as the Install tab — it opens the confirmation m
 
 ## Understanding Skill Relationships
 
-Skills in cc-praxis form a connected system. There are three kinds of relationships.
+Skills in soredium form a connected system. There are three kinds of relationships.
 
 ### Chains To
 
@@ -297,7 +297,7 @@ The label shows the real count of what will be removed, not the total bundle siz
 | **Uninstall** | Removes installed skills |
 | **Update** | Brings *all installed* skills to their latest version as a set |
 
-Skills in cc-praxis are designed to work together as a consistent set. `java-code-review` references conventions defined in `java-dev`. `git-commit` routes to specialists sharing the same commit format. Running different versions of related skills can cause subtle inconsistencies.
+Skills in soredium are designed to work together as a consistent set. `java-code-review` references conventions defined in `java-dev`. `git-commit` routes to specialists sharing the same commit format. Running different versions of related skills can cause subtle inconsistencies.
 
 The update modal shows exactly what changes and links to the release notes:
 

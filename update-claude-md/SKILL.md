@@ -45,11 +45,11 @@ Projects can provide a project-specific config-architecture by adding to their C
 ```
 **Config architecture:** https://raw.githubusercontent.com/<owner>/<repo>/main/docs/config-architecture.md
 ```
-If present, that URL is used. Otherwise falls back to the generic cc-praxis version.
+If present, that URL is used. Otherwise falls back to the generic soredium version.
 
 ```bash
 CONFIG_FILE="$HOME/.claude/config-architecture.md"
-GENERIC_URL="https://raw.githubusercontent.com/mdproctor/cc-praxis/main/docs/config-architecture.md"
+GENERIC_URL="https://raw.githubusercontent.com/Hortora/soredium/main/docs/config-architecture.md"
 
 # Check for project-specific config-architecture URL in CLAUDE.md
 PROJECT_URL=$(grep -m1 "^\*\*Config architecture:\*\*" CLAUDE.md 2>/dev/null | sed 's/\*\*Config architecture:\*\* *//')

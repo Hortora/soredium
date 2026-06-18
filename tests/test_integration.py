@@ -300,11 +300,11 @@ class TestSingleSubmissionMergeCycle(unittest.TestCase):
         new_id = f"GE-{counter + 1:04d}"
 
         filename = self.garden.add_submission(
-            new_id, "SVG textPath dy unreliable on curves", "cc-praxis",
+            new_id, "SVG textPath dy unreliable on curves", "soredium",
             sub_type="gotcha"
         )
         self.garden.increment_counter(new_id)
-        self.garden.commit(f"submit(cc-praxis): {new_id} 'SVG textPath dy unreliable'",
+        self.garden.commit(f"submit(soredium): {new_id} 'SVG textPath dy unreliable'",
                            f"submissions/{filename}", "GARDEN.md")
 
         # Harvest: list submissions via git ls-tree
@@ -325,10 +325,10 @@ class TestSingleSubmissionMergeCycle(unittest.TestCase):
 
         # Forage submits
         filename = self.garden.add_submission(
-            new_id, "SVG textPath dy unreliable on curves", "cc-praxis"
+            new_id, "SVG textPath dy unreliable on curves", "soredium"
         )
         self.garden.increment_counter(new_id)
-        self.garden.commit(f"submit(cc-praxis): {new_id}",
+        self.garden.commit(f"submit(soredium): {new_id}",
                            f"submissions/{filename}", "GARDEN.md")
 
         # Harvest merges: write entry to garden file, update index, remove submission

@@ -1,6 +1,6 @@
-# cc-praxis — Design
+# soredium — Design
 
-Architectural decisions for the cc-praxis skill collection. Conventions and workflow rules live in `CLAUDE.md`; skill documentation lives in `README.md`. This file captures the *why* behind structural choices.
+Architectural decisions for the soredium skill collection. Conventions and workflow rules live in `CLAUDE.md`; skill documentation lives in `README.md`. This file captures the *why* behind structural choices.
 
 ---
 
@@ -18,7 +18,7 @@ Skills write methodology artifacts to a companion workspace directory (`~/claude
 
 **Resolved:**
 - Claude Code follows a CLAUDE.md symlink for session initialisation — confirmed via smoke test on cccli (2026-04-13).
-- cc-praxis does not use the workspace model — its CLAUDE.md is a public artifact committed to the repo, not personal workflow config. Opening Claude in the project directory is the correct workflow.
+- soredium does not use the workspace model — its CLAUDE.md is a public artifact committed to the repo, not personal workflow config. Opening Claude in the project directory is the correct workflow.
 
 **Workspace mode detection (java-update-design):** Workspace mode was previously detected by checking for an `epic-*` branch prefix. This broke silently for `issue-NNN-*` branches — every commit wrote directly to `DESIGN.md`, bypassing the journal with no error. The fix uses three conditions: `.meta` exists, `JOURNAL.md` exists, workspace not on main. Branch name plays no part. (Refs cc-praxis#94)
 
@@ -56,7 +56,7 @@ The blog skill uses a four-layer architecture to separate universal craft rules 
 
 ## Issue Tracking Infrastructure
 
-Work Tracking is enabled in cc-praxis CLAUDE.md and wired into all four commit skills.
+Work Tracking is enabled in soredium CLAUDE.md and wired into all four commit skills.
 
 **Key decisions:**
 
@@ -70,7 +70,7 @@ Work Tracking is enabled in cc-praxis CLAUDE.md and wired into all four commit s
 
 ## Knowledge Garden
 
-The `garden` skill was removed from cc-praxis and the entire knowledge garden system was migrated to the hortora project. The garden now lives at `~/.hortora/garden/` (via `HORTORA_GARDEN` env var; legacy symlink `~/claude/knowledge-garden/` preserved). The replacement skills — `forage` (session-time capture) and `harvest` (deduplication) — ship from hortora/soredium and are installed into `~/.claude/skills/` alongside cc-praxis skills.
+The `garden` skill was removed from the skill collection and the entire knowledge garden system was migrated to the hortora project. The garden now lives at `~/.hortora/garden/` (via `HORTORA_GARDEN` env var; legacy symlink `~/claude/knowledge-garden/` preserved). The replacement skills — `forage` (session-time capture) and `harvest` (deduplication) — ship from soredium and are installed into `~/.claude/skills/`.
 
 Use `forage` for session-time capture and `harvest` for deduplication. The `garden` skill is gone.
 

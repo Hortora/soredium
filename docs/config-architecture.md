@@ -1,6 +1,6 @@
 # Claude Configuration Architecture
 
-> **Source:** https://raw.githubusercontent.com/mdproctor/cc-praxis/main/docs/config-architecture.md  
+> **Source:** https://raw.githubusercontent.com/Hortora/soredium/main/docs/config-architecture.md  
 > **Installed to:** `~/.claude/config-architecture.md` — refreshed daily by `update-claude-md`  
 > **Project override:** set `**Config architecture:** <url>` in CLAUDE.md to use a project-specific version instead
 

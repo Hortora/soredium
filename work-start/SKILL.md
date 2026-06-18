@@ -194,7 +194,7 @@ PROJECT_GITHUB_REPO=$(grep "GitHub repo:" "$PROJECT/CLAUDE.md" | head -1 | sed '
 **Cross-repo detection (work-start owns this — workspace concern):**
 
 If the work description or invocation argument contains a ref of the form `<repo-name>#N`
-(e.g., `cc-praxis#94`) where `<repo-name>` does not match the project repo name:
+(e.g., `soredium#94`) where `<repo-name>` does not match the project repo name:
 - Extract `ISSUE_N = N`, `ISSUE_REPO_NAME = <repo-name>`
 - Resolve: `ISSUE_REPO_GITHUB = "<org>/$ISSUE_REPO_NAME"` using the org from `$PROJECT_GITHUB_REPO`
 - Confirm with the user: "Tracking cross-repo issue $ISSUE_REPO_GITHUB#$ISSUE_N — correct? (y/n)"

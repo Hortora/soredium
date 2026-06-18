@@ -243,7 +243,7 @@ Returns the parsed content of `.claude-plugin/marketplace.json`.
 
 | # | Test | Setup | Expected Response |
 |---|------|-------|-------------------|
-| 2.2.1 | 🔴 Returns full marketplace JSON | File exists at known path | Body matches file content; `"name": "cc-praxis"` present |
+| 2.2.1 | 🔴 Returns full marketplace JSON | File exists at known path | Body matches file content; `"name": "soredium"` present |
 | 2.2.2 | 🔴 File not found: 500 with error message | marketplace.json deleted | HTTP 500; body contains error description |
 | 2.2.3 | 🟡 Malformed JSON: 500 | marketplace.json is not valid JSON | HTTP 500; no crash/traceback leaked to client |
 | 2.2.4 | 🟡 Response Content-Type is `application/json` | Valid file | `Content-Type: application/json` |
@@ -325,7 +325,7 @@ older than, equal to, or newer than `1.0.0`. Document the rule in `web_installer
 
 | # | Test | Request | Expected |
 |---|------|---------|----------|
-| 2.7.1 | 🔴 Root path serves index.html | `GET /` | HTTP 200; `Content-Type: text/html`; body contains `<title>cc-praxis` |
+| 2.7.1 | 🔴 Root path serves index.html | `GET /` | HTTP 200; `Content-Type: text/html`; body contains `<title>soredium` |
 | 2.7.2 | 🔴 Unknown path: 404 | `GET /nonexistent` | HTTP 404 |
 | 2.7.3 | 🟡 index.html not found: 500 | `docs/index.html` deleted | HTTP 500 or 404 with clear error |
 | 2.7.4 | 🟡 Path traversal rejected | `GET /../../../etc/passwd` | HTTP 400 or 404; file not served |

@@ -115,7 +115,7 @@ Tag release:
 
 Verify:
 
-- [ ] Tag visible on GitHub: `https://github.com/mdproctor/cc-praxis/releases`
+- [ ] Tag visible on GitHub: `https://github.com/Hortora/soredium/releases`
 - [ ] Test install: `scripts/claude-skill install <skill-name>`
 
 ## Multi-Skill Releases
