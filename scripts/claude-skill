@@ -22,6 +22,10 @@ MARKETPLACE_URL = "https://raw.githubusercontent.com/Hortora/soredium/main/.clau
 SKILLS_DIR = Path(os.environ.get('CLAUDE_SKILLS_DIR', str(Path.home() / '.claude' / 'skills')))
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
+HOOK_SOURCE = Path(__file__).parent.parent / "hooks" / "check_project_setup.sh"
+HOOK_DEST = Path.home() / ".claude" / "hooks" / "check_project_setup.sh"
+HOOK_COMMAND = "~/.claude/hooks/check_project_setup.sh"
+
 
 # ---------------------------------------------------------------------------
 # Network helpers
@@ -226,6 +230,80 @@ def cmd_uninstall_all(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Hook management
+# ---------------------------------------------------------------------------
+
+def is_hook_registered(settings_path: Path = SETTINGS_PATH) -> bool:
+    """Return True if the session-start hook is already in settings.json."""
+    if not settings_path.exists():
+        return False
+    try:
+        settings = json.loads(settings_path.read_text())
+        for group in settings.get("hooks", {}).get("SessionStart", []):
+            for hook in group.get("hooks", []):
+                if hook.get("command") == HOOK_COMMAND:
+                    return True
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass
+    return False
+
+
+def register_hook(settings_path: Path = SETTINGS_PATH) -> None:
+    """Add the session-start hook to settings.json, preserving existing content."""
+    settings: dict = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            pass
+
+    session_start = settings.setdefault("hooks", {}).setdefault("SessionStart", [])
+    new_hook = {"type": "command", "command": HOOK_COMMAND}
+
+    if session_start:
+        session_start[0].setdefault("hooks", []).append(new_hook)
+    else:
+        session_start.append({"hooks": [new_hook]})
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=4))
+
+
+def sync_hook(
+    hook_source: Path = HOOK_SOURCE,
+    hook_dest: Path = HOOK_DEST,
+    settings_path: Path = SETTINGS_PATH,
+) -> str:
+    """
+    Sync the session-start hook from repo source to ~/.claude/hooks/.
+
+    Returns one of: 'installed', 'updated', 'up-to-date', 'registered', 'no-source'
+    """
+    if not hook_source.exists():
+        return 'no-source'
+
+    source_content = hook_source.read_text()
+    hook_dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if not hook_dest.exists():
+        hook_dest.write_text(source_content)
+        hook_dest.chmod(0o755)
+        status = 'installed'
+    elif hook_dest.read_text() != source_content:
+        hook_dest.write_text(source_content)
+        status = 'updated'
+    else:
+        status = 'up-to-date'
+
+    if not is_hook_registered(settings_path):
+        register_hook(settings_path)
+        if status == 'up-to-date':
+            status = 'registered'
+
+    return status
+
+
+# ---------------------------------------------------------------------------
 # Local development sync
 # ---------------------------------------------------------------------------
 
@@ -242,7 +320,7 @@ def cmd_sync_local(args: argparse.Namespace) -> None:
     With --all, also installs skills from the repo not yet present.
     """
     repo_root = get_repo_root()
-    excluded = {'.git', '.claude-plugin', 'scripts', '.claude'}
+    excluded = {'.git', 'docs', 'scripts', 'tests', '__pycache__', '.claude'}
 
     local_skills = sorted(
         [d for d in repo_root.iterdir()
@@ -255,6 +333,7 @@ def cmd_sync_local(args: argparse.Namespace) -> None:
         return
 
     if getattr(args, 'skills', None):
+        # Install/update only the specified skills, regardless of current state
         requested = set(args.skills)
         unknown = requested - {s.name for s in local_skills}
         if unknown:
@@ -310,6 +389,16 @@ def cmd_sync_local(args: argparse.Namespace) -> None:
 
     print(f"\n{synced}/{len(to_sync)} skills synced.")
 
+    hook_status = sync_hook()
+    hook_messages = {
+        'installed':  '🔗 Session-start hook installed and registered',
+        'updated':    '✅ Session-start hook updated from repo',
+        'up-to-date': '✅ Session-start hook up to date',
+        'registered': '✅ Session-start hook registered in settings.json',
+        'no-source':  '⚠️  Hook source missing from repo (hooks/check_project_setup.sh)',
+    }
+    print(hook_messages[hook_status])
+
 
 def cmd_list(args: argparse.Namespace) -> None:
     """List installed skills."""
@@ -333,7 +422,7 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Claude Code skill installer for Hortora/soredium"
+        description="Claude Code skill installer with dependency resolution"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -360,7 +449,7 @@ def main() -> int:
     )
     sync_parser.add_argument(
         "--skills", nargs="+", metavar="SKILL",
-        help="Sync only these specific skills"
+        help="Sync only these specific skills (installs them even if not yet present)"
     )
     sync_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
 
