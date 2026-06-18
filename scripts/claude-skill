@@ -320,7 +320,7 @@ def cmd_sync_local(args: argparse.Namespace) -> None:
     With --all, also installs skills from the repo not yet present.
     """
     repo_root = get_repo_root()
-    excluded = {'.git', 'docs', 'scripts', 'tests', '__pycache__', '.claude'}
+    excluded = {'.git', '.claude-plugin', 'docs', 'scripts', 'tests', '__pycache__', '.claude'}
 
     local_skills = sorted(
         [d for d in repo_root.iterdir()
