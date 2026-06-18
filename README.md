@@ -1,127 +1,124 @@
-# soredium
+# Soredium
 
-The engine for Hortora gardens — validators, CI scripts, GitHub Actions workflows, and Claude skills.
+Development workflow and knowledge garden skills for Claude Code.
 
 > A soredium is a lichen's dispersal unit: a self-contained bundle that carries everything needed to establish a new colony wherever it lands.
 
----
+## Install
 
-## What's in here
+```bash
+/plugin marketplace add github.com/Hortora/soredium
+```
 
-### Claude Skills
+## What's Included
 
-| Skill | Purpose |
-|-------|---------|
-| `forage` | Session-time capture, search, and retrieval. CAPTURE writes the entry, validates locally, commits, and pushes directly to main. SWEEP scans a session for all four entry types (gotchas, techniques, undocumented, conventions) and delivers as a single batch commit. SEARCH uses `git grep` for fast on-demand retrieval. REVISE enriches an existing entry in place. |
-| `harvest` | Dedicated maintenance sessions. DEDUPE sweeps the full garden for near-duplicates. REVIEW surfaces stale entries overdue for a freshness check. |
-| `protocol` | Session-time operations for project-level protocol files (`docs/protocols/`). CAPTURE scaffolds a new protocol entry with YAML frontmatter. SWEEP scans a session for rules worth formalising. SEARCH finds protocols by keyword. HEALTH validates schema completeness and ref integrity. DEEP-SCAN stubbed until audits complete. |
+33 skills across seven categories.
 
-### Scripts
+### Lifecycle
+
+| Skill | What it does |
+|-------|-------------|
+| `work` | Unified entry point — detects branch state and routes to start/end/pause/resume |
+| `work-start` | Creates issue branches, scaffolds metadata, runs pre-checks |
+| `work-end` | Closes branch, promotes artifacts, merges to main |
+| `work-pause` | Commits WIP, pushes to pause stack, switches to main |
+| `work-resume` | Restores a paused branch, rebases onto current main |
+| `workspace-init` | One-time companion workspace setup |
+
+### Development
+
+| Skill | What it does |
+|-------|-------------|
+| `java-dev` | Java/Quarkus — safety, concurrency, Vert.x event loop awareness |
+| `ts-dev` | TypeScript/Node.js — strict mode, async patterns, testing |
+| `python-dev` | Python — type hints, async, pytest |
+
+### Quality
+
+| Skill | What it does |
+|-------|-------------|
+| `code-review` | Routes to Java/TS/Python review with OWASP-aware escalation |
+| `security-audit` | OWASP Top 10 audit, triggered by code-review or on demand |
+| `project-health` | Correctness, completeness, consistency checks by project type |
+| `project-refine` | Improvement opportunities — duplication, bloat, doc quality |
+
+### Commits & Docs
+
+| Skill | What it does |
+|-------|-------------|
+| `git-commit` | Conventional commits with project-type routing and doc sync |
+| `git-squash` | Branch history compaction with review gate and backup |
+| `update-claude-md` | CLAUDE.md sync on convention changes |
+| `update-design` | DESIGN.md sync on architecture changes |
+| `implementation-doc-sync` | Session-scoped doc sweep after implementation |
+| `adr` | Architecture Decision Records (MADR format) |
+| `idea-log` | Lightweight parking lot for undecided possibilities |
+
+### Garden
+
+| Skill | What it does |
+|-------|-------------|
+| `forage` | Session-time capture, search, and retrieval of technical knowledge |
+| `harvest` | Dedicated deduplication and staleness review sessions |
+| `protocol` | Project-level rules and conventions in `docs/protocols/` |
+
+### Content
+
+| Skill | What it does |
+|-------|-------------|
+| `write-content` | Universal content creation — diary, article, brief, tutorial |
+| `publish-blog` | Routes blog entries to external git destinations |
+| `handover` | End-of-session context preservation for next session |
+| `design-snapshot` | Freeze and record current design state |
+
+### Infrastructure
+
+| Skill | What it does |
+|-------|-------------|
+| `project-init` | Project setup verification at session start |
+| `issue-workflow` | GitHub issue tracking, epic planning, split detection |
+| `retro-issues` | Retrospective mapping of git history to GitHub issues |
+| `dependency-update` | Maven/npm/pip dependency management |
+| `fix-ci` | Reproduce CI failures locally, root-cause, verify green |
+| `ide-tooling` | IntelliJ MCP routing — rename, find-references, diagnostics |
+
+## Garden Engine
+
+Soredium includes the garden engine — validators, CI scripts, and an autonomous agent for managing Hortora knowledge gardens.
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/validate_pr.py` | Validates a single garden entry. Checks required fields, score threshold (≥ 8), prompt injection patterns, Jaccard duplicate scan (≥ 0.4 = warning), vocabulary compliance, and variant: consistency for `convention` entries (CRITICAL when same-title sibling exists without `variant:`). Exits 1 on CRITICAL failures. Called by forage before committing. |
-| `scripts/validate_schema.py` | Validates a garden's `SCHEMA.md` federation config — role, ge_prefix, domains, upstream rules. Exits 0 (valid) or 1 (invalid). |
-| `scripts/init_garden.py` | Initializes a new canonical/child/peer garden — creates `GARDEN.md`, `SCHEMA.md`, `garden.db`, domain directories, CI workflow. Idempotent. |
-| `scripts/validate_garden.py` | Full garden validation — structural checks, entry format, index consistency (GARDEN.md vs actual files), and same-title `variant:` consistency (check 8). Also validates `SCHEMA.md` when present. |
-| `scripts/dedupe_scanner.py` | Scans all entry pairs for semantic similarity. Outputs ranked unchecked pairs. Records classifications (distinct / related / duplicate-discarded) in `CHECKED.md`. |
-| `scripts/garden-agent-install.sh` | Installs the autonomous garden agent into a local garden clone. Idempotent — safe to re-run. See [Garden Agent](#garden-agent) below. |
-| `scripts/garden-setup.sh` | One-time sparse blobless clone setup. Index files materialised; entry bodies fetched on demand via `git cat-file`. |
-| `scripts/integrate_entry.py` | Updates all garden indexes after an entry is submitted: `_summaries/`, domain `INDEX.md`, `labels/`, `_index/global.md`, `GARDEN.md` drift counter, and `garden.db`. Commits the result. Supports `--skip-validate` (skip structural validation when already done by `validate_pr.py`) and `--skip-commit` (update indexes on disk only — caller handles commit, used by SWEEP batch delivery). |
-| `scripts/claude-skill` | Skill installer — `install`, `sync-local`, `uninstall`. |
+| `scripts/validate_pr.py` | Entry validation — fields, score, Jaccard duplicates, injection |
+| `scripts/validate_garden.py` | Full garden structural validation and index consistency |
+| `scripts/integrate_entry.py` | Updates all garden indexes after entry submission |
+| `scripts/dedupe_scanner.py` | Semantic similarity scan across entry pairs |
+| `scripts/init_garden.py` | Initializes canonical/child/peer gardens |
+| `scripts/garden-agent-install.sh` | Installs the autonomous garden agent into a local clone |
 
----
-
-## How submissions work
-
-```
-forage CAPTURE
-  → write GE-YYYYMMDD-xxxxxx.md
-  → validate_pr.py               # format, score, Jaccard, injection check
-  → git add <entry>
-  → integrate_entry.py --skip-validate  # updates _summaries/, INDEX.md, labels/, GARDEN.md, garden.db; commits entry + indexes
-  → git pull --rebase origin main + git push origin main
-  → post-commit hook fires garden agent (async)
-
-forage SWEEP
-  → write N entries
-  → validate_pr.py × N
-  → integrate_entry.py --skip-validate --skip-commit × N  # update indexes on disk only
-  → git add <all entries + index dirs> + git commit "sweep: N entries — ..."
-  → git pull --rebase origin main + git push origin main
-    → git pull               # pull any other concurrent entries
-    → dedupe_scanner.py      # sweep top-50 unchecked pairs
-    → classify + commit      # "dedupe: sweep N pairs — ..."
-```
-
-**Local mode** (no GitHub remote): same flow, push step skipped.
-
-The garden agent runs autonomously in the background — no manual intervention needed after the initial `git push`.
-
----
-
-## Garden Agent
-
-The garden agent runs autonomously on every `git push` to the garden. It pulls new entries and runs a full dedup sweep without prompting.
-
-### Install
-
-After cloning the garden, run the installer from inside the garden directory:
+## Developer Setup
 
 ```bash
-cd ~/.hortora/garden   # or wherever your garden clone lives
-bash ~/claude/hortora/soredium/scripts/garden-agent-install.sh
-```
+git clone https://github.com/Hortora/soredium.git ~/soredium
 
-The installer is idempotent — safe to re-run and safe across machines. It installs:
+# Install all skills from local source
+python3 scripts/claude-skill sync-local --all -y
 
-| File | Purpose |
-|------|---------|
-| `garden-agent.sh` | Entry point. Acquires a lockfile, rotates logs, invokes Claude. |
-| `run-scanner.sh` | Thin wrapper around `dedupe_scanner.py` — avoids shell expansion issues in agent commands. |
-| `.claude/settings.json` | Allows git read/write and scanner commands without prompting. |
-| `CLAUDE.md` | Agent instructions: pull → dedup sweep → commit. |
-| `.git/hooks/post-commit` | Fires the agent after any non-dedupe commit. |
-
-### Manual trigger
-
-```bash
-cd ~/.hortora/garden && ./garden-agent.sh
-```
-
-Useful for clearing a backlog or verifying the agent runs cleanly after config changes. Output goes to `garden-agent.log` (gitignored).
-
----
-
-## Install skills
-
-```bash
-# In any Claude Code session
-/install-skills https://github.com/Hortora/soredium
-
-# Or sync from a local clone
-python3 scripts/claude-skill sync-local
-```
-
-## Set up a garden clone
-
-```bash
-bash scripts/garden-setup.sh
-# Clones Hortora/garden with sparse blobless checkout
-# Index files materialised; entry bodies fetched on demand
-```
-
-## Run tests
-
-```bash
+# Run tests
 python3 -m pytest tests/ -v
-# 139 tests
+
+# Run commit-tier validators
+python3 scripts/validate_all.py --tier commit
 ```
 
----
+After editing any skill, run `scripts/claude-skill sync-local -y` to push changes into `~/.claude/skills/`.
 
-## Repos
+## Links
 
+- [hortora.github.io](https://hortora.github.io) — project site
+- [Hortora on GitHub](https://github.com/Hortora) — organisation
 - [Hortora/garden](https://github.com/Hortora/garden) — root canonical garden
 - [Hortora/spec](https://github.com/Hortora/spec) — open protocol specification
-- [hortora.github.io](https://hortora.github.io) — project site
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
