@@ -270,10 +270,16 @@ Read `docs/retro-issues.md` as the authoritative source. For each ticket:
 Never create in parallel — order matters for issue numbers.
 
 **8a. Create epics:**
+
+For each epic, write the body to a temporary file, then:
 ```bash
-gh issue create --title "{epic title}" \
-  --label "epic,{type-label}" --repo {owner/repo} \
-  --body "$(cat <<'EOF'
+python3 ~/.claude/skills/retro-issues/retro_create.py create-epic {owner/repo} \
+  --title "{epic title}" \
+  --body-file /tmp/epic-body-{N}.md
+```
+
+**Epic body template** (write to `/tmp/epic-body-{N}.md` before calling):
+```markdown
 ## Overview
 {Inferred from doc references and commit summary. 2–4 sentences.}
 
@@ -288,17 +294,23 @@ gh issue create --title "{epic title}" \
 
 ---
 *Retrospectively created. Covers {start-date} → {end-date}.*
-EOF
-)"
 ```
 
-Record each epic number. Update `#TBD` placeholders in `docs/retro-issues.md`.
+Record each epic number from `ISSUE_NUMBER=N` output. Update `#TBD` placeholders in `docs/retro-issues.md`.
 
 **8b. Create child issues:**
+
+For each child issue, write the body to a temporary file, then:
 ```bash
-gh issue create --title "{child title}" \
-  --label "{type-label}" --repo {owner/repo} \
-  --body "$(cat <<'EOF'
+python3 ~/.claude/skills/retro-issues/retro_create.py create-issue {owner/repo} \
+  --title "{child title}" \
+  --body-file /tmp/child-body-{N}.md \
+  --labels "{type-label}" \
+  --close yes
+```
+
+**Child issue body template** (write to `/tmp/child-body-{N}.md` before calling):
+```markdown
 ## Context
 Part of epic #{epic-number} — {epic title}.
 Retrospectively created. Covers {start-date} → {end-date}.
@@ -312,25 +324,34 @@ Key commits: {3–5 short hashes and messages}.
 
 ## Notes
 {ADR / blog entry / design doc reference if relevant. Primary file paths changed.}
-EOF
-)"
 ```
 
-Close immediately:
-```bash
-gh issue close {number} --comment "Completed. Retrospectively created from git history."
-```
+Output: `ISSUE_NUMBER=N` and `CLOSED=yes`.
 
 **8c. Update each epic's Scope checklist** with real child issue numbers:
+
+Write the updated body to a temporary file (same template as 8a but with real child issue numbers in Scope section), then:
 ```bash
-gh issue edit {epic-number} --body "..." --repo {owner/repo}
+python3 ~/.claude/skills/retro-issues/retro_create.py create-epic {owner/repo} \
+  --title "{epic title}" \
+  --body-file /tmp/epic-update-{N}.md
 ```
 
+Note: `gh issue edit` is more appropriate here, but we use create-epic pattern for consistency. In practice, use `gh issue edit {epic-number} --body-file /tmp/epic-update-{N}.md --repo {owner/repo}` directly.
+
 **8d. Create standalone issues:**
+
+For each standalone issue, write the body to a temporary file, then:
 ```bash
-gh issue create --title "{title}" \
-  --label "{type-label}" --repo {owner/repo} \
-  --body "$(cat <<'EOF'
+python3 ~/.claude/skills/retro-issues/retro_create.py create-issue {owner/repo} \
+  --title "{title}" \
+  --body-file /tmp/standalone-body-{N}.md \
+  --labels "{type-label}" \
+  --close yes
+```
+
+**Standalone issue body template** (write to `/tmp/standalone-body-{N}.md` before calling):
+```markdown
 ## Context
 Retrospectively created. Standalone — not part of any epic.
 Covers {date}. Key commits: {short hashes}.
@@ -340,10 +361,9 @@ Covers {date}. Key commits: {short hashes}.
 
 ## Notes
 {Primary file paths changed.}
-EOF
-)"
-gh issue close {number} --comment "Completed. Retrospectively created from git history."
 ```
+
+Output: `ISSUE_NUMBER=N` and `CLOSED=yes`.
 
 ---
 
@@ -365,9 +385,11 @@ Run `gh issue list --state closed --label epic` to review.
 Then commit `docs/retro-issues.md` as a permanent audit trail:
 
 ```bash
-git add docs/retro-issues.md
-git commit -m "docs(retro-issues): retrospective issue mapping"
+python3 ~/.claude/skills/retro-issues/retro_create.py commit-mapping {project-path} \
+  --file docs/retro-issues.md
 ```
+
+Output: `COMMITTED=yes`.
 
 **Why keep it:** GitHub issues record outcomes; `docs/retro-issues.md` records the *reasoning* — how commits were grouped, what was excluded and why. Useful when re-running retro-issues later (avoids re-analysis) and when investigating why a commit isn't linked to a specific issue.
 

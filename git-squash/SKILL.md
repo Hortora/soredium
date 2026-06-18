@@ -52,7 +52,7 @@ single-commit cleanup to a full reconstruction, goes through `/git-squash`.
 Before any destructive operation, create an isolated working branch:
 
 ```bash
-python3 ~/.claude/skills/git-squash/ctx.py
+python3 ~/.claude/skills/git-squash/ctx.py base-branch=<BASE_BRANCH from project-init ctx.py>
 ```
 Use `ORIG_BRANCH` and `WORK_BRANCH` from the output, then:
 ```bash
@@ -283,24 +283,11 @@ On **"skip":** proceed directly to Step 2.
 
 **When called without a range** (direct `/git-squash` invocation): auto-detect the three candidate ranges, show commit counts, and offer a choice.
 
-```bash
-CURRENT_BRANCH=$(git branch --show-current)
-PROJECT_BASE_BRANCH=$(grep "^\*\*Project base branch:\*\*" CLAUDE.md 2>/dev/null | sed 's/.*`\(.*\)`.*/\1/') 
-[ -z "$PROJECT_BASE_BRANCH" ] && PROJECT_BASE_BRANCH="main"
-
-# Detect upstream remote (the blessed repo — casehubio, upstream, etc.)
-UPSTREAM_REMOTE=$(git remote | grep -E "^upstream$|^casehubio$" | head -1)
-
-# Range 1: Unpushed — commits not yet on your fork's tracking branch
-UNPUSHED_COUNT=$(git log --oneline "@{u}..HEAD" 2>/dev/null | wc -l | tr -d ' ')
-UNPUSHED_RANGE="@{u}..HEAD"
-
 Run the context script to get all range data:
 ```bash
-python3 ~/.claude/skills/git-squash/ctx.py
+python3 ~/.claude/skills/git-squash/ctx.py base-branch=<BASE_BRANCH from project-init ctx.py>
 ```
 Use `UNPUSHED_COUNT`/`UNPUSHED_RANGE`, `SAFE_COUNT`/`SAFE_RANGE`, `ALL_COUNT`/`ALL_RANGE`/`ALL_LABEL` from the output.
-```
 
 Present the choice:
 
@@ -339,17 +326,20 @@ final classification for each commit.
 
 #### 3a — Gather raw data
 
-For every commit in the range, collect subject **and body**:
+Run `commit_gather.py` to collect per-commit data as structured JSON:
 ```bash
-# Subject + body — %b captures the full commit body after the subject line
-git log --format="%H%n%ae%n%ai%n%s%n%b%n---END---" <range>
-git show --name-only --format="" <sha>   # file set per commit
-git show --stat <sha>                    # line counts for small-commit detection
+python3 ~/.claude/skills/git-squash/commit_gather.py <project> range=<base..head>
 ```
 
-Parse each commit's body separately from its subject. The body often contains
-the rationale, the constraint, the approach tried first — information that must
-survive into the curated message if not already captured in the subject.
+Parse the JSON output. The result contains:
+- `commits[]` — array of per-commit objects with `sha`, `subject`, `body`, `author`,
+  `date`, `files[]`, `insertions`, `deletions`, `issue_refs[]`, and `patch_id`
+- `is_conventional` — whether ≥ 80% of recent history uses conventional commits (feeds Step 3b)
+- `pr` — PR info if `gh` is available (feeds Step 3c)
+- `commit_count` — total commits in range
+
+Use the `commits` array for classification in Steps 3b–3i. The script handles all
+git log, git show, git patch-id, and gh pr view calls internally.
 
 **Non-trivial body content:** a body is non-trivial if it contains more than
 `Co-authored-by:`, `Signed-off-by:`, or blank lines.
@@ -370,20 +360,14 @@ This preserves architectural rationale through the squash — the *why* survives
 
 #### 3b — Detect conventional commits
 
-Scan recent history (last 20 commits outside the range) to determine if the repo
-uses conventional commits:
-```bash
-git log --oneline -20 @{u} | grep -cE "^[a-f0-9]+ (feat|fix|chore|docs|test|refactor|perf|style)[:(]"
-```
-If ≥ 80% match, record `CONVENTIONAL=true` — used in Step 6 to enforce format
+Use the `is_conventional` field from the `commit_gather.py` output (Step 3a).
+If `true`, record `CONVENTIONAL=true` — used in Step 6 to enforce format
 on MERGE messages.
 
 #### 3c — PR/issue body integration
 
-If `gh` is available, fetch the PR for the current branch:
-```bash
-gh pr view --json body,title,number,baseRefName 2>/dev/null
-```
+Use the `pr` field from the `commit_gather.py` output (Step 3a). If non-null,
+it contains `number`, `title`, `body`, and `base`.
 
 If a PR exists:
 - **Protected-branch merge target** (`main`, `master`, `release/*`): note this for
@@ -396,14 +380,10 @@ If a PR exists:
 
 #### 3d-pre — Same-issue clustering (runs before pattern classification)
 
-Before pattern classification, group commits by shared issue reference. Extract
-issue refs from both subject and body (`#N`, `Closes #N`, `Refs #N`).
+Before pattern classification, group commits by shared issue reference. Use
+the `issue_refs` array from each commit in the `commit_gather.py` output (Step 3a).
 
 For each issue number that appears in 2+ commits in the range:
-
-```bash
-git log --format="%H %s%n%b" <range> | grep -oE '(Closes|Refs|Fixes)?\s*#[0-9]+' 
-```
 
 **Clustering rules:**
 - **One feat + one or more fix/test/docs sharing the same #N**: MERGE all into the feat. The combined work for that issue belongs together.
@@ -460,13 +440,8 @@ whatever KEEP precedes them. Instead:
 **Double issue-close detection (run after grouping, before showing plan):**
 
 After all groups are formed, scan all surviving KEEP commits for duplicate `Closes #N`
-references. If two or more KEEPs both claim `Closes #N` for the same issue number,
-flag it in the plan:
-
-```bash
-# Extract all Closes refs from surviving KEEP commit subjects + bodies
-git log --format="%H %s%n%b" <work-branch> | grep -oE 'Closes\s+#[0-9]+'
-```
+references. Use the `issue_refs` array from each commit's `commit_gather.py` output
+(Step 3a) — filter for entries where `type` is `"Closes"`.
 
 For each issue number that appears more than once with `Closes`:
 ```
@@ -555,10 +530,8 @@ rename sweep.
 
 #### 3f — Temporal scrutiny
 
-Extract timestamps and identify commits from the same author within 30-minute windows:
-```bash
-git log --format="%H %ae %ai" <range>
-```
+Use the `author` and `date` fields from each commit in the `commit_gather.py`
+output (Step 3a) to identify commits from the same author within 30-minute windows.
 
 Temporal proximity is not a merge signal — two commits 10 minutes apart may address
 completely different concerns. It is a scrutiny signal: surface them together in the
@@ -602,15 +575,9 @@ the absorbed commit is already classified SQUASH (formatting, CI, spelling).
 
 #### 3i — Cherry-pick detection
 
-For commits classified SQUASH or MERGE, check if any appear on other branches:
-```bash
-# Get patch-id for the commit
-git show <sha> | git patch-id --stable
-
-# Compare against all other branches
-git log --all --format="%H" -- | grep -v $(git rev-list <range>) | \
-  xargs -I{} sh -c 'git show {} | git patch-id --stable' 2>/dev/null
-```
+For commits classified SQUASH or MERGE, use the `patch_id` field from the
+`commit_gather.py` output (Step 3a) to check for cherry-picks. Compare each
+commit's `patch_id` against patch-ids on other branches to detect duplicates.
 
 If a commit being squashed has a matching patch-id on another branch, warn:
 ```
@@ -966,31 +933,30 @@ Never proceed to Step 6 without YES. Never offer "apply all without reviewing."
 
 **Single-commit squash** (fast path — only when squashing HEAD~1 into HEAD):
 ```bash
-git reset --soft HEAD~1 && git commit --amend --no-edit
+python3 ~/.claude/skills/git-squash/rebase_exec.py single <project>
 ```
+Outputs `SQUASHED=yes` on success. On failure, prints `ERROR=single_failed` with detail.
 
-**Multi-commit squashes:** write the todo and execute non-interactively:
-```bash
-PLAN=$(mktemp)
-cat > "$PLAN" <<'PLAN_EOF'
+**Multi-commit squashes:** write the todo file, then execute via script:
+```
+Write the rebase todo to a temporary file, e.g. /tmp/squash-todo-XXXX:
+
 pick abc1234 feat(api): add UserRepository SPI
 squash ghi9012 docs(api): align findByKey Javadoc wording
 pick jkl0123 feat(engine): add CaseRepository
-PLAN_EOF
-
-GIT_SEQUENCE_EDITOR="cp $PLAN" git rebase -i <base-sha>
-rm -f "$PLAN"
 ```
+
+```bash
+python3 ~/.claude/skills/git-squash/rebase_exec.py multi <project> base=<base-sha> todo-file=<path-to-todo>
+```
+Outputs `REBASED=yes`, `COMMITS_BEFORE=N`, `COMMITS_AFTER=M` on success.
+On failure, the script auto-aborts the rebase and prints `ERROR=rebase_failed` with detail.
 
 **Multi-issue reference preservation:**
 
 Before finalising any curated message (SQUASH or MERGE groups), collect all issue
-references from every commit in the group — KEEP and all absorbed:
-
-```bash
-# Extract all issue refs from a commit message
-git log -1 --format="%s%n%b" <sha> | grep -oE '(Closes|Refs|Fixes) #[0-9]+'
-```
+references from every commit in the group — KEEP and all absorbed. Use the
+`issue_refs` array from each commit's `commit_gather.py` output (Step 3a).
 
 Deduplicate across the group: `Closes #N` takes precedence over `Refs #N` for the
 same issue number. Append any refs not already in the KEEP commit's message:
@@ -1022,8 +988,9 @@ For each MERGE operation, before finalising the unified message:
 
 3. Apply the message via:
    ```bash
-   git commit --amend -m "<unified message>"
+   python3 ~/.claude/skills/git-squash/rebase_exec.py amend-message <project> message=<unified message>
    ```
+   Outputs `AMENDED=yes` on success.
 
 **AFTER block — correct arithmetic:**
 
@@ -1186,28 +1153,31 @@ Wait for explicit YES before proceeding to Step 8.
 ### Step 8 — Swap branches
 
 ```bash
-BACKUP="backup/pre-squash-${ORIG_BRANCH}-$(date +%Y%m%d)"
-git branch -m "$ORIG_BRANCH" "$BACKUP"
-git branch -m "$WORK_BRANCH" "$ORIG_BRANCH"
-git branch --set-upstream-to="origin/$ORIG_BRANCH" "$ORIG_BRANCH" 2>/dev/null || true
-git push --force-with-lease origin "$ORIG_BRANCH"
+python3 ~/.claude/skills/git-squash/branch_swap.py <project> orig=<ORIG_BRANCH> work=<WORK_BRANCH>
 ```
 
-**Post-swap working tree check (mandatory):**
+The script performs the full swap atomically:
+1. Creates backup: `git branch -m <orig> backup/pre-squash-<orig>-<YYYYMMDD>`
+2. Renames work to orig: `git branch -m <work> <orig>`
+3. Sets upstream: `git branch --set-upstream-to=origin/<orig> <orig>`
+4. Force pushes: `git push --force-with-lease origin <orig>`
+5. Post-swap verify: checks working tree status and unpushed commits
 
-After the swap and push, verify the working tree is clean:
+Parse the output:
+- `SWAPPED=yes` — swap succeeded
+- `BACKUP=<name>` — backup branch name (always reported, even on partial failure)
+- `STATUS_CLEAN=yes|no` — whether working tree is clean
+- `UNPUSHED=<count>` — unpushed commit count
+- `PUSH_FAILED=yes` (optional) — push failed, with `PUSH_ERROR=<detail>`
 
-```bash
-git status --short
-git log origin/"$ORIG_BRANCH".."$ORIG_BRANCH" --oneline
-```
+**Post-swap checks (mandatory):**
 
-If `git status --short` produces any output (staged or unstaged changes), hard stop:
+If `STATUS_CLEAN=no`, hard stop:
 > "⚠️  Swap complete but working tree is dirty — staged/unstaged changes remain.
 >  These will be invisible to the next session if not committed.
 >  Commit or discard before ending the session."
 
-If `git log origin/...` shows unpushed commits, warn:
+If `UNPUSHED` > 0, warn:
 > "⚠️  Swap complete but $ORIG_BRANCH has N unpushed commits — push or note in handover."
 
 Do not consider the squash complete until the working tree is clean and the branch is pushed.
@@ -1216,15 +1186,15 @@ Confirm:
 ```
 ✅ Swap complete.
   Active branch:  <orig-branch> (squashed history)
-  Backup branch:  backup/pre-squash-<orig-branch>-<YYYYMMDD> (original history)
+  Backup branch:  <BACKUP value> (original history)
 
 To push backup for off-machine safety:
-  git push origin backup/pre-squash-<orig-branch>-<YYYYMMDD>
+  git push origin <BACKUP value>
 
 To undo entirely:
-  git checkout backup/pre-squash-<orig-branch>-<YYYYMMDD>
+  git checkout <BACKUP value>
   git branch -m <orig-branch> squash/wip-<orig-branch>-<timestamp>
-  git branch -m backup/pre-squash-<orig-branch>-<YYYYMMDD> <orig-branch>
+  git branch -m <BACKUP value> <orig-branch>
   git push --force-with-lease origin <orig-branch>
 ```
 

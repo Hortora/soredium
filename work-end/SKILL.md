@@ -378,67 +378,33 @@ failure prompts the user before continuing to issue close.
 
 ### 8a — Batch workspace-main operations (single main-visit)
 
-```bash
-# Pre-condition: clean working tree verified in Pre-conditions step 4.
-# Never stash — if the tree is dirty, work-end should have stopped already.
+Build a comma-separated list of all workspace-routed artifact paths from the Step 4
+inventory (blog entries, snapshots, plan files to archive, etc.). Include plan files
+that need archiving — the script handles `mkdir -p` and `mv` to `plans/attic/` internally.
 
-git -C "$WORKSPACE" checkout main
-git -C "$WORKSPACE" pull --rebase origin main
+Run: `python3 ~/.claude/skills/work-end/artifact_promote.py to-workspace-main <WORKSPACE> branch=<BRANCH_NAME> artifacts=<comma-sep-paths>`
+Read `PROMOTED=<count>` and `PUSHED=yes|no` from output.
 
-# Promote workspace-routed artifacts (blog, snapshots, etc.)
-# For each artifact file in the Step 4 inventory where routing destination = workspace:
-for each workspace-routed artifact:
-  mkdir -p "$WORKSPACE/<dest>/"
-  git -C "$WORKSPACE" checkout "$BRANCH_NAME" -- <artifact-files>
-  git -C "$WORKSPACE" add "<dest>/"
-  git -C "$WORKSPACE" commit -m "feat: promote <type> from $BRANCH_NAME"
-
-# Archive plans to attic
-if plans exist:
-  git -C "$WORKSPACE" checkout "$BRANCH_NAME" -- plans/<files>
-  mkdir -p "$WORKSPACE/plans/attic/$BRANCH_NAME"
-  mv "$WORKSPACE/plans/<files>" "$WORKSPACE/plans/attic/$BRANCH_NAME/"
-  git -C "$WORKSPACE" add -A
-  git -C "$WORKSPACE" commit -m "archive($BRANCH_NAME): move plans to attic"
-
-# WORKSPACE DESIGN REPO CASE: journal merge must happen here on main, not on the epic branch.
-# Commits to the epic branch are discarded at close — the merge must land on workspace main.
-if [ "$DESIGN_REPO_KEY" = "workspace" ]; then
-  # Cherry-pick JOURNAL.md from the epic branch, then run the journal merge sub-procedure
-  # (same steps as 8d below: baseline read, current read, apply journal, verify, commit)
-  git -C "$WORKSPACE" checkout "$BRANCH_NAME" -- design/JOURNAL.md
-  # [execute 8d merge steps here — baseline=$PROJECT_SHA, target=$WORKSPACE/DESIGN.md]
-  git -C "$WORKSPACE" add DESIGN.md
-  git -C "$WORKSPACE" commit -m "docs($BRANCH_NAME): apply design journal"
-  # 8d is now complete for the workspace case — skip the 8d block when DESIGN_REPO_KEY=workspace
-fi
-
-git -C "$WORKSPACE" push  # single push for all workspace-main commits
-
-git -C "$WORKSPACE" checkout "$BRANCH_NAME"
-```
+**WORKSPACE DESIGN REPO CASE:** If `$DESIGN_REPO_KEY = workspace`, the journal merge
+must also happen during this main-visit. After the script returns, cherry-pick
+JOURNAL.md from the epic branch and run the 8d merge steps on workspace main
+(baseline=$PROJECT_SHA, target=$WORKSPACE/DESIGN.md). Commit the merged DESIGN.md
+and push. Then 8d is complete for the workspace case — skip the 8d block below.
 
 ### 8b — Project-routed artifact promotion (ADRs, specs)
 
-```bash
-for each project-routed artifact:
-  mkdir -p "$PROJECT/<dest>/"
-  cp "$WORKSPACE/<artifact-file>" "$PROJECT/<dest>/"
-  git -C "$PROJECT" add "<dest>/"
-  git -C "$PROJECT" commit -m "feat: promote <type> from $BRANCH_NAME"
-  git -C "$PROJECT" push  # non-fatal if fails; report exit code
-```
+Build a comma-separated list of all project-routed artifact paths from the Step 4
+inventory (ADRs, specs, etc.) — paths relative to the workspace root.
+
+Run: `python3 ~/.claude/skills/work-end/artifact_promote.py to-project <PROJECT> <WORKSPACE> artifacts=<comma-sep-paths>`
+Read `PROMOTED=<count>` and `PUSHED=yes|no` from output. If `PUSHED=no`, report the push failure but continue.
 
 ### 8c — Spec cleanup (only if 8b push exit code was 0)
 
 If 8b push failed, skip entirely — workspace copy is the only remaining copy.
 
-```bash
-rm -rf "$WORKSPACE/specs/$BRANCH_NAME/"
-git -C "$WORKSPACE" add -A
-git -C "$WORKSPACE" commit -m "chore($BRANCH_NAME): remove promoted specs from staging"
-git -C "$WORKSPACE" push
-```
+Run: `python3 ~/.claude/skills/work-end/artifact_promote.py cleanup-specs <WORKSPACE> branch=<BRANCH_NAME>`
+Read `CLEANED=<count>` and `PUSHED=yes|no` from output.
 
 ### 8d — Journal merge
 
@@ -474,12 +440,8 @@ Only if tracking enabled and `$COVERS` is non-empty. Close every issue in `$COVE
 (comma-separated). `COVERS` always includes the primary `ISSUE_N` so no separate
 call for the primary is needed.
 
-Close each issue in COVERS with a separate command per issue number — no loop:
-```bash
-gh issue close <N1> --repo <ISSUE_REPO> 2>/dev/null && echo "✅ Closed #<N1>" || echo "⚠️ #<N1> already closed or failed"
-gh issue close <N2> --repo <ISSUE_REPO> 2>/dev/null && echo "✅ Closed #<N2>" || echo "⚠️ #<N2> already closed or failed"
-```
-Substitute each issue number from COVERS. If COVERS == ISSUE_N there is only one command.
+Run: `python3 ~/.claude/skills/work-end/artifact_promote.py close-issues <ISSUE_REPO> covers=<COVERS>`
+Read `CLOSED=<count>` from output. If `ERRORS=` is present, report which issues failed.
 
 ### 8g — Publish blog
 
@@ -659,22 +621,11 @@ must not be removed.
 
 After 8j completes (workspace/project is now on main):
 
-```bash
-if [ "$SINGLE_REPO_MODE" = "yes" ]; then
-  FILES_TO_REMOVE=""
-  [ -f "$WORKSPACE/design/.meta" ] && FILES_TO_REMOVE="$FILES_TO_REMOVE design/.meta"
-  [ -f "$WORKSPACE/design/JOURNAL.md" ] && FILES_TO_REMOVE="$FILES_TO_REMOVE design/JOURNAL.md"
-  if [ -n "$FILES_TO_REMOVE" ]; then
-    git -C "$WORKSPACE" rm -f $FILES_TO_REMOVE
-    # Remove design/ dir only if it is now completely empty
-    if [ -d "$WORKSPACE/design" ] && [ -z "$(ls -A "$WORKSPACE/design")" ]; then
-      rmdir "$WORKSPACE/design"
-    fi
-    git -C "$WORKSPACE" commit -m "chore($BRANCH_NAME): remove branch scaffold from main"
-    git -C "$WORKSPACE" push
-  fi
-fi
-```
+If `$SINGLE_REPO_MODE = yes`:
+
+Run: `python3 ~/.claude/skills/work-end/branch_cleanup.py cleanup-scaffold <WORKSPACE> single-repo=yes`
+Read `CLEANED=yes` from output. The script removes `.meta` and `JOURNAL.md`, removes the
+`design/` directory if empty, commits, and pushes.
 
 **Why this step exists:** In two-repo mode, `.meta` and `JOURNAL.md` live on the workspace
 epic branch only — they never reach workspace main. In single-repo mode, the workspace IS
@@ -743,62 +694,25 @@ an "offer" — it always runs. 8i then verifies the result; any unpublished entr
 **Single-repo mode:** after 8j the repo is on main. Switch to the epic branch to commit,
 then return to main.
 
-```bash
-CLOSE_DATE=$(date +%Y-%m-%d)
-
-if [ "$SINGLE_REPO_MODE" = "yes" ]; then
-  git -C "$WORKSPACE" checkout "$BRANCH_NAME"
-fi
-
-mkdir -p "$WORKSPACE/design"
-cat > "$WORKSPACE/design/EPIC-CLOSED.md" << EOF
-# Branch Closed — $BRANCH_NAME
-**Date:** $CLOSE_DATE
-**Issue:** #$ISSUE_N
-**Covers:** $COVERS
-EOF
-
-git -C "$WORKSPACE" add design/EPIC-CLOSED.md
-git -C "$WORKSPACE" commit -m "docs($BRANCH_NAME): mark closed"
-git -C "$WORKSPACE" push
-
-if [ "$SINGLE_REPO_MODE" = "yes" ]; then
-  git -C "$WORKSPACE" checkout main
-fi
-```
+Run: `python3 ~/.claude/skills/work-end/branch_cleanup.py create-epic-closed <WORKSPACE> branch=<BRANCH_NAME> date=$(date +%Y-%m-%d) issues=<COVERS> single-repo=<yes|no>`
+Read `CREATED=yes` from output. The script handles single-repo branch switching internally.
 
 Branches are **not deleted**. `EPIC-CLOSED.md` is the signal for hygiene scan cleanup.
 
 **Stack cleanup on end:** If this branch was in the pause stack (detected in Pre-conditions),
 remove it now that the branch is closed:
 
-```bash
-STACK_FILE="$WORKSPACE/design/.pause-stack"
-if grep -q "branch: $BRANCH_NAME" "$STACK_FILE" 2>/dev/null; then
-  python3 -c "
-import re
-stack = open('$STACK_FILE').read()
-pattern = r'- branch: $BRANCH_NAME\n(?:  .*\n)*'
-stack = re.sub(pattern, '', stack)
-open('$STACK_FILE', 'w').write(stack)
-"
-  git -C "$WORKSPACE" add design/.pause-stack
-  git -C "$WORKSPACE" commit -m "chore: remove $BRANCH_NAME from pause stack (branch closed)"
-  git -C "$WORKSPACE" push
-fi
-```
+Run: `python3 ~/.claude/skills/work-end/branch_cleanup.py cleanup-stack <WORKSPACE> branch=<BRANCH_NAME>`
+Read `REMOVED=yes|no` from output. If `yes`, the branch was found and removed from the stack.
 
 ---
 
 ## Step 10 — Return to base branches
 
-Project is already on `$PROJECT_BASE_BRANCH` from Step 8j. Switch workspace to main:
+Project is already on `$PROJECT_BASE_BRANCH` from Step 8j. Switch both repos to main:
 
-```bash
-git -C "$WORKSPACE" checkout main
-```
-
-Check remote ahead; prompt before `pull --rebase`. Not automatic.
+Run: `python3 ~/.claude/skills/work-end/branch_cleanup.py checkout-main <PROJECT> <WORKSPACE>`
+Read `SWITCHED=yes` from output. The script checks out main and pulls in both repos.
 
 ---
 

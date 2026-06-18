@@ -49,88 +49,59 @@ Must be on a branch where `$WORKSPACE/design/.meta` exists.
 ## Step 2 — Commit WIP on project branch
 
 ```bash
-PROJECT_DIRTY=$(git -C "$PROJECT" status --short | wc -l | tr -d ' ')
-```
-
-If `$PROJECT_DIRTY > 0`:
-```bash
 PAUSE_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-git -C "$PROJECT" add -A
-git -C "$PROJECT" commit -m "WIP: paused $BRANCH_NAME at $PAUSE_TS"
-WIP_COMMITTED=true
+OUTPUT=$(python3 ~/.claude/skills/work-pause/pause_exec.py commit-wip "$PROJECT" message="WIP: paused $BRANCH_NAME at $PAUSE_TS")
 ```
 
-If clean: `WIP_COMMITTED=false` — no commit needed.
+Parse `COMMITTED=` from output:
+- `COMMITTED=yes` → WIP commit created
+- `COMMITTED=clean` → no commit needed (repo was clean)
 
 ---
 
 ## Step 3 — Commit WIP on workspace branch
 
 ```bash
-WORKSPACE_DIRTY=$(git -C "$WORKSPACE" status --short | grep -v "design/.pause-stack" | wc -l | tr -d ' ')
+WS_OUTPUT=$(python3 ~/.claude/skills/work-pause/pause_exec.py commit-wip "$WORKSPACE" message="WIP: paused $BRANCH_NAME at $PAUSE_TS")
 ```
 
-If `$WORKSPACE_DIRTY > 0`:
-```bash
-git -C "$WORKSPACE" add -A
-git -C "$WORKSPACE" commit -m "WIP: paused $BRANCH_NAME at $PAUSE_TS"
-WORKSPACE_WIP_COMMITTED=true
-```
-
-If clean: `WORKSPACE_WIP_COMMITTED=false`.
+Parse `COMMITTED=` from output:
+- `COMMITTED=yes` → WIP commit created on workspace
+- `COMMITTED=clean` → workspace was clean
 
 ---
 
-## Step 4 — Push branch state to remote
+## Step 4 — Push branches and add to pause stack
 
 ```bash
-git -C "$PROJECT" push origin "$BRANCH_NAME" 2>/dev/null || echo "⚠️  Project push failed — continuing (WIP commit is local)"
-git -C "$WORKSPACE" push origin "$BRANCH_NAME" 2>/dev/null || echo "⚠️  Workspace push failed — continuing"
+STACK_OUTPUT=$(python3 ~/.claude/skills/work-pause/pause_exec.py push-and-stack "$WORKSPACE" "$PROJECT" branch="$BRANCH_NAME" issue="$ISSUE_N" base-branch="$BASE_BRANCH")
 ```
 
-Push failures are non-fatal — the WIP commit is safely on the local branch.
+Parse output:
+- `PROJECT_PUSHED=yes|no` — whether project branch push succeeded
+- `WORKSPACE_PUSHED=yes|no` — whether workspace branch push succeeded
+- `STACKED=yes` — pause entry added to stack on workspace main
+- If `ERROR=` appears, abort
+
+This operation:
+1. Pushes both branches to origin (non-fatal if fails — WIP commits are local)
+2. Checks out base-branch in project, main in workspace
+3. Pulls latest from both remotes
+4. Adds pause entry to `.pause-stack` using stack.py
+5. Commits and pushes the stack change
+
+**If stack push to main fails: the script automatically aborts and pops the entry.**
 
 ---
 
-## Step 5 — Push pause entry onto stack (on workspace main)
+## Step 5 — Parse stack depth and confirm
 
+Get current stack depth:
 ```bash
-git -C <WORKSPACE> checkout main
-git -C <WORKSPACE> pull --rebase origin main
+STACK_DEPTH=$(python3 ~/.claude/skills/project-init/stack.py depth "$WORKSPACE/design/.pause-stack")
 ```
 
-Push the entry using the stack script — no shell variable assignments or heredocs:
-```bash
-python3 ~/.claude/skills/project-init/stack.py push <WORKSPACE>/design/.pause-stack branch=<BRANCH_NAME> issue=<ISSUE_N> wip_project=<WIP_COMMITTED> wip_workspace=<WORKSPACE_WIP_COMMITTED>
-```
-
-Read `STACK_DEPTH` from output. Then commit and push:
-```bash
-git -C <WORKSPACE> add design/.pause-stack
-git -C <WORKSPACE> commit -m "chore: pause <BRANCH_NAME> — stack depth <STACK_DEPTH>"
-git -C <WORKSPACE> push
-```
-
-**If push fails: abort.** Remove the stack entry with:
-```bash
-python3 ~/.claude/skills/project-init/stack.py pop <WORKSPACE>/design/.pause-stack <BRANCH_NAME>
-```
-Then switch back to the branch. The pause stack on main must always be committed and pushed — it is the source of truth across sessions.
-
----
-
-## Step 6 — Switch project repo to base branch
-
-```bash
-git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
-```
-
-Prompt before `pull --rebase` — not automatic.
-
----
-
-## Step 7 — Confirm
-
+Display confirmation:
 ```
 ⏸  Paused: <branch-name>  Issue: #<N>
    WIP committed: project=<yes|no>  workspace=<yes|no>

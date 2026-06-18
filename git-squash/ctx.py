@@ -3,9 +3,11 @@
 Context resolver for git-squash.
 Prints KEY=value lines for the current branch, commit ranges, and upstream state.
 
-Usage: python3 ~/.claude/skills/git-squash/ctx.py
+Usage: python3 ~/.claude/skills/git-squash/ctx.py [base-branch=<name>]
        python3 ~/.claude/skills/git-squash/ctx.py --rebase-todo <base> <branch>
        python3 ~/.claude/skills/git-squash/ctx.py --compaction-targets <base> <branch> <step>
+
+When base-branch=<name> is provided, uses that value instead of parsing CLAUDE.md.
 """
 import subprocess
 import sys
@@ -39,6 +41,13 @@ if len(sys.argv) > 1 and sys.argv[1] == "--compaction-targets":
     sys.exit(0)
 
 # Default: output squash context
+
+# Parse base-branch=<value> from remaining args (positional args that aren't subcommands)
+_cli_base_branch = ""
+for _arg in sys.argv[1:]:
+    if _arg.startswith("base-branch="):
+        _cli_base_branch = _arg[len("base-branch="):]
+
 orig_branch = git("branch", "--show-current")
 ts = datetime.now().strftime("%Y%m%d-%H%M%S")
 work_branch = f"squash/wip-{orig_branch}-{ts}"
@@ -47,10 +56,13 @@ work_branch = f"squash/wip-{orig_branch}-{ts}"
 upstream = git("remote").splitlines()
 upstream_remote = next((r for r in upstream if r in ("upstream", "origin")), upstream[0] if upstream else "origin")
 
-# Project base branch from CLAUDE.md
-claude_text = Path("CLAUDE.md").read_text() if Path("CLAUDE.md").exists() else ""
-m = re.search(r'\*\*Project base branch:\*\*\s*`([^`]+)`', claude_text)
-base_branch = m.group(1) if m else "main"
+# Project base branch: CLI arg takes precedence over CLAUDE.md
+if _cli_base_branch:
+    base_branch = _cli_base_branch
+else:
+    claude_text = Path("CLAUDE.md").read_text() if Path("CLAUDE.md").exists() else ""
+    m = re.search(r'\*\*Project base branch:\*\*\s*`([^`]+)`', claude_text)
+    base_branch = m.group(1) if m else "main"
 
 # Workspace path (if applicable)
 workspace_root = run("git", "rev-parse", "--show-toplevel")
@@ -62,7 +74,6 @@ if meta_path.exists():
             meta_sha = line.partition(": ")[2].strip()
 
 # Commit count ranges
-unpushed_count = git("log", "--oneline", "@{u}..HEAD", "2>/dev/null") if True else ""
 try:
     unpushed_lines = git("log", "--oneline", "@{u}..HEAD")
     unpushed_count = str(len(unpushed_lines.splitlines())) if unpushed_lines else "0"

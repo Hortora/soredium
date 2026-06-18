@@ -216,10 +216,10 @@ git log @{u}..HEAD --oneline 2>/dev/null || git log origin/HEAD..HEAD --oneline 
 
 If user replies **SQUASH**:
 ```bash
-git reset --soft HEAD~1
-# Re-stage all (previous + new changes are now combined in working tree)
-# Commit with a single message covering the combined change
+python3 ~/.claude/skills/git-commit/commit_exec.py squash <project>
 ```
+Read `SQUASHED` from output. If `ERROR=no_parent` → warn and continue without squashing.
+Re-stage all (previous + new changes are now combined in working tree) and commit with a single message covering the combined change.
 
 If no unpushed commits, or no squash benefit, continue silently.
 
@@ -302,25 +302,22 @@ Then ask exactly:
 **If documentation updates were proposed**, run in this exact order:
 1. Let update-claude-md apply its changes (if proposed)
 2. Apply README.md changes per readme-sync.md workflow (if proposed)
-3. Stage updated files: `git add CLAUDE.md README.md` (only files that were changed)
-4. Commit with the confirmed message:
+3. Stage updated doc files:
 ```bash
-git commit -m "<subject>" -m "<body if any>"
+python3 ~/.claude/skills/git-commit/commit_exec.py stage-docs <project> files=CLAUDE.md,README.md
 ```
-5. Confirm success:
+Read `STAGED=<count>` from output (only files that were actually changed get staged).
+4. Commit all staged files:
 ```bash
-git log --oneline -1
+python3 ~/.claude/skills/git-commit/commit_exec.py commit <project> message=<confirmed-message> files=<all-staged-files-csv>
 ```
+Read `COMMITTED=yes, SHA=<sha>` from output. If `ERROR=nothing_to_commit` → warn user.
 
-**If no documentation updates**, run in this exact order:
-1. Commit with the confirmed message:
+**If no documentation updates**, commit directly:
 ```bash
-git commit -m "<subject>" -m "<body if any>"
+python3 ~/.claude/skills/git-commit/commit_exec.py commit <project> message=<confirmed-message> files=<staged-files-csv>
 ```
-2. Confirm success:
-```bash
-git log --oneline -1
-```
+Read `COMMITTED=yes, SHA=<sha>` from output. If `ERROR=nothing_to_commit` → warn user.
 
 ### Step 8 — Handle edge cases
 

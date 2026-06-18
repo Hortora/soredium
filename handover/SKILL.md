@@ -96,7 +96,10 @@ For each `#N` found, run a separate command per issue with the concrete repo val
 gh issue view <N> --repo <OWNER_REPO> --json state,title --jq '"#\(.number) [\(.state)] \(.title)"' 2>/dev/null
 ```
 
-If any are CLOSED but still appear as open work: remove them from HANDOFF.md immediately — no prompt. Add `*Updated: #N, #M closed — removed from backlog.*` at the top, commit to workspace main.
+If any are CLOSED but still appear as open work: remove them from HANDOFF.md immediately — no prompt. Add `*Updated: #N, #M closed — removed from backlog.*` at the top, then commit to workspace main:
+```bash
+python3 ~/.claude/skills/handover/handover_commit.py commit-to-main <Workspace> branch=<current-branch>
+```
 
 Report what was removed at the end of the resume output (see structure below).
 
@@ -386,9 +389,9 @@ Scan for phrases like `#NNN will`, `will migrate`, `will add`, `will replace` fo
 
 Present each finding with the exact line and proposed fix. Apply only on confirmation. After applying fixes, commit to the project repo:
 ```bash
-git -C "$PROJECT" add ARC42STORIES.MD
-git -C "$PROJECT" commit -m "docs: sync ARC42STORIES.MD — stale scan at session wrap"
+python3 ~/.claude/skills/git-commit/commit_exec.py commit "$PROJECT" message="docs: sync ARC42STORIES.MD — stale scan at session wrap" files=ARC42STORIES.MD
 ```
+Read `COMMITTED=yes, SHA=<sha>` from output.
 
 **If nothing stale is found**, proceed silently.
 
@@ -492,24 +495,10 @@ Use `WORKSPACE` from the ctx.py output as a concrete string.
 
 ```bash
 CURRENT_BRANCH=$(git -C <Workspace> branch --show-current)
-
-# If on an epic branch, switch workspace to main, commit, switch back
-if [ "$CURRENT_BRANCH" != "main" ]; then
-  git -C <Workspace> stash
-  git -C <Workspace> checkout main
-  git -C <Workspace> pull --rebase origin main
-  git -C <Workspace> add HANDOFF.md
-  git -C <Workspace> commit -m "docs: session handover YYYY-MM-DD"
-  git -C <Workspace> push
-  git -C <Workspace> checkout "$CURRENT_BRANCH"
-  git -C <Workspace> stash pop
-else
-  git -C <Workspace> pull --rebase origin main
-  git -C <Workspace> add HANDOFF.md
-  git -C <Workspace> commit -m "docs: session handover YYYY-MM-DD"
-  git -C <Workspace> push
-fi
+python3 ~/.claude/skills/handover/handover_commit.py commit-to-main <Workspace> branch=$CURRENT_BRANCH
 ```
+
+Read `COMMITTED=yes` and `PUSHED=yes|no` from output. If `ERROR=` appears, report and stop.
 
 Committing is mandatory. It's what makes git history the archive.
 

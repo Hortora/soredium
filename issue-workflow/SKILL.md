@@ -144,10 +144,13 @@ Wait for user choice. If 3, stop.
 ### Step 4 — Create standard labels
 
 ```bash
-gh label list --repo {owner/repo}
+python3 ~/.claude/skills/issue-workflow/issue_setup.py create-labels {owner/repo}
 ```
 
-Create any missing labels — see **[github-setup.md](github-setup.md)** for the full label table and `gh label create` commands.
+This creates all standard labels, scale labels (XS-XL), and complexity labels (Low/Med/High).
+See **[github-setup.md](github-setup.md)** for the complete label reference.
+
+**Output:** `CREATED=<count>` — number of newly created labels (existing labels are skipped).
 
 ### Step 5 — Write Work Tracking to CLAUDE.md
 
@@ -163,31 +166,16 @@ Install the hook that hard-blocks commits without an issue reference.
 The hook is committed to `.githooks/` so it survives clones and is visible
 to all contributors. `core.hooksPath` activates it on the current machine.
 
-Run the bundled context script first:
+Run `python3 ~/.claude/skills/project-init/ctx.py` and read the `PROJECT=` line
+from its output. Then pass that path to install-hooks:
+
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/issue-workflow/issue_setup.py install-hooks <project-path>
 ```
 
-Use `PROJECT` from the output as the concrete project path. Then:
-```bash
-HOOK_SRC="$HOME/.claude/skills/issue-workflow/hooks/commit-msg"
-GITHOOKS_DIR="<PROJECT>/.githooks"
-HOOK_DEST="$GITHOOKS_DIR/commit-msg"
-
-if [ -f "$HOOK_DEST" ]; then
-  echo "ℹ️  .githooks/commit-msg already present — skipping."
-elif [ ! -f "$HOOK_SRC" ]; then
-  echo "⚠️  issue-workflow skill not installed — cannot find hook source."
-else
-  mkdir -p "$GITHOOKS_DIR"
-  cp "$HOOK_SRC" "$HOOK_DEST"
-  chmod +x "$HOOK_DEST"
-  git -C "$PROJECT_PATH" config core.hooksPath .githooks
-  git -C "$PROJECT_PATH" add .githooks/commit-msg
-  git -C "$PROJECT_PATH" commit -m "chore: add commit-msg hook — require issue ref on every commit"
-  echo "✅ commit-msg hook installed and committed to .githooks/"
-fi
-```
+**Output:**
+- `INSTALLED=yes` — hook installed, configured, and committed
+- `INSTALLED=skipped` — hook already exists, no changes made
 
 The hook blocks any commit that lacks both an issue reference (`Refs #N`,
 `Closes #N`, `Fixes #N`, `Resolves #N`) and the explicit bypass token
@@ -250,10 +238,8 @@ user to fill in fields — infer and propose.
 - ✅ "Add WKWebView + xterm.js terminal renderer"
 - ❌ "WKWebView work" / "Plan 5b"
 
-```bash
-gh issue create --title "{epic title}" \
-  --label "epic,{type-label}" --repo {owner/repo} \
-  --body "$(cat <<'EOF'
+**Epic body template:**
+```markdown
 ## Overview
 {What this epic delivers and why. 2–4 sentences.}
 
@@ -265,9 +251,16 @@ gh issue create --title "{epic title}" \
 
 ## Definition of Done
 {Observable, specific end state — what does "this epic is complete" look like?}
-EOF
-)"
 ```
+
+Write the filled template to `/tmp/epic-body.md`, then:
+
+```bash
+python3 ~/.claude/skills/issue-workflow/issue_setup.py create-epic {owner/repo} \
+  title="{epic title}" body-file=/tmp/epic-body.md
+```
+
+**Output:** `ISSUE_NUMBER=<N>` — the created epic's issue number.
 
 **Sub-epics:** If a child is itself large (days of work, multiple sub-tasks), give
 it the `epic` label and create grandchild issues referencing it. The same title
@@ -311,10 +304,8 @@ merged, and reverted on its own.
 
 Before creating each issue, infer scale and complexity using the **Scale and Complexity Triage** table. Do not ask the user — assess from the description and add both labels.
 
-```bash
-gh issue create --title "{child title}" \
-  --label "{type-label},scale: {XS|S|M|L|XL},complexity: {Low|Med|High}" --repo {owner/repo} \
-  --body "$(cat <<'EOF'
+**Child issue body template:**
+```markdown
 ## Context
 Part of epic #{epic-number} — {epic title}. {Note any dependency on sibling issues.}
 
@@ -327,15 +318,29 @@ Part of epic #{epic-number} — {epic title}. {Note any dependency on sibling is
 
 ## Notes
 {Pitfalls, relevant files, architectural constraints, known gotchas. Always include something.}
-EOF
-)"
 ```
 
-Repeat for every task. Then update the epic's Scope checklist with real issue numbers:
+Write the filled template to `/tmp/issue-body.md`, then:
 
 ```bash
-gh issue edit {epic-number} --body "..." --repo {owner/repo}
+python3 ~/.claude/skills/issue-workflow/issue_setup.py create-issue {owner/repo} \
+  title="{child title}" \
+  body-file=/tmp/issue-body.md \
+  labels="{type-label},scale: {XS|S|M|L|XL},complexity: {Low|Med|High}"
 ```
+
+**Output:** `ISSUE_NUMBER=<N>` — the created issue's number.
+
+Repeat for every task. Then update the epic's Scope checklist with real issue numbers.
+
+Write the updated epic body (with filled Scope section) to `/tmp/updated-epic-body.md`, then:
+
+```bash
+python3 ~/.claude/skills/issue-workflow/issue_setup.py update-scope {owner/repo} \
+  epic={epic-number} body-file=/tmp/updated-epic-body.md
+```
+
+**Output:** `UPDATED=yes` — epic body updated successfully.
 
 ### Step 5 — Establish active epic and active issue
 

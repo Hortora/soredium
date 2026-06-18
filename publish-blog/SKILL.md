@@ -139,31 +139,35 @@ If any target directory is missing, warn before proceeding:
 For each (entry, destination) pair approved by the user:
 
 ```bash
-cp "$BLOG_DIR/<filename>" "<target_dir>/<filename>"
+python3 ~/.claude/skills/publish-blog/blog_publish.py copy-entry \
+  "$BLOG_DIR/<filename>" "<target_dir>"
 ```
 
-If the destination is a git repo:
-```bash
-git -C "<dest_path>" add "<subdir>/<filename>"
-```
+Expected output: `COPIED=yes`
+Error cases: `ERROR=source_not_found`, `ERROR=copy_failed`
+
+**Git staging is handled separately in Step 7 — do not manually `git add` here.**
 
 ### Step 7 — Commit destinations with a remote
 
-After copying all entries for a destination, if the destination is a `git` type
-and has a remote:
+After copying all entries for a destination, if the destination is a `git` type:
 
+First, verify remote exists:
 ```bash
-# Verify remote exists
 git -C "<dest_path>" remote get-url origin 2>/dev/null && echo "has-remote"
-
-# Commit
-git -C "<dest_path>" commit -m "chore: publish blog entries from cc-praxis"
-
-# Push
-git -C "<dest_path>" push
 ```
 
-If push fails, report with resolution command:
+Then commit and push the copied files:
+```bash
+python3 ~/.claude/skills/publish-blog/blog_publish.py commit-destination \
+  "<dest_path>" \
+  "files=<subdir>/<filename1>,<subdir>/<filename2>" \
+  "message=chore: publish blog entries from cc-praxis"
+```
+
+Expected output: `COMMITTED=yes, PUSHED=yes` (or `PUSHED=no` if push fails)
+
+If `PUSHED=no`, report with resolution command:
 ```
 ❌ Push failed for 'personal-blog'. Run manually:
    git -C ~/blog push
@@ -175,17 +179,15 @@ Published entries are now versioned in the destination repo — the workspace co
 is redundant. Delete it:
 
 ```bash
-git -C "$BLOG_DIR/.." rm "$BLOG_DIR/<filename>"
+python3 ~/.claude/skills/publish-blog/blog_publish.py remove-source \
+  "$BLOG_DIR/.." \
+  "files=$BLOG_DIR/<filename1>,$BLOG_DIR/<filename2>"
 ```
+
+Expected output: `REMOVED=<count>`
 
 If all entries in `$BLOG_DIR` have been published and removed, also remove
-`INDEX.md` if present.
-
-Commit the removals in the source workspace repo:
-
-```bash
-git -C "$BLOG_DIR/.." commit -m "chore: remove published blog entries"
-```
+`INDEX.md` if present using the same command.
 
 Only remove entries whose destinations all succeeded (✅). If any destination
 failed for an entry, keep the source copy until the failure is resolved.

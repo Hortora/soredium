@@ -312,13 +312,11 @@ or `$PROJECT_BASE_BRANCH` for normal work). The project must already be on that 
 before this step runs — Step 4b handles the checkout.
 
 ```bash
-git -C "$PROJECT" checkout -b <branch-name>   # from PROJECT_BRANCH_BASE
-# If fails → abort (nothing to clean up)
-git -C "$WORKSPACE" checkout -b <branch-name>
-# If fails → git -C "$PROJECT" branch -D <branch-name>, abort, report error
+python3 ~/.claude/skills/work-start/branch_create.py create-branches "$PROJECT" "$WORKSPACE" branch=<branch-name> base=<PROJECT_BRANCH_BASE>
 ```
 
-Confirm both commands succeeded before continuing.
+Read `CREATED=yes` from output. If `ERROR=project_branch_failed` → abort (nothing to clean up).
+If `ERROR=workspace_branch_failed` → project branch was already rolled back; abort and report error.
 
 ### Step 8 — Resolve design routing and SHA baseline
 
@@ -381,10 +379,10 @@ issue was resolved, omit the `covers=` arg (defaults to `issue=` value).
 ### Step 10 — Commit and push scaffold
 
 ```bash
-git -C "$WORKSPACE" add design/JOURNAL.md design/.meta
-git -C "$WORKSPACE" commit -m "init(<branch-name>): scaffold workspace branch"
-git -C "$WORKSPACE" push  # non-fatal if fails; warn and continue
+python3 ~/.claude/skills/work-start/branch_create.py commit-scaffold "$WORKSPACE" branch=<branch-name>
 ```
+
+Read `COMMITTED=yes` and `PUSHED=yes|no` from output. Push failure is non-fatal; warn and continue.
 
 ### Step 11 — IntelliJ MCPs
 

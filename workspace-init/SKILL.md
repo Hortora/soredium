@@ -379,9 +379,8 @@ Per-repo artifacts live in each child workspace.
 ```
 
 Create the standard artifact directories at the family root too:
-```bash
-mkdir -p "$FAMILY_ROOT/adr" "$FAMILY_ROOT/snapshots" "$FAMILY_ROOT/blog" "$FAMILY_ROOT/specs" "$FAMILY_ROOT/plans"
-```
+
+Run: `python3 ~/.claude/skills/workspace-init/workspace_create.py create-dirs <FAMILY_ROOT>`
 
 Write the family root `.gitignore` — ignores all child workspace directories so
 the family repo tracks only family-level artifacts, not the nested repos:
@@ -454,35 +453,15 @@ If no org is detected or no remote exists, skip silently.
 
 ### Step 2 — Create directory structure
 
-```bash
-# BASE is set in Step 1a (flat or nested under parent)
-mkdir -p "$BASE/snapshots" "$BASE/adr" "$BASE/blog" "$BASE/specs" "$BASE/plans" "$BASE/design"
-```
+Run: `python3 ~/.claude/skills/workspace-init/workspace_create.py create-dirs <BASE>`
+
+Read `CREATED` from output. If `ERROR=` appears, stop and report the error.
 
 ### Step 3 — Create INDEX.md in multi-file folders
 
-```bash
-cat > "$BASE/snapshots/INDEX.md" << 'EOF'
-# Snapshots Index
+Run: `python3 ~/.claude/skills/workspace-init/workspace_create.py create-indexes <BASE>`
 
-| File | Date | Topic |
-|------|------|-------|
-EOF
-
-cat > "$BASE/adr/INDEX.md" << 'EOF'
-# ADR Index
-
-| ID | Title | Status | Date |
-|----|-------|--------|------|
-EOF
-
-cat > "$BASE/blog/INDEX.md" << 'EOF'
-# Blog Index
-
-| File | Date | Title |
-|------|------|-------|
-EOF
-```
+Read `CREATED=<count>` from output. If `ERROR=` appears, stop and report the error.
 
 (`specs/`, `plans/`, and `design/` need no INDEX.md — superpowers and design skills manage them directly.)
 
@@ -491,20 +470,9 @@ creates `design/JOURNAL.md` and `design/.meta` when a work branch begins.
 
 ### Step 4 — Create HANDOFF.md and IDEAS.md stubs
 
-```bash
-cat > "$BASE/HANDOFF.md" << 'EOF'
-# Handoff
+Run: `python3 ~/.claude/skills/workspace-init/workspace_create.py create-stubs <BASE>`
 
-No sessions yet.
-EOF
-
-cat > "$BASE/IDEAS.md" << 'EOF'
-# Idea Log
-
-Undecided possibilities — things worth remembering but not yet decided.
-Promote to an ADR when ready to decide; discard when no longer relevant.
-EOF
-```
+Read `CREATED=<count>` from output. If `ERROR=` appears, stop and report the error.
 
 ### Step 5 — Create workspace CLAUDE.md (routing hub)
 
@@ -930,22 +898,23 @@ HAS_COMMITMSG=false
 > Both are committed so all clones get them. `core.hooksPath` activated on this machine. (YES / n)"
 
 If YES:
+
+For each available hook, run `hook_install.py install`:
+
+If `HAS_PREPUSH`:
+Run: `python3 ~/.claude/skills/workspace-init/hook_install.py install <project-path> hook-src=$HOME/.claude/skills/git-squash/hooks/pre-push hook-name=pre-push`
+Read `INSTALLED` from output. If `INSTALLED=yes`, stage: `git -C "<project-path>" add .githooks/pre-push`
+
+If `HAS_COMMITMSG`:
+Run: `python3 ~/.claude/skills/workspace-init/hook_install.py install <project-path> hook-src=$HOME/.claude/skills/issue-workflow/hooks/commit-msg hook-name=commit-msg`
+Read `INSTALLED` from output. If `INSTALLED=yes`, stage: `git -C "<project-path>" add .githooks/commit-msg`
+
+Configure hooks path:
+Run: `python3 ~/.claude/skills/workspace-init/hook_install.py configure <project-path>`
+Read `CONFIGURED` from output.
+
+Commit all staged hooks in one commit:
 ```bash
-mkdir -p "$GITHOOKS_DIR"
-
-if $HAS_PREPUSH; then
-  cp "$PREPUSH_SRC" "$GITHOOKS_DIR/pre-push"
-  chmod +x "$GITHOOKS_DIR/pre-push"
-  git -C "<project-path>" add .githooks/pre-push
-fi
-
-if $HAS_COMMITMSG; then
-  cp "$COMMITMSG_SRC" "$GITHOOKS_DIR/commit-msg"
-  chmod +x "$GITHOOKS_DIR/commit-msg"
-  git -C "<project-path>" add .githooks/commit-msg
-fi
-
-git -C "<project-path>" config core.hooksPath .githooks
 git -C "<project-path>" commit -m "chore: add git hooks — squash detection and issue ref enforcement"
 ```
 
@@ -956,28 +925,24 @@ If n → skip. Do not ask again this session.
 
 ### Step 8 — Initialise git and push
 
-```bash
-cd "$BASE"
-git init
-git add .
-git commit -m "init: workspace for <project>"
-```
+If the user provided a GitHub remote URL:
+Run: `python3 ~/.claude/skills/workspace-init/workspace_create.py init-repo <BASE> name=<owner>/<REPO_NAME> visibility=<private|public>`
 
-If the user provided a GitHub remote URL, create the repo and push:
+If no remote URL provided:
+Run: `python3 ~/.claude/skills/workspace-init/workspace_create.py init-repo <BASE>`
 
-```bash
-gh repo create <owner>/<REPO_NAME> $PRIVACY_FLAG --description "Workspace for <workspace-name>" 2>/dev/null || true
-git remote add origin git@github.com:<owner>/<REPO_NAME>.git
-git push -u origin main
-```
+Read output: `REPO_URL=<url>` on success, `ERROR=` on failure.
 
-If no remote URL provided, tell the user:
+If `ERROR=already_initialized` — the workspace already has a `.git` directory; skip this step.
+If `ERROR=gh_failed` — git init succeeded but GitHub remote creation failed. Report the error detail and tell the user:
 > Remote not configured. When ready (using your chosen tag `<REPO_NAME>`):
 > ```bash
 > gh repo create <owner>/<REPO_NAME> $PRIVACY_FLAG
 > git remote add origin git@github.com:<owner>/<REPO_NAME>.git
 > git push -u origin main
 > ```
+
+If no remote URL was provided and init succeeded, tell the user the same manual instructions.
 
 ### Step 9b — Migrate Claude session history and memory
 
@@ -1013,35 +978,13 @@ This step runs unconditionally — session continuity is not optional.
 
 Scan for existing methodology artifacts across the project:
 
-```bash
-FOUND=()
-# Root-level handovers and ideas
-[ -f "<project-path>/HANDOFF.md" ]  && git -C "<project-path>" ls-files --error-unmatch HANDOFF.md  2>/dev/null && FOUND+=("HANDOFF.md → HANDOFF.md")
-[ -f "<project-path>/HANDOVER.md" ] && git -C "<project-path>" ls-files --error-unmatch HANDOVER.md 2>/dev/null && FOUND+=("HANDOVER.md → HANDOFF.md")
-[ -f "<project-path>/IDEAS.md" ]    && git -C "<project-path>" ls-files --error-unmatch IDEAS.md    2>/dev/null && FOUND+=("IDEAS.md → IDEAS.md")
+Run: `python3 ~/.claude/skills/workspace-init/artifact_migrate.py scan <project-path>`
 
-# Root-level artifact directories (common in repos that predate docs/ convention)
-# Note: adr/ excluded — project knowledge, stays in repo.
-# Note: specs/ excluded — design specs are project knowledge; they explain why the
-#   code is shaped the way it is and are useful for future contributors. New specs
-#   are written to the workspace during active work, then merged to the project repo
-#   via work-end when the work ships.
-[ -d "<project-path>/blog" ]        && FOUND+=("blog/ → blog/")
-[ -d "<project-path>/plans" ]       && FOUND+=("plans/ → plans/")
-[ -d "<project-path>/snapshots" ]   && FOUND+=("snapshots/ → snapshots/")
+Read `FOUND=<json-array>` from output. The array contains relative paths of detected
+artifacts (e.g. `["HANDOFF.md", "blog/", "docs/superpowers/plans/"]`).
 
-# docs/ artifacts
-# Note: docs/adr/ and docs/specs/ excluded — both are project knowledge, not workspace artifacts.
-
-[ -d "<project-path>/docs/blog" ]              && FOUND+=("docs/blog/ → blog/")
-[ -d "<project-path>/docs/_posts" ]            && FOUND+=("docs/_posts/ → blog/")
-[ -d "<project-path>/docs/handoffs" ]          && FOUND+=("docs/handoffs/ → handoffs/")
-[ -f "<project-path>/docs/ideas/IDEAS.md" ]    && FOUND+=("docs/ideas/IDEAS.md → IDEAS.md")
-[ -d "<project-path>/docs/superpowers/plans" ] && FOUND+=("docs/superpowers/plans/ → plans/")
-
-# Hidden directories
-[ -d "<project-path>/.superpowers/brainstorm" ] && FOUND+=(".superpowers/brainstorm/ → specs/")
-```
+Note: `adr/` and `specs/` are excluded from scanning — they are project knowledge,
+not workspace artifacts. `docs/adr/` and `docs/specs/` are also excluded.
 
 If any found, present the list and ask:
 > "Found existing methodology artifacts:
@@ -1061,19 +1004,18 @@ before copying:
 Copy root-level first, then `docs/` so that `docs/` content takes precedence
 in any collision. After copying, report any files that were overwritten.
 
-If YES (or after selection is confirmed), for each item:
+If YES (or after selection is confirmed), copy the selected artifacts:
+
+Run: `python3 ~/.claude/skills/workspace-init/artifact_migrate.py migrate <project-path> <BASE> paths=HANDOFF.md,blog/,plans/`
+
+(Pass the selected paths as a comma-separated list. The script handles path remapping —
+e.g. `docs/superpowers/plans/` maps to `plans/`, `docs/_posts/` maps to `blog/`.)
+
+Read `MIGRATED=<count>` from output. If `ERROR=` appears, stop and report the error.
+
+Then remove the migrated artifacts from the project and commit:
 ```bash
-# 1. Copy to workspace (merges into destination dir)
-cp -r "<project-path>/adr/." "$BASE/adr/"
-
-# 2. Remove from project
-git -C "<project-path>" rm -r adr
-
-# ... repeat for each selected item, root-level before docs/
-```
-
-Then commit all removals in one go:
-```bash
+git -C "<project-path>" rm -r <each-migrated-path>
 git -C "<project-path>" commit -m "chore: migrate methodology artifacts to workspace"
 ```
 

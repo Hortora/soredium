@@ -2,9 +2,8 @@
 name: work-resume
 description: >
   Use when returning to a paused branch — user says "work-resume", "resume",
-  or "go back to that branch". Reads the pause stack on workspace main and
-  lets the user pick which branch to resume. Rebases onto current main before
-  restoring WIP. Must be invoked from main.
+  or "go back to that branch". Invoked from main to restore a previously
+  paused work session. Handles multiple paused branches via stack.
 ---
 
 # work-resume
@@ -93,33 +92,29 @@ same branch.
 ## Step 5 — Switch both repos to branch
 
 ```bash
-git -C "$PROJECT" checkout "$RESUME_BRANCH"
-git -C "$WORKSPACE" checkout "$RESUME_BRANCH"
+OUTPUT=$(python3 ~/.claude/skills/work-resume/resume_exec.py checkout-branches "$PROJECT" "$WORKSPACE" branch="$RESUME_BRANCH")
+echo "$OUTPUT"
+echo "$OUTPUT" | grep -q "CHECKED_OUT=yes" || { echo "⚠️ Branch checkout failed."; exit 1; }
 ```
-
-Verify both are on the same branch after switching.
 
 ---
 
 ## Step 6 — Rebase branch onto current base branch
 
 ```bash
-git -C "$PROJECT" rebase "$PROJECT_BASE_BRANCH"
-```
+OUTPUT=$(python3 ~/.claude/skills/work-resume/resume_exec.py rebase "$PROJECT" "$WORKSPACE" base-branch="$BASE_BRANCH")
+echo "$OUTPUT"
 
-**If rebase succeeds:** continue to Step 7.
+if echo "$OUTPUT" | grep -q "ERROR=rebase_conflict"; then
+  echo "⚠️ Rebase conflict occurred. Conflicting files:"
+  git -C "$PROJECT" diff --name-only --diff-filter=U
+  echo ""
+  echo "**Stop. Do not proceed.**"
+  echo "Resolve conflicts, run 'git -C $PROJECT rebase --continue', then run work-resume again."
+  exit 1
+fi
 
-**If rebase fails (conflict):**
-- Report conflicting files verbatim.
-- **Stop. Do not proceed.**
-- Instruct: resolve conflicts, `git rebase --continue`, then run `work-resume` again — it will detect the stack entry is already removed and skip Steps 1–5.
-- The branch is now checked out; work can continue after manual resolution.
-
-Workspace branch does not need rebasing — it holds methodology artifacts only,
-not implementation code. Switch workspace to the branch but do not rebase it.
-
-```bash
-git -C "$WORKSPACE" rebase main 2>/dev/null || true  # best-effort only; workspace always uses main
+echo "$OUTPUT" | grep -qE "REBASED=(yes|skipped)" || { echo "⚠️ Rebase failed."; exit 1; }
 ```
 
 ---
@@ -127,14 +122,13 @@ git -C "$WORKSPACE" rebase main 2>/dev/null || true  # best-effort only; workspa
 ## Step 7 — Reset WIP commit
 
 ```bash
-if [ "$RESUME_WIP_PROJECT" = "true" ]; then
-  git -C "$PROJECT" reset HEAD~1
-  echo "✅ Project WIP commit reset — changes restored to working tree"
-fi
+OUTPUT=$(python3 ~/.claude/skills/work-resume/resume_exec.py reset-wip "$PROJECT" "$WORKSPACE")
+echo "$OUTPUT"
 
-if [ "$RESUME_WIP_WORKSPACE" = "true" ]; then
-  git -C "$WORKSPACE" reset HEAD~1
-  echo "✅ Workspace WIP commit reset — changes restored to working tree"
+if echo "$OUTPUT" | grep -q "RESET=yes"; then
+  echo "✅ WIP commit(s) reset — changes restored to working tree"
+elif echo "$OUTPUT" | grep -q "RESET=no"; then
+  echo "ℹ️  No WIP commits found to reset"
 fi
 ```
 
