@@ -1,33 +1,196 @@
 {
   "name": "soredium",
-  "description": "Hortora garden skills for Claude Code — forage (session-time capture) and harvest (maintenance merge/dedupe)",
+  "description": "Development workflow + knowledge garden skills for Claude Code",
   "owner": {
     "name": "Hortora",
     "url": "https://github.com/Hortora"
   },
-  "bundles": [
-    {
-      "name": "hortora-garden",
-      "displayName": "Hortora Garden",
-      "description": "Garden skills for Hortora knowledge gardens: forage (CAPTURE/SWEEP/SEARCH/REVISE during session work) and harvest (MERGE/DEDUPE in dedicated maintenance sessions)",
-      "skills": [
-        "forage",
-        "harvest"
-      ]
-    }
-  ],
   "plugins": [
     {
+      "name": "adr",
+      "source": "./adr",
+      "description": "Use when recording architectural decisions: user says \"create an ADR\", \"document why we chose X\", significant technic...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "code-review",
+      "source": "./code-review",
+      "description": "Use when the user says \"review the code\", \"check these changes\", \"review this\", \"look at staged changes\", or invokes ...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "dependency-update",
+      "source": "./dependency-update",
+      "description": "Use when the user says \"bump a version\", \"upgrade dependencies\", \"check for newer versions\", \"add a dependency\", or \"...",
+      "version": "1.0.0"
+    },
+    {
       "name": "forage",
+      "source": "./forage",
       "description": "Session-time garden operations: CAPTURE, SWEEP, SEARCH, REVISE",
-      "source": "https://github.com/Hortora/soredium",
-      "path": "forage"
+      "version": "1.0.0"
+    },
+    {
+      "name": "git-commit",
+      "source": "./git-commit",
+      "description": "Use when user wants to create a commit NOW — says \"commit this\", \"commit these changes\", \"create a commit\". Routes to...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "git-squash",
+      "source": "./git-squash",
+      "description": "Use when the commit history contains noise — fixup commits, revert chains, docs wording chores, tiny cleanups — that ...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "handover",
+      "source": "./handover",
+      "description": "Use when ending a session and wanting to preserve context for resumption, OR when a session is beginning and needing ...",
+      "version": "1.0.0"
     },
     {
       "name": "harvest",
+      "source": "./harvest",
       "description": "Garden maintenance operations: MERGE, DEDUPE",
-      "source": "https://github.com/Hortora/soredium",
-      "path": "harvest"
+      "version": "1.0.0"
+    },
+    {
+      "name": "ide-tooling",
+      "source": "./ide-tooling",
+      "description": "INVOKE IMMEDIATELY when two IntelliJ MCPs are visible: mcp__intellij-index__* and mcp__intellij__*. These are NOT int...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "idea-log",
+      "source": "./idea-log",
+      "description": "Use when user wants to park an idea for later — says \"log this idea\", \"add to idea log\", \"park that thought\", \"we sho...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "implementation-doc-sync",
+      "source": "./implementation-doc-sync",
+      "description": "Use when documentation needs syncing — user says \"sync docs\", \"update docs\", \"doc sweep\", or invoked from a prompt sn...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "issue-workflow",
+      "source": "./issue-workflow",
+      "description": "Use when setting up GitHub issue tracking, planning implementation work (creating epics and child issues from a plan)...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "java-dev",
+      "source": "./java-dev",
+      "description": "Use when writing new Java code, fixing bugs, refactoring, or adding tests in Quarkus applications — user says \"implem...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "project-health",
+      "source": "./project-health",
+      "description": "Use when correctness, completeness, or consistency of a project needs verification — \"is the project healthy?\", \"pre-...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "project-init",
+      "source": "./project-init",
+      "description": "Use when project setup needs to be verified or completed — invoked automatically at session start (via hook) and by w...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "project-refine",
+      "source": "./project-refine",
+      "description": "Use when seeking improvement opportunities in a project — \"find duplication\", \"bloat check\", \"look for ways to improv...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "protocol",
+      "source": "./protocol",
+      "description": "Use when working with project-level protocol files — project-specific rules, architectural constraints, and conventions that apply within a single project.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "publish-blog",
+      "source": "./publish-blog",
+      "description": "Use when publishing blog entries to external platforms via blog-routing.yaml — user says \"publish blog\", \"publish ent...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "python-dev",
+      "source": "./python-dev",
+      "description": "Use when writing new Python code, fixing bugs, refactoring, or adding tests — user says \"implement\", \"fix\", \"refactor...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "retro-issues",
+      "source": "./retro-issues",
+      "description": "Use when mapping an existing git repository's history to GitHub epics and issues — user says \"map our history to issu...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "security-audit",
+      "source": "./security-audit",
+      "description": "Use when user explicitly requests \"security review\", \"audit security\", \"check for vulnerabilities\", or \"OWASP check\",...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "ts-dev",
+      "source": "./ts-dev",
+      "description": "Use when writing new TypeScript code, fixing bugs, refactoring, or adding tests — user says \"implement\", \"fix\", \"refa...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "update-claude-md",
+      "source": "./update-claude-md",
+      "description": "Use when CLAUDE.md needs updating due to workflow or convention changes, or when invoked automatically by git-commit/...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "update-design",
+      "source": "./update-design",
+      "description": "Use when the user says \"update the design doc\", \"sync DESIGN.md\", \"sync ARC42STORIES.MD\", \"reflect code changes in th...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "work",
+      "source": "./work",
+      "description": "Use when the user says \"work\", \"work end\", \"work pause\", or \"work resume\" — detects current branch state and routes t...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "work-end",
+      "source": "./work-end",
+      "description": "Use when the current branch is complete and ready to close — user says \"work-end\", \"close this branch\", or \"wrap up t...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "work-pause",
+      "source": "./work-pause",
+      "description": "Use when interrupting current branch work to switch to something else — user says \"work-pause\", \"pause this work\", or...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "work-resume",
+      "source": "./work-resume",
+      "description": "Use when returning to a paused branch — user says \"work-resume\", \"resume\", or \"go back to that branch\". Reads the pau...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "work-start",
+      "source": "./work-start",
+      "description": "Use when a task or session is beginning — the opening directive in any work-item prompt, or when the user says they a...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "workspace-init",
+      "source": "./workspace-init",
+      "description": "Use when explicitly creating a new companion workspace from scratch — user invokes /workspace-init or says \"init work...",
+      "version": "1.0.0"
+    },
+    {
+      "name": "write-content",
+      "source": "./write-content",
+      "description": "Use when writing any piece of content — project diary entry, blog post, article, note, brief, README, news item, tech...",
+      "version": "1.0.0"
     }
   ]
 }
