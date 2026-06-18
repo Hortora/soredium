@@ -13,7 +13,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import requests
+import pytest
+
+requests = pytest.importorskip("requests", reason="requests not installed")
 
 # Ensure scripts/ is on path before importing the module under test
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))

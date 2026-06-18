@@ -102,44 +102,44 @@ class TestWorkRouting:
 
 class TestWorkPauseConfirmation:
 
-    def test_step7_present(self, work_pause_text):
-        """Step 7 (confirm) must be present."""
-        assert "Step 7" in work_pause_text
+    def test_step5_present(self, work_pause_text):
+        """Step 5 (confirm) must be present."""
+        assert "Step 5" in work_pause_text
 
-    def test_step7_mentions_work_for_next_action(self, work_pause_text):
-        """Step 7 must tell user to type 'work' — not just 'work-resume'."""
-        # Find the Step 7 section
-        idx = work_pause_text.find("Step 7")
+    def test_step5_mentions_work_for_next_action(self, work_pause_text):
+        """Step 5 must tell user to type 'work' — not just 'work-resume'."""
+        # Find the Step 5 section
+        idx = work_pause_text.find("Step 5")
         assert idx != -1
-        step7_section = work_pause_text[idx:]
+        step5_section = work_pause_text[idx:]
 
-        assert "work" in step7_section, (
-            "Step 7 confirmation must mention 'work' as the next command"
+        assert "work" in step5_section, (
+            "Step 5 confirmation must mention 'work' as the next command"
         )
 
-    def test_step7_does_not_only_advertise_work_resume(self, work_pause_text):
-        """Step 7 must not leave user thinking work-resume is the only option."""
-        idx = work_pause_text.find("Step 7")
-        step7_section = work_pause_text[idx:]
+    def test_step5_does_not_only_advertise_work_resume(self, work_pause_text):
+        """Step 5 must not leave user thinking work-resume is the only option."""
+        idx = work_pause_text.find("Step 5")
+        step5_section = work_pause_text[idx:]
 
         # If the only command mentioned is "work-resume", that's the bug
         has_work_resume_only = (
-            "work-resume" in step7_section
-            and "start new" not in step7_section
-            and "new work" not in step7_section
-            and "type work" not in step7_section.lower()
+            "work-resume" in step5_section
+            and "start new" not in step5_section
+            and "new work" not in step5_section
+            and "type work" not in step5_section.lower()
         )
         assert not has_work_resume_only, (
-            "Step 7 must not advertise work-resume as the only option — "
+            "Step 5 must not advertise work-resume as the only option — "
             "user must know they can start new work from main"
         )
 
-    def test_step7_references_main_branch_context(self, work_pause_text):
-        """Step 7 should tell user they are on main after pausing."""
-        idx = work_pause_text.find("Step 7")
-        step7_section = work_pause_text[idx:]
-        assert "main" in step7_section, (
-            "Step 7 should confirm user is on main, "
+    def test_step5_references_main_branch_context(self, work_pause_text):
+        """Step 5 should tell user they are on main after pausing."""
+        idx = work_pause_text.find("Step 5")
+        step5_section = work_pause_text[idx:]
+        assert "main" in step5_section, (
+            "Step 5 should confirm user is on main, "
             "making it clear new work can begin"
         )
 
@@ -191,10 +191,10 @@ class TestCrossSkillConsistency:
             )
 
     def test_work_pause_and_work_agree_on_next_step(self, work_text, work_pause_text):
-        """work-pause Step 7 must align with work's picker — 'work' is the next command."""
+        """work-pause Step 5 must align with work's picker — 'work' is the next command."""
         # work-pause tells user to type 'work'; work has the picker
-        idx = work_pause_text.find("Step 7")
-        step7 = work_pause_text[idx:]
-        assert "work" in step7, "work-pause Step 7 must reference 'work' as next command"
+        idx = work_pause_text.find("Step 5")
+        step5 = work_pause_text[idx:]
+        assert "work" in step5, "work-pause Step 5 must reference 'work' as next command"
         # And work must have a picker that offers new work
         assert "new" in work_text, "work skill picker must offer 'new' option"

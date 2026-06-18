@@ -61,6 +61,15 @@ def find_all_files_in_skill(skill_dir: Path) -> set[Path]:
     return all_files
 
 
+def _is_slash_command_suppressed(skill_path: Path) -> bool:
+    """Return True if the skill's frontmatter contains 'slash-command: false'."""
+    content = skill_path.read_text(encoding='utf-8')
+    match = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
+    if not match:
+        return False
+    return re.search(r'^slash-command:\s*false\s*$', match.group(1), re.MULTILINE) is not None
+
+
 def validate_skill_structure(skill_path: Path) -> list[ValidationIssue]:
     """Validate file organization for a single skill."""
     issues = []
@@ -68,8 +77,9 @@ def validate_skill_structure(skill_path: Path) -> list[ValidationIssue]:
     skill_name = skill_dir.name
 
     # Every skill must have a commands/<skill-name>.md file to enable slash commands
+    # unless the skill explicitly suppresses it via 'slash-command: false' in frontmatter
     command_file = skill_dir / 'commands' / f'{skill_name}.md'
-    if not command_file.exists():
+    if not command_file.exists() and not _is_slash_command_suppressed(skill_path):
         issues.append(ValidationIssue(
             severity=Severity.CRITICAL,
             file_path=str(skill_path),

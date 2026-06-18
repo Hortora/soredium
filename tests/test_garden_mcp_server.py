@@ -7,6 +7,12 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+try:
+    import mcp  # noqa: F401
+    HAS_MCP = True
+except ImportError:
+    HAS_MCP = False
+
 SERVER = Path(__file__).parent.parent / 'scripts' / 'garden_mcp_server.py'
 
 
@@ -77,6 +83,7 @@ class TestMcpServerFile(unittest.TestCase):
         self.assertIn('mcp_garden_capture', content)
 
 
+@unittest.skipUnless(HAS_MCP, "mcp SDK not installed")
 class TestMcpServerImport(unittest.TestCase):
     """Verify the server module can be imported."""
 
@@ -94,6 +101,7 @@ class TestMcpServerImport(unittest.TestCase):
         self.assertTrue(hasattr(garden_mcp_server, 'mcp'))
 
 
+@unittest.skipUnless(HAS_MCP, "mcp SDK not installed")
 class TestMcpServerTools(unittest.TestCase):
     """Test the tool functions directly (bypassing MCP protocol)."""
 

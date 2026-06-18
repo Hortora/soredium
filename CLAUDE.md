@@ -21,6 +21,20 @@ Named after the lichen's dispersal unit: a self-contained bundle that carries ev
 
 **Type:** skills
 
+## Project Type Awareness
+
+**CRITICAL: Skills must handle different project types with appropriate workflows.**
+
+### Project Types
+
+| Type | When to Use |
+|------|-------------|
+| **`skills`** | Claude Code skill repositories |
+| **`java`** | Java/Maven/Gradle projects |
+| **`blog`** | GitHub Pages / Jekyll blogs |
+| **`custom`** | Working groups, research, docs with custom sync |
+| **`generic`** | Everything else |
+
 ---
 
 ## Migration Status

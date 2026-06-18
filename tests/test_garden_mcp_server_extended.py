@@ -20,6 +20,9 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
+mcp = pytest.importorskip("mcp", reason="mcp SDK not installed")
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 

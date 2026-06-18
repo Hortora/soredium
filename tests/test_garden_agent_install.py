@@ -24,10 +24,12 @@ def make_garden() -> TemporaryDirectory:
 
 
 def run_installer(garden_path: str) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if k != 'HORTORA_GARDEN'}
     return subprocess.run(
         ['bash', str(INSTALLER)],
         capture_output=True, text=True,
-        cwd=garden_path
+        cwd=garden_path,
+        env=env,
     )
 
 
