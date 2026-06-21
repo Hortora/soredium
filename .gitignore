@@ -31,3 +31,4 @@ wksp
 
 # Registry candidate report (generated)
 registry/candidate_report.json
+target/
