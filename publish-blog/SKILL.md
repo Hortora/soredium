@@ -31,7 +31,7 @@ This skill controls where individual entries are cross-posted to blog platforms.
 ### Step 0 — Resolve blog directory
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Read `BLOG_DIR` and `HAS_BLOG_ROUTING` from the output.

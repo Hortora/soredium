@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for project-init/stack.py
+Tests for project/stack.py
 
 Covers: depth on empty/populated/missing stack, list output format,
 push creates entry, push is idempotent, push auto-timestamps, pop
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 import pytest
 
-SCRIPT = Path(__file__).parent.parent / "project-init" / "stack.py"
+SCRIPT = Path(__file__).parent.parent / "project" / "stack.py"
 
 
 def run(*args) -> subprocess.CompletedProcess:

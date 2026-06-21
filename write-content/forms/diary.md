@@ -120,7 +120,7 @@ Use these forms as the filter — if what you'd write doesn't fit one, leave it 
 
 > *"The ctx.py pattern probably has further to run — there's a whole class of shell operations in the remaining skills that are one permission check away from the same problem."*
 
-> *"Between ctx.py, stack.py, and discover-repos.py, project-init is quietly becoming a Python runtime for the whole skill ecosystem. That's a meaningfully different thing than it started as."*
+> *"Between ctx.py, stack.py, and discover-repos.py, project is quietly becoming a Python runtime for the whole skill ecosystem. That's a meaningfully different thing than it started as."*
 
 > *"Fixing work-pause surfaces a broader question: how many of the lifecycle commands have implicit ordering assumptions that aren't enforced anywhere?"*
 

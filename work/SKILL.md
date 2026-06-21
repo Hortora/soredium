@@ -31,7 +31,7 @@ correct skill — developer says `work` to begin, `work end` to close,
 **Step 2 — Detect state (for `work` alone)**
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Read `WORKSPACE` and `CURRENT_BRANCH` from the output, then check pause stack state:

@@ -1,4 +1,4 @@
-"""Tests for project-init/ctx.py — context field extraction and path resolution."""
+"""Tests for project/ctx.py — context field extraction and path resolution."""
 
 import subprocess
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 
-SCRIPT = Path(__file__).parent.parent / "project-init" / "ctx.py"
+SCRIPT = Path(__file__).parent.parent / "project" / "ctx.py"
 
 
 def run_ctx(cwd: Path) -> subprocess.CompletedProcess:

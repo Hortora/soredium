@@ -48,7 +48,7 @@ The pre-push hook blocks diverged pushes, but prevention is better than detectio
 Run the bundled context script — installed, version-controlled, no hardcoded paths:
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 **Never write a script to /tmp/ for path resolution.** `/tmp/` is shared across sessions — a stale script from a previous session in a different project will silently return the wrong workspace and project paths, contaminating the entire close operation.
@@ -62,7 +62,7 @@ with the actual value from the script output.
 
 ## Pre-conditions
 
-Run `python3 ~/.claude/skills/project-init/ctx.py` first. Use `CURRENT_BRANCH` from its output. Check in order:
+Run `python3 ~/.claude/skills/project/ctx.py` first. Use `CURRENT_BRANCH` from its output. Check in order:
 
 1. **If `$WORKSPACE/design/.pause-stack` exists and has entries** — check whether
    the target branch is in the stack:
@@ -315,7 +315,7 @@ in `.meta`. For each `§Section` anchor in JOURNAL.md, verify its heading still 
 unchanged in ARC42STORIES.MD.
 ```bash
 grep "^design-section-hashes:" <WORKSPACE>/design/.meta
-python3 ~/.claude/skills/project-init/section_hashes.py <DESIGN_REPO>/ARC42STORIES.MD
+python3 ~/.claude/skills/project/section_hashes.py <DESIGN_REPO>/ARC42STORIES.MD
 ```
 Use the first command's output as STORED, the second as CURRENT.
 If drift: `[U]` update journal anchors, `[S]` skip drifted sections, `[A]` abort.

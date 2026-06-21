@@ -20,7 +20,7 @@ no stash used. On resume, the WIP commit is reset so work continues cleanly.
 
 Run the bundled context script — no shell variable assignments, no CLAUDE.md scanning:
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Use `WORKSPACE`, `PROJECT`, `BASE_BRANCH`, `CURRENT_BRANCH` from the output as concrete strings.
@@ -98,7 +98,7 @@ This operation:
 
 Get current stack depth:
 ```bash
-STACK_DEPTH=$(python3 ~/.claude/skills/project-init/stack.py depth "$WORKSPACE/design/.pause-stack")
+STACK_DEPTH=$(python3 ~/.claude/skills/project/stack.py depth "$WORKSPACE/design/.pause-stack")
 ```
 
 Display confirmation:

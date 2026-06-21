@@ -79,7 +79,7 @@ print(f"ISSUE_N={issue_n}")
 print(f"ISSUE_REPO={issue_repo}")
 print(f"COVERS={covers}")
 
-# project-init fast-path checks
+# project fast-path checks
 cwd = Path.cwd()
 claude_md_cwd = cwd / "CLAUDE.md"
 cwd_claude_text = claude_md_cwd.read_text() if claude_md_cwd.exists() else ""

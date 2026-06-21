@@ -6,11 +6,11 @@ if ! git rev-parse --is-inside-work-tree &>/dev/null; then
   exit 0
 fi
 
-# Project setup — delegate all checks to project-init
-echo "🔧 Invoke the project-init skill to verify this project is set up before proceeding."
+# Project setup — delegate all checks to project
+echo "🔧 Invoke the project skill to verify this project is set up before proceeding."
 
 
-# Handover — session context, handled here not in project-init
+# Handover — session context, handled here not in project
 if [ -f "CLAUDE.md" ] && [ -f "HANDOVER.md" ]; then
   LAST_UPDATED=$(git log -1 --format="%ar" -- HANDOVER.md 2>/dev/null || echo "unknown age")
   echo "📋 HANDOVER.md found (last updated: $LAST_UPDATED)."

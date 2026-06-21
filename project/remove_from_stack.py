@@ -2,7 +2,7 @@
 """
 Remove a branch entry from the workspace pause stack (.pause-stack).
 
-Usage: python3 ~/.claude/skills/project-init/remove_from_stack.py <stack_file> <branch_name>
+Usage: python3 ~/.claude/skills/project/remove_from_stack.py <stack_file> <branch_name>
 
 Exits 0 on success. Exits 1 if the stack file doesn't exist.
 Prints a summary of what was removed.

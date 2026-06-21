@@ -91,8 +91,8 @@
       "version": "1.0.0"
     },
     {
-      "name": "project-init",
-      "source": "./project-init",
+      "name": "project",
+      "source": "./project",
       "description": "Use when project setup needs to be verified or completed — invoked automatically at session start (via hook) and by w...",
       "version": "1.0.0"
     },

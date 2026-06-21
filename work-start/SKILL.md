@@ -16,21 +16,21 @@ runs pre-checks. **Never skip this skill — even for small changes.**
 
 ## Step 0 — Project initialisation
 
-**Invoke `project-init` before anything else.**
+**Invoke `project` before anything else.**
 
-project-init verifies CLAUDE.md, workspace, work tracking, and superpowers
+project verifies CLAUDE.md, workspace, work tracking, and superpowers
 are set up. If anything is missing it walks the user through setup and returns
 before proceeding. On the fast path (everything set up) it returns immediately.
 
-Only continue to path resolution once project-init returns clean.
+Only continue to path resolution once project returns clean.
 
 ---
 
-## Path Resolution (run after project-init)
+## Path Resolution (run after project)
 
 Run the bundled context script — no shell variable assignments:
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Use the printed values as **concrete strings** in all subsequent commands.
@@ -337,7 +337,7 @@ CANDIDATE="$(dirname "$PROJECT")/$ISSUE_REPO_NAME"
 Resolve routing config for `design` artifact (only if Layer 0 did not match):
 
 ```bash
-python3 ~/.claude/skills/project-init/routing.py ~/.claude/CLAUDE.md <WORKSPACE>/CLAUDE.md design
+python3 ~/.claude/skills/project/routing.py ~/.claude/CLAUDE.md <WORKSPACE>/CLAUDE.md design
 ```
 
 Read `DESTINATION` and `LAYER` from output. If command fails, default to `project`.
@@ -351,7 +351,7 @@ from routing config — which may have changed between sessions.
 
 Compute section hashes (single pipe-separated line):
 ```bash
-python3 ~/.claude/skills/project-init/section_hashes.py <DESIGN_REPO>/ARC42STORIES.MD
+python3 ~/.claude/skills/project/section_hashes.py <DESIGN_REPO>/ARC42STORIES.MD
 ```
 Leave blank (empty output) if `<DESIGN_REPO>/ARC42STORIES.MD` does not exist yet.
 

@@ -265,9 +265,9 @@ are loaded, parent's workspace declaration is found first). Fixed in Phase 1.
 
 Stays separate — it adds squash-specific fields (commit ranges, candidate
 analysis) that don't belong in the shared ctx.py. Its `BASE_BRANCH` extraction
-should delegate to project-init ctx.py output rather than re-implementing.
+should delegate to project ctx.py output rather than re-implementing.
 
-**Delegation mechanism:** The SKILL.md already calls project-init/ctx.py in
+**Delegation mechanism:** The SKILL.md already calls project/ctx.py in
 Path Resolution. git-squash/ctx.py should accept `base-branch=<value>` as an
 argument and stop parsing CLAUDE.md for it. The SKILL.md passes the value
 through — consistent with the architecture (SKILL.md orchestrates, scripts
@@ -356,7 +356,7 @@ After Phase 1, these skills have only instructional or pre-approved blocks:
 
 code-review, dependency-update, security-audit, update-design (type detection
 only — ctx.py), project-health (type detection + validate_all.py invocation),
-project-init (fast-path checks — ctx.py), work (state detection — ctx.py),
+project (fast-path checks — ctx.py), work (state detection — ctx.py),
 sync-local, python-dev, ts-dev, java-dev, fix-ci, idea-log, write-content.
 
 ### git-squash: deeper treatment

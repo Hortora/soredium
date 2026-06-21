@@ -16,7 +16,7 @@ only the document format and detection logic differ.
 ## Step 1 — Detect project type
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Read `PROJECT_TYPE` from the output. Also read `HAS_ARC42STORIES` for design doc routing.

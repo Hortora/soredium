@@ -162,7 +162,7 @@ Map changes to CLAUDE.md sections:
 
 ### Step 4b: Check for missing Work Tracking section
 
-Run `python3 ~/.claude/skills/project-init/ctx.py` if not already run this session.
+Run `python3 ~/.claude/skills/project/ctx.py` if not already run this session.
 Read `ISSUES_STATUS` from the output.
 
 If `ISSUES_STATUS` is `absent`, prompt:

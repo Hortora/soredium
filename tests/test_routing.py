@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for project-init/routing.py
+Tests for project/routing.py
 
 Covers: layer precedence, all artifact defaults, deprecated vocab,
 invalid values, missing files, alternative paths, single-artifact mode.
@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 import pytest
 
-SCRIPT = Path(__file__).parent.parent / "project-init" / "routing.py"
+SCRIPT = Path(__file__).parent.parent / "project" / "routing.py"
 
 
 def run(global_md: Path, workspace_md: Path, artifact: str | None = None) -> subprocess.CompletedProcess:

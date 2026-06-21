@@ -7,10 +7,10 @@ branches paused mid-work. Shared across work-pause, work-resume, the work
 router, and handover hygiene.
 
 Usage:
-    python3 ~/.claude/skills/project-init/stack.py depth <stack_file>
-    python3 ~/.claude/skills/project-init/stack.py list  <stack_file>
-    python3 ~/.claude/skills/project-init/stack.py push  <stack_file> branch=X issue=N paused=ISO wip_project=yes|no wip_workspace=yes|no
-    python3 ~/.claude/skills/project-init/stack.py pop   <stack_file> <branch_name>
+    python3 ~/.claude/skills/project/stack.py depth <stack_file>
+    python3 ~/.claude/skills/project/stack.py list  <stack_file>
+    python3 ~/.claude/skills/project/stack.py push  <stack_file> branch=X issue=N paused=ISO wip_project=yes|no wip_workspace=yes|no
+    python3 ~/.claude/skills/project/stack.py pop   <stack_file> <branch_name>
 
 Output:
     depth → single integer on stdout

@@ -41,7 +41,7 @@ grep -A 5 "^## Routing$" "$HOME/.claude/CLAUDE.md" 2>/dev/null | grep "Default d
 
 Resolve paths — run the bundled context script:
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Use `WORKSPACE` and `PROJECT` from the output as concrete strings in all subsequent commands.

@@ -112,7 +112,7 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
 
     # Push stack entry
     stack_file = Path(workspace) / "design" / ".pause-stack"
-    stack_script = Path.home() / ".claude" / "skills" / "project-init" / "stack.py"
+    stack_script = Path.home() / ".claude" / "skills" / "project" / "stack.py"
 
     try:
         result = subprocess.run(

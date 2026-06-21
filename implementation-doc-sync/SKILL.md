@@ -45,7 +45,7 @@ checked against this boundary — peer-repo docs are never edited directly.
 
 Run the bundled context script to resolve the home repo path:
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 A doc is **in the home repo** if its absolute path starts with `<WORKSPACE>/`.

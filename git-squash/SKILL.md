@@ -52,7 +52,7 @@ single-commit cleanup to a full reconstruction, goes through `/git-squash`.
 Before any destructive operation, create an isolated working branch:
 
 ```bash
-python3 ~/.claude/skills/git-squash/ctx.py base-branch=<BASE_BRANCH from project-init ctx.py>
+python3 ~/.claude/skills/git-squash/ctx.py base-branch=<BASE_BRANCH from project ctx.py>
 ```
 Use `ORIG_BRANCH` and `WORK_BRANCH` from the output, then:
 ```bash
@@ -285,7 +285,7 @@ On **"skip":** proceed directly to Step 2.
 
 Run the context script to get all range data:
 ```bash
-python3 ~/.claude/skills/git-squash/ctx.py base-branch=<BASE_BRANCH from project-init ctx.py>
+python3 ~/.claude/skills/git-squash/ctx.py base-branch=<BASE_BRANCH from project ctx.py>
 ```
 Use `UNPUSHED_COUNT`/`UNPUSHED_RANGE`, `SAFE_COUNT`/`SAFE_RANGE`, `ALL_COUNT`/`ALL_RANGE`/`ALL_LABEL` from the output.
 

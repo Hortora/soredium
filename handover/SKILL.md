@@ -39,12 +39,12 @@ Use the same convention as `work-start` — derive workspace from CWD via git, n
 
 Run the bundled context script — no shell variable assignments:
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Use `WORKSPACE` and `PROJECT` from the output as concrete strings. HANDOFF.md is at `<WORKSPACE>/HANDOFF.md`.
 
-**Do not scan CLAUDE.md for a workspace path.** Multiple CLAUDE.mds are loaded per session (global, parent, project). The parent's `**Workspace:**` declaration will be found first and will point to the wrong repo. `python3 ~/.claude/skills/project-init/ctx.py` resolves from CWD via git — always correct.
+**Do not scan CLAUDE.md for a workspace path.** Multiple CLAUDE.mds are loaded per session (global, parent, project). The parent's `**Workspace:**` declaration will be found first and will point to the wrong repo. `python3 ~/.claude/skills/project/ctx.py` resolves from CWD via git — always correct.
 
 ### Step R2 — Check freshness, then read
 

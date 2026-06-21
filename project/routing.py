@@ -9,7 +9,7 @@ Layer 3 (workspace):        <workspace>/CLAUDE.md §## Routing table (per-artifa
 Resolution: Layer 3 wins → Layer 2 → Layer 1.
 
 Usage:
-    python3 ~/.claude/skills/project-init/routing.py <global_claude_md> <workspace_claude_md> [<artifact>]
+    python3 ~/.claude/skills/project/routing.py <global_claude_md> <workspace_claude_md> [<artifact>]
 
     <artifact>  one of: adr blog design snapshots specs plans
                 if omitted, resolves all known artifacts

@@ -20,7 +20,7 @@ All review severity models, reporting formats, and workflow steps are defined th
 ## Step 1 — Detect project type
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Read `PROJECT_TYPE` from the output.

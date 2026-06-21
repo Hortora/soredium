@@ -81,7 +81,7 @@ Run when the user calls `/issue-workflow` directly, or when `git-commit` or
 ### Step 0 — Idempotency check
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Read `ISSUES_STATUS` from the output.
@@ -166,7 +166,7 @@ Install the hook that hard-blocks commits without an issue reference.
 The hook is committed to `.githooks/` so it survives clones and is visible
 to all contributors. `core.hooksPath` activates it on the current machine.
 
-Run `python3 ~/.claude/skills/project-init/ctx.py` and read the `PROJECT=` line
+Run `python3 ~/.claude/skills/project/ctx.py` and read the `PROJECT=` line
 from its output. Then pass that path to install-hooks:
 
 ```bash

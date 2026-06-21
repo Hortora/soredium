@@ -34,7 +34,7 @@ from pathlib import Path
 from common import parse_args
 
 # Path to remove_from_stack.py — resolve relative to this script's location
-REMOVE_FROM_STACK = Path(__file__).parent.parent / "project-init" / "remove_from_stack.py"
+REMOVE_FROM_STACK = Path(__file__).parent.parent / "project" / "remove_from_stack.py"
 
 
 def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:

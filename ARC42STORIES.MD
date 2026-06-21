@@ -206,7 +206,7 @@ C4Container
 | Commits and Docs | 7 | `git-commit`, `git-squash`, `update-design`, `update-claude-md`, `implementation-doc-sync`, `adr`, `issue-workflow` |
 | Garden | 3 | `forage`, `harvest`, `protocol` |
 | Content | 4 | `write-content`, `publish-blog`, `handover`, `idea-log` |
-| Infrastructure | 6 | `project-init`, `dependency-update`, `retro-issues`, `sync-local`, `fix-ci`, `ide-tooling` |
+| Infrastructure | 6 | `project`, `dependency-update`, `retro-issues`, `sync-local`, `fix-ci`, `ide-tooling` |
 
 ### Python Scripts
 

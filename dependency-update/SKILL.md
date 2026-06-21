@@ -14,7 +14,7 @@ Reads project type, then loads the package-manager-specific workflow.
 ## Step 1 — Detect project type
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Read `PROJECT_TYPE` from the output.

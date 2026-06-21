@@ -23,7 +23,7 @@ Development workflow and knowledge garden skills for Claude Code.
 | `work-end` | Closes branch, promotes artifacts, merges to main |
 | `work-pause` | Commits WIP, pushes to pause stack, switches to main |
 | `work-resume` | Restores a paused branch, rebases onto current main |
-| `workspace-init` | One-time companion workspace setup (prompted by project-init hook) |
+| `workspace-init` | One-time companion workspace setup (prompted by project hook) |
 
 ### Development
 
@@ -75,7 +75,7 @@ Development workflow and knowledge garden skills for Claude Code.
 
 | Skill | What it does |
 |-------|-------------|
-| `project-init` | Project setup verification at session start |
+| `project` | Project setup verification at session start |
 | `issue-workflow` | GitHub issue tracking, epic planning, split detection |
 | `retro-issues` | Retrospective mapping of git history to GitHub issues |
 | `dependency-update` | Maven/npm/pip dependency management |

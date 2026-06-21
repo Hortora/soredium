@@ -1,5 +1,5 @@
 ---
-name: project-init
+name: project
 description: >
   Use when project setup needs to be verified or completed — invoked
   automatically at session start (via hook) and by work-start before
@@ -7,7 +7,7 @@ description: >
 slash-command: false
 ---
 
-# project-init
+# project
 
 Normalised setup gateway. Both the session hook and `work-start` converge
 here — so the entry point doesn't matter, every session hits the same
@@ -41,7 +41,7 @@ exploration. The rule is in effect for the whole session once noted here.
 Run this first. If all conditions are met, return immediately — do nothing else.
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 If `CLAUDE_OK=yes` AND `WORKSPACE_OK=yes` AND `ISSUES_STATUS` is not `absent` → return silently.
@@ -189,7 +189,7 @@ not affect workflow correctness. Show once per session, never block.
 ## Resetting a decline
 
 If a user changes their mind:
-- **Workspace:** remove `workspace: declined` from CLAUDE.md — project-init
+- **Workspace:** remove `workspace: declined` from CLAUDE.md — project
   will offer again next session, or they can say "set up workspace"
 - **Issue tracking:** change `Issue tracking: declined` to `Issue tracking: enabled`
   in `## Work Tracking`, or say "set up issue tracking" to invoke the skill directly
@@ -203,13 +203,13 @@ If a user changes their mind:
 Output at session start:
 
 ```
-🔧 Invoke the project-init skill to verify this project is set up before proceeding.
+🔧 Invoke the project skill to verify this project is set up before proceeding.
 ```
 
 ### work-start
 
-Invoke project-init as Step 0 before path resolution. Only continue once
-project-init returns. If workspace was declined, proceed in single-repo mode.
+Invoke project as Step 0 before path resolution. Only continue once
+project returns. If workspace was declined, proceed in single-repo mode.
 
 ---
 

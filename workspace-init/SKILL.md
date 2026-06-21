@@ -714,7 +714,7 @@ Start with standard project-knowledge paths:
 
 **Create ARC42STORIES.MD stub if missing (java / typescript / python projects only):**
 
-Read `PROJECT_TYPE` from ctx.py output (run `python3 ~/.claude/skills/project-init/ctx.py` if not already run for this repo).
+Read `PROJECT_TYPE` from ctx.py output (run `python3 ~/.claude/skills/project/ctx.py` if not already run for this repo).
 
 If type is `java`, `typescript`, or `python` AND `docs/ARC42STORIES.MD` does not exist:
 
@@ -1042,7 +1042,7 @@ more recent file as `workspace/HANDOFF.md` and discard the older one.
 
 ### Step 10b — Offer issue tracking setup
 
-Read `ISSUES_STATUS` from ctx.py output (run `python3 ~/.claude/skills/project-init/ctx.py` if not already run).
+Read `ISSUES_STATUS` from ctx.py output (run `python3 ~/.claude/skills/project/ctx.py` if not already run).
 
 If `ISSUES_STATUS` is `enabled` → skip silently.
 

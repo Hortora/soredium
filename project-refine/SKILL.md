@@ -23,7 +23,7 @@ Read project type (for context, not routing — project-refine is always the
 right skill regardless of type):
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Read `PROJECT_TYPE` from the output.

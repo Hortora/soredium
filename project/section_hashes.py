@@ -4,7 +4,7 @@ Compute SHA-256 hashes of H2 section headings in a ARC42STORIES.MD file.
 Output: a pipe-separated string of hash:heading pairs, suitable for storing
 in .meta as design-section-hashes.
 
-Usage: python3 ~/.claude/skills/project-init/section_hashes.py /path/to/ARC42STORIES.MD
+Usage: python3 ~/.claude/skills/project/section_hashes.py /path/to/ARC42STORIES.MD
 
 Returns empty string if the file does not exist.
 """

@@ -21,7 +21,7 @@ type-specific health checks inline based on the project type declared in CLAUDE.
 Before any checks run, read the project type:
 
 ```bash
-python3 ~/.claude/skills/project-init/ctx.py
+python3 ~/.claude/skills/project/ctx.py
 ```
 
 Read `PROJECT_TYPE` from the output.
