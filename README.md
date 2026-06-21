@@ -82,6 +82,23 @@ Development workflow and knowledge garden skills for Claude Code.
 | `fix-ci` | Reproduce CI failures locally, root-cause, verify green |
 | `ide-tooling` | IntelliJ MCP routing — rename, find-references, diagnostics |
 
+## Superpowers Integration
+
+Soredium skills work alongside [superpowers](https://github.com/anthropics/claude-code) — Claude Code's built-in development skills. Each handles a different concern in the same workflow.
+
+| Stage | Soredium skill | Superpowers skill | Who does what |
+|-------|---------------|-------------------|---------------|
+| Design | — | `brainstorming` | Superpowers explores the problem space |
+| Planning | — | `writing-plans` | Superpowers creates the implementation plan |
+| Branch setup | `work-start` | `using-git-worktrees` | Soredium creates branches; superpowers isolates the workspace |
+| Implementation | `java-dev` / `ts-dev` / `python-dev` | `test-driven-development` | Soredium sets language rules; superpowers enforces TDD |
+| Debugging | — | `systematic-debugging` | Superpowers owns the debugging workflow |
+| Pre-commit review | `code-review` | `verification-before-completion` | Soredium reviews per-language; superpowers verifies claims |
+| Feature review | — | `requesting-code-review` | Superpowers runs the full-feature review gate |
+| Execution | — | `subagent-driven-development` | Superpowers dispatches plan tasks to subagents |
+
+Soredium skills auto-trigger (file type, commit hooks, session start). Superpowers are invoked deliberately at stage transitions.
+
 ## Garden Engine
 
 Soredium includes the garden engine — validators, CI scripts, and an autonomous agent for managing Hortora knowledge gardens.
