@@ -107,8 +107,7 @@ DEDUPE checks *existing entries against each other* — it does not process subm
 **Step 1 — Run scanner to get pre-scored pair list**
 
 ```bash
-python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py \
-  ${HORTORA_GARDEN:-~/.hortora/garden} --top 50
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py ${HORTORA_GARDEN:-~/.hortora/garden} --top 50
 ```
 
 The scanner reads domain directories directly for YAML-frontmatter entries, queries `garden.db` to exclude already-checked pairs, computes Jaccard similarity for all unchecked within-domain pairs, and returns them sorted highest-score-first.
@@ -149,8 +148,7 @@ Write changes to working tree:
 For each pair reviewed, record the result using the scanner's `--record` flag:
 
 ```bash
-python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py \
-  ${HORTORA_GARDEN:-~/.hortora/garden} \
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/dedupe_scanner.py ${HORTORA_GARDEN:-~/.hortora/garden} \
   --record "GE-XXXX × GE-YYYY" distinct "brief note"
 ```
 
@@ -193,8 +191,7 @@ ALL domains systematically — it is the backstop that guarantees full garden co
 **Step 1 — Report overdue count**
 
 ```bash
-python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_garden.py \
-  --freshness ${HORTORA_GARDEN:-~/.hortora/garden}
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_garden.py --freshness ${HORTORA_GARDEN:-~/.hortora/garden}
 ```
 
 Note the count and which entries are most overdue. If count is 0, report to user and stop — no REVIEW needed.

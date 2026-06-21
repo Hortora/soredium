@@ -150,7 +150,7 @@ submitted: YYYY-MM-DD
 
 Generate locally — no external counter needed:
 ```bash
-GE_ID="GE-$(date +%Y%m%d)-$(python3 -c "import secrets; print(secrets.token_hex(3))")"
+GE_ID="GE-$(date +%Y%m%d)-$(python3 -c 'import secrets; print(secrets.token_hex(3))')"
 # e.g. GE-20260410-a3f7c2
 ```
 
@@ -328,8 +328,7 @@ Resolve `HORTORA_GARDEN` to its concrete path (e.g. `/Users/mdproctor/.hortora/g
 Resolve `HORTORA_GARDEN` and `SOREDIUM_PATH` to concrete paths first (same rule as Step 8 — no shell variable assignment inside Bash blocks). Then run with the literal resolved paths:
 
 ```bash
-python3 /concrete/soredium/scripts/validate_pr.py \
-  /concrete/garden/<domain>/$GE_ID.md \
+python3 /concrete/soredium/scripts/validate_pr.py /concrete/garden/<domain>/$GE_ID.md \
   /concrete/garden
 ```
 
@@ -352,10 +351,8 @@ git -C /concrete/garden remote get-url origin 2>/dev/null
 Stage the entry file first (it is a new untracked file — `integrate_entry.py` uses `git add --update` internally which only covers tracked files), then run integration (validation already done in Step 7 — skip it here):
 ```bash
 git -C /concrete/garden add <domain>/$GE_ID.md
-python3 /concrete/soredium/scripts/integrate_entry.py \
-  /concrete/garden/<domain>/$GE_ID.md \
-  /concrete/garden \
-  --skip-validate
+python3 /concrete/soredium/scripts/integrate_entry.py /concrete/garden/<domain>/$GE_ID.md \
+  /concrete/garden --skip-validate
 ```
 
 `integrate_entry.py` updates all indexes (`_summaries/`, domain `INDEX.md`, `labels/`,
@@ -375,8 +372,7 @@ git -C /concrete/garden push origin main
 Before reporting back, scan for any other untracked entry files in the garden:
 
 ```bash
-git -C /concrete/garden ls-files --others --exclude-standard \
-  | grep -E "^[^/]+/GE-[0-9]{8}-[0-9a-f]{6}\.md$"
+git -C /concrete/garden ls-files --others --exclude-standard | grep -E "^[^/]+/GE-[0-9]{8}-[0-9a-f]{6}\.md$"
 ```
 
 If any appear, offer to commit them immediately before they can be lost by a future branch operation:
@@ -449,16 +445,12 @@ After all entry files are written, validate and deliver as a single batch:
 
 Resolve `HORTORA_GARDEN` and `SOREDIUM_PATH` to concrete paths first — no shell variable assignment inside Bash blocks.
 
-If 3 or more entries were written, run validation in parallel (faster for typical 6–8 entry sweeps):
+Run validate_pr.py for each entry as a separate command — no loops, no backslash continuations:
 ```bash
-for ENTRY_PATH in <list of written entry paths>; do
-  python3 /concrete/soredium/scripts/validate_pr.py \
-    "$ENTRY_PATH" /concrete/garden &
-done
-wait
+python3 /concrete/soredium/scripts/validate_pr.py /concrete/garden/<domain>/GE-YYYYMMDD-xxxxxx.md /concrete/garden
+python3 /concrete/soredium/scripts/validate_pr.py /concrete/garden/<domain>/GE-YYYYMMDD-yyyyyy.md /concrete/garden
+# one line per entry — substitute actual GE-ID in each path
 ```
-
-If fewer than 3, validate sequentially (same command without `&`).
 
 Fix any CRITICAL issues before continuing.
 
@@ -477,10 +469,8 @@ For each written entry, update all indexes on disk without committing yet (the e
 is already tracked or will be staged before the batch commit — `--skip-commit` defers the
 git operation to the caller):
 ```bash
-python3 /concrete/soredium/scripts/integrate_entry.py \
-  /concrete/garden/<domain>/$GE_ID.md \
-  /concrete/garden \
-  --skip-validate --skip-commit
+python3 /concrete/soredium/scripts/integrate_entry.py /concrete/garden/<domain>/GE-YYYYMMDD-xxxxxx.md /concrete/garden --skip-validate --skip-commit
+# substitute actual GE-ID in each path — no variables, no backslash continuations
 ```
 
 Run this sequentially for each entry. Then issue a single batch commit containing all entry
@@ -575,8 +565,7 @@ Unlike CAPTURE, REVISE modifies the target entry directly — no separate file i
 If already in context, use that knowledge directly. Otherwise search:
 
 ```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' \
-  ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
 ```
 
 Read the full entry from committed state:
@@ -641,8 +630,7 @@ Single solutions never get pros/cons. Only restructure when a second solution is
 
 Validate:
 ```bash
-python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py \
-  ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
+python3 ${SOREDIUM_PATH:-~/claude/hortora/soredium}/scripts/validate_pr.py ${HORTORA_GARDEN:-~/.hortora/garden}/<domain>/GE-XXXX.md \
   ${HORTORA_GARDEN:-~/.hortora/garden}
 ```
 
@@ -655,10 +643,8 @@ git -C /concrete/garden remote get-url origin 2>/dev/null
 
 Update all indexes on disk without committing (the modified entry is already tracked — `git add --update` will stage it in the commit below):
 ```bash
-python3 /concrete/soredium/scripts/integrate_entry.py \
-  /concrete/garden/<domain>/GE-XXXX.md \
-  /concrete/garden \
-  --skip-validate --skip-commit
+python3 /concrete/soredium/scripts/integrate_entry.py /concrete/garden/<domain>/GE-XXXX.md \
+  /concrete/garden --skip-validate --skip-commit
 ```
 
 Commit with the REVISE-specific message:
@@ -700,8 +686,7 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
 
 3. If not in the index, search committed content:
    ```bash
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' \
-     ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
    ```
 
 4. Return the full entry.
@@ -750,8 +735,7 @@ Search in priority order — stop at first match:
 
 3. **Full upstream grep** — if still not found after checking all indexed entries, run `git grep` across the upstream garden:
    ```bash
-   git -C <upstream-garden-path> grep "keywords" HEAD -- '*.md' \
-     ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+   git -C <upstream-garden-path> grep "keywords" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
    ```
 
 Apply the same staleness annotation (Step 5) regardless of which garden the entry came from.
