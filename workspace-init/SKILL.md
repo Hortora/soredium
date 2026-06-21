@@ -542,9 +542,9 @@ Per-artifact routing destinations (optional). If absent, all artifacts route to 
 
 | Artifact   | Destination | Notes |
 |------------|-------------|-------|
-| adr        | project     | lands in `docs/adr/` — promoted at work end |
-| specs      | project     | lands in `docs/specs/` — promoted at work end |
-| blog       | workspace   | staged here; published to mdproctor.github.io via publish-blog at work end |
+| adr        | project     | lands in `docs/adr/` — promoted at work-end |
+| specs      | project     | lands in `docs/specs/` — promoted at work-end |
+| blog       | workspace   | staged here; published to mdproctor.github.io via publish-blog at work-end |
 | plans      | workspace   | stay in workspace permanently |
 | design     | workspace   | epic journal stays in workspace |
 | snapshots  | workspace   | stay in workspace permanently |

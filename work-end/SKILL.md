@@ -555,7 +555,7 @@ git -C "$PROJECT" rebase "$BRANCH_NAME"
 **If rebase fails (conflict):**
 - Report the conflicting files verbatim.
 - **Stop. Do not proceed to Step 9.**
-- Instruct the user: resolve conflicts on `$PROJECT_BASE_BRANCH`, then re-run `work end` to complete the close.
+- Instruct the user: resolve conflicts on `$PROJECT_BASE_BRANCH`, then re-run `work-end` to complete the close.
 
 **Squash before fork push (fork model only — mandatory):**
 

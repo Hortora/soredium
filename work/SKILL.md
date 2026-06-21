@@ -12,8 +12,8 @@ description: >
 # work
 
 Unified entry point for the work lifecycle. Detects state and routes to the
-correct skill — developer says `work` to begin, `work end` to close,
-`work pause` to save and switch, `work resume` to return to paused work.
+correct skill — developer says `work` to begin, `work-end` to close,
+`work-pause` to save and switch, `work-resume` to return to paused work.
 
 ---
 

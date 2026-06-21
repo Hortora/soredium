@@ -571,7 +571,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `workspace-init` -- one-time setup; creates `~/claude/private/<project>/` or
   `~/claude/public/<project>/` with routing CLAUDE.md, gitignored project symlink
   via `.git/info/exclude`, and all subdirectories
-- `work` -- **unified lifecycle entry point**; detects current state and routes automatically: `work` alone starts or resumes, `work end` closes the branch, `work pause` saves state and returns to main. Single command replaces needing to know which lifecycle skill to invoke
+- `work` -- **unified lifecycle entry point**; detects current state and routes automatically: `work` alone starts or resumes, `work-end` closes the branch, `work-pause` saves state and returns to main. Single command replaces needing to know which lifecycle skill to invoke
 - `work-start` -- unified entry point for all work; detects branch state (6 states including paused, orphaned, misaligned); creates `issue-NNN-<slug>` branches in both repos atomically; scaffolds `.meta` + `JOURNAL.md` with SHA baseline and design routing; runs platform coherence, protocols, IntelliJ pre-checks; replaces the former "work-start + /epic begin" two-step
 - `work-end` -- closes the current branch; promotes artifacts per routing config; merges `design/JOURNAL.md` into ARC42STORIES.MD with three-way diff preview; posts specs to GitHub issue; closes issue; marks branch with `design/EPIC-CLOSED.md`; returns both repos to main
 - `work-pause` -- commits all WIP as a `WIP:` commit on the branch; pushes an entry onto `.pause-stack` on workspace main (supports multiple paused branches); switches both repos to main. No stash used -- WIP commit is durable and visible in history
