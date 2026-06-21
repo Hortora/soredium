@@ -30,7 +30,7 @@ This framework ensures reliability, consistency, and correctness across all docu
 - ❌ Resource leaks slip through (file handles, connections left open)
 - ❌ Blocking I/O on Vert.x event loop (runtime failures)
 - ❌ OWASP vulnerabilities undetected (SQL injection, XSS, auth bypass)
-- ❌ DESIGN.md drifts from code (architecture docs become lies)
+- ❌ ARC42STORIES.MD drifts from code (architecture docs become lies)
 - ❌ BOM version drift (dependency hell, runtime classpath conflicts)
 
 **In custom projects:**
@@ -56,7 +56,7 @@ This framework ensures reliability, consistency, and correctness across all docu
 - ✅ java-code-review blocks commits with resource leaks (CRITICAL findings)
 - ✅ Event loop safety enforced (Red Flags section prevents rationalization)
 - ✅ Security audit catches OWASP Top 10 before merge
-- ✅ DESIGN.md auto-synced with architecture changes (validated before staging)
+- ✅ ARC42STORIES.MD auto-synced with architecture changes (validated before staging)
 - ✅ BOM alignment checked on every dependency update
 
 **In custom projects:**
@@ -106,13 +106,13 @@ This framework ensures reliability, consistency, and correctness across all docu
 |------------|------------------|--------------|
 | **java-code-review blocking** | Resource leaks, concurrency bugs, safety violations | Before commits (CRITICAL findings block) |
 | **java-security-audit** | OWASP Top 10 vulnerabilities (injection, auth, crypto) | When security-critical code detected |
-| **DESIGN.md sync accuracy** | Architecture docs drifting from code | After java-update-design applies changes |
-| **DESIGN.md enforcement** | Missing architecture documentation | java-git-commit blocks if docs/DESIGN.md doesn't exist |
+| **ARC42STORIES.MD sync accuracy** | Architecture docs drifting from code | After java-update-design applies changes |
+| **ARC42STORIES.MD enforcement** | Missing architecture documentation | java-git-commit blocks if docs/ARC42STORIES.MD doesn't exist |
 | **BOM alignment verification** | Version drift, dependency conflicts | maven-dependency-update workflow |
 | **Quarkus event loop safety** | Blocking I/O on event loop threads | java-dev Red Flags section |
 | **ADR enforcement** | Major upgrades without documenting decisions | maven-dependency-update detects major versions |
 
-**Example:** Your Java project commits are protected by code review that blocks on resource leaks, security audit for auth code, DESIGN.md kept in sync with architecture changes, and BOM alignment checks preventing version drift.
+**Example:** Your Java project commits are protected by code review that blocks on resource leaks, security audit for auth code, ARC42STORIES.MD kept in sync with architecture changes, and BOM alignment checks preventing version drift.
 
 ### Type: Custom (Working Groups, Research, Documentation)
 
@@ -197,7 +197,7 @@ This framework ensures reliability, consistency, and correctness across all docu
 | Project Type | Additional Checks | Why Type-Specific |
 |--------------|------------------|-------------------|
 | **type: skills** | SKILL.md frontmatter, CSO compliance, flowchart syntax | SKILL.md format is skills-specific |
-| **type: java** | Java syntax, import organization, DESIGN.md required sections | Code structure rules |
+| **type: java** | Java syntax, import organization, ARC42STORIES.MD required sections | Code structure rules |
 | **type: custom** | User-defined validation rules (configurable) | User knows their domain |
 | **type: generic** | None (universal checks only) | Minimal overhead |
 
@@ -387,8 +387,8 @@ git push origin main
 - Naming conventions (prefixes, hierarchies)
 
 **Type: java only:**
-- DESIGN.md exists (blocks commit if missing)
-- DESIGN.md required sections present
+- ARC42STORIES.MD exists (blocks commit if missing)
+- ARC42STORIES.MD required sections present
 - Java code safety (resource leaks, concurrency)
 - OWASP Top 10 (for security-critical code)
 - BOM alignment (dependency version drift)
@@ -408,7 +408,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the full planned check roadmap.
 
 **Ensuring modular documentation maintains integrity across files with comprehensive cross-file validation.**
 
-When documents split into modules (DESIGN.md → architecture.md + api.md + components.md), new failure modes emerge: broken links, orphaned modules, sync only updating primary file, duplicated content, inconsistent information. This framework prevents all of them.
+When documents split into modules (ARC42STORIES.MD → architecture.md + api.md + components.md), new failure modes emerge: broken links, orphaned modules, sync only updating primary file, duplicated content, inconsistent information. This framework prevents all of them.
 
 **See README.md § Modular Documentation for user-facing feature explanation.**
 
@@ -420,10 +420,10 @@ When documents split into modules (DESIGN.md → architecture.md + api.md + comp
 |--------------|--------|---------|
 | **Broken links** | Users click link, 404, lose trust | `[API](api.md)` but `api.md` doesn't exist |
 | **Invalid anchors** | Links go to file but wrong section | `[Auth](api.md#security)` but no `## Security` header |
-| **Orphaned modules** | Module exists but nobody finds it | `components.md` exists but not linked from DESIGN.md |
-| **Sync only updates primary** | Modules become stale | Code changes update DESIGN.md but not api.md |
-| **Duplicate content** | Maintenance burden, conflicts | Same paragraph in DESIGN.md and architecture.md |
-| **Inconsistent info** | Contradictions between files | DESIGN.md says 3-tier, architecture.md says 4-layer |
+| **Orphaned modules** | Module exists but nobody finds it | `components.md` exists but not linked from ARC42STORIES.MD |
+| **Sync only updates primary** | Modules become stale | Code changes update ARC42STORIES.MD but not api.md |
+| **Duplicate content** | Maintenance burden, conflicts | Same paragraph in ARC42STORIES.MD and architecture.md |
+| **Inconsistent info** | Contradictions between files | ARC42STORIES.MD says 3-tier, architecture.md says 4-layer |
 
 **All of these are prevented by the validation framework.**
 
@@ -466,12 +466,12 @@ When sync workflows update modular documents:
 3. **Apply ALL changes:** Update primary + all modules together
 4. **Validate entire group:** Run all cross-module checks
 5. **If ANY check fails CRITICAL:**
-   - `git restore DESIGN.md docs/design/architecture.md docs/design/api.md`
+   - `git restore ARC42STORIES.MD docs/design/architecture.md docs/design/api.md`
    - Revert **ALL files**, not just the one with the error
    - Report issues to user
    - **Nothing reaches git staging**
 
-**This prevents partial corruption** - you never get DESIGN.md updated but api.md left stale.
+**This prevents partial corruption** - you never get ARC42STORIES.MD updated but api.md left stale.
 
 ### Test Coverage
 
@@ -526,7 +526,7 @@ When sync workflows update modular documents:
 
 | Workflow | Document | Validation Trigger |
 |----------|----------|-------------------|
-| **java-update-design** | DESIGN.md + modules | After applying proposals, before staging |
+| **java-update-design** | ARC42STORIES.MD + modules | After applying proposals, before staging |
 | **update-claude-md** | CLAUDE.md + modules | After applying proposals, before staging |
 | **update-primary-doc** | User-configured + modules | After applying proposals, before staging |
 | **docs/development/readme-sync.md** | README.md + modules | After applying proposals, before staging |
@@ -634,7 +634,7 @@ git push origin main
 python scripts/validate_all.py
 
 # Validate specific document
-python scripts/validate_document.py docs/DESIGN.md
+python scripts/validate_document.py docs/ARC42STORIES.MD
 ```
 
 **When to invoke:**
@@ -808,10 +808,10 @@ Claude:
 **Type: java:**
 - ✅ Code review (java-code-review)
 - ✅ Security audit (java-security-audit)
-- ✅ DESIGN.md sync (java-update-design)
-- ✅ DESIGN.md enforcement (blocks if missing)
+- ✅ ARC42STORIES.MD sync (java-update-design)
+- ✅ ARC42STORIES.MD enforcement (blocks if missing)
 - ✅ BOM alignment (maven-dependency-update)
-- ✅ Modular DESIGN.md support (primary + architecture/api/data-model modules)
+- ✅ Modular ARC42STORIES.MD support (primary + architecture/api/data-model modules)
 
 **Type: custom:**
 - ✅ Primary document sync (update-primary-doc)

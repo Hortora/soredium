@@ -57,7 +57,7 @@ def load_fixture(repo_name: str) -> RepoFixture:
     ) + (
         len(list(blog_dir.glob("*"))) if blog_dir.exists() else 0
     )
-    has_design = (base / "docs" / "DESIGN.md").exists()
+    has_design = (base / "docs" / "ARC42STORIES.MD").exists()
     return RepoFixture(repo_name, commits, file_changes, adr_count, blog_count, has_design)
 
 

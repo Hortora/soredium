@@ -21,28 +21,28 @@ These extend universal categories with Java-specific items (tier 2+):
 ### `primary-doc` augmentations
 
 **Quality:**
-- [ ] `DESIGN.md` exists and reflects current architecture (java-git-commit blocks without it)
-- [ ] No stale entity, service, or repository references in DESIGN.md for classes that were removed
-- [ ] Module structure in DESIGN.md matches actual Maven/Gradle module layout
+- [ ] `ARC42STORIES.MD` exists and reflects current architecture (java-git-commit blocks without it)
+- [ ] No stale entity, service, or repository references in ARC42STORIES.MD for classes that were removed
+- [ ] Module structure in ARC42STORIES.MD matches actual Maven/Gradle module layout
 
 **Refinement (tier 4):**
-- [ ] Could DESIGN.md be split into focused modules (architecture, API, data model)?
-- [ ] Has DESIGN.md grown beyond what a single file can communicate clearly?
+- [ ] Could ARC42STORIES.MD be split into focused modules (architecture, API, data model)?
+- [ ] Has ARC42STORIES.MD grown beyond what a single file can communicate clearly?
 
 ### `artifacts` augmentations
 
 **Quality:**
-- [ ] `docs/DESIGN.md` exists (required by `java-git-commit` workflow) — if missing, offer to create a stub using the java DESIGN.md template from `workspace-init` Step 6b, commit it, and note it needs content
+- [ ] `docs/ARC42STORIES.MD` exists (required by `java-git-commit` workflow) — if missing, offer to create a stub using the java ARC42STORIES.MD template from `workspace-init` Step 6b, commit it, and note it needs content
 - [ ] Root `pom.xml` or `build.gradle` is present and parseable
 - [ ] All Maven modules declared in parent `pom.xml` have corresponding directories
 
 **Refinement (tier 4):**
-- [ ] Is DESIGN.md appropriately sized, or has it grown beyond a single file?
+- [ ] Is ARC42STORIES.MD appropriately sized, or has it grown beyond a single file?
 
 ### `conventions` augmentations
 
 **Quality:**
-- [ ] BOM (Bill of Materials) strategy is documented in CLAUDE.md or DESIGN.md
+- [ ] BOM (Bill of Materials) strategy is documented in CLAUDE.md or ARC42STORIES.MD
 - [ ] Commit scopes are consistent with declared conventions (`rest`, `service`, `repository`, `bom`, `config`)
 - [ ] No version overrides in module POMs where BOM should manage the version
 
@@ -60,7 +60,7 @@ These extend universal categories with Java-specific items (tier 2+):
 - [ ] No `@Entity` classes used as API request/response types
 
 **Refinement (tier 4):**
-- [ ] Could Quarkus/Vert.x concurrency guidance in DESIGN.md be better grouped?
+- [ ] Could Quarkus/Vert.x concurrency guidance in ARC42STORIES.MD be better grouped?
 
 ## Java-Specific Categories (tier 3+)
 
@@ -129,7 +129,7 @@ These extend universal categories with Java-specific items (tier 2+):
 - [java][java-code-quality] UserValidator.validate() logic duplicated in AdminValidator and GuestValidator
 
 ### LOW (nice to fix)
-- [java][primary-doc] DESIGN.md still references CacheService which was removed in last sprint
+- [java][primary-doc] ARC42STORIES.MD still references CacheService which was removed in last sprint
 
 ### PASS
 ✅ docs-sync, consistency, security, git, java-architecture
@@ -142,7 +142,7 @@ These extend universal categories with Java-specific items (tier 2+):
 | Skipping universal checks | Java-specific checks don't replace universal ones | Always run universal checks first |
 | Flagging `@Blocking` on every service method | Only I/O-bound methods on the event loop need it | Check whether the method actually performs blocking I/O |
 | Calling a utility class a "mini-service" | Utility classes without state are fine | Only flag if a utility class has grown state or lifecycle concerns |
-| Reporting BOM override as a bug without context | Overrides can be intentional | Check for a documented reason (comment in pom.xml or DESIGN.md) |
+| Reporting BOM override as a bug without context | Overrides can be intentional | Check for a documented reason (comment in pom.xml or ARC42STORIES.MD) |
 | Treating every code similarity as duplication | Some patterns are intentionally repeated per layer | Flag only identical logic blocks (3+) that diverge silently on bug fixes |
 | Flagging an `@Entity` in a DTO as a violation | The concern is `@Entity` used AS the API type | Separate DTO classes that happen to share field names are fine |
 

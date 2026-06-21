@@ -351,9 +351,9 @@ from routing config — which may have changed between sessions.
 
 Compute section hashes (single pipe-separated line):
 ```bash
-python3 ~/.claude/skills/project-init/section_hashes.py <DESIGN_REPO>/DESIGN.md
+python3 ~/.claude/skills/project-init/section_hashes.py <DESIGN_REPO>/ARC42STORIES.MD
 ```
-Leave blank (empty output) if `<DESIGN_REPO>/DESIGN.md` does not exist yet.
+Leave blank (empty output) if `<DESIGN_REPO>/ARC42STORIES.MD` does not exist yet.
 
 ### Step 9 — Scaffold
 

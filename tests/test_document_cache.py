@@ -50,7 +50,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_hit(self):
         """Cached group returned when cache key matches"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("[Link](architecture.md)")
@@ -77,7 +77,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_miss_no_entry(self):
         """Returns None if no cache entry exists"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         primary.write_text("# Design")
 
         cached = get_cached_group(primary)
@@ -86,7 +86,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_miss_no_file(self):
         """Returns None if cache file doesn't exist"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         primary.write_text("# Design")
 
         # Don't create cache file
@@ -96,7 +96,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_invalidation_on_structure_change(self):
         """Cache invalidated when structure changes (cache_key mismatch)"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("[Link](architecture.md)")
@@ -121,7 +121,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_valid_after_content_change(self):
         """Cache still valid when only content changes (not structure)"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("# Design\n\n[Link](architecture.md)\n\nSome content")
@@ -146,7 +146,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_corruption_recovery(self):
         """Invalid JSON triggers cache deletion"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         primary.write_text("# Design")
 
         # Write corrupted cache file
@@ -161,7 +161,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_invalidate_cache_removes_entry(self):
         """invalidate_cache() removes specific entry"""
-        primary1 = self.test_dir / "DESIGN.md"
+        primary1 = self.test_dir / "ARC42STORIES.MD"
         primary2 = self.test_dir / "README.md"
 
         primary1.write_text("# Design")
@@ -193,7 +193,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_multiple_entries(self):
         """Cache can store multiple document groups"""
-        primary1 = self.test_dir / "DESIGN.md"
+        primary1 = self.test_dir / "ARC42STORIES.MD"
         primary2 = self.test_dir / "README.md"
         module1 = self.test_dir / "architecture.md"
         module2 = self.test_dir / "usage.md"
@@ -256,7 +256,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_file_structure(self):
         """Cache file has correct JSON structure"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("[Link](architecture.md)")
@@ -290,7 +290,7 @@ class TestDocumentCache(unittest.TestCase):
 
     def test_cache_update_overwrites_entry(self):
         """Caching same primary file with same cache_key updates existing entry"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module1 = self.test_dir / "architecture.md"
         module2 = self.test_dir / "components.md"
 

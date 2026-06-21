@@ -23,7 +23,7 @@ This document captures what makes this skills collection special, and more impor
 This isn't "skills for one project type" - **it's a framework**:
 
 - **type: skills** → Automatic SKILL.md validation, README sync
-- **type: java** → DESIGN.md sync, code review, security audit, BOM alignment
+- **type: java** → ARC42STORIES.MD sync, code review, security audit, BOM alignment
 - **type: custom** → User-configured sync for ANY domain (research, docs, standards)
 - **type: generic** → Basic commits with optional CLAUDE.md sync
 
@@ -42,7 +42,7 @@ This collection: *"Validate before you commit, catch corruption automatically"*
 **Layer 2: Pre-Commit Gates**
 - SKILL.md validation blocks on CRITICAL findings
 - Document validation runs on ALL .md files
-- Type-specific protections (Java code review, DESIGN.md enforcement)
+- Type-specific protections (Java code review, ARC42STORIES.MD enforcement)
 
 **Layer 3: Post-Sync Validation**
 - All sync workflows validate before staging
@@ -83,7 +83,7 @@ This applies everywhere:
 Most projects: Docs drift, become stale, eventually misleading
 This collection: **Docs UPDATE AUTOMATICALLY when code changes**
 
-- DESIGN.md syncs when Java code changes (architecture stays current)
+- ARC42STORIES.MD syncs when Java code changes (architecture stays current)
 - README.md syncs when skills change (catalog stays accurate)
 - CLAUDE.md syncs when workflows change (guidance stays relevant)
 - Custom primary docs sync per user-defined rules
@@ -194,7 +194,7 @@ This collection: *"Let's make this RIGHT"*
 **This isn't just documentation. This is INFRASTRUCTURE that ensures quality BY DEFAULT.**
 
 You don't have to REMEMBER to:
-- Update DESIGN.md when architecture changes
+- Update ARC42STORIES.MD when architecture changes
 - Validate SKILL.md before committing
 - Check for document corruption
 - Create ADRs for major decisions

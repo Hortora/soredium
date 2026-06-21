@@ -203,7 +203,7 @@ Group proposals by file:
 > (new entry)
 
 **With:**
-> | `java-git-commit` | `java-update-design` | Always (if docs/DESIGN.md exists) |
+> | `java-git-commit` | `java-update-design` | Always (if docs/ARC42STORIES.MD exists) |
 
 **Reason:** New automatic chaining relationship documented
 ```

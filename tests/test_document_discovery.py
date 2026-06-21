@@ -37,7 +37,7 @@ class TestDocumentDiscovery(TempDirTestCase):
     def test_discover_single_file(self):
         """Backwards compat: single file returns group with 1 file"""
         # Create a simple markdown file with no references
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         primary.write_text("# Design\n\nSome content")
 
         group = discover_document_group(primary)
@@ -50,7 +50,7 @@ class TestDocumentDiscovery(TempDirTestCase):
     def test_discover_via_markdown_links(self):
         """Parse markdown [text](file.md) links"""
         # Create primary file with link
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("# Design\n\nSee [Architecture](architecture.md)")
@@ -64,7 +64,7 @@ class TestDocumentDiscovery(TempDirTestCase):
 
     def test_discover_via_includes(self):
         """Parse <!-- include: file.md --> directives"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "components.md"
 
         primary.write_text("# Design\n\n<!-- include: components.md -->")
@@ -78,7 +78,7 @@ class TestDocumentDiscovery(TempDirTestCase):
 
     def test_discover_via_section_references(self):
         """Parse § Section in file.md references"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "api.md"
 
         primary.write_text("# Design\n\n§ API Details in api.md")
@@ -91,8 +91,8 @@ class TestDocumentDiscovery(TempDirTestCase):
         self.assertEqual(group.modules[0].relationship, "section-ref")
 
     def test_discover_via_directory_pattern(self):
-        """If DESIGN.md, check docs/design/*.md"""
-        primary = self.test_dir / "DESIGN.md"
+        """If ARC42STORIES.MD, check docs/design/*.md"""
+        primary = self.test_dir / "ARC42STORIES.MD"
         docs_dir = self.test_dir / "docs" / "design"
         docs_dir.mkdir(parents=True)
 
@@ -183,7 +183,7 @@ class TestDocumentDiscovery(TempDirTestCase):
 
     def test_check_directory_pattern_ignores_primary(self):
         """Directory pattern should not include primary file itself"""
-        primary = self.test_dir / "docs" / "design" / "DESIGN.md"
+        primary = self.test_dir / "docs" / "design" / "ARC42STORIES.MD"
         primary.parent.mkdir(parents=True)
 
         primary.write_text("# Design")
@@ -229,7 +229,7 @@ class TestDocumentDiscovery(TempDirTestCase):
 
     def test_read_explicit_config(self):
         """Read CLAUDE.md ## Modular Documentation section"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         claude_md = self.test_dir / "CLAUDE.md"
         module = self.test_dir / "docs" / "design" / "architecture.md"
         module.parent.mkdir(parents=True)
@@ -242,7 +242,7 @@ class TestDocumentDiscovery(TempDirTestCase):
 
 ## Modular Documentation
 
-### DESIGN.md
+### ARC42STORIES.MD
 **Modules:**
 - docs/design/architecture.md
         """)
@@ -256,7 +256,7 @@ class TestDocumentDiscovery(TempDirTestCase):
 
     def test_read_explicit_config_missing_section(self):
         """Returns None if no ## Modular Documentation section"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         claude_md = self.test_dir / "CLAUDE.md"
 
         primary.write_text("# Design")
@@ -268,7 +268,7 @@ class TestDocumentDiscovery(TempDirTestCase):
 
     def test_read_explicit_config_no_claude_md(self):
         """Returns None if CLAUDE.md doesn't exist"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         primary.write_text("# Design")
 
         modules = read_explicit_config(primary)
@@ -277,7 +277,7 @@ class TestDocumentDiscovery(TempDirTestCase):
 
     def test_propose_explicit_config(self):
         """Generate CLAUDE.md config suggestion"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module1 = self.test_dir / "docs" / "design" / "architecture.md"
         module2 = self.test_dir / "docs" / "design" / "components.md"
 
@@ -289,14 +289,14 @@ class TestDocumentDiscovery(TempDirTestCase):
         config = propose_explicit_config(primary, detected)
 
         self.assertIn("## Modular Documentation", config)
-        self.assertIn("### DESIGN.md", config)
+        self.assertIn("### ARC42STORIES.MD", config)
         self.assertIn("**Modules:**", config)
         self.assertIn("docs/design/architecture.md", config)
         self.assertIn("docs/design/components.md", config)
 
     def test_multiple_reference_types(self):
         """Skill can combine markdown links + includes + directory patterns"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         docs_dir = self.test_dir / "docs" / "design"
         docs_dir.mkdir(parents=True)
 
@@ -348,7 +348,7 @@ class TestCacheKeyConsistency(TempDirTestCase):
         """Same structure should produce same cache key"""
         from scripts.document_group_cache import compute_cache_key
 
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         primary.write_text("[Link](a.md)")
 
         key1 = compute_cache_key(primary)
@@ -360,7 +360,7 @@ class TestCacheKeyConsistency(TempDirTestCase):
         """Adding a link should change cache key"""
         from scripts.document_group_cache import compute_cache_key
 
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
 
         primary.write_text("[Link](a.md)")
         key1 = compute_cache_key(primary)
@@ -374,7 +374,7 @@ class TestCacheKeyConsistency(TempDirTestCase):
         """Content changes without structural changes don't affect key"""
         from scripts.document_group_cache import compute_cache_key
 
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
 
         primary.write_text("# Design\n\n[Link](a.md)\n\nSome content")
         key1 = compute_cache_key(primary)

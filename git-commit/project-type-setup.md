@@ -65,7 +65,7 @@ Stage CLAUDE.md, then tell user:
 >
 > This is a Java project. For best results, please use `java-git-commit`
 > instead of `git-commit`. It provides:
-> - DESIGN.md synchronization
+> - ARC42STORIES.MD synchronization
 > - Java-specific code review
 > - Java-specific commit scopes
 >
@@ -76,7 +76,7 @@ Stage CLAUDE.md, then tell user:
 > Reply with 1 or 2.
 
 Wait for response. If 2, stop and tell user to invoke java-git-commit.
-If 1, continue to Step 1 (but warn about missing DESIGN.md sync).
+If 1, continue to Step 1 (but warn about missing ARC42STORIES.MD sync).
 
 ---
 

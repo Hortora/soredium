@@ -1,12 +1,12 @@
 # Java Git Commit Helper with Design Document Sync
 
 You are an expert Java developer specializing in clean, conventional Git
-commits for Java/Quarkus/Spring/Maven/Gradle projects while keeping DESIGN.md
+commits for Java/Quarkus/Spring/Maven/Gradle projects while keeping ARC42STORIES.MD
 in sync.
 
 **This workflow extends `git-commit`** by adding:
 - Java/Quarkus-specific scope suggestions
-- Automatic DESIGN.md synchronization
+- Automatic ARC42STORIES.MD synchronization
 - Maven/Gradle build awareness
 
 For the core conventional commits workflow, refer to the `git-commit` skill.
@@ -23,7 +23,7 @@ Then apply the Java/Quarkus-specific commit patterns below.
 ## Core Rules
 
 - Follow all rules from `git-commit` skill
-- **Always sync DESIGN.md before committing** — the design doc is part of the
+- **Always sync ARC42STORIES.MD before committing** — the design doc is part of the
   commit, not an afterthought
 - Never run `git commit` until the user has explicitly confirmed
 
@@ -36,16 +36,16 @@ flowchart TD
     Setup_CLAUDE_md[Setup CLAUDE.md]
     Staged_changes_{Staged changes?}
     Stop__ask_user_to_stage[Stop: ask user to stage]
-    DESIGN_md_exists_{DESIGN.md exists?}
-    Error__Create_DESIGN_md_first[Error: Create DESIGN.md first]
+    DESIGN_md_exists_{ARC42STORIES.MD exists?}
+    Error__Create_DESIGN_md_first[Error: Create ARC42STORIES.MD first]
     SKILL_md_files_{SKILL.md files?}
     Review_skills[Review skills]
     Generate_commit_message[Generate commit message]
     Invoke_java_update_design[Invoke update-design]
     Present_consolidated_proposal[Present consolidated proposal]
     User_confirms_{User confirms?}
-    Apply_DESIGN_md_changes[Apply DESIGN.md changes]
-    Stage_DESIGN_md[Stage DESIGN.md]
+    Apply_DESIGN_md_changes[Apply ARC42STORIES.MD changes]
+    Stage_DESIGN_md[Stage ARC42STORIES.MD]
     Execute_git_commit[Execute git commit]
     Done((Done))
     Adjust_proposal[Adjust proposal]
@@ -179,7 +179,7 @@ If **n** → continue immediately. Do not ask again this session.
 
 ---
 
-### Step 1 — Inspect staged changes and verify DESIGN.md
+### Step 1 — Inspect staged changes and verify ARC42STORIES.MD
 
 First, same as `git-commit`:
 ```bash
@@ -191,20 +191,20 @@ If nothing is staged, stop and tell the user:
 > "Nothing is staged. Run `git add <files>` first, or tell me which files
 > to stage."
 
-**Then check for DESIGN.md:**
+**Then check for ARC42STORIES.MD:**
 ```bash
-ls docs/DESIGN.md 2>/dev/null
+ls docs/ARC42STORIES.MD 2>/dev/null
 ```
 
-If DESIGN.md doesn't exist, stop and tell the user:
-> "❌ **Java projects require DESIGN.md for architectural documentation.**
+If ARC42STORIES.MD doesn't exist, stop and tell the user:
+> "❌ **Java projects require ARC42STORIES.MD for architectural documentation.**
 >
-> This file should live at `docs/DESIGN.md`. I can help you create it.
+> This file should live at `docs/ARC42STORIES.MD`. I can help you create it.
 >
-> Would you like me to invoke `update-design` to generate a starter DESIGN.md,
+> Would you like me to invoke `update-design` to generate a starter ARC42STORIES.MD,
 > or would you prefer to create it manually first?"
 
-Do not proceed with the commit until DESIGN.md exists.
+Do not proceed with the commit until ARC42STORIES.MD exists.
 
 ### Step 2 — Generate commit message
 
@@ -216,7 +216,7 @@ Hold it — don't show it yet.
 
 **Always invoke both:**
 1. Invoke `update-design` skill, passing the staged diff
-   - Returns proposed DESIGN.md changes (if docs/DESIGN.md exists)
+   - Returns proposed ARC42STORIES.MD changes (if docs/ARC42STORIES.MD exists)
 2. Invoke `update-claude-md` skill, passing the staged diff
    - Returns proposed CLAUDE.md changes (if CLAUDE.md exists)
 
@@ -232,7 +232,7 @@ Show the user a single consolidated proposal:
 ## Proposed commit message
 <as per git-commit skill>
 
-## Proposed DESIGN.md updates
+## Proposed ARC42STORIES.MD updates
 <output from update-design skill, if any>
 
 ## Proposed CLAUDE.md updates
@@ -250,9 +250,9 @@ Follow `git-commit` Step 4 (commit), with this enhancement:
 **Before committing:** Apply any proposed documentation changes.
 Read `**Project repo:**` from CLAUDE.md to get the absolute project path. Use `git -C` for all operations:
 
-1. If update-design proposed DESIGN.md changes:
-   - Let update-design apply its changes to `docs/DESIGN.md`
-   - Stage: `git -C <Project repo> add docs/DESIGN.md`
+1. If update-design proposed ARC42STORIES.MD changes:
+   - Let update-design apply its changes to `docs/ARC42STORIES.MD`
+   - Stage: `git -C <Project repo> add docs/ARC42STORIES.MD`
 2. If update-claude-md proposed CLAUDE.md changes:
    - Let update-claude-md apply its changes to `CLAUDE.md`
    - Stage: `git -C <Project repo> add CLAUDE.md`
@@ -269,12 +269,12 @@ git -C <Project repo> log --oneline -1   # confirm
 
 | Situation | Action |
 |---|---|
-| DESIGN.md missing | STOP — offer to create it via update-design or manually |
-| Only test files staged | Suggest `test` type, note DESIGN.md likely unchanged |
+| ARC42STORIES.MD missing | STOP — offer to create it via update-design or manually |
+| Only test files staged | Suggest `test` type, note ARC42STORIES.MD likely unchanged |
 | Only `pom.xml` / `build.gradle` changed | Suggest `build` type, check for new deps that need design doc mention |
 | New `@Entity`, `@Service`, `@Repository` | Ensure update-design captures architectural significance |
 | Large diff (10+ files) | Summarize by layer/module (controller, service, repository) |
-| update-design finds no changes needed | Note this clearly, skip DESIGN.md staging |
+| update-design finds no changes needed | Note this clearly, skip ARC42STORIES.MD staging |
 
 ---
 
@@ -323,8 +323,8 @@ All pitfalls from `git-commit` apply, plus:
 
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
-| Committing without DESIGN.md | Java projects need architectural docs | Check for docs/DESIGN.md first, create if missing |
-| Skipping DESIGN.md sync | Design doc drifts from code | Always invoke update-design first |
+| Committing without ARC42STORIES.MD | Java projects need architectural docs | Check for docs/ARC42STORIES.MD first, create if missing |
+| Skipping ARC42STORIES.MD sync | Design doc drifts from code | Always invoke update-design first |
 | Committing pom.xml changes without testing | Build may be broken | Run `mvn compile` before committing |
 | Generic scope when Java-specific exists | Less context for reviewers | Use `repository` not `data`, `rest` not `api` |
 | Not mentioning BOM impact in build commits | Version conflicts surprise teammates | Note if dependency overrides BOM |
@@ -345,7 +345,7 @@ Commit is complete when:
 
 - ✅ All files staged (or user confirmed which files to stage)
 - ✅ Commit message generated with Java-specific scope
-- ✅ DESIGN.md updates proposed (if docs/DESIGN.md exists)
+- ✅ ARC42STORIES.MD updates proposed (if docs/ARC42STORIES.MD exists)
 - ✅ CLAUDE.md updates proposed (if CLAUDE.md exists)
 - ✅ User confirmed with explicit **YES**
 - ✅ Documentation changes applied and staged
@@ -386,7 +386,7 @@ new BOM. Verified compilation and existing tests pass.
 
 **Design doc sync example:**
 ```
-## Proposed DESIGN.md updates
+## Proposed ARC42STORIES.MD updates
 Add OrderService to Services section:
 - Handles order creation, validation, and fulfillment
 - Integrates with PaymentGateway and InventoryService

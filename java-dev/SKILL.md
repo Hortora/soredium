@@ -435,7 +435,7 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 
 - **Before committing:** invoke `code-review` to catch safety, concurrency, and performance issues
 - **After implementing or refactoring:** if the user wants to commit, invoke
-  `git-commit`, which will also sync DESIGN.md via `java-update-design`
+  `git-commit`, which will also sync ARC42STORIES.MD via `java-update-design`
 - **For architectural decisions:** suggest running `adr` to document significant decisions
 - **For security-critical code:** invoke `security-audit` when handling authentication, authorization, payment, or PII
 - **If architectural impact without commit:** suggest running `java-update-design` independently

@@ -105,10 +105,10 @@ class TestFindMovedFileReferences(unittest.TestCase):
         f = self._tmp_file("See ARCHITECTURE.md for details.\n")
         issues = find_moved_file_references(f.read_text(), f)
         if issues:
-            self.assertTrue(any("DESIGN.md" in i["message"] for i in issues))
+            self.assertTrue(any("ARC42STORIES.MD" in i["message"] for i in issues))
 
     def test_no_issue_for_current_paths(self):
-        f = self._tmp_file("See docs/DESIGN.md for current architecture.\n")
+        f = self._tmp_file("See docs/ARC42STORIES.MD for current architecture.\n")
         issues = find_moved_file_references(f.read_text(), f)
         self.assertEqual(issues, [])
 

@@ -1,6 +1,6 @@
 # Update Design Document — Python
 
-Keeps `DESIGN.md` accurate as the Python codebase evolves. Focuses on
+Keeps `ARC42STORIES.MD` accurate as the Python codebase evolves. Focuses on
 public API surface, module structure, and dependency changes.
 
 ## Core Rules
@@ -12,10 +12,10 @@ public API surface, module structure, and dependency changes.
 
 ## Workflow
 
-### Step 1 — Locate DESIGN.md
+### Step 1 — Locate ARC42STORIES.MD
 
 ```bash
-ls DESIGN.md docs/DESIGN.md 2>/dev/null | head -1
+ls ARC42STORIES.MD docs/ARC42STORIES.MD 2>/dev/null | head -1
 ```
 
 If not found, offer to create a stub:
@@ -44,7 +44,7 @@ In priority order:
 
 ### Step 3 — Identify architectural impact
 
-Map changes to DESIGN.md sections:
+Map changes to ARC42STORIES.MD sections:
 
 | Change | Section to update |
 |--------|------------------|
@@ -75,8 +75,8 @@ Then ask:
 
 ### Step 5 — Apply on YES
 
-Write the updated DESIGN.md. Confirm:
-> "✅ DESIGN.md updated."
+Write the updated ARC42STORIES.MD. Confirm:
+> "✅ ARC42STORIES.MD updated."
 
 ## Common Pitfalls
 
@@ -85,13 +85,13 @@ Write the updated DESIGN.md. Confirm:
 | Documenting private functions | Only document public API (no leading `_`) |
 | Copying type hints verbatim | Write intent, not syntax — the code already has the types |
 | Skipping removed exports | Deletions matter as much as additions |
-| Updating DESIGN.md without reading it first | Always read the current state before proposing changes |
+| Updating ARC42STORIES.MD without reading it first | Always read the current state before proposing changes |
 
 ## Edge Cases
 
 | Situation | Action |
 |-----------|--------|
 | No staged changes and no diff provided | Run `git log --oneline -5`, ask which to analyse |
-| DESIGN.md has no matching section | Propose a new section rather than silently skipping |
+| ARC42STORIES.MD has no matching section | Propose a new section rather than silently skipping |
 | Large diffs (50+ files) | Summarise themes rather than file-by-file; confirm scope first |
-| Multiple packages in monorepo | Ask which package's DESIGN.md to update, or update all if global change |
+| Multiple packages in monorepo | Ask which package's ARC42STORIES.MD to update, or update all if global change |

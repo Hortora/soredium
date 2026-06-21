@@ -31,7 +31,7 @@ class TestLinkIntegrity(TempDirTestCase):
 
     def test_validate_link_integrity_all_valid(self):
         """All links exist → pass"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("# Design\n\n[Link](architecture.md)")
@@ -51,7 +51,7 @@ class TestLinkIntegrity(TempDirTestCase):
 
     def test_validate_link_integrity_broken_link(self):
         """Link to missing file → CRITICAL"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
 
         primary.write_text("# Design\n\n[Missing](missing.md)")
 
@@ -69,7 +69,7 @@ class TestLinkIntegrity(TempDirTestCase):
 
     def test_validate_link_integrity_broken_anchor(self):
         """Link to valid file but invalid anchor → WARNING"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("# Design\n\n[Link](architecture.md#nonexistent)")
@@ -90,7 +90,7 @@ class TestLinkIntegrity(TempDirTestCase):
 
     def test_validate_link_integrity_internal_anchor(self):
         """Internal anchor (#section) should be validated"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
 
         primary.write_text("# Design\n\n[Link](#overview)\n\n## Overview")
 
@@ -108,7 +108,7 @@ class TestLinkIntegrity(TempDirTestCase):
 
     def test_validate_link_integrity_missing_internal_anchor(self):
         """Internal anchor that doesn't exist → WARNING"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
 
         primary.write_text("# Design\n\n[Link](#missing)")
 
@@ -152,7 +152,7 @@ class TestLinkIntegrity(TempDirTestCase):
 
     def test_validate_link_integrity_external_urls_skipped(self):
         """External URLs are not validated"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
 
         primary.write_text("[External](https://example.com)")
 
@@ -174,7 +174,7 @@ class TestCompleteness(TempDirTestCase):
 
     def test_check_completeness_single_file(self):
         """Single-file group has no completeness checks"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         primary.write_text("# Design")
 
         group = DocumentGroup(
@@ -191,7 +191,7 @@ class TestCompleteness(TempDirTestCase):
 
     def test_check_completeness_orphaned_module(self):
         """Module not referenced from primary → WARNING"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "orphan.md"
 
         primary.write_text("# Design\n\nNo links")
@@ -211,7 +211,7 @@ class TestCompleteness(TempDirTestCase):
 
     def test_check_completeness_directory_pattern_skipped(self):
         """Directory pattern modules don't need explicit reference"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "docs" / "design" / "architecture.md"
         module.parent.mkdir(parents=True)
 
@@ -232,7 +232,7 @@ class TestCompleteness(TempDirTestCase):
 
     def test_check_completeness_bidirectional(self):
         """Module doesn't reference back → NOTE"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("[Link](architecture.md)")
@@ -273,7 +273,7 @@ class TestDuplication(TempDirTestCase):
 
     def test_find_duplication_single_file(self):
         """Single-file group has no duplication checks"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         primary.write_text("# Design")
 
         group = DocumentGroup(
@@ -289,7 +289,7 @@ class TestDuplication(TempDirTestCase):
 
     def test_find_duplication_no_duplicates(self):
         """Unique content across modules → no issues"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         primary.write_text("# Design\n\nUnique content in primary file")
@@ -308,7 +308,7 @@ class TestDuplication(TempDirTestCase):
 
     def test_find_duplication_duplicate_paragraphs(self):
         """Same paragraph in multiple modules → NOTE"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         # Substantial paragraph (>100 chars)
@@ -331,7 +331,7 @@ class TestDuplication(TempDirTestCase):
 
     def test_find_duplication_short_content_ignored(self):
         """Short paragraphs (<100 chars) are ignored"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         # Short content (< 100 chars)
@@ -358,12 +358,12 @@ class TestDocumentGroupValidation(TempDirTestCase):
 
     def test_validate_document_group_clean(self):
         """Clean group with valid links and content → no critical issues"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         # Create substantial content with bidirectional links
         primary.write_text("# Design\n\n[Architecture](architecture.md)\n\nDesign content here.")
-        module.write_text("# Architecture\n\n## Overview\n\nContent here.\n\n[Back to design](DESIGN.md)")
+        module.write_text("# Architecture\n\n## Overview\n\nContent here.\n\n[Back to design](ARC42STORIES.MD)")
 
         group = DocumentGroup(
             primary_file=primary,
@@ -381,7 +381,7 @@ class TestDocumentGroupValidation(TempDirTestCase):
 
     def test_validate_document_group_multiple_issues(self):
         """Group with multiple issues reported correctly"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
         module = self.test_dir / "architecture.md"
 
         # Broken link + duplication
@@ -408,7 +408,7 @@ class TestDocumentGroupValidation(TempDirTestCase):
 
     def test_validate_document_group_filters_clean_results(self):
         """Results with no issues are filtered out"""
-        primary = self.test_dir / "DESIGN.md"
+        primary = self.test_dir / "ARC42STORIES.MD"
 
         primary.write_text("# Design\n\nClean content")
 

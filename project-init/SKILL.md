@@ -93,7 +93,7 @@ Read `WORKSPACE_OK` and `WORKSPACE_DECLINED` from the ctx.py output (already run
 > A workspace keeps methodology artifacts (plans, specs, handovers, blog
 > entries) separate from the project repo. Set one up now? **(YES / n)**
 
-- **YES** → invoke `workspace-init`. It handles git hooks, DESIGN.md stub,
+- **YES** → invoke `workspace-init`. It handles git hooks, ARC42STORIES.MD stub,
   work tracking, and superpowers as part of its own flow. Once complete,
   skip Checks 3 and 4 — workspace-init already offered them.
 - **n** → write `workspace: declined` to CLAUDE.md (see below), continue.

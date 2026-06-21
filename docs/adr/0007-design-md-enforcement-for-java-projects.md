@@ -1,4 +1,4 @@
-# ADR-0007: DESIGN.md Enforcement for Java Projects
+# ADR-0007: ARC42STORIES.MD Enforcement for Java Projects
 
 **Status:** Accepted
 
@@ -10,13 +10,13 @@
 
 ## Decision
 
-java-git-commit BLOCKS if `docs/DESIGN.md` doesn't exist, forcing architectural documentation from the first commit.
+java-git-commit BLOCKS if `docs/ARC42STORIES.MD` doesn't exist, forcing architectural documentation from the first commit.
 
 **Enforcement mechanism:**
-- Check for `docs/DESIGN.md` existence before proceeding
-- If missing → offer to create starter DESIGN.md or do it manually
+- Check for `docs/ARC42STORIES.MD` existence before proceeding
+- If missing → offer to create starter ARC42STORIES.MD or do it manually
 - If user declines → workflow stops, commit doesn't proceed
-- If user accepts → create minimal DESIGN.md, add to staging, continue
+- If user accepts → create minimal ARC42STORIES.MD, add to staging, continue
 
 **Philosophy:** Critical documentation is **required**, not suggested.
 
@@ -39,14 +39,14 @@ Software projects accumulate documentation debt:
 **Real scenario:**
 ```
 Developer joins project with 50,000 lines of Java code.
-No DESIGN.md, no architecture doc, no component diagram.
+No ARC42STORIES.MD, no architecture doc, no component diagram.
 Spends 3 weeks reading code to understand:
 - What's the layering?
 - What does each module do?
 - How do components communicate?
 - What are the design decisions?
 
-If DESIGN.md existed from day 1:
+If ARC42STORIES.MD existed from day 1:
 - 30 minutes to read doc
 - 3 days to understand details
 - 27 days saved
@@ -58,16 +58,16 @@ If DESIGN.md existed from day 1:
 
 - **Prevent documentation debt** - Architecture docs decay fast if not maintained
 - **Early enforcement** - Easier to document 500 lines than 50,000 lines
-- **Quality signal** - Projects without DESIGN.md lack architectural discipline
-- **Automatic sync** - java-update-design only works if DESIGN.md exists
+- **Quality signal** - Projects without ARC42STORIES.MD lack architectural discipline
+- **Automatic sync** - java-update-design only works if ARC42STORIES.MD exists
 - **Onboarding cost** - New developers need architecture understanding
-- **Design thinking** - Writing DESIGN.md forces architectural clarity
+- **Design thinking** - Writing ARC42STORIES.MD forces architectural clarity
 
 ## Considered Options
 
-### Option 1: Make DESIGN.md Optional (REJECTED)
+### Option 1: Make ARC42STORIES.MD Optional (REJECTED)
 
-**Approach:** java-git-commit works without DESIGN.md
+**Approach:** java-git-commit works without ARC42STORIES.MD
 
 **Pros:**
 - No friction for new projects
@@ -81,14 +81,14 @@ If DESIGN.md existed from day 1:
 - ❌ Architecture decisions forgotten
 - ❌ No forcing function for design thinking
 
-**Real-world result:** 90% of projects never create DESIGN.md
+**Real-world result:** 90% of projects never create ARC42STORIES.MD
 
 ### Option 2: Warn But Don't Block (REJECTED)
 
-**Approach:** java-git-commit warns "DESIGN.md doesn't exist" but proceeds
+**Approach:** java-git-commit warns "ARC42STORIES.MD doesn't exist" but proceeds
 
 ```
-⚠️  WARNING: docs/DESIGN.md not found
+⚠️  WARNING: docs/ARC42STORIES.MD not found
 Consider creating architecture documentation.
 
 Proceeding with commit...
@@ -106,9 +106,9 @@ Proceeding with commit...
 
 **Psychology:** Warnings that don't block get habituated away.
 
-### Option 3: Create Minimal DESIGN.md Automatically (REJECTED)
+### Option 3: Create Minimal ARC42STORIES.MD Automatically (REJECTED)
 
-**Approach:** java-git-commit auto-creates stub DESIGN.md
+**Approach:** java-git-commit auto-creates stub ARC42STORIES.MD
 
 ```markdown
 # Design Documentation
@@ -118,7 +118,7 @@ TODO: Document architecture
 
 **Pros:**
 - Zero friction
-- DESIGN.md exists (java-update-design can sync)
+- ARC42STORIES.MD exists (java-update-design can sync)
 
 **Cons:**
 - ❌ Generates low-quality documentation
@@ -127,7 +127,7 @@ TODO: Document architecture
 - ❌ False sense of "we have docs"
 - ❌ No forcing function for design thinking
 
-**Result:** Projects have empty DESIGN.md files (worse than nothing)
+**Result:** Projects have empty ARC42STORIES.MD files (worse than nothing)
 
 ### Option 4: Require for "Mature" Projects Only (REJECTED)
 
@@ -146,28 +146,28 @@ TODO: Document architecture
 
 **Question:** If documentation is important at 5001 lines, why not at 4999 lines?
 
-### Option 5: Block Unless DESIGN.md Exists (ACCEPTED)
+### Option 5: Block Unless ARC42STORIES.MD Exists (ACCEPTED)
 
-**Approach:** java-git-commit checks for DESIGN.md, blocks if missing, offers to help
+**Approach:** java-git-commit checks for ARC42STORIES.MD, blocks if missing, offers to help
 
 **Workflow:**
 ```
 java-git-commit
   ↓
-Check docs/DESIGN.md exists?
+Check docs/ARC42STORIES.MD exists?
   ↓ NO
   ↓
-"docs/DESIGN.md not found.
+"docs/ARC42STORIES.MD not found.
 
 Would you like to:
-1. Create starter DESIGN.md (recommended)
+1. Create starter ARC42STORIES.MD (recommended)
 2. Create it manually
 3. Cancel commit
 
 Reply with 1, 2, or 3."
   ↓ User choice 1
   ↓
-Create minimal DESIGN.md with:
+Create minimal ARC42STORIES.MD with:
 - Project name
 - Purpose
 - Architecture section (empty)
@@ -191,7 +191,7 @@ Continue with commit
 
 ## Decision Outcome
 
-**Chosen option:** Block Unless DESIGN.md Exists
+**Chosen option:** Block Unless ARC42STORIES.MD Exists
 
 **Implementation:**
 
@@ -199,17 +199,17 @@ Continue with commit
 
 **Added Step 0a:**
 ```markdown
-### Step 0a: Verify DESIGN.md exists
+### Step 0a: Verify ARC42STORIES.MD exists
 
 ```bash
-ls docs/DESIGN.md 2>/dev/null
+ls docs/ARC42STORIES.MD 2>/dev/null
 ```
 
 **If not found:**
-> ❌ **DESIGN.md required for Java projects**
+> ❌ **ARC42STORIES.MD required for Java projects**
 >
-> docs/DESIGN.md not found. Would you like to:
-> 1. Create starter DESIGN.md (recommended)
+> docs/ARC42STORIES.MD not found. Would you like to:
+> 1. Create starter ARC42STORIES.MD (recommended)
 > 2. Create it manually
 > 3. Cancel commit
 >
@@ -218,13 +218,13 @@ ls docs/DESIGN.md 2>/dev/null
 **Wait for user response.**
 
 **If 1 (create starter):**
-- Generate minimal DESIGN.md
+- Generate minimal ARC42STORIES.MD
 - Add to staging
 - Continue with commit
 
 **If 2 (manual):**
 - Stop workflow
-- User creates DESIGN.md
+- User creates ARC42STORIES.MD
 - User re-runs java-git-commit
 
 **If 3 (cancel):**
@@ -232,7 +232,7 @@ ls docs/DESIGN.md 2>/dev/null
 - No commit
 ```
 
-### 2. Starter DESIGN.md Template
+### 2. Starter ARC42STORIES.MD Template
 
 ```markdown
 # Design Documentation
@@ -280,9 +280,9 @@ ls docs/DESIGN.md 2>/dev/null
 ### 3. Documentation in CLAUDE.md
 
 ```markdown
-## DESIGN.md Requirement (Type: Java)
+## ARC42STORIES.MD Requirement (Type: Java)
 
-**java-git-commit blocks if docs/DESIGN.md doesn't exist.**
+**java-git-commit blocks if docs/ARC42STORIES.MD doesn't exist.**
 
 This enforces architectural documentation from the first commit.
 ```
@@ -292,7 +292,7 @@ This enforces architectural documentation from the first commit.
 ```markdown
 #### **java-git-commit**
 
-**DESIGN.md enforcement:** Blocks commits if docs/DESIGN.md doesn't exist.
+**ARC42STORIES.MD enforcement:** Blocks commits if docs/ARC42STORIES.MD doesn't exist.
 Offers to create starter template or let user create manually.
 ```
 
@@ -302,22 +302,22 @@ Offers to create starter template or let user create manually.
 
 ✅ **Zero Java projects without architecture docs**
 ✅ **Documentation starts early** - easier to document 500 lines than 50,000
-✅ **Forces design thinking** - writing DESIGN.md clarifies architecture
+✅ **Forces design thinking** - writing ARC42STORIES.MD clarifies architecture
 ✅ **Auto-sync works** - java-update-design can keep docs current
-✅ **Better onboarding** - new developers read DESIGN.md, not code
+✅ **Better onboarding** - new developers read ARC42STORIES.MD, not code
 ✅ **Architecture decisions preserved** - why we chose X is documented
-✅ **Quality signal** - projects with DESIGN.md show discipline
+✅ **Quality signal** - projects with ARC42STORIES.MD show discipline
 
 ### Negative
 
-⚠️ **Initial friction** - can't make first commit until DESIGN.md exists
+⚠️ **Initial friction** - can't make first commit until ARC42STORIES.MD exists
 ⚠️ **Feels heavy-handed** - some users prefer to "just start coding"
-⚠️ **Prototypes affected** - even throwaway code needs DESIGN.md
+⚠️ **Prototypes affected** - even throwaway code needs ARC42STORIES.MD
 ⚠️ **User must decide** - can't fully automate (need user input on template choice)
 
 ### Neutral
 
-📝 **Can be bypassed** - user creates minimal DESIGN.md, never updates it (but at least structure exists)
+📝 **Can be bypassed** - user creates minimal ARC42STORIES.MD, never updates it (but at least structure exists)
 📝 **Template helps** - provides starting point, reduces barrier
 📝 **Sync maintains** - once created, java-update-design keeps it current
 
@@ -325,7 +325,7 @@ Offers to create starter template or let user create manually.
 
 Success criteria for this ADR:
 
-- ✅ java-git-commit checks for DESIGN.md
+- ✅ java-git-commit checks for ARC42STORIES.MD
 - ✅ Blocks if missing (doesn't proceed)
 - ✅ Offers to create starter template
 - ✅ Starter template has useful structure
@@ -350,16 +350,16 @@ Cost: 3 weeks onboarding
 
 ### After Enforcement
 
-**Same project with DESIGN.md:**
+**Same project with ARC42STORIES.MD:**
 ```
-Day 1: Create DESIGN.md (blocked until exists)
+Day 1: Create ARC42STORIES.MD (blocked until exists)
         Document: 3-tier architecture, REST API
         Create UserService.java
-Week 1: Add OrderService, java-update-design syncs DESIGN.md
-Month 1: 15 services documented in DESIGN.md § Component Structure
+Week 1: Add OrderService, java-update-design syncs ARC42STORIES.MD
+Month 1: 15 services documented in ARC42STORIES.MD § Component Structure
 Month 3: New developer joins
 Question: "What's the architecture?"
-Answer: "Read docs/DESIGN.md" (30 minutes)
+Answer: "Read docs/ARC42STORIES.MD" (30 minutes)
 Cost: 3 days onboarding
 Savings: 2.5 weeks
 ```
@@ -376,16 +376,16 @@ Code tells you WHAT the system does. Documentation tells you WHY it does it that
 
 **Counter-argument:** "But Agile says working software over documentation!"
 
-**Response:** DESIGN.md IS working software. It's the map that helps developers navigate the codebase. Without it, you have a maze with no map.
+**Response:** ARC42STORIES.MD IS working software. It's the map that helps developers navigate the codebase. Without it, you have a maze with no map.
 
 **The forcing function:**
-Making DESIGN.md required forces design thinking. You can't document architecture you haven't thought through. This improves code quality, not just documentation quality.
+Making ARC42STORIES.MD required forces design thinking. You can't document architecture you haven't thought through. This improves code quality, not just documentation quality.
 
 ## Related Decisions
 
 - **ADR-0001:** Documentation Completeness Must Be Universal (same principle: docs are mandatory)
-- **java-update-design:** Automatic DESIGN.md sync (only works if DESIGN.md exists)
-- **Quality Assurance Framework:** Documentation validation (DESIGN.md corruption detection)
+- **java-update-design:** Automatic ARC42STORIES.MD sync (only works if ARC42STORIES.MD exists)
+- **Quality Assurance Framework:** Documentation validation (ARC42STORIES.MD corruption detection)
 
 ## Notes
 
@@ -394,7 +394,7 @@ Making DESIGN.md required forces design thinking. You can't document architectur
 Documentation debt is like technical debt - it compounds over time. Preventing it at the source (first commit) is cheaper than paying it off later (50,000 lines).
 
 **Quote from a developer who experienced this:**
-> "I spent 3 weeks reading code to understand the architecture. If DESIGN.md had existed from day 1, I would have understood in 30 minutes. This requirement would have saved me 3 weeks."
+> "I spent 3 weeks reading code to understand the architecture. If ARC42STORIES.MD had existed from day 1, I would have understood in 30 minutes. This requirement would have saved me 3 weeks."
 
 **Design principle:**
 > "If it's required eventually, require it from the start."

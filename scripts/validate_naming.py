@@ -18,7 +18,7 @@ NAMING_RULES = {
         'prefix': 'java-',
         'indicators': [
             # File references
-            'pom.xml', 'build.gradle', 'DESIGN.md', 'docs/DESIGN.md',
+            'pom.xml', 'build.gradle', 'ARC42STORIES.MD', 'docs/ARC42STORIES.MD',
             # Annotations
             '@Entity', '@Service', '@Repository', '@RestController', '@Component',
             # Build tools

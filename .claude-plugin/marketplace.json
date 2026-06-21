@@ -147,7 +147,7 @@
     {
       "name": "update-design",
       "source": "./update-design",
-      "description": "Use when the user says \"update the design doc\", \"sync DESIGN.md\", \"sync ARC42STORIES.MD\", \"reflect code changes in th...",
+      "description": "Use when the user says \"update the design doc\", \"sync ARC42STORIES.MD\", \"sync ARC42STORIES.MD\", \"reflect code changes in th...",
       "version": "1.0.0"
     },
     {

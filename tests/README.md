@@ -52,10 +52,10 @@ java-git-commit/
         "invokes_skills": ["update-design", "update-claude-md"],
         "creates_commit": true,
         "commit_message_matches": "^(feat|fix|refactor)\\(.*\\):.*",
-        "files_modified": ["docs/DESIGN.md", "CLAUDE.md"]
+        "files_modified": ["docs/ARC42STORIES.MD", "CLAUDE.md"]
       },
       "assertions": [
-        {"type": "file_exists", "path": "docs/DESIGN.md"},
+        {"type": "file_exists", "path": "docs/ARC42STORIES.MD"},
         {"type": "git_commit_exists", "message_contains": "Co-Authored-By: Claude"},
         {"type": "skill_invoked", "skill": "update-design"}
       ]

@@ -10,7 +10,7 @@ Usage: python3 scripts/generate_retro_fixtures.py [--max-commits N]
 Output: tests/fixtures/retro/repos/{repo-name}/
   git_log.jsonl       — one JSON object per line: {hash, date, subject}
   file_changes.json   — {hash: [changed_file_paths]}
-  docs/               — copied ADRs, blog entries, DESIGN.md if present
+  docs/               — copied ADRs, blog entries, ARC42STORIES.MD if present
 
 After running: git add tests/fixtures/retro/ && git commit
 """
@@ -27,7 +27,7 @@ DOC_SOURCES = [
     ("docs/adr", "docs/adr"),
     ("docs/diary", "docs/diary"),
     ("blog", "blog"),
-    ("DESIGN.md", "DESIGN.md"),
+    ("ARC42STORIES.MD", "ARC42STORIES.MD"),
     # CLAUDE.md excluded — process docs aren't used by retro analysis and
     # may contain stale content that confuses validators
 ]

@@ -92,7 +92,7 @@ def discover_document_group(primary_file: Path) -> DocumentGroup:
     6. Return DocumentGroup
 
     Args:
-        primary_file: Primary document file (DESIGN.md, CLAUDE.md, README.md, etc.)
+        primary_file: Primary document file (ARC42STORIES.MD, CLAUDE.md, README.md, etc.)
 
     Returns:
         DocumentGroup with primary file and discovered modules
@@ -149,7 +149,7 @@ def detect_modules_automatic(primary_file: Path) -> List[ModuleFile]:
     - Markdown links: [text](file.md)
     - Include directives: <!-- include: file.md -->
     - Section references: § Section in file.md
-    - Directory patterns: docs/design/*.md if primary is DESIGN.md
+    - Directory patterns: docs/design/*.md if primary is ARC42STORIES.MD
 
     Args:
         primary_file: Primary document to analyze
@@ -392,6 +392,7 @@ def check_directory_pattern(primary_file: Path) -> List[Path]:
     # Map primary file names to conventional subdirectory patterns
     patterns = {
         'design':       'docs/design',
+        'arc42stories': 'docs/design',
         'architecture': 'docs/architecture',
         'claude':       'docs/workflows',
         'readme':       'docs/readme',
@@ -488,7 +489,7 @@ def read_explicit_config(primary_file: Path) -> Optional[List[ModuleFile]]:
     Format:
     ## Modular Documentation
 
-    ### DESIGN.md
+    ### ARC42STORIES.MD
     **Modules:**
     - docs/design/architecture.md
     - docs/design/components.md

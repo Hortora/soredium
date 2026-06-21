@@ -18,7 +18,7 @@ When implementing the universal document validation framework (scripts/validate_
 4. This bypassed the process that would have caught the missing documentation
 
 **The deeper problem:** This failure pattern is not specific to skills repositories. The same rationalization ("just internal, not worth documenting") can occur in:
-- **type: java** - Infrastructure changes to update-design, missing documentation in DESIGN.md
+- **type: java** - Infrastructure changes to update-design, missing documentation in ARC42STORIES.MD
 - **type: custom** - Infrastructure changes to custom-update-primary-doc, missing documentation in primary doc
 - **type: generic** - Infrastructure changes to update-claude-md, missing documentation anywhere
 

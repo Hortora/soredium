@@ -25,9 +25,9 @@ Large documentation files (>1000 lines) become unmaintainable:
 - Single-file sync workflows miss updates when docs split
 
 **Real-world scenario:**
-1. User splits DESIGN.md → DESIGN.md + docs/design/architecture.md + docs/design/api.md
+1. User splits ARC42STORIES.MD → ARC42STORIES.MD + docs/design/architecture.md + docs/design/api.md
 2. Code changes: new @Service added
-3. `java-update-design` runs → only updates DESIGN.md
+3. `java-update-design` runs → only updates ARC42STORIES.MD
 4. `docs/design/api.md` becomes stale (missing new API endpoint)
 5. Documentation diverges from code
 
@@ -74,7 +74,7 @@ class ModuleFile:
 
 @dataclass(frozen=True)
 class DocumentGroup:
-    primary_file: Path          # e.g., DESIGN.md
+    primary_file: Path          # e.g., ARC42STORIES.MD
     modules: List[ModuleFile]   # e.g., [docs/design/architecture.md, ...]
     discovered_via: str         # "auto" | "config"
     cache_key: str              # sha256 for invalidation
@@ -94,7 +94,7 @@ Try all methods, aggregate results:
 1. **Markdown links:** `[Architecture](docs/design/architecture.md)`
 2. **Include directives:** `<!-- include: api.md -->`
 3. **Section references:** `§ API Reference in docs/design/api.md`
-4. **Directory patterns:** If primary is `DESIGN.md`, check `docs/design/*.md`
+4. **Directory patterns:** If primary is `ARC42STORIES.MD`, check `docs/design/*.md`
 
 **If unambiguous (all methods agree or only one method finds modules):**
 - Cache discovered structure
@@ -110,7 +110,7 @@ Try all methods, aggregate results:
 ```markdown
 ## Modular Documentation
 
-### DESIGN.md
+### ARC42STORIES.MD
 **Modules:**
 - docs/design/architecture.md
 - docs/design/components.md
@@ -154,7 +154,7 @@ def compute_cache_key(primary_file: Path) -> str:
 issues = validate_document_group(group)
 if any(issue.severity == "CRITICAL" for issue in issues):
     # Revert ALL files atomically
-    git restore DESIGN.md docs/design/architecture.md docs/design/api.md
+    git restore ARC42STORIES.MD docs/design/architecture.md docs/design/api.md
     raise ValidationError(issues)
 ```
 
@@ -182,7 +182,7 @@ if any(issue.severity == "CRITICAL" for issue in issues):
 group = discover_document_group(Path("README.md"))
 
 # Type: java
-group = discover_document_group(Path("docs/DESIGN.md"))
+group = discover_document_group(Path("docs/ARC42STORIES.MD"))
 
 # Type: custom
 group = discover_document_group(Path("docs/vision.md"))
@@ -194,7 +194,7 @@ group = discover_document_group(Path("docs/vision.md"))
 
 **Type-specific logic only in what to sync:**
 - Skills: Skill collection changes → README sections
-- Java: Code changes → DESIGN.md sections
+- Java: Code changes → ARC42STORIES.MD sections
 - Custom: User-defined Sync Rules
 
 **Discovery and validation are universal.**
@@ -219,7 +219,7 @@ group = discover_document_group(Path("README.md"))
 ### Positive
 
 ✅ **Users can modularize without breaking sync**
-- Split DESIGN.md into focused files
+- Split ARC42STORIES.MD into focused files
 - All files stay synchronized automatically
 - No configuration needed (auto-detection works)
 
@@ -231,7 +231,7 @@ group = discover_document_group(Path("README.md"))
 
 ✅ **Universal across project types**
 - Skills: README.md + modules
-- Java: DESIGN.md + modules
+- Java: ARC42STORIES.MD + modules
 - Custom: Any primary doc + modules
 - Generic: CLAUDE.md + modules
 - Same code, zero duplication

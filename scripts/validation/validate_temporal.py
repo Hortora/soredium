@@ -21,8 +21,8 @@ RENAMED_SKILLS = {
 }
 
 MOVED_FILES = {
-    'docs/ARCHITECTURE.md': 'docs/DESIGN.md',
-    'ARCHITECTURE.md': 'DESIGN.md',
+    'docs/ARCHITECTURE.md': 'docs/ARC42STORIES.MD',
+    'ARCHITECTURE.md': 'ARC42STORIES.MD',
 }
 
 def find_deprecated_tool_usage(content: str, file_path: Path) -> List[Dict]:

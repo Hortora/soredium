@@ -93,7 +93,7 @@ git tag -l --sort=version:refname
 ```bash
 ls docs/adr/ 2>/dev/null
 ls docs/diary/ blog/ 2>/dev/null
-cat DESIGN.md 2>/dev/null
+cat ARC42STORIES.MD 2>/dev/null
 ```
 
 For each ADR: extract its date and title.

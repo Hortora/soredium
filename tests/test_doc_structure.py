@@ -155,40 +155,40 @@ class TestAnalyseNudge(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_no_nudge_below_threshold(self):
-        doc = make_doc(self.d, "DESIGN.md", lines=300)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=300)
         claude_md = make_claude_md(self.d, threshold=400)
         result = analyse(doc, claude_md)
         self.assertFalse(result["nudge"])
         self.assertFalse(result["review_structure"])
 
     def test_nudge_at_threshold(self):
-        doc = make_doc(self.d, "DESIGN.md", lines=400)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=400)
         claude_md = make_claude_md(self.d, threshold=400)
         result = analyse(doc, claude_md)
         self.assertTrue(result["nudge"])
 
     def test_nudge_above_threshold(self):
-        doc = make_doc(self.d, "DESIGN.md", lines=600)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=600)
         claude_md = make_claude_md(self.d, threshold=400)
         result = analyse(doc, claude_md)
         self.assertTrue(result["nudge"])
         self.assertIn("600", result["reason"])
 
     def test_no_nudge_when_disabled(self):
-        doc = make_doc(self.d, "DESIGN.md", lines=800)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=800)
         claude_md = make_claude_md(self.d, threshold=400, nudge_enabled=False)
         result = analyse(doc, claude_md)
         self.assertFalse(result["nudge"])
 
     def test_uses_default_threshold_without_claude_md(self):
-        doc = make_doc(self.d, "DESIGN.md", lines=DEFAULT_THRESHOLD + 10)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=DEFAULT_THRESHOLD + 10)
         result = analyse(doc, self.d / "missing.md")
         self.assertTrue(result["nudge"])
         self.assertEqual(result["threshold"], DEFAULT_THRESHOLD)
 
     def test_custom_threshold_from_claude_md(self):
         # At 399 lines with threshold 600 — no nudge
-        doc = make_doc(self.d, "DESIGN.md", lines=399)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=399)
         claude_md = make_claude_md(self.d, threshold=600)
         result = analyse(doc, claude_md)
         self.assertFalse(result["nudge"])
@@ -208,7 +208,7 @@ class TestAnalyseModular(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_already_modular_no_nudge(self):
-        doc = make_doc(self.d, "DESIGN.md", lines=600,
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=600,
                        links=["docs/architecture", "docs/api"])
         claude_md = make_claude_md(self.d, threshold=400)
         result = analyse(doc, claude_md)
@@ -217,7 +217,7 @@ class TestAnalyseModular(unittest.TestCase):
 
     def test_already_modular_many_sections_suggests_review(self):
         sections = [f"Section {i}" for i in range(9)]
-        doc = make_doc(self.d, "DESIGN.md", lines=600,
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=600,
                        sections=sections, links=["docs/arch"])
         claude_md = make_claude_md(self.d, threshold=400)
         result = analyse(doc, claude_md)
@@ -226,7 +226,7 @@ class TestAnalyseModular(unittest.TestCase):
         self.assertFalse(result["nudge"])
 
     def test_module_links_detected(self):
-        doc = make_doc(self.d, "DESIGN.md", lines=100,
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=100,
                        links=["docs/architecture", "docs/api"])
         result = analyse(doc, self.d / "CLAUDE.md")
         self.assertTrue(result["already_modular"])
@@ -234,7 +234,7 @@ class TestAnalyseModular(unittest.TestCase):
 
     def test_section_names_in_result(self):
         sections = ["Architecture", "API", "Data Model"]
-        doc = make_doc(self.d, "DESIGN.md", lines=500, sections=sections)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=500, sections=sections)
         claude_md = make_claude_md(self.d, threshold=400)
         result = analyse(doc, claude_md)
         self.assertTrue(result["nudge"])
@@ -254,7 +254,7 @@ class TestThresholdAdjustment(unittest.TestCase):
 
     def test_threshold_increase_suppresses_nudge(self):
         """User says 'too frequent' — threshold bumped — same doc no longer nudges."""
-        doc = make_doc(self.d, "DESIGN.md", lines=450)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=450)
 
         # With default threshold (400): nudge fires
         make_claude_md(self.d, threshold=400)
@@ -268,7 +268,7 @@ class TestThresholdAdjustment(unittest.TestCase):
 
     def test_threshold_decrease_triggers_nudge(self):
         """User says 'too late' — threshold lowered — smaller doc now nudges."""
-        doc = make_doc(self.d, "DESIGN.md", lines=250)
+        doc = make_doc(self.d, "ARC42STORIES.MD", lines=250)
 
         # With default threshold (400): no nudge
         make_claude_md(self.d, threshold=400)

@@ -712,11 +712,11 @@ Start with standard project-knowledge paths:
 - `CLAUDE.md` — project conventions (build commands, test patterns, naming)
 - `docs/adr/` — architecture decision records (always project knowledge)
 
-**Create DESIGN.md stub if missing (java / typescript / python projects only):**
+**Create ARC42STORIES.MD stub if missing (java / typescript / python projects only):**
 
 Read `PROJECT_TYPE` from ctx.py output (run `python3 ~/.claude/skills/project-init/ctx.py` if not already run for this repo).
 
-If type is `java`, `typescript`, or `python` AND `docs/DESIGN.md` does not exist:
+If type is `java`, `typescript`, or `python` AND `docs/ARC42STORIES.MD` does not exist:
 
 ```bash
 mkdir -p "<project-path>/docs"
@@ -784,16 +784,16 @@ Replace `[Repo Name]` with the actual repo name (read from the project directory
 
 Commit the stub to the project repo:
 ```bash
-git -C "<project-path>" add docs/DESIGN.md
-git -C "<project-path>" commit -m "chore: add DESIGN.md stub"
+git -C "<project-path>" add docs/ARC42STORIES.MD
+git -C "<project-path>" commit -m "chore: add ARC42STORIES.MD stub"
 ```
 
-Do not create DESIGN.md for `custom`, `blog`, or `skills` project types — those are either self-documenting (skills) or use a different primary doc structure (custom/blog).
+Do not create ARC42STORIES.MD for `custom`, `blog`, or `skills` project types — those are either self-documenting (skills) or use a different primary doc structure (custom/blog).
 
 **Then detect additional project-knowledge paths:**
 ```bash
 # Check for common project docs
-[ -f "<project-path>/docs/DESIGN.md" ]     && echo "docs/DESIGN.md"
+[ -f "<project-path>/docs/ARC42STORIES.MD" ]     && echo "docs/ARC42STORIES.MD"
 [ -d "<project-path>/docs/specs/" ]         && echo "docs/specs/"
 [ -f "<project-path>/docs/RESEARCH.md" ]   && echo "docs/RESEARCH.md"
 [ -f "<project-path>/docs/CAPABILITIES.md" ] && echo "docs/CAPABILITIES.md"
@@ -825,7 +825,7 @@ filtering or dropping commits that touch these paths.
 |------|------------|
 | `CLAUDE.md` | Project conventions (build, test, naming) |
 | `docs/adr/` | Architecture decision records |
-| `docs/DESIGN.md` | Design document |
+| `docs/ARC42STORIES.MD` | Design document |
 ```
 
 Do not show this section to the user or ask for confirmation — it is derived

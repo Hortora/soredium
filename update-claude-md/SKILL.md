@@ -23,7 +23,7 @@ changes.
 - Repository-specific tools and processes
 - Project conventions that aren't obvious from code
 
-**Not covered here:** Software architecture (that's DESIGN.md via update-design)
+**Not covered here:** Software architecture (that's ARC42STORIES.MD via update-design)
 
 ## Core Rules
 
@@ -131,8 +131,8 @@ Map changes to CLAUDE.md sections:
 
 **What to skip:**
 - **Project Type section** — never modify this user-configured section
-- Code implementation details (that's for DESIGN.md)
-- Architecture changes (that's for DESIGN.md)
+- Code implementation details (that's for ARC42STORIES.MD)
+- Architecture changes (that's for ARC42STORIES.MD)
 - Individual bug fixes that don't change workflow
 - Formatting/style changes
 
@@ -343,7 +343,7 @@ Avoid these mistakes when updating CLAUDE.md:
 |---------|----------------|-----|
 | Modifying Project Type section | Breaks repository behavior, user-configured | Never touch this section, skip it entirely |
 | Applying changes without confirmation | User loses control | Always wait for explicit YES |
-| Documenting architecture in CLAUDE.md | Wrong file - DESIGN.md is for architecture | Focus on workflow/conventions only |
+| Documenting architecture in CLAUDE.md | Wrong file - ARC42STORIES.MD is for architecture | Focus on workflow/conventions only |
 | Over-documenting obvious things | Clutter, maintenance burden | Only document non-obvious workflows |
 | Not updating CLAUDE.md when adding tools | Claude doesn't know about new tools | Update when workflow changes |
 | Copying command help text verbatim | Duplicate of `--help` output | Summarize common use cases |

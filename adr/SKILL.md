@@ -11,7 +11,7 @@ description: >
 
 You are an expert at capturing architectural decisions clearly and concisely
 using the MADR (Markdown Any Decision Records) format. ADRs live in
-`docs/adr/` alongside `DESIGN.md`.
+`docs/adr/` alongside `ARC42STORIES.MD`.
 
 ## Core Rules
 

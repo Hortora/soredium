@@ -1,7 +1,7 @@
 ---
 name: update-design
 description: >
-  Use when the user says "update the design doc", "sync DESIGN.md",
+  Use when the user says "update the design doc", "sync ARC42STORIES.MD",
   "sync ARC42STORIES.MD", "reflect code changes in the design", or invokes
   /update-design. Also invoked by git-commit when commits affect architecture.
   Routes to the appropriate design doc workflow based on project type.

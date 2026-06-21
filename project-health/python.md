@@ -39,7 +39,7 @@ These extend universal categories with Python-specific items (tier 2+):
 ### `artifacts` augmentations
 
 **Quality:**
-- [ ] `docs/DESIGN.md` exists — if missing, offer to create a stub using the python DESIGN.md template from `workspace-init` Step 6b, commit it, and note it needs content
+- [ ] `docs/ARC42STORIES.MD` exists — if missing, offer to create a stub using the python ARC42STORIES.MD template from `workspace-init` Step 6b, commit it, and note it needs content
 - [ ] `pyproject.toml` or `setup.py` exists at the project root
 - [ ] A lockfile is committed (`poetry.lock`, `Pipfile.lock`, or equivalent) — bare `requirements.txt` without pins is insufficient for reproducible installs
 - [ ] Source layout is internally consistent — either `src/` layout throughout, or flat layout throughout; not mixed

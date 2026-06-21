@@ -43,7 +43,7 @@ Claude: [creates commit]
 
 **What went wrong:**
 1. Users forget steps (skip review → buggy code committed)
-2. Users skip documentation (DESIGN.md becomes stale)
+2. Users skip documentation (ARC42STORIES.MD becomes stale)
 3. Documentation drift (README.md not updated when skills change)
 4. Inconsistent quality (some commits reviewed, others not)
 5. Cognitive load (remember all steps in correct order)
@@ -88,7 +88,7 @@ Discovery: README was last updated 2 months ago, 10 skills added since.
 - ❌ Users forget steps (documentation drift)
 - ❌ Cognitive load (remember correct order)
 - ❌ Inconsistent (some commits skip steps)
-- ❌ Error-prone (easy to forget DESIGN.md sync)
+- ❌ Error-prone (easy to forget ARC42STORIES.MD sync)
 - ❌ Manual validation (user must invoke review)
 
 ### Option 2: Single Monolithic Commit Skill (REJECTED)
@@ -100,7 +100,7 @@ Discovery: README was last updated 2 months ago, 10 skills added since.
 
 If Java project:
   - Run code review
-  - Update DESIGN.md
+  - Update ARC42STORIES.MD
   - Update CLAUDE.md
   - Commit
 
@@ -227,13 +227,13 @@ Step 5: Apply updates, commit
 
 **java-git-commit (type: java mode):**
 ```markdown
-Step 0a: Verify DESIGN.md exists → BLOCK if missing
+Step 0a: Verify ARC42STORIES.MD exists → BLOCK if missing
 Step 1: Check code review status
   → If not done this session: invoke java-code-review
   → If security-critical: chain to java-security-audit
 Step 2: Inspect staged changes
 Step 3: Generate commit message (Java-specific scopes)
-Step 4: Sync DESIGN.md
+Step 4: Sync ARC42STORIES.MD
   → Invoke java-update-design
   → Propose architecture doc updates
 Step 5: Sync CLAUDE.md (if exists)
@@ -273,7 +273,7 @@ Step 7: Apply updates, commit
 [type(scope): description]
 
 ## Proposed documentation updates
-[DESIGN.md, CLAUDE.md, README.md, or primary doc updates]
+[ARC42STORIES.MD, CLAUDE.md, README.md, or primary doc updates]
 
 **Does this look good? Reply YES to commit, or tell me what to adjust.**
 ```

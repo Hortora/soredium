@@ -23,7 +23,7 @@ Development workflow and knowledge garden skills for Claude Code.
 | `work-end` | Closes branch, promotes artifacts, merges to main |
 | `work-pause` | Commits WIP, pushes to pause stack, switches to main |
 | `work-resume` | Restores a paused branch, rebases onto current main |
-| `workspace-init` | One-time companion workspace setup |
+| `workspace-init` | One-time companion workspace setup (prompted by project-init hook) |
 
 ### Development
 
@@ -49,7 +49,7 @@ Development workflow and knowledge garden skills for Claude Code.
 | `git-commit` | Conventional commits with project-type routing and doc sync |
 | `git-squash` | Branch history compaction with review gate and backup |
 | `update-claude-md` | CLAUDE.md sync on convention changes |
-| `update-design` | DESIGN.md sync on architecture changes |
+| `update-design` | ARC42STORIES.MD sync on architecture changes |
 | `implementation-doc-sync` | Session-scoped doc sweep after implementation |
 | `adr` | Architecture Decision Records (MADR format) |
 | `idea-log` | Lightweight parking lot for undecided possibilities |

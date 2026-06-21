@@ -76,7 +76,7 @@ git-commit (for type: skills)
 
 **Why this type exists:**
 - Java architecture has known patterns (layers, components, modules)
-- DESIGN.md serves specific purpose (architecture documentation)
+- ARC42STORIES.MD serves specific purpose (architecture documentation)
 - We understand Java domain models (@Entity, @Service, @Repository, etc.)
 - We can map code changes to architectural concepts
 
@@ -89,7 +89,7 @@ git-commit (for type: skills)
 
 **What we know about Java projects:**
 - `pom.xml` or `build.gradle` define build
-- `docs/DESIGN.md` documents architecture (REQUIRED)
+- `docs/ARC42STORIES.MD` documents architecture (REQUIRED)
 - Code organized in packages/modules
 - Annotations indicate architectural roles (@Entity, @Service, etc.)
 - Dependencies managed via BOM patterns
@@ -97,10 +97,10 @@ git-commit (for type: skills)
 **Built-in Behavior:**
 ```
 java-git-commit (for type: java)
-  ├─ Check DESIGN.md exists (BLOCKS if missing)
+  ├─ Check ARC42STORIES.MD exists (BLOCKS if missing)
   ├─ java-code-review (if not done this session)
   │   └─ java-security-audit (for security-critical code)
-  ├─ java-update-design (syncs DESIGN.md with code changes)
+  ├─ java-update-design (syncs ARC42STORIES.MD with code changes)
   │   └─ Maps .java changes to architecture sections
   ├─ update-claude-md (syncs CLAUDE.md if exists)
   └─ Conventional commit with Java-specific scopes
@@ -277,7 +277,7 @@ git-commit (for type: generic)
 - Personal projects
 - Experiments
 - Anything without special documentation needs
-- **TypeScript/Node.js projects** — use `type: generic` with the TypeScript skill suite (`ts-dev`, `ts-code-review`, `ts-security-audit`, `npm-dependency-update`, `ts-project-health`) loaded via description matching. TypeScript does not have a dedicated project type because there is no TypeScript-specific architecture document (equivalent of Java's DESIGN.md) that needs automated sync.
+- **TypeScript/Node.js projects** — use `type: generic` with the TypeScript skill suite (`ts-dev`, `ts-code-review`, `ts-security-audit`, `npm-dependency-update`, `ts-project-health`) loaded via description matching. TypeScript does not have a dedicated project type because there is no TypeScript-specific architecture document (equivalent of Java's ARC42STORIES.MD) that needs automated sync.
 
 ---
 
@@ -294,7 +294,7 @@ git-commit (for type: generic)
    - ❌ Research: No (every thesis is different)
 
 2. **Can we hardcode the sync logic?**
-   - ✅ Java: Yes (DESIGN.md sections map to code concepts)
+   - ✅ Java: Yes (ARC42STORIES.MD sections map to code concepts)
    - ✅ Skills: Yes (README sections map to skill structure)
    - ❌ Vision docs: No (sections vary by project)
    - ❌ Thesis: No (chapter organization varies)
@@ -465,7 +465,7 @@ User configures in their CLAUDE.md:
    - Data science might document pipelines vs transformers vs models
 
 3. **Is there a standard Python architecture documentation pattern?**
-   - ❌ No — unlike Java (where DESIGN.md typically has Layers/Components/Domain Model), Python has no standard
+   - ❌ No — unlike Java (where ARC42STORIES.MD typically has Layers/Components/Domain Model), Python has no standard
 
 **Decision: Use `type: custom`, NOT a new built-in type.**
 
@@ -535,7 +535,7 @@ Reply with the number (1-4) or type the name.
 
 **Type:** java
 ```
-Plus check for DESIGN.md, offer to create if missing.
+Plus check for ARC42STORIES.MD, offer to create if missing.
 
 **For 3 (custom):**
 Prompt for:

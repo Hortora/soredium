@@ -15,7 +15,7 @@ This collection follows a **layered architecture** where foundation skills provi
 | Skill | Purpose | Project Types |
 |-------|---------|---------------|
 | **git-commit** | Entry point, routes based on project type | skills, generic |
-| **java-git-commit** | Java-specific commits with DESIGN.md sync | java |
+| **java-git-commit** | Java-specific commits with ARC42STORIES.MD sync | java |
 | **custom-git-commit** | User-configured commits with primary doc sync | custom |
 
 ### Layer 2: Documentation Sync (4 skills)
@@ -25,7 +25,7 @@ This collection follows a **layered architecture** where foundation skills provi
 | Skill | Document | Project Types | Auto-Invoked By |
 |-------|----------|---------------|-----------------|
 | **update-claude-md** | CLAUDE.md (workflows) | all | git-commit, java-git-commit, custom-git-commit |
-| **java-update-design** | DESIGN.md (architecture) | java | java-git-commit |
+| **java-update-design** | ARC42STORIES.MD (architecture) | java | java-git-commit |
 | **readme-sync.md** | README.md (skill catalog) | skills | git-commit |
 | **update-primary-doc** | User-configured doc | custom | custom-git-commit |
 

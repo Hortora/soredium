@@ -10,7 +10,7 @@
 
 ## Decision
 
-Create `validate_document.py` as a universal corruption detector that works on ANY .md file (README.md, CLAUDE.md, DESIGN.md, VISION.md, THESIS.md, custom docs) across ALL project types. Integrate into all 4 sync workflows with automatic revert on CRITICAL failures.
+Create `validate_document.py` as a universal corruption detector that works on ANY .md file (README.md, CLAUDE.md, ARC42STORIES.MD, VISION.md, THESIS.md, custom docs) across ALL project types. Integrate into all 4 sync workflows with automatic revert on CRITICAL failures.
 
 **What it catches:**
 - Duplicate section headers (copy-paste errors)
@@ -75,7 +75,7 @@ Documentation corruption occurred during sync operations:
 
 ```
 validate_readme.py     # README.md specific
-validate_design.py     # DESIGN.md specific
+validate_design.py     # ARC42STORIES.MD specific
 validate_claude.py     # CLAUDE.md specific
 ```
 
@@ -235,10 +235,10 @@ When user confirms YES:
 ### Step 6: Apply updates
 
 After user confirms YES:
-1. Apply proposed changes to DESIGN.md
-2. python scripts/validate_document.py docs/DESIGN.md
-3. If exit code 1 → git restore docs/DESIGN.md, report issues, stop
-4. If exit code 0 or 2 → stage DESIGN.md
+1. Apply proposed changes to ARC42STORIES.MD
+2. python scripts/validate_document.py docs/ARC42STORIES.MD
+3. If exit code 1 → git restore docs/ARC42STORIES.MD, report issues, stop
+4. If exit code 0 or 2 → stage ARC42STORIES.MD
 ```
 
 **update-primary-doc/SKILL.md:**
@@ -428,7 +428,7 @@ if lines_modified > 100:
 | Project Type | Documents Validated | Integration Point |
 |--------------|---------------------|-------------------|
 | **type: skills** | README.md, CLAUDE.md, SKILL.md, ADRs | readme-sync, update-claude-md, git-commit |
-| **type: java** | DESIGN.md, CLAUDE.md, ADRs | java-update-design, update-claude-md, git-commit |
+| **type: java** | ARC42STORIES.MD, CLAUDE.md, ADRs | java-update-design, update-claude-md, git-commit |
 | **type: custom** | VISION.md, THESIS.md, API.md, etc., CLAUDE.md | update-primary-doc, update-claude-md, git-commit |
 | **type: generic** | CLAUDE.md, any .md files | update-claude-md, git-commit |
 
@@ -444,7 +444,7 @@ if lines_modified > 100:
 
 **What we learned:**
 
-Corruption patterns are universal. Duplicate headers can occur in README.md, DESIGN.md, VISION.md, THESIS.md - it doesn't matter. The corruption mechanism is the same.
+Corruption patterns are universal. Duplicate headers can occur in README.md, ARC42STORIES.MD, VISION.md, THESIS.md - it doesn't matter. The corruption mechanism is the same.
 
 **Key principle:**
 > "If it can corrupt one .md file, it can corrupt all .md files. Validate universally."

@@ -246,7 +246,7 @@ Dependency update is complete when:
 
 **Note:** This repository does not use modular documentation. Skills use single `SKILL.md` files.
 
-For projects that split large documents into linked modules (e.g., `DESIGN.md` -> `docs/design/architecture.md` + `api.md` + `data-model.md`), with automatic discovery, validation, and sync across all modules:
+For projects that split large documents into linked modules (e.g., `ARC42STORIES.MD` -> `docs/design/architecture.md` + `api.md` + `data-model.md`), with automatic discovery, validation, and sync across all modules:
 
 **See:** [QUALITY.md -- Modular Documentation Quality Assurance](QUALITY.md#modular-documentation-quality-assurance) and [README.md -- Modular Documentation](README.md#modular-documentation)
 
@@ -573,7 +573,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
   via `.git/info/exclude`, and all subdirectories
 - `work` -- **unified lifecycle entry point**; detects current state and routes automatically: `work` alone starts or resumes, `work end` closes the branch, `work pause` saves state and returns to main. Single command replaces needing to know which lifecycle skill to invoke
 - `work-start` -- unified entry point for all work; detects branch state (6 states including paused, orphaned, misaligned); creates `issue-NNN-<slug>` branches in both repos atomically; scaffolds `.meta` + `JOURNAL.md` with SHA baseline and design routing; runs platform coherence, protocols, IntelliJ pre-checks; replaces the former "work-start + /epic begin" two-step
-- `work-end` -- closes the current branch; promotes artifacts per routing config; merges `design/JOURNAL.md` into DESIGN.md with three-way diff preview; posts specs to GitHub issue; closes issue; marks branch with `design/EPIC-CLOSED.md`; returns both repos to main
+- `work-end` -- closes the current branch; promotes artifacts per routing config; merges `design/JOURNAL.md` into ARC42STORIES.MD with three-way diff preview; posts specs to GitHub issue; closes issue; marks branch with `design/EPIC-CLOSED.md`; returns both repos to main
 - `work-pause` -- commits all WIP as a `WIP:` commit on the branch; pushes an entry onto `.pause-stack` on workspace main (supports multiple paused branches); switches both repos to main. No stash used -- WIP commit is durable and visible in history
 - `work-resume` -- reads `.pause-stack`; shows picker if multiple paused branches; rebases selected branch onto current main (picks up work that landed while paused); resets the WIP commit to restore working state; removes entry from stack
 
@@ -587,7 +587,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `security-audit` -- Java/TS/Python OWASP audit, same pattern
 - `dependency-update` -- Maven/npm/pip management via `maven.md`, `npm.md`, `pip.md`
 - `git-commit` -- routes to `java.md`, `custom.md`, or generic
-- `update-design` -- DESIGN.md sync via `java.md`, `typescript.md`, `python.md`
+- `update-design` -- ARC42STORIES.MD sync via `java.md`, `typescript.md`, `python.md`
 - `project-health` -- universal checks + per-type content files
 
 **Language dev skills** (auto-trigger on file type):

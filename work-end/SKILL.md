@@ -304,18 +304,18 @@ BLOG_HAS_ENTRIES=$(ls "$WORKSPACE/blog/" 2>/dev/null | grep -v INDEX.md | grep -
 
 ## Step 5 — Journal validation
 
-**5a — DESIGN.md existence**
-If `$DESIGN_REPO/DESIGN.md` is missing:
-- `[C]` Create from journal entries — journal becomes the initial DESIGN.md content
+**5a — ARC42STORIES.MD existence**
+If `$DESIGN_REPO/ARC42STORIES.MD` is missing:
+- `[C]` Create from journal entries — journal becomes the initial ARC42STORIES.MD content
 - `[S]` Skip merge entirely
 
 **5b — Section heading drift**
-Re-hash H2 headings in `$DESIGN_REPO/DESIGN.md`. Compare against `design-section-hashes`
+Re-hash H2 headings in `$DESIGN_REPO/ARC42STORIES.MD`. Compare against `design-section-hashes`
 in `.meta`. For each `§Section` anchor in JOURNAL.md, verify its heading still exists
-unchanged in DESIGN.md.
+unchanged in ARC42STORIES.MD.
 ```bash
 grep "^design-section-hashes:" <WORKSPACE>/design/.meta
-python3 ~/.claude/skills/project-init/section_hashes.py <DESIGN_REPO>/DESIGN.md
+python3 ~/.claude/skills/project-init/section_hashes.py <DESIGN_REPO>/ARC42STORIES.MD
 ```
 Use the first command's output as STORED, the second as CURRENT.
 If drift: `[U]` update journal anchors, `[S]` skip drifted sections, `[A]` abort.
@@ -353,7 +353,7 @@ work-end close plan — <branch-name>
   ├── specs/<N>      → project      [remote-git]
   └── snapshots/<N>  → workspace    [remote-git]
   Plan archiving     → plans/attic/<branch-name>/  [workspace main]
-  Journal merge      → DESIGN.md  (<N> sections)
+  Journal merge      → ARC42STORIES.MD  (<N> sections)
   Spec posting       → #<N>  (<filenames>)
   Issues             → close #<all issues from COVERS, e.g. "#5, #19, #32, #24">
   Publish blog       → 8g (N unpublished entries → destination)
@@ -388,7 +388,7 @@ Read `PROMOTED=<count>` and `PUSHED=yes|no` from output.
 **WORKSPACE DESIGN REPO CASE:** If `$DESIGN_REPO_KEY = workspace`, the journal merge
 must also happen during this main-visit. After the script returns, cherry-pick
 JOURNAL.md from the epic branch and run the 8d merge steps on workspace main
-(baseline=$PROJECT_SHA, target=$WORKSPACE/DESIGN.md). Commit the merged DESIGN.md
+(baseline=$PROJECT_SHA, target=$WORKSPACE/ARC42STORIES.MD). Commit the merged ARC42STORIES.MD
 and push. Then 8d is complete for the workspace case — skip the 8d block below.
 
 ### 8b — Project-routed artifact promotion (ADRs, specs)
@@ -415,15 +415,15 @@ happen during the 8a main-visit (see 8a above) — not here. For `$DESIGN_REPO_K
 run the full merge below on the project epic branch (committed before the rebase in Step 8j).
 
 Steps:
-1. Read baseline: `git -C "$DESIGN_REPO" show "$PROJECT_SHA":DESIGN.md`
-2. Read current `$DESIGN_REPO/DESIGN.md`
+1. Read baseline: `git -C "$DESIGN_REPO" show "$PROJECT_SHA":ARC42STORIES.MD`
+2. Read current `$DESIGN_REPO/ARC42STORIES.MD`
 3. Apply journal narrative per `§Section`, preserving independent main-branch changes
 4. Write merged result
 5. Post-merge verification: re-read each `§Section`; present to user (`[A]` accept,
    `[R]` redo, `[X]` abort) before committing
 6. Commit and push:
    ```bash
-   git -C "$DESIGN_REPO" add DESIGN.md
+   git -C "$DESIGN_REPO" add ARC42STORIES.MD
    git -C "$DESIGN_REPO" commit -m "docs($BRANCH_NAME): apply design journal"
    git -C "$DESIGN_REPO" push
    ```
@@ -473,7 +473,7 @@ every workspace blog entry exists at the destination. Verify with the same `comm
 ✅ Specs → project
 ✅ Blog → workspace
 ✅ Plans → attic
-✅ Journal merged → DESIGN.md (N sections)
+✅ Journal merged → ARC42STORIES.MD (N sections)
 ✅ Specs posted to #N, issue closed
 ✅ Blog published → <destination path> (N new entries)   ← "0 new (all current)" if nothing to publish
 ❌ Push failed — <path>. Run: git -C <path> push
