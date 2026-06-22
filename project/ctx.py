@@ -91,10 +91,11 @@ proj_ok_symlink = (cwd / "proj").is_symlink() and (cwd / "proj").is_dir()
 wksp_declined = "workspace: declined" in cwd_claude_text
 workspace_ok = "yes" if (wksp_ok_symlink or proj_ok_symlink or wksp_declined) else "no"
 
-# ISSUES_STATUS replaces ISSUES_OK
-if "Issue tracking: enabled" in cwd_claude_text:
+# ISSUES_STATUS replaces ISSUES_OK — strip markdown bold so **Issue tracking:** matches
+clean_claude_text = cwd_claude_text.replace("**", "")
+if "Issue tracking: enabled" in clean_claude_text:
     issues_status = "enabled"
-elif "Issue tracking: declined" in cwd_claude_text:
+elif "Issue tracking: declined" in clean_claude_text:
     issues_status = "declined"
 else:
     issues_status = "absent"

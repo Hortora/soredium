@@ -355,6 +355,20 @@ Issue tracking: declined
         assert data["ISSUES_STATUS"] == "absent"
         assert "ISSUES_OK" not in data
 
+    def test_issues_status_enabled_with_bold_markdown(self, tmp_path):
+        """ISSUES_STATUS=enabled when field uses **bold** markdown."""
+        claude_md = """
+## Work Tracking
+
+**Issue tracking:** enabled
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        result = run_ctx(repo)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["ISSUES_STATUS"] == "enabled"
+
 
 class TestProjectType:
     """Test PROJECT_TYPE field extraction."""
