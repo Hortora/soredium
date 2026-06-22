@@ -410,9 +410,13 @@ Call `mcp__intellij-index__ide_index_status` to confirm the Index MCP server is 
 **If the MCP is reachable but the project isn't open:**
 - Do NOT stop and do NOT ask the user to open the project manually
 - Do NOT fall back to `mcp__intellij__*` tools — they cannot open projects
+- Do NOT report "ide_open_project unavailable in this plugin version" — if that tool
+  is missing from the list, it is **disabled by default**, not absent. The plugin's
+  lifecycle manager auto-opens projects when you pass `project_path` to any semantic
+  tool — you do not need ide_open_project for this.
 - Call `mcp__intellij-index__ide_project_status` to see all managed projects and their paths
-- Pass `project_path: <path>` to the first `mcp__intellij-index__*` tool you need — the
-  plugin opens the project automatically (5–30s), then runs the tool
+- Pass `project_path: <path>` to the first `mcp__intellij-index__*` semantic tool you
+  need — the plugin opens the project automatically (5–30s), then runs the tool
 - Never use `get_project_modules` to check what's open — it only sees the currently
   focused window and will mislead you when multiple projects are managed
 
