@@ -673,23 +673,16 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
 
 **Single-garden search workflow** (no `garden-config.toml`, or single garden configured):
 
-1. Read the committed index:
-   ```
-   Read: ${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md
-   ```
-   Check By Technology, By Symptom/Type, and By Label sections.
+1. Call the `gardenSearch` MCP tool with the user's search query.
+   If searching by a known GE-ID, include the ID in the query.
 
-2. Read the specific entry:
-   ```bash
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file blob HEAD:<domain>/GE-XXXX.md
-   ```
+2. If `gardenSearch` is unavailable or returns an error, fall back to:
+   a. Read the committed index: `${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md`
+   b. Read the specific entry: `git -C ${HORTORA_GARDEN:-~/.hortora/garden} cat-file blob HEAD:<domain>/GE-XXXX.md`
+   c. If not in the index, search committed content:
+      `git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -il -E "keyword1|keyword2" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'`
 
-3. If not in the index, search committed content:
-   ```bash
-   git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep "keywords" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
-   ```
-
-4. Return the full entry.
+3. Return the full entry.
 
 5. Append a staleness annotation immediately after the entry content:
 

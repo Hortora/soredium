@@ -165,20 +165,24 @@ Common signals:
 
 ### Step 3b — Garden search
 
-Search the garden for GEs relevant to the domain being worked. This step surfaces existing knowledge before implementation begins — relevant gotchas, techniques, and undocumented behaviours often already exist for the domain.
+Search the garden for entries relevant to the domain being worked. Extract 2–4
+keywords from the work description (domain name, library, framework, key concept).
 
-Extract 2–4 keywords from the work description (domain name, library, framework, or key concept). Then:
+1. Call the `gardenSearch` MCP tool with a natural language query derived from
+   the work description. Include domain filter if the work is domain-specific.
+2. If `gardenSearch` is unavailable or returns an error, warn once:
+   "⚠️ Garden MCP unavailable — using keyword fallback. Start engine per CLAUDE.md Dev Services."
+   Then fall back to:
+   git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -il -E "keyword1|keyword2" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
 
-```bash
-git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -i "<keyword1>\|<keyword2>" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md' \
-  | grep -i "^[^:]*:" | head -20
-```
+If results found: surface entry IDs and titles to the user. Ask which are
+relevant before proceeding. These form the initial **garden context set** —
+carry it forward into brainstorming and implementation.
 
-If matches found: surface the GE filenames and titles to the user. Ask which are relevant before proceeding. Do not read them unless the user confirms interest.
+If no results: proceed silently.
 
-If no matches: proceed silently.
-
-**Skip** if the garden path does not exist (`${HORTORA_GARDEN:-~/.hortora/garden}` is absent) or the work description has no searchable domain keywords (e.g., a pure docs or tooling task).
+**Skip** if the garden is not configured or the work description has no
+searchable domain keywords (e.g., a pure tooling or docs task).
 
 ### Step 4 — Issue
 
