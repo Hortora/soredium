@@ -26,6 +26,23 @@ Suggested fix:
 
 Step 2 uses the Python Review Checklist below.
 
+## Garden Consultation
+
+After collecting the diff (Step 1), search the garden for gotchas relevant
+to the technical domains in the changed files. Include domain filter if the
+changed files are domain-specific.
+
+  Call `gardenSearch` with the primary technical domains in the changed files
+  (e.g. "asyncio gather error handling", "pytest fixture scope gotchas").
+
+Surface any relevant gotchas or techniques that bear on the code under review.
+
+If `gardenSearch` is unavailable or returns an error, warn once per session
+(skip if already warned earlier in this conversation):
+  "⚠️ Garden MCP unavailable — using keyword fallback. Start engine per CLAUDE.md Dev Services."
+  Then fall back to:
+  git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -il -E "keyword1|keyword2" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+
 ---
 
 ## Severity Assignment Decision Flow
