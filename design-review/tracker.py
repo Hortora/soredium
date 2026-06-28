@@ -1,0 +1,337 @@
+"""Issue tracker for adversarial design review.
+
+Manages the issue lifecycle state machine, premature convergence
+detection, and tracker file rendering.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from datetime import date
+from enum import Enum
+from pathlib import Path
+from typing import Final
+
+
+class IssueStatus(Enum):
+    OPEN = "OPEN"
+    ADDRESSED = "ADDRESSED"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+    ACCEPTED = "ACCEPTED"
+    CONTESTED = "CONTESTED"
+    DEFERRED = "DEFERRED"
+
+
+_TERMINAL: Final = frozenset({IssueStatus.VERIFIED, IssueStatus.ACCEPTED, IssueStatus.DEFERRED})
+
+
+def _heading_slug(text: str) -> str:
+    slug = text.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s]+", "-", slug)
+    return slug
+
+_VALID_TRANSITIONS: Final[dict[IssueStatus, frozenset[IssueStatus]]] = {
+    IssueStatus.OPEN: frozenset({IssueStatus.ADDRESSED, IssueStatus.REJECTED, IssueStatus.DEFERRED}),
+    IssueStatus.ADDRESSED: frozenset({IssueStatus.VERIFIED, IssueStatus.CONTESTED}),
+    IssueStatus.REJECTED: frozenset({IssueStatus.ACCEPTED, IssueStatus.CONTESTED}),
+    IssueStatus.CONTESTED: frozenset({IssueStatus.ADDRESSED, IssueStatus.DEFERRED}),
+    IssueStatus.VERIFIED: frozenset(),
+    IssueStatus.ACCEPTED: frozenset(),
+    IssueStatus.DEFERRED: frozenset(),
+}
+
+
+@dataclass
+class TrackedIssue:
+    issue_id: str
+    summary: str
+    round_raised: int
+    status: IssueStatus = IssueStatus.OPEN
+    contested_rounds: int = 0
+    commit_before: str = ""
+    commit_after: str = ""
+    section_ref: str = ""
+    rationale: str = ""
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class ConvergenceResult:
+    should_override: bool
+    unconfirmed_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class VerifyResult:
+    section_changed: bool
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class Assumption:
+    text: str
+    round_surfaced: int
+    source: str
+
+
+@dataclass(frozen=True)
+class SettledDecisionEntry:
+    text: str
+    from_issue: str
+    rationale: str
+
+
+@dataclass
+class RoundSummary:
+    round_num: int
+    raised: int = 0
+    verified: int = 0
+    accepted: int = 0
+    open: int = 0
+    contested: int = 0
+    deferred: int = 0
+
+
+class Tracker:
+
+    def __init__(self, project_name: str) -> None:
+        self.project_name = project_name
+        self.start_date = date.today().isoformat()
+        self.current_round = 0
+        self._issues: dict[str, TrackedIssue] = {}
+        self._assumptions: list[Assumption] = []
+        self._settled: list[SettledDecisionEntry] = []
+        self._round_summaries: list[RoundSummary] = []
+        self._previous_snapshot: dict[str, IssueStatus] = {}
+
+    def add_issue(self, issue_id: str, summary: str, round_raised: int) -> None:
+        self._issues[issue_id] = TrackedIssue(
+            issue_id=issue_id, summary=summary, round_raised=round_raised,
+        )
+
+    def get_issue(self, issue_id: str) -> TrackedIssue:
+        if issue_id not in self._issues:
+            raise KeyError(f"Unknown issue: {issue_id}")
+        return self._issues[issue_id]
+
+    def has_issue(self, issue_id: str) -> bool:
+        return issue_id in self._issues
+
+    def issue_ids(self) -> set[str]:
+        return set(self._issues.keys())
+
+    def issues(self) -> list[TrackedIssue]:
+        return list(self._issues.values())
+
+    def all_resolved(self) -> bool:
+        return bool(self._issues) and all(
+            issue.status in _TERMINAL for issue in self._issues.values()
+        )
+
+    def _check_transition(self, issue: TrackedIssue, target: IssueStatus) -> None:
+        valid = _VALID_TRANSITIONS.get(issue.status, frozenset())
+        if target not in valid:
+            raise ValueError(
+                f"Invalid transition for {issue.issue_id}: "
+                f"{issue.status.value} → {target.value}"
+            )
+
+    def mark_addressed(
+        self, issue_id: str, section_ref: str, commit_hash: str, rationale: str,
+    ) -> None:
+        issue = self.get_issue(issue_id)
+        self._check_transition(issue, IssueStatus.ADDRESSED)
+        issue.status = IssueStatus.ADDRESSED
+        issue.section_ref = section_ref
+        issue.commit_after = commit_hash
+        issue.rationale = rationale
+
+    def mark_rejected(self, issue_id: str, rationale: str) -> None:
+        issue = self.get_issue(issue_id)
+        self._check_transition(issue, IssueStatus.REJECTED)
+        issue.status = IssueStatus.REJECTED
+        issue.rationale = rationale
+
+    def mark_verified(self, issue_id: str) -> None:
+        issue = self.get_issue(issue_id)
+        self._check_transition(issue, IssueStatus.VERIFIED)
+        issue.status = IssueStatus.VERIFIED
+
+    def mark_accepted(self, issue_id: str) -> None:
+        issue = self.get_issue(issue_id)
+        self._check_transition(issue, IssueStatus.ACCEPTED)
+        issue.status = IssueStatus.ACCEPTED
+
+    def mark_contested(self, issue_id: str, reason: str) -> None:
+        issue = self.get_issue(issue_id)
+        self._check_transition(issue, IssueStatus.CONTESTED)
+        issue.contested_rounds += 1
+        if issue.contested_rounds >= 2:
+            # Auto-escalation: bypass transition check for CONTESTED → DEFERRED
+            issue.status = IssueStatus.DEFERRED
+            issue.notes = f"auto-escalated: contested for {issue.contested_rounds} rounds"
+        else:
+            issue.status = IssueStatus.CONTESTED
+            issue.notes = reason
+
+    def mark_deferred(self, issue_id: str, note: str) -> None:
+        issue = self.get_issue(issue_id)
+        self._check_transition(issue, IssueStatus.DEFERRED)
+        issue.status = IssueStatus.DEFERRED
+        issue.notes = note
+
+    def check_premature_convergence(self, round_num: int) -> ConvergenceResult:
+        if round_num > 3:
+            return ConvergenceResult(should_override=False)
+
+        all_ids = list(self._issues.keys())
+        verified_ids = {
+            iid for iid, issue in self._issues.items()
+            if issue.status in (IssueStatus.VERIFIED, IssueStatus.ACCEPTED, IssueStatus.DEFERRED)
+        }
+        unconfirmed = [iid for iid in all_ids if iid not in verified_ids]
+
+        if len(unconfirmed) > len(all_ids) / 2:
+            return ConvergenceResult(should_override=True, unconfirmed_ids=unconfirmed)
+
+        return ConvergenceResult(should_override=False)
+
+    def get_focus_items(self) -> list[str]:
+        return [
+            iid for iid, issue in self._issues.items()
+            if issue.status in (
+                IssueStatus.OPEN, IssueStatus.CONTESTED,
+                IssueStatus.ADDRESSED, IssueStatus.REJECTED,
+            )
+        ]
+
+    def add_assumption(self, text: str, round_surfaced: int, source: str) -> None:
+        self._assumptions.append(Assumption(text=text, round_surfaced=round_surfaced, source=source))
+
+    def add_settled_decision(self, text: str, from_issue: str, rationale: str) -> None:
+        self._settled.append(SettledDecisionEntry(text=text, from_issue=from_issue, rationale=rationale))
+
+    def record_round(self, round_num: int) -> None:
+        current_snapshot = self._status_snapshot()
+        previous_snapshot = self._previous_snapshot
+
+        counts = RoundSummary(round_num=round_num)
+        for issue in self._issues.values():
+            if issue.round_raised == round_num:
+                counts.raised += 1
+
+        for iid, status in current_snapshot.items():
+            prev = previous_snapshot.get(iid)
+            if status == IssueStatus.VERIFIED and prev != IssueStatus.VERIFIED:
+                counts.verified += 1
+            elif status == IssueStatus.ACCEPTED and prev != IssueStatus.ACCEPTED:
+                counts.accepted += 1
+            elif status == IssueStatus.DEFERRED and prev != IssueStatus.DEFERRED:
+                counts.deferred += 1
+            elif status == IssueStatus.CONTESTED and prev != IssueStatus.CONTESTED:
+                counts.contested += 1
+
+        counts.open = sum(
+            1 for s in current_snapshot.values()
+            if s in (IssueStatus.OPEN, IssueStatus.ADDRESSED, IssueStatus.REJECTED, IssueStatus.CONTESTED)
+        )
+
+        self._round_summaries.append(counts)
+        self._previous_snapshot = current_snapshot
+
+    def _status_snapshot(self) -> dict[str, IssueStatus]:
+        return {iid: issue.status for iid, issue in self._issues.items()}
+
+    def get_round_summaries(self) -> list[RoundSummary]:
+        return list(self._round_summaries)
+
+    def render(self) -> str:
+        lines: list[str] = []
+        lines.append("# Design Review Tracker")
+        lines.append("")
+        lines.append(f"Spec: spec.md | Project: {self.project_name}")
+        lines.append(f"Started: {self.start_date} | Current round: {self.current_round}")
+        lines.append("")
+
+        lines.append("## Issues")
+        lines.append("")
+        for issue in self._issues.values():
+            slug = _heading_slug(f"{issue.issue_id}: {issue.summary}")
+            lines.append(f"### {issue.issue_id}: {issue.summary}")
+            reviewer_file = f"responses/reviewer-{issue.round_raised}.md"
+            lines.append(f"- **Raised:** Round {issue.round_raised} ([{reviewer_file}]({reviewer_file}#{slug}))")
+            lines.append(f"- **Status:** {issue.status.value}")
+            if issue.contested_rounds:
+                lines.append(f"- **Contested rounds:** {issue.contested_rounds}")
+            if issue.commit_after:
+                lines.append(f"- **Spec commit:** {issue.commit_before} → {issue.commit_after}")
+            if issue.section_ref:
+                lines.append(f"- **Evidence:** [§{issue.section_ref}](spec.md)")
+            if issue.rationale:
+                lines.append(f"- **Rationale:** {issue.rationale}")
+            if issue.notes:
+                lines.append(f"- **Notes:** {issue.notes}")
+            lines.append("")
+
+        if self._round_summaries:
+            lines.append("## Summary")
+            lines.append("")
+            lines.append("| Round | Raised | Verified | Accepted | Open | Contested | Deferred |")
+            lines.append("|-------|--------|----------|----------|------|-----------|----------|")
+            for s in self._round_summaries:
+                lines.append(
+                    f"| {s.round_num} | {s.raised} | {s.verified} | {s.accepted} "
+                    f"| {s.open} | {s.contested} | {s.deferred} |"
+                )
+            lines.append("")
+
+        focus = self.get_focus_items()
+        lines.append("## Focus for next round")
+        if focus:
+            lines.append(", ".join(focus))
+        else:
+            lines.append("None — all issues resolved")
+        lines.append("")
+
+        if self._assumptions:
+            lines.append("## Assumptions")
+            lines.append("")
+            lines.append("| # | Assumption | Surfaced | Source |")
+            lines.append("|---|-----------|----------|--------|")
+            for i, a in enumerate(self._assumptions, 1):
+                lines.append(f"| A{i} | {a.text} | Round {a.round_surfaced} | {a.source} |")
+            lines.append("")
+
+        if self._settled:
+            lines.append("## Settled Decisions")
+            lines.append("")
+            lines.append("| Decision | From issue | Rationale |")
+            lines.append("|----------|-----------|-----------|")
+            for d in self._settled:
+                lines.append(f"| {d.text} | {d.from_issue} | {d.rationale} |")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def write(self, path: Path) -> None:
+        path.write_text(self.render())
+
+
+# ---------------------------------------------------------------------------
+# Diff verification (standalone function)
+# ---------------------------------------------------------------------------
+
+def verify_against_diff(diff: str, section_ref: str | None) -> VerifyResult:
+    if section_ref is None:
+        return VerifyResult(section_changed=True, note="No section reference provided")
+
+    pattern = re.compile(
+        rf"(?:§{re.escape(section_ref)}|[Ss]ection\s+{re.escape(section_ref)}|##\s+{re.escape(section_ref)}\b)",
+    )
+    if pattern.search(diff):
+        return VerifyResult(section_changed=True)
+
+    return VerifyResult(section_changed=False, note=f"Section {section_ref} not found in diff")
