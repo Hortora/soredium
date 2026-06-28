@@ -103,15 +103,42 @@ python3 /Users/mdproctor/.claude/skills/design-review/review.py \
 
 Use `run_in_background: true` on the Bash tool call.
 
-## Step 6 — Monitor and report
+## Step 5 — Set up watchdog
 
-After launching, periodically check the progress log:
+**Immediately after launching the background process**, create a cron watchdog
+to monitor progress. This is mandatory — without it, stalls go undetected.
 
-```bash
-cat ~/adr/*/{title}-*/progress.log 2>/dev/null | tail -20
-```
+Use `CronCreate` with a 5-minute interval and this prompt:
 
-Report progress to the user when you see updates.
+> Check the design review progress for {title}. Read the last 5 lines of
+> ~/adr/*/{title}-*/progress.log. If the last line contains "REVIEW DONE",
+> report the results to the user (read tracker.md for the summary) and delete
+> this cron job. If the last line contains "REVIEW FAILED" or "REVIEW CRASHED",
+> report the error and suggest resuming. If the progress log exists but hasn't
+> been updated in 10+ minutes (compare the last timestamp to now), warn the
+> user that the review appears stalled and suggest checking or resuming.
+
+Set `recurring: true`. Store the cron job ID so you can delete it when the
+review completes.
+
+The script writes terminal status lines to progress.log:
+- `REVIEW DONE` — completed successfully
+- `REVIEW FAILED (exit N)` — main() returned non-zero
+- `REVIEW CRASHED: {error}` — unhandled exception
+- `REVIEW INTERRUPTED` — KeyboardInterrupt
+
+## Step 6 — Handle notifications
+
+You will receive notifications from two sources:
+
+1. **Background task completion** — the Bash `run_in_background` notification
+   fires when the Python process exits. Read progress.log to determine outcome.
+2. **Watchdog cron** — fires every 5 minutes with a progress check.
+
+On either notification:
+- If the review completed: present results, delete the watchdog cron
+- If it failed/crashed: report the error, suggest resuming, delete the cron
+- If stalled: warn the user, suggest resuming or checking IntelliJ
 
 ## Step 7 — Handle failures
 
@@ -129,9 +156,6 @@ If the process exits with an error:
      --workspace ~/adr/{project}/{title}-{timestamp}/ \
      --source-dirs {dirs}
    ```
-
-**Never silently spin.** If 2 minutes pass with no progress log updates, check what's happening
-and report to the user.
 
 ## Step 8 — Present results
 

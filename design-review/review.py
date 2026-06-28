@@ -778,4 +778,18 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        code = main()
+        if code == 0:
+            _log("REVIEW DONE")
+        else:
+            _log(f"REVIEW FAILED (exit {code})")
+        sys.exit(code)
+    except KeyboardInterrupt:
+        _log("REVIEW INTERRUPTED")
+        sys.exit(130)
+    except Exception as exc:
+        _log(f"REVIEW CRASHED: {exc}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
