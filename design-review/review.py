@@ -291,6 +291,28 @@ def main() -> int:
         _log(f"  Implementor done (${result.get('cost', 0.0):.2f})")
 
         implementor_file = ws / "responses" / f"implementor-{round_num}.md"
+
+        # Timeout with partial output — find what's missing and retry
+        if implementor_file.exists() and result.get("timed_out"):
+            addressed_ids = {r.issue_id for r in extract_issue_responses(implementor_file.read_text())}
+            missing = [f for f in focus if f not in addressed_ids]
+            if missing:
+                _log(f"  {len(missing)} items unaddressed after timeout: {', '.join(missing)} — retrying")
+                retry_prompt = build_implementor_prompt(
+                    round_num=round_num, focus_items=missing,
+                    source_dirs=args.source_dirs, workspace_root=str(ws),
+                    spec_path=spec_path,
+                )
+                retry_prompt += f"\n\nYour previous response is at responses/implementor-{round_num}.md — read it. Address only the items listed above that are not yet covered. Do not duplicate items already addressed."
+                retry_result = _invoke_claude(
+                    ws, "implementor", retry_prompt, args.source_dirs,
+                    model, budget, effort,
+                    expected_file=f"responses/implementor-{round_num}.md",
+                    focus_count=len(missing),
+                )
+                if retry_result:
+                    cumulative_cost += retry_result.get("cost", 0.0)
+
         if not implementor_file.exists():
             _log(f"  WARNING: implementor-{round_num}.md not created")
             action = _prompt_hil("Response file missing. [r]etry / [a]bort? ")

@@ -260,6 +260,22 @@ class TestExtractIssueResponses:
         assert len(rejected) == 1
         assert len(rejected[0].rationale) > 20
 
+    def test_partial_response_missing_items_detectable(self) -> None:
+        """PM can diff parsed responses against focus list to find missing items."""
+        from adversarial_design_review.parser import extract_issue_responses
+
+        content = """\
+### R1-01: FIXED
+Updated §2.3 with new validation logic.
+### R1-02: REJECTED
+This is already handled by the existing retry mechanism.
+"""
+        responses = extract_issue_responses(content)
+        addressed_ids = {r.issue_id for r in responses}
+        focus = ["R1-01", "R1-02", "R1-03", "R1-04"]
+        missing = [f for f in focus if f not in addressed_ids]
+        assert missing == ["R1-03", "R1-04"]
+
 
 # ---------------------------------------------------------------------------
 # 1e. Marker extraction
