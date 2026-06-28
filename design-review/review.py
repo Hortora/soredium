@@ -152,6 +152,7 @@ def main() -> int:
         is_window_end = round_num % session_window == 0
 
         if round_num > 1 and (round_num - 1) % session_window == 0:
+            _log(f"  Session window reset — both agents start fresh this round")
             reviewer_session_id = None
             implementor_session_id = None
 
@@ -177,18 +178,24 @@ def main() -> int:
         if is_window_end:
             reviewer_prompt += "\n\n" + build_sweep_prompt("reviewer", round_num, workspace_root=str(ws))
 
-        _log(f"  Reviewer {'(continued)' if reviewer_session_id else '(fresh)'}... (this may take 1-2 minutes)")
+        use_reviewer_sid = reviewer_session_id if not args.fresh_sessions else None
+        _log(f"  Reviewer {'(continued — cached context)' if use_reviewer_sid else '(fresh session)'}... (this may take 1-2 minutes)")
         result = _invoke_claude(
             ws, "reviewer", reviewer_prompt, args.source_dirs,
             model, budget, effort,
-            session_id=reviewer_session_id if not args.fresh_sessions else None,
+            session_id=use_reviewer_sid,
+            expected_file=f"responses/reviewer-{round_num}.md",
         )
         if result is None:
             return 1
 
         cumulative_cost += result.get("cost", 0.0)
-        if reviewer_session_id is None:
-            reviewer_session_id = result.get("session_id")
+        new_sid = result.get("session_id")
+        if reviewer_session_id is None and new_sid:
+            reviewer_session_id = new_sid
+        elif reviewer_session_id and not new_sid and result.get("timed_out"):
+            _log(f"  WARNING: reviewer session ID lost to timeout — next round will be fresh")
+            reviewer_session_id = None
         _log(f"  Reviewer done (${result.get('cost', 0.0):.2f})")
 
         # --- Step 2: Script extract ---
@@ -262,18 +269,25 @@ def main() -> int:
         if is_window_end:
             implementor_prompt += "\n\n" + build_sweep_prompt("implementor", round_num, workspace_root=str(ws))
 
-        _log(f"  Implementor {'(continued)' if implementor_session_id else '(fresh)'}... (this may take 1-2 minutes)")
+        use_impl_sid = implementor_session_id if not args.fresh_sessions else None
+        _log(f"  Implementor {'(continued — cached context)' if use_impl_sid else '(fresh session)'}... (this may take 1-2 minutes)")
         result = _invoke_claude(
             ws, "implementor", implementor_prompt, args.source_dirs,
             model, budget, effort,
-            session_id=implementor_session_id if not args.fresh_sessions else None,
+            session_id=use_impl_sid,
+            expected_file=f"responses/implementor-{round_num}.md",
+            focus_count=len(focus),
         )
         if result is None:
             return 1
 
         cumulative_cost += result.get("cost", 0.0)
-        if implementor_session_id is None:
-            implementor_session_id = result.get("session_id")
+        new_sid = result.get("session_id")
+        if implementor_session_id is None and new_sid:
+            implementor_session_id = new_sid
+        elif implementor_session_id and not new_sid and result.get("timed_out"):
+            _log(f"  WARNING: implementor session ID lost to timeout — next round will be fresh")
+            implementor_session_id = None
         _log(f"  Implementor done (${result.get('cost', 0.0):.2f})")
 
         implementor_file = ws / "responses" / f"implementor-{round_num}.md"
@@ -396,6 +410,8 @@ def _invoke_claude(
     budget: float,
     effort: str,
     session_id: str | None = None,
+    expected_file: str | None = None,
+    focus_count: int = 0,
 ) -> dict | None:
     cmd = build_claude_command(
         role_dir=ws / "agents" / role,
@@ -409,26 +425,92 @@ def _invoke_claude(
         session_id=session_id,
     )
 
-    while True:
-        try:
-            result = subprocess.run(
-                cmd, cwd=ws,
-                capture_output=True, text=True,
-                stdin=subprocess.DEVNULL,
-                timeout=SESSION_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired:
-            _log(f"  Session timed out after {SESSION_TIMEOUT}s — but checking if output was written...")
-            return {"cost": 0.0, "timed_out": True}
+    import time
 
-        if result.returncode != 0:
-            stderr_text = result.stderr[:500] if result.stderr else ""
+    while True:
+        proc = subprocess.Popen(
+            cmd, cwd=ws,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL, text=True,
+        )
+
+        start_time = time.time()
+        file_seen = False
+        file_size = 0
+        check_interval = 30
+
+        while proc.poll() is None:
+            elapsed = int(time.time() - start_time)
+
+            if elapsed > 0 and elapsed % check_interval == 0:
+                if expected_file:
+                    ef = ws / expected_file
+                    if ef.exists():
+                        new_size = ef.stat().st_size
+                        if not file_seen:
+                            _log(f"    [{elapsed}s] output file appeared ({new_size} bytes)")
+                            file_seen = True
+                        elif new_size > file_size:
+                            _log(f"    [{elapsed}s] output file growing ({new_size} bytes)")
+                        file_size = new_size
+                    elif elapsed >= 120 and not file_seen:
+                        _log(f"    [{elapsed}s] no output file yet — agent may be reading/exploring")
+
+                if elapsed >= SESSION_TIMEOUT:
+                    proc.kill()
+                    proc.wait()
+                    if file_seen:
+                        _log(f"  Timed out after {elapsed}s — output file written ({file_size} bytes)")
+                        ef = ws / expected_file
+                        if ef.exists():
+                            content = ef.read_text()
+                            import re
+                            addressed = len(re.findall(r"###\s+R\d+-\d+:\s+(?:FIXED|REJECTED|ESCALATED)", content, re.IGNORECASE))
+                            findings = len(re.findall(r"^###\s+", content, re.MULTILINE))
+                            if "implementor" in expected_file and addressed > 0:
+                                if focus_count > 0:
+                                    pct = int(addressed / focus_count * 100)
+                                    _log(f"  Progress: {addressed}/{focus_count} issues addressed ({pct}%)")
+                                else:
+                                    _log(f"  Progress: {addressed} issues addressed in partial response")
+                            elif "reviewer" in expected_file and findings > 0:
+                                _log(f"  Progress: {findings} findings written in partial response")
+                        action = _prompt_hil(
+                            "Output exists. [c]ontinue with it / [r]etry / [a]bort? ",
+                            default="c",
+                        )
+                        if action == "r":
+                            continue
+                        if action == "a":
+                            return None
+                        return {"cost": 0.0, "timed_out": True}
+                    else:
+                        _log(f"  Timed out after {elapsed}s — no output file written")
+                        _log(f"  Agent may be stuck. Check IntelliJ, permissions, or connectivity.")
+                        action = _prompt_hil(
+                            "No output. [r]etry / [a]bort / [s]kip? ",
+                            default="s",
+                        )
+                        if action == "r":
+                            continue
+                        if action == "a":
+                            return None
+                        return {"cost": 0.0, "timed_out": True}
+
+            time.sleep(1)
+
+        stdout = proc.stdout.read()
+        stderr = proc.stderr.read()
+        result_code = proc.returncode
+
+        if result_code != 0:
+            stderr_text = stderr[:500] if stderr else ""
             if "permission" in stderr_text.lower() or "trust" in stderr_text.lower():
                 _log(f"  PERMISSION ERROR: claude -p needs permission approval.")
                 _log(f"  Add to ~/.claude/settings.json permissions.allow:")
                 _log(f'    "Bash(python3 */.claude/skills/design-review/review.py *)"')
                 _log(f"  Or run with: ! python3 ... (foreground with visible prompts)")
-            _log(f"  Session failed (exit {result.returncode}): {stderr_text[:200]}")
+            _log(f"  Session failed (exit {result_code}): {stderr_text[:200]}")
             action = _prompt_hil("[r]etry / [a]bort / [s]kip? ")
             if action == "r":
                 continue
@@ -441,7 +523,7 @@ def _invoke_claude(
     cost = 0.0
     sid: str | None = None
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(stdout)
         cost = data.get("total_cost_usd", 0.0) or 0.0
         sid = data.get("session_id")
     except (json.JSONDecodeError, TypeError):
