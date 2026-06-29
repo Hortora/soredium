@@ -46,8 +46,9 @@ def setup_review(
     for agent in ["reviewer", "implementor"]:
         (ws / "agents" / agent).mkdir(parents=True, exist_ok=True)
 
-    # Store spec path — spec stays in place, not copied
+    # Store spec path and source dirs — both needed on resume
     (ws / ".spec-path").write_text(str(spec_path.resolve()))
+    (ws / ".source-dirs").write_text("\n".join(source_dirs))
 
     _generate_context_md(ws, source_dirs, spec_path)
     _generate_agent_claude_mds(ws)

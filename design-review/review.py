@@ -80,20 +80,32 @@ def main() -> int:
             return 1
         if not args.title:
             name = ws.name
-            args.title = name.replace("adr-", "").rsplit("-", 2)[0] if name.startswith("adr-") else name
+            args.title = name.rsplit("-", 2)[0]
         if not args.source_dirs:
-            args.source_dirs = []
+            source_dirs_file = ws / ".source-dirs"
+            if source_dirs_file.exists():
+                args.source_dirs = [
+                    line for line in source_dirs_file.read_text().splitlines() if line.strip()
+                ]
+            else:
+                args.source_dirs = []
         _LOG_FILE = ws / "progress.log"
-        start_round = _detect_last_round(ws) + 1
-        _log(f"Resuming review: {ws}")
-        _log(f"Last completed round: {start_round - 1}, resuming from round {start_round}")
+        last_round, reviewer_only = _detect_last_round(ws)
+        if reviewer_only:
+            start_round = last_round
+            _log(f"Resuming review: {ws}")
+            _log(f"Round {last_round} has reviewer but no implementor — resuming at implementor step")
+        else:
+            start_round = last_round + 1
+            _log(f"Resuming review: {ws}")
+            _log(f"Last completed round: {last_round}, resuming from round {start_round}")
     else:
         adr_root = Path.home() / "adr"
         existing = sorted(adr_root.glob(f"*/{args.title}-*")) if adr_root.exists() else []
         existing = [d for d in existing if d.is_dir()]
         if existing:
             latest = existing[-1]
-            last_round = _detect_last_round(latest)
+            last_round, _ = _detect_last_round(latest)
             if last_round > 0:
                 print(
                     f"WARNING: Existing review found at {latest} "
@@ -133,10 +145,13 @@ def main() -> int:
     tracker = Tracker(project_name=args.title)
     model = args.model
     budget = args.budget_per_session
+    effort = "high"
+    skip_reviewer_this_round = reviewer_only if args.workspace else False
 
     if start_round > 1:
-        _log(f"Rebuilding tracker from {start_round - 1} prior round(s)...")
-        _rebuild_tracker(ws, tracker, start_round - 1)
+        rebuild_through = start_round if skip_reviewer_this_round else start_round - 1
+        _log(f"Rebuilding tracker from {rebuild_through} prior round(s)...")
+        _rebuild_tracker(ws, tracker, rebuild_through)
         focus = tracker.get_focus_items()
         _log(f"Tracker rebuilt: {len(tracker.issues())} issues, {len(focus)} open")
 
@@ -187,6 +202,11 @@ def main() -> int:
                         tracker.write(ws / "tracker.md")
                         _git_commit(ws, ["tracker.md", catchup_file],
                                      f"catch-up: implementor addressed {len(focus)} items")
+                        spec_dir = Path(spec_path).parent
+                        spec_name = Path(spec_path).name
+                        subprocess.run(["git", "add", spec_name], cwd=spec_dir, capture_output=True)
+                        subprocess.run(["git", "commit", "-m", "docs: spec revised — catch-up round",
+                                        "--allow-empty"], cwd=spec_dir, capture_output=True)
                     focus = tracker.get_focus_items()
                     _log(f"  After catch-up: {len(focus)} items still open")
 
@@ -209,106 +229,107 @@ def main() -> int:
 
         effort = "xhigh" if round_num >= 4 else "high"
 
-        # --- Step 1: Reviewer ---
-        handover_path: str | None = None
-        if reviewer_session_id is None and round_num > 1:
-            latest_handover = _find_latest_handover(ws, "reviewer")
-            if latest_handover:
-                handover_path = str(latest_handover.relative_to(ws))
+        # --- Step 1 & 2: Reviewer + extract + signal checks ---
+        if skip_reviewer_this_round:
+            _log(f"  Skipping reviewer — already ran for round {round_num}, proceeding to implementor")
+            skip_reviewer_this_round = False
+        else:
+            handover_path: str | None = None
+            if reviewer_session_id is None and round_num > 1:
+                latest_handover = _find_latest_handover(ws, "reviewer")
+                if latest_handover:
+                    handover_path = str(latest_handover.relative_to(ws))
 
-        focus = tracker.get_focus_items()
-        reviewer_prompt = build_reviewer_prompt(
-            round_num=round_num,
-            focus_items=focus,
-            handover_path=handover_path,
-            source_dirs=args.source_dirs,
-            workspace_root=str(ws),
-            spec_path=spec_path,
-        )
+            focus = tracker.get_focus_items()
+            reviewer_prompt = build_reviewer_prompt(
+                round_num=round_num,
+                focus_items=focus,
+                handover_path=handover_path,
+                source_dirs=args.source_dirs,
+                workspace_root=str(ws),
+                spec_path=spec_path,
+            )
 
-        if is_window_end:
-            reviewer_prompt += "\n\n" + build_sweep_prompt("reviewer", round_num, workspace_root=str(ws))
+            if is_window_end:
+                reviewer_prompt += "\n\n" + build_sweep_prompt("reviewer", round_num, workspace_root=str(ws))
 
-        use_reviewer_sid = reviewer_session_id if not args.fresh_sessions else None
-        _log(f"  Reviewer {'(continued — cached context)' if use_reviewer_sid else '(fresh session)'}... (this may take 1-2 minutes)")
-        result = _invoke_claude(
-            ws, "reviewer", reviewer_prompt, args.source_dirs,
-            model, budget, effort,
-            session_id=use_reviewer_sid,
-            expected_file=f"responses/reviewer-{round_num}.md",
-        )
-        if result is None:
-            return 1
-
-        cumulative_cost += result.get("cost", 0.0)
-        new_sid = result.get("session_id")
-        if reviewer_session_id is None and new_sid:
-            reviewer_session_id = new_sid
-        elif reviewer_session_id and not new_sid and result.get("timed_out"):
-            _log(f"  WARNING: reviewer session ID lost to timeout — next round will be fresh")
-            reviewer_session_id = None
-        _log(f"  Reviewer done (${result.get('cost', 0.0):.2f})")
-
-        # --- Step 2: Script extract ---
-        reviewer_file = ws / "responses" / f"reviewer-{round_num}.md"
-        if not reviewer_file.exists():
-            _log(f"  WARNING: reviewer-{round_num}.md not created")
-            action = _prompt_hil("Response file missing. [r]etry / [a]bort? ")
-            if action == "a":
+            use_reviewer_sid = reviewer_session_id if not args.fresh_sessions else None
+            _log(f"  Reviewer {'(continued — cached context)' if use_reviewer_sid else '(fresh session)'}... (this may take 1-2 minutes)")
+            result = _invoke_claude(
+                ws, "reviewer", reviewer_prompt, args.source_dirs,
+                model, budget, effort,
+                session_id=use_reviewer_sid,
+                expected_file=f"responses/reviewer-{round_num}.md",
+            )
+            if result is None:
                 return 1
-            continue
 
-        reviewer_content = reviewer_file.read_text()
-        signal = extract_signal(reviewer_content)
-        if signal.is_default:
-            _log(f"  WARNING: No signal found in reviewer-{round_num}.md, defaulting to CONTINUE")
+            cumulative_cost += result.get("cost", 0.0)
+            new_sid = result.get("session_id")
+            if reviewer_session_id is None and new_sid:
+                reviewer_session_id = new_sid
+            elif reviewer_session_id and not new_sid and result.get("timed_out"):
+                _log(f"  WARNING: reviewer session ID lost to timeout — next round will be fresh")
+                reviewer_session_id = None
+            _log(f"  Reviewer done (${result.get('cost', 0.0):.2f})")
 
-        existing_ids = tracker.issue_ids()
-        new_issues = extract_new_issues(reviewer_content, round_num, existing_ids)
-        for issue in new_issues:
-            tracker.add_issue(issue.issue_id, issue.title, round_raised=round_num)
-        if new_issues:
-            _log(f"  {len(new_issues)} new issue(s) raised")
-            _inject_issue_ids(reviewer_file, new_issues)
-
-        confirmations = extract_confirmations(reviewer_content)
-        for conf in confirmations:
-            if not tracker.has_issue(conf.issue_id):
+            reviewer_file = ws / "responses" / f"reviewer-{round_num}.md"
+            if not reviewer_file.exists():
+                _log(f"  WARNING: reviewer-{round_num}.md not created")
+                action = _prompt_hil("Response file missing. [r]etry / [a]bort? ")
+                if action == "a":
+                    return 1
                 continue
-            if conf.is_resolved:
-                tracker.mark_verified(conf.issue_id)
-            else:
-                tracker.mark_contested(conf.issue_id, reason=conf.reason)
 
-        for assumption in extract_assumptions(reviewer_content):
-            tracker.add_assumption(assumption, round_surfaced=round_num, source=f"reviewer-{round_num}.md")
+            reviewer_content = reviewer_file.read_text()
+            signal = extract_signal(reviewer_content)
+            if signal.is_default:
+                _log(f"  WARNING: No signal found in reviewer-{round_num}.md, defaulting to CONTINUE")
 
-        tracker.write(ws / "tracker.md")
-        _git_commit(ws, ["tracker.md", f"responses/reviewer-{round_num}.md"],
-                     f"tracker: round {round_num} reviewer issues")
-        _check_unstaged(ws)
+            existing_ids = tracker.issue_ids()
+            new_issues = extract_new_issues(reviewer_content, round_num, existing_ids)
+            for issue in new_issues:
+                tracker.add_issue(issue.issue_id, issue.title, round_raised=round_num)
+            if new_issues:
+                _log(f"  {len(new_issues)} new issue(s) raised")
+                _inject_issue_ids(reviewer_file, new_issues)
 
-        # --- Signal checks ---
-        if signal.signal_type == "APPROVED":
-            if round_num < args.min_rounds:
-                _log(f"  APPROVED in round {round_num} but min-rounds is {args.min_rounds} — overriding to CONTINUE")
-                _log(f"  Reviewer: look deeper. You are not expected to approve before round {args.min_rounds}.")
-                signal = signal.__class__(signal_type="CONTINUE")
-            else:
-                convergence = tracker.check_premature_convergence(round_num)
-                if convergence.should_override:
-                    _log(f"  Premature convergence detected — {len(convergence.unconfirmed_ids)} unconfirmed")
-                    signal = signal.__class__(signal_type="CONTINUE")
-                else:
+            confirmations = extract_confirmations(reviewer_content)
+            for conf in confirmations:
+                if not tracker.has_issue(conf.issue_id):
+                    continue
+                try:
+                    if conf.is_resolved:
+                        tracker.mark_verified(conf.issue_id)
+                    else:
+                        tracker.mark_contested(conf.issue_id, reason=conf.reason)
+                except ValueError:
+                    pass
+
+            for assumption in extract_assumptions(reviewer_content):
+                tracker.add_assumption(assumption, round_surfaced=round_num, source=f"reviewer-{round_num}.md")
+
+            tracker.write(ws / "tracker.md")
+            _git_commit(ws, ["tracker.md", f"responses/reviewer-{round_num}.md"],
+                         f"tracker: round {round_num} reviewer issues")
+            _check_unstaged(ws)
+
+            if signal.signal_type == "APPROVED":
+                if round_num < args.min_rounds:
+                    _log(f"  APPROVED in round {round_num} but min-rounds is {args.min_rounds} — overriding to CONTINUE")
+                    _log(f"  Reviewer: look deeper. You are not expected to approve before round {args.min_rounds}.")
+                elif not tracker.check_premature_convergence(round_num).should_override:
                     _log(f"\n  APPROVED by reviewer in round {round_num}")
                     _print_summary(tracker, round_num, cumulative_cost)
                     return 0
+                else:
+                    _log(f"  Premature convergence detected — overriding APPROVED")
 
-        if signal.signal_type == "DECISION_NEEDED":
-            _handle_decision_needed(ws, tracker, round_num, signal.description or "")
-            tracker.write(ws / "tracker.md")
-            _git_commit(ws, ["tracker.md", f"decisions/decision-{round_num}.md"],
-                         f"tracker: round {round_num} human decision")
+            if signal.signal_type == "DECISION_NEEDED":
+                _handle_decision_needed(ws, tracker, round_num, signal.description or "")
+                tracker.write(ws / "tracker.md")
+                _git_commit(ws, ["tracker.md", f"decisions/decision-{round_num}.md"],
+                             f"tracker: round {round_num} human decision")
 
         # --- Step 3: Implementor ---
         focus = tracker.get_focus_items()
@@ -461,7 +482,12 @@ def main() -> int:
         choice = "d"
     if choice == "d":
         for iid in tracker.get_focus_items():
-            tracker.mark_deferred(iid, note="deferred at checkpoint")
+            try:
+                tracker.mark_deferred(iid, note="deferred at checkpoint")
+            except ValueError:
+                issue = tracker.get_issue(iid)
+                issue.status = IssueStatus.DEFERRED
+                issue.notes = "deferred at checkpoint (forced)"
         tracker.write(ws / "tracker.md")
         _print_summary(tracker, args.max_rounds, cumulative_cost)
     elif choice.startswith("c"):
@@ -622,28 +648,34 @@ def _inject_issue_ids(reviewer_file: Path, issues: list) -> None:
     reviewer_file.write_text(content)
 
 
-def _detect_last_round(ws: Path) -> int:
+def _detect_last_round(ws: Path) -> tuple[int, bool]:
+    """Returns (last_round, reviewer_only).
+
+    reviewer_only=True means the last round has a reviewer file but
+    no implementor file — the implementor still needs to run.
+    """
     responses = ws / "responses"
     if not responses.is_dir():
-        return 0
-    complete_rounds = set()
-    partial_rounds = set()
+        return 0, False
+    reviewer_rounds: set[int] = set()
+    implementor_rounds: set[int] = set()
     for f in responses.iterdir():
         if f.suffix != ".md":
             continue
         try:
             n = int(f.stem.split("-")[1])
             if f.name.startswith("implementor-"):
-                complete_rounds.add(n)
+                implementor_rounds.add(n)
             elif f.name.startswith("reviewer-"):
-                partial_rounds.add(n)
+                reviewer_rounds.add(n)
         except (IndexError, ValueError):
             pass
-    if complete_rounds:
-        return max(complete_rounds)
-    if partial_rounds:
-        return max(partial_rounds) - 1
-    return 0
+    if not reviewer_rounds:
+        return 0, False
+    max_reviewer = max(reviewer_rounds)
+    if max_reviewer in implementor_rounds:
+        return max_reviewer, False
+    return max_reviewer, True
 
 
 def _rebuild_tracker(ws: Path, tracker: Tracker, through_round: int) -> None:
@@ -772,7 +804,7 @@ def _handle_decision_needed(
         decision = "skip"
         _log("  Non-interactive mode — deferring decision.")
     if decision.lower() == "abort":
-        sys.exit(1)
+        raise RuntimeError("Review aborted by user at DECISION_NEEDED prompt")
 
     parts = [f"---", f"round: {round_num}"]
     if issue_id:
