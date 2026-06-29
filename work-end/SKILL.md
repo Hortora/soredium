@@ -527,6 +527,39 @@ was involved on this branch).
 **3. Stale workspace branches** — list open branches (no `design/EPIC-CLOSED.md` in
 `design/`) with no commits in the last 7 days. Report only; do not act.
 
+**4. Unrecovered artifacts on closed branches** — for every workspace branch that HAS
+`design/EPIC-CLOSED.md` (i.e. was properly closed via work-end), verify that artifacts
+reached workspace main:
+
+```bash
+# For each branch with EPIC-CLOSED.md:
+# a) Check blogs — any .md in blog/ on the branch that isn't on main?
+# b) Check specs — any .md in specs/ on the branch that isn't on main?
+```
+
+For each blog found on a closed branch but not on workspace main:
+> ⚠️ Blog `<filename>` on closed branch `<branch>` never reached workspace main.
+> Cherry-pick to main and publish? (y/n)
+
+For each spec found on a closed branch but not on workspace main:
+> ⚠️ Spec `<filename>` on closed branch `<branch>` never promoted to workspace main.
+> Cherry-pick to main? (y/n)
+
+Apply confirmed recoveries immediately — cherry-pick to workspace main, commit, push.
+Then run publish-blog for any recovered blogs.
+
+**5. Unstamped closed branches** — for every workspace branch that HAS `design/EPIC-CLOSED.md`
+but whose last commit on the **project** branch is NOT `chore: branch closed`, flag it:
+> ⚠️ Branch `<branch>` has EPIC-CLOSED.md but project branch is not stamped.
+> Stamp now? (y/n)
+
+If confirmed, stamp the project branch:
+```bash
+git -C "$PROJECT" checkout <branch>
+git -C "$PROJECT" commit --allow-empty -m "chore: branch closed"
+git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
+```
+
 ### 8j — Rebase project branch onto project base branch, push to fork, prompt for blessed repo
 
 **This step is mandatory.** Implementation commits on the project branch must land on `$PROJECT_BASE_BRANCH` before the branch is marked closed.
