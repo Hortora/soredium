@@ -137,7 +137,58 @@ def main() -> int:
     if start_round > 1:
         _log(f"Rebuilding tracker from {start_round - 1} prior round(s)...")
         _rebuild_tracker(ws, tracker, start_round - 1)
-        _log(f"Tracker rebuilt: {len(tracker.issues())} issues, {len(tracker.get_focus_items())} open")
+        focus = tracker.get_focus_items()
+        _log(f"Tracker rebuilt: {len(tracker.issues())} issues, {len(focus)} open")
+
+        # Health check: detect rounds with missing implementor responses
+        for rn in range(1, start_round):
+            reviewer_file = ws / "responses" / f"reviewer-{rn}.md"
+            impl_file = ws / "responses" / f"implementor-{rn}.md"
+            if reviewer_file.exists() and not impl_file.exists():
+                _log(f"  WARNING: round {rn} reviewer ran but implementor never responded")
+
+        # Catch-up: if there are unaddressed items, run the implementor
+        # before starting the next reviewer round
+        if focus:
+            _log(f"  {len(focus)} unaddressed items from prior rounds — running implementor catch-up")
+            catchup_prompt = build_implementor_prompt(
+                round_num=start_round - 1, focus_items=focus,
+                source_dirs=args.source_dirs, workspace_root=str(ws),
+                spec_path=spec_path,
+            )
+            catchup_prompt += "\n\nThis is a catch-up run. Previous rounds left these items unaddressed. Address all of them."
+            catchup_file = f"responses/implementor-{start_round - 1}.md"
+            existing_impl = ws / catchup_file
+            if not existing_impl.exists():
+                _log(f"  Implementor catch-up (fresh)...")
+                catchup_result = _invoke_claude(
+                    ws, "implementor", catchup_prompt, args.source_dirs,
+                    model, budget, effort,
+                    expected_file=catchup_file,
+                    focus_count=len(focus),
+                )
+                if catchup_result:
+                    _log(f"  Catch-up done (${catchup_result.get('cost', 0.0):.2f})")
+                    if existing_impl.exists():
+                        impl_content = existing_impl.read_text()
+                        for resp in extract_issue_responses(impl_content):
+                            if not tracker.has_issue(resp.issue_id):
+                                continue
+                            try:
+                                if resp.status == "FIXED":
+                                    tracker.mark_addressed(resp.issue_id, section_ref=resp.section_ref or "",
+                                                           commit_hash="", rationale=resp.body[:200])
+                                elif resp.status == "REJECTED":
+                                    tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
+                                elif resp.status == "ESCALATED":
+                                    tracker.mark_deferred(resp.issue_id, note="DECISION_NEEDED")
+                            except ValueError:
+                                pass
+                        tracker.write(ws / "tracker.md")
+                        _git_commit(ws, ["tracker.md", catchup_file],
+                                     f"catch-up: implementor addressed {len(focus)} items")
+                    focus = tracker.get_focus_items()
+                    _log(f"  After catch-up: {len(focus)} items still open")
 
     reviewer_session_id: str | None = None
     implementor_session_id: str | None = None
