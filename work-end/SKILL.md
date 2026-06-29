@@ -548,8 +548,10 @@ For each spec found on a closed branch but not on workspace main:
 Apply confirmed recoveries immediately — cherry-pick to workspace main, commit, push.
 Then run publish-blog for any recovered blogs.
 
-**5. Unstamped closed branches** — for every workspace branch that HAS `design/EPIC-CLOSED.md`
-but whose last commit on the **project** branch is NOT `chore: branch closed`, flag it:
+**5. Unstamped closed branches** — the current branch was stamped in 8j. This check
+catches OLDER closed branches that predate the mandatory stamp. For every workspace
+branch (other than `$BRANCH_NAME`) that HAS `design/EPIC-CLOSED.md` but whose last
+commit on the **project** branch is NOT `chore: branch closed`, flag it:
 > ⚠️ Branch `<branch>` has EPIC-CLOSED.md but project branch is not stamped.
 > Stamp now? (y/n)
 
@@ -590,6 +592,22 @@ git -C "$PROJECT" rebase "$BRANCH_NAME"
 - **Stop. Do not proceed to Step 9.**
 - Instruct the user: resolve conflicts on `$PROJECT_BASE_BRANCH`, then re-run `work-end` to complete the close.
 
+**Collect sub-issue references before squash:**
+
+Before squashing, scan all branch commits for `Closes #N`, `Fixes #N`, or `Resolves #N`
+references that are NOT already in `$COVERS`. These are sub-issues closed by individual
+commits that will be lost when the commits are squashed into a single message.
+
+```bash
+git -C "$PROJECT" log --format="%B" "$BLESSED_REMOTE/$PROJECT_BASE_BRANCH"..HEAD \
+  | grep -oiE '(closes|fixes|resolves) #[0-9]+' | grep -oE '#[0-9]+' | sort -u
+```
+
+Compare with `$COVERS`. Any issue numbers found in branch commits but not in `$COVERS`
+must be appended to the squash commit message as trailer lines (e.g. `Closes #27`).
+After git-squash produces its message, append any missing `Closes #N` lines before
+the commit is finalised. If git-squash has already run, amend the message to include them.
+
 **Squash before fork push (fork model only — mandatory):**
 
 Squash runs BEFORE the fork push so both fork and blessed repo receive identical history.
@@ -605,6 +623,9 @@ git -C "$PROJECT" log --oneline "$BLESSED_REMOTE/$PROJECT_BASE_BRANCH"..HEAD
 
 Invoke `/git-squash` with the range `$BLESSED_REMOTE/$PROJECT_BASE_BRANCH..HEAD`.
 Wait for the squash plan, user approval, and execution before proceeding.
+
+After squash completes, verify the squash commit message includes all sub-issue
+references collected above. If any are missing, amend the message to append them.
 
 If the user explicitly says "skip squash" or "no squash needed": accept and note it,
 then proceed. Never silently skip.
@@ -640,6 +661,20 @@ If `$BLESSED_REMOTE` is non-empty, always prompt — three choices:
 - **N — Skip:** leave blessed repo delivery for later; note it in the 8h report. Fork already has the commits.
 
 If no `$BLESSED_REMOTE`: no prompt — fork push is the final delivery.
+
+**Stamp the project branch as closed:**
+
+After all pushes complete (fork and optionally blessed), stamp the project branch.
+This makes `git log -1 --format="%s" <branch>` immediately tell you the branch is
+archived — no need to cross-reference workspace state.
+
+```bash
+git -C "$PROJECT" checkout "$BRANCH_NAME"
+git -C "$PROJECT" commit --allow-empty -m "chore: branch closed"
+git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
+```
+
+This is mandatory, not an offer. An unstamped branch looks live to the next session.
 
 **Why rebase and not merge --no-ff?** Rebase keeps the project base branch history linear and avoids a merge commit that references a branch consumers never saw. Fast-forward is a safe subset — `git rebase` fast-forwards when possible, replays commits otherwise.
 
