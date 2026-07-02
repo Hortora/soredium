@@ -551,14 +551,19 @@ Then run publish-blog for any recovered blogs.
 **5. Unstamped closed branches** — the current branch was stamped in 8j. This check
 catches OLDER closed branches that predate the mandatory stamp. For every workspace
 branch (other than `$BRANCH_NAME`) that HAS `design/EPIC-CLOSED.md` but whose last
-commit on the **project** branch is NOT `chore: branch closed`, flag it:
+commit on the **project** branch does not start with `chore: branch closed`, flag it:
 > ⚠️ Branch `<branch>` has EPIC-CLOSED.md but project branch is not stamped.
 > Stamp now? (y/n)
 
-If confirmed, stamp the project branch:
+Both old (`chore: branch closed`) and new (`chore: branch closed — landed as <SHA> on <branch>`)
+formats are valid stamps. Match with a prefix check, not exact string equality.
+
+If confirmed, stamp the project branch with the new format (resolve the landing SHA
+from the base branch's log if possible; use `unknown` if the squashed commit cannot
+be identified):
 ```bash
 git -C "$PROJECT" checkout <branch>
-git -C "$PROJECT" commit --allow-empty -m "chore: branch closed"
+git -C "$PROJECT" commit --allow-empty -m "chore: branch closed — landed as <LANDED_SHA> on $PROJECT_BASE_BRANCH"
 git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
 ```
 
@@ -665,12 +670,14 @@ If no `$BLESSED_REMOTE`: no prompt — fork push is the final delivery.
 **Stamp the project branch as closed:**
 
 After all pushes complete (fork and optionally blessed), stamp the project branch.
-This makes `git log -1 --format="%s" <branch>` immediately tell you the branch is
-archived — no need to cross-reference workspace state.
+The stamp includes the SHA that landed on the base branch so branch auditing tools
+can verify content landed without tree diffs — `git log -1 --format="%s" <branch>`
+immediately tells you the branch is archived AND where the content went.
 
 ```bash
+LANDED_SHA=$(git -C "$PROJECT" rev-parse HEAD)
 git -C "$PROJECT" checkout "$BRANCH_NAME"
-git -C "$PROJECT" commit --allow-empty -m "chore: branch closed"
+git -C "$PROJECT" commit --allow-empty -m "chore: branch closed — landed as $LANDED_SHA on $PROJECT_BASE_BRANCH"
 git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
 ```
 
