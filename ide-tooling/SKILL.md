@@ -1,129 +1,199 @@
 ---
 name: ide-tooling
 description: >
-  INVOKE IMMEDIATELY when two IntelliJ MCPs are visible: mcp__intellij-index__*
-  and mcp__intellij__*. These are NOT interchangeable — mcp__intellij-index__
-  supports auto-opening projects via project_path; mcp__intellij__ cannot.
-  Always use mcp__intellij-index__ for code navigation. Never try mcp__intellij__
-  first and fall back. Also invoke for any IDE operation: rename, move file,
-  find references, navigate to definition, type hierarchy, diagnostics.
-slash-command: false
+  INVOKE IMMEDIATELY when mcp__intellij-index__* tools are visible.
+  Use for ALL code navigation, editing, refactoring, and diagnostics.
+  Also invoke for any IDE operation: rename, move, edit member, find
+  references, type hierarchy, diagnostics. Never fall back to bash
+  grep or text tools for semantic code operations.
 ---
 
 # IDE Tooling — IntelliJ MCP Guide
 
-## ⚠️ Critical: Two MCPs, one right choice
+## Two MCPs, one routing rule
 
-**Use `mcp__intellij-index__*` for everything code-related. Never use `mcp__intellij__*` to navigate or open projects.**
+Two IntelliJ MCP servers may be present. They are NOT interchangeable:
 
-| Need | Use |
-|------|-----|
-| Find references, navigate, search, diagnostics, rename, move | `mcp__intellij-index__*` |
-| Check if project is open | `mcp__intellij-index__ide_project_status` |
-| Project not open → open it | Pass `project_path` to any `mcp__intellij-index__` tool — auto-opens |
-| Build, run tests, terminal, formatting | `mcp__intellij__*` only |
+| Server | Use for | Key difference |
+|--------|---------|----------------|
+| `mcp__intellij-index__*` | Navigation, editing, refactoring, diagnostics, project management | Auto-opens projects via `project_path` |
+| `mcp__intellij__*` | Build, run, terminal, formatting | Cannot open projects — only sees already-open windows |
 
-**Never ask the user to open a project. Never fall back to bash because a project isn't open. Never launch IntelliJ from the command line.** Pass `project_path` and let the plugin handle it.
-
----
-
-Always prefer IntelliJ MCPs over bash, grep, or text tools for semantic code
-operations. IntelliJ understands the code structure; text tools do not.
-
-Check `ide_index_status` before batch operations — indexing may still be in
-progress. If neither MCP server is available for a semantic operation, stop
-and inform the user rather than silently falling back to text tools.
+**Always use `mcp__intellij-index__*` for code operations.** Never ask
+the user to open a project. Pass `project_path` and the plugin opens
+it automatically.
 
 ---
 
-## `mcp__intellij-index` — Semantic index (always prefer for code intelligence)
+## Navigate — understand code before changing it
 
-Multi-project aware: supports `project_path` to target any open or managed project.
+Use these to explore structure, trace dependencies, and understand
+impact before making changes.
 
-| Operation | Tool | Notes |
-|-----------|------|-------|
-| Find all usages of a symbol | `ide_find_references` | **Run before any rename or delete** — understand full impact first |
-| Navigate to symbol declaration | `ide_find_definition` | |
-| All implementations of an interface/abstract | `ide_find_implementations` | |
-| What does this method override | `ide_find_super_methods` | |
-| Full class/interface inheritance tree | `ide_type_hierarchy` | |
-| Who calls this / what this calls | `ide_call_hierarchy` | |
-| Find a class by name | `ide_find_class` | Faster than grep for known names |
-| Find a file by name | `ide_find_file` | |
-| **Safe rename** — updates all references | `ide_refactor_rename` | Never use Edit/sed for renames |
-| **Safe move** — updates package/imports | `ide_move_file` | Never use bash mv for source files |
-| Safe delete — checks usages first | `ide_refactor_safe_delete` | Lists usages if deletion would break things |
-| Fast identifier/word search | `ide_search_text` | Faster than grep for exact names |
-| Errors, warnings, quick-fix intentions | `ide_diagnostics` | Supersedes `get_file_problems` |
-| All open/managed projects + their states | `ide_project_status` | **Use this, not `get_project_modules`** |
-| Check IDE is ready for semantic ops | `ide_index_status` | |
-| Sync IDE after external file changes | `ide_sync_files` | |
+| Tool | What it does | When to use |
+|------|-------------|-------------|
+| `ide_find_references` | All usages of a symbol across the project | **Before any rename, delete, or signature change** — understand full impact |
+| `ide_find_definition` | Navigate to where a symbol is declared | Jump to source of a class, method, or variable |
+| `ide_find_implementations` | All concrete implementations of an interface or abstract method | Understanding polymorphism, finding all providers |
+| `ide_find_super_methods` | Parent methods that a method overrides | Tracing inheritance chain upward |
+| `ide_type_hierarchy` | Full inheritance tree (supertypes and subtypes) | Understanding class relationships |
+| `ide_call_hierarchy` | Who calls this method / what this method calls | Tracing execution flow, debugging, impact analysis |
+| `ide_find_class` | Find a class by name (camelCase, substring, wildcard) | Faster than grep for known class names |
+| `ide_find_file` | Find a file by name | Quick file lookup by pattern |
+| `ide_find_symbol` | Find any symbol (class, method, field, function) by name | When you know the symbol name but not its location |
+| `ide_search_text` | Word index or regex search across project | Fast identifier search, context filtering (code/comments/strings) |
+| `ide_file_structure` | Hierarchical structure of a source file (classes, methods, fields) | Understanding file layout. Returns `line` and `endLine` per member — use with `ide_read_file(startLine, endLine)` to read exactly one member |
+
+## Read — examine specific code
+
+| Tool | What it does | When to use |
+|------|-------------|-------------|
+| `ide_read_file` | Read file content by path or qualified name, with optional line range | Reading specific methods (use `startLine`/`endLine` from `ide_file_structure`). Also reads library/dependency sources from jars |
+| `ide_get_active_file` | Currently open file(s) in the editor | Checking what the user is looking at |
+| `ide_open_file` | Open a file in the editor, optionally at a specific line | Directing the user's attention to relevant code |
+
+## Edit — structural code changes
+
+Semantic editing that works with methods, fields, and properties —
+not line numbers and string matching. Auto-reformats by default.
+
+| Tool | What it does | When to use |
+|------|-------------|-------------|
+| `ide_edit_member` | Replace entire member declaration (signature + body) | Changing a method's API and implementation together |
+| `ide_replace_member` | Replace only the body — signature preserved | Fixing or rewriting implementation without changing the API |
+| `ide_insert_member` | Insert new member at a structural position (before/after/first/last) | Adding new methods, fields, or properties |
+
+**Parameters common to all three:** `file` (required), `class` (optional —
+omit for top-level Kotlin), `member` (for edit/replace), `content`
+(required), `reformat` (default: true), `project_path` (when multiple
+projects open).
+
+**Disambiguation:** When a class has overloaded methods, use
+`parameterCount` or `line` to target the right one. Ambiguous calls
+return a candidate list with signatures, parameter counts, and line
+numbers for retry.
+
+**ide_replace_member content format:** Provide the new body WITHOUT
+braces for methods (just the statements), or a new initializer
+expression for fields.
+
+**Error handling:**
+- `ambiguous_member` — retry with `parameterCount` or `line`
+- `member_not_found` — check spelling and class name
+- `no_body` (abstract method) — use `ide_edit_member` instead
+
+## Refactor — cross-cutting changes that update references
+
+| Tool | What it does | When to use |
+|------|-------------|-------------|
+| `ide_refactor_rename` | Rename symbol + update all references | **Never use Edit/sed for renames** — IntelliJ updates all callers |
+| `ide_move_file` | Move file + update package/imports | **Never use bash mv for source files** |
+| `ide_refactor_safe_delete` | Delete symbol, checking for usages first | Lists blocking usages if deletion would break things |
+| `ide_optimize_imports` | Remove unused imports, organise remaining | After adding new code or moving classes |
+| `ide_reformat_code` | Apply project code style formatting | After manual text edits or when formatting drifts |
+| `ide_convert_java_to_kotlin` | Convert Java files to Kotlin | Migration projects |
+
+## Verify — check correctness after changes
+
+| Tool | What it does | When to use |
+|------|-------------|-------------|
+| `ide_diagnostics` | Errors, warnings, quick-fix intentions for a file. Also build errors and test results | After editing — check for compilation errors, unused imports, type mismatches |
+| `ide_build_project` | Compile the project | After code changes — verify everything compiles |
+| `ide_index_status` | Check if IDE is ready for semantic operations | Before batch operations — indexing may still be in progress |
+| `ide_sync_files` | Sync IDE's virtual file system with external changes | After files created/modified outside the IDE (e.g., by agents) |
+| `ide_reload_project` | Re-resolve dependencies (Maven/Gradle reload) | After modifying pom.xml, build.gradle, or dependency config |
+
+## Project — manage what's open and active
+
+| Tool | What it does | When to use |
+|------|-------------|-------------|
+| `ide_open_project` | Open a project and wait for indexing | When you need a project that isn't open yet |
+| `ide_open_workspace` | Open multiple Maven projects as one workspace | Cross-project refactoring across sibling repos |
+| `ide_import_modules` | Import external project directories as modules | Adding cross-project code intelligence |
+| `ide_close_project` | Close a project to free memory | When done with a project |
+| `ide_project_status` | All open/managed projects and their states | **Use this, not `get_project_modules`** |
+| `ide_set_project_mode` | Set lifecycle mode (active/background/dormant/closed) | Managing memory across projects |
+| `ide_set_all_project_modes` | Set mode for all managed projects at once | Batch lifecycle management |
+| `ide_get_project_modes` | Current mode of all managed projects | Checking what's active |
+| `ide_enroll_all_projects` | Enroll open projects in lifecycle management | First-time setup |
+| `ide_release_project` | Release from lifecycle management | Returning control to the user |
+| `ide_release_all_projects` | Release all managed projects | Session cleanup |
+| `ide_lifecycle_log` | Recent lifecycle events | Diagnosing why a project closed or changed state |
+| `ide_set_lifecycle_log_file` | Enable/disable writing lifecycle events to disk | Post-mortem analysis |
+| `ide_set_power_save_mode` | Toggle Power Save Mode (IDE-wide) | Reduce CPU when not actively editing |
+| `ide_install_plugin` | Install a plugin into the IDE | Plugin management |
+| `ide_restart` | Restart the IDE | After plugin install (MCP connection drops) |
 
 ---
 
-## `mcp__intellij` — JetBrains built-in (window-scoped — only sees already-open projects)
+## Editing preference hierarchy
 
-**Cannot auto-open projects.** If a project isn't open in the IDE, `mcp__intellij__*` tools
-will fail or return wrong results. Never use these tools to check whether a project is open
-or to trigger opening one — use `mcp__intellij-index__ide_project_status` instead, which
-auto-opens via `project_path`.
+When authoring code, prefer tools in this order:
 
-Use `mcp__intellij__*` only for operations `intellij-index` cannot do. Tools marked ⚠️ have an
-`intellij-index` equivalent that is multi-project aware — prefer those.
+1. **Structural edits** (`ide_edit_member`, `ide_replace_member`,
+   `ide_insert_member`) — for class members. Semantically aware,
+   auto-reformats, handles overloads.
+2. **Semantic refactoring** (`ide_refactor_rename`, `ide_move_file`,
+   `ide_refactor_safe_delete`) — for cross-cutting reference updates.
+3. **Text edits** (Edit tool) — for non-structural changes: config
+   files, markdown, non-class code, file-level changes outside any
+   class body.
 
-| Operation | Tool | Note |
-|-----------|------|------|
-| Build / compile | `build_project` | |
-| Run a named test or app configuration | `execute_run_configuration` | |
-| Hover documentation / type info at position | `get_symbol_info` | |
-| File-level inspection results | `get_file_problems` | ⚠️ Use `ide_diagnostics` instead |
-| Targeted text replacement (no semantic awareness) | `replace_text_in_file` | |
-| Apply code formatting rules | `reformat_file` | |
-| Project module structure | `get_project_modules` | ⚠️ Use `ide_project_status` instead — multi-project aware |
-| Library dependencies | `get_project_dependencies` | |
-| Find files by glob pattern | `find_files_by_glob` | |
-| Find files by name keyword | `find_files_by_name_keyword` | ⚠️ Use `ide_find_file` instead |
-| Browse directory tree | `list_directory_tree` | |
-| Run shell command in IDE terminal | `execute_terminal_command` | |
-| Open a file in the editor | `open_file_in_editor` | |
+**When IntelliJ MCP is unavailable:** Fall back to text tools (Edit,
+Write). Check `ide_index_status` first — the project may still be
+indexing. If no MCP server is available for a semantic operation, stop
+and inform the user rather than silently falling back.
 
 ---
+
+## Multi-repo workspaces
+
+If a project named `ide-workspace-*` is already open (visible in
+`ide_project_status`), use its path as `project_path` — it provides
+cross-project code intelligence across all modules.
+
+If no workspace is open and you need cross-project refactoring, call
+`ide_open_workspace` with the common parent directory.
 
 ## Lifecycle-managed projects
 
-Projects may be sleeping to free memory. **Never ask the user to open a project.**
+Projects may be sleeping to free memory. **Never ask the user to open
+a project.**
 
-1. **Always include `project_path` and proceed silently** — it auto-opens any project
-   that has a `.idea` directory, whether managed, in limbo, or never enrolled. Do not
-   warn the user that a project is closed. Do not ask the user to open it. Just pass
-   `project_path` to whichever semantic tool you need (`ide_find_references`,
-   `ide_search_text`, etc.) — the plugin opens the project first, then runs the tool.
-2. **Use `ide_project_status` to see all open projects** — not `get_project_modules`,
-   which only sees the currently focused window. If `ide_project_status` is unavailable,
-   skip this step and go straight to rule 1 with the path you need.
-3. **If you get `no_project_open`** — retry any tool call with a `project_path` from the
-   error's `managed_closed_projects` list.
-
-```
-# Wrong — warned the user instead of proceeding
-⚠️ IntelliJ — casehub-connectors is not open. Currently open: engine, life, aml...
-
-# Right — pass project_path silently, plugin opens it automatically
-ide_find_references { "project_path": "/Users/dev/casehub/connectors", ... }
-```
+1. **Always include `project_path` and proceed silently** — it
+   auto-opens any project with a `.idea` directory. Do not warn the
+   user. Do not ask them to open it. Just pass `project_path`.
+2. **Use `ide_project_status` to see all open projects** — not
+   `get_project_modules`.
+3. **If you get `no_project_open`** — retry with a `project_path`
+   from the error's `managed_closed_projects` list.
 
 ---
 
-## Decision rule
+## `mcp__intellij__*` — built-in server (limited scope)
 
-**`intellij-index`** for anything semantic: navigation, references, refactoring, diagnostics.
+Use only for operations `intellij-index` cannot do. **Cannot auto-open
+projects** — if a project isn't open, these tools fail silently.
 
-**`intellij`** for build/run, formatting, file browsing, database tools, and terminal.
+| Tool | When |
+|------|------|
+| `build_project` | Build/compile |
+| `execute_run_configuration` | Run named test or app configuration |
+| `execute_terminal_command` | Shell command in IDE terminal |
+| `get_project_dependencies` | Library dependency list |
+| `list_directory_tree` | Browse directory tree |
 
-**Native tools** (Read, Edit, Grep, Glob) for reading files, searching content, and targeted text edits where semantic awareness is not needed.
+Prefer `intellij-index` equivalents where they exist:
+- `get_file_problems` → use `ide_diagnostics`
+- `get_project_modules` → use `ide_project_status`
+- `find_files_by_name_keyword` → use `ide_find_file`
+- `replace_text_in_file` → use `ide_edit_member` / `ide_replace_member`
 
 ---
 
 ## Skill Chaining
 
-**Used as prerequisite by:** `java-dev`, `python-dev`, `ts-dev`
+**Used as prerequisite by:** `java-dev`, `python-dev`, `ts-dev`,
+`test-driven-development`, `systematic-debugging`,
+`subagent-driven-development`, `executing-plans`,
+`dispatching-parallel-agents`, `brainstorming`
