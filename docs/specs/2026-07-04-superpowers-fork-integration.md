@@ -153,10 +153,12 @@ dialogue. Hard gate: no implementation without approved design.
 
 **Rewrite approach:**
 - Accept work-start context when available: if work-start has run,
-  read `.meta/context.json` for issue group, protocols surfaced,
-  garden results. Don't redo what work-start already gathered. If
-  work-start hasn't run, skill gathers context itself (current
-  behaviour).
+  read `$WORKSPACE/design/.meta` for `issue` and `covers` (the
+  issue group). Protocols and garden results gathered by work-start
+  are transient (conversation context, not persisted) — brainstorming
+  re-gathers these itself via forage SEARCH and protocol SEARCH. If
+  work-start hasn't run (no `.meta` exists), skill gathers all
+  context itself (current behaviour).
 - Add forage SEARCH step early in exploration — surface relevant garden
   entries (gotchas, techniques) before the user starts answering
   design questions.
@@ -503,6 +505,20 @@ writing, SDO for descriptions, bulletproofing against rationalisation.
   skill architecture, supporting files, and flowcharts
 - No reference to soredium's validation infrastructure (validate_all.py,
   skill-validation.md, 2010 tests)
+- Supporting files need evaluation:
+  - `graphviz-conventions.dot` — dot-specific style rules; must be
+    replaced with Mermaid conventions (settled decision: Mermaid for
+    all flowcharts)
+  - `render-graphs.js` — renders dot flowcharts to SVG; needs
+    updating or removal after Mermaid migration
+  - `testing-skills-with-subagents.md` — testing methodology;
+    evaluate for soredium integration
+  - `persuasion-principles.md` — research foundation for
+    bulletproofing; keep as companion doc
+  - `anthropic-best-practices.md` — official skill authoring
+    guidance; keep as companion doc
+  - `examples/CLAUDE_MD_TESTING.md` — example material; evaluate
+    for currency
 
 **Rewrite approach:**
 - Remove content that duplicates CLAUDE.md: frontmatter format,
@@ -520,6 +536,9 @@ writing, SDO for descriptions, bulletproofing against rationalisation.
   than restating the rules.
 - Convert `dot digraph` flowcharts to Mermaid `flowchart TD`.
 - Strip `hortora:` prefixes from skill references.
+- Replace `graphviz-conventions.dot` with Mermaid-based conventions
+  (or fold into main SKILL.md if the content is small enough).
+  Remove or update `render-graphs.js` accordingly.
 
 #### 14. using-superpowers
 
@@ -735,7 +754,11 @@ Dependency-driven ordering. Each skill is written fresh, not patched.
 11. **finishing-a-development-branch** — audit work-end, fold gaps
 12. **soredium-native cross-references** — update code-review, fix-ci,
     language dev skills
-13. **commit and validate** — git add all, run validators, sync-local
+13. **cross-spec update** — update four-phase pipeline spec
+    (`docs/specs/2026-07-02-adr-four-phase-review-pipeline.md`) to note
+    superpowers integration has landed. File a comment on #66 noting
+    that `requesting-code-review` is now a soredium citizen.
+14. **commit and validate** — git add all, run validators, sync-local
 
 ## Verification
 
@@ -752,6 +775,8 @@ Dependency-driven ordering. Each skill is written fresh, not patched.
 - ide-tooling exhaustively catalogs all IntelliJ MCP tools
 - All code-authoring skills reference ide-tooling and prefer
   structural editing
+- Four-phase pipeline spec updated to note superpowers integration
+- Comment filed on #66 noting `requesting-code-review` integration
 
 ## Token budget analysis
 
