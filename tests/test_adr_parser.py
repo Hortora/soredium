@@ -198,6 +198,27 @@ class TestExtractConfirmations:
         confirmations = extract_confirmations(content)
         assert len(confirmations) == 0
 
+    def test_accepted_rejection(self) -> None:
+        from adversarial_design_review.parser import extract_confirmations
+
+        content = """\
+## Addressed Items
+- R1-01: resolved
+- R1-02: **accepted** — the implementor's rejection is correct
+- R1-03: still open — not convinced
+"""
+        confirmations = extract_confirmations(content)
+        assert len(confirmations) == 3
+
+        by_id = {c.issue_id: c for c in confirmations}
+        assert by_id["R1-01"].is_resolved is True
+        assert by_id["R1-01"].is_accepted is False
+        assert by_id["R1-02"].is_resolved is False
+        assert by_id["R1-02"].is_accepted is True
+        assert by_id["R1-03"].is_resolved is False
+        assert by_id["R1-03"].is_accepted is False
+        assert "not convinced" in by_id["R1-03"].reason
+
 
 # ---------------------------------------------------------------------------
 # 1d. Implementor response parsing

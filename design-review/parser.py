@@ -34,6 +34,7 @@ class Issue:
 class Confirmation:
     issue_id: str
     is_resolved: bool
+    is_accepted: bool = False
     reason: str = ""
 
 
@@ -71,7 +72,7 @@ _ISSUE_RESPONSE_RE: Final = re.compile(
 )
 
 _CONFIRMATION_RE: Final = re.compile(
-    r"R(\d+)-(\d+)\b[^#\n]*?\b(resolved|still\s+open)\b",
+    r"R(\d+)-(\d+)\b[^#\n]*?\b(resolved|accepted|still\s+open)\b",
     re.IGNORECASE,
 )
 
@@ -91,6 +92,28 @@ _KNOWN_SECTIONS: Final = frozenset({
     "settled decisions",
     "signals",
     "signal",
+    "summary",
+    "overview",
+    "overall assessment",
+    "final assessment",
+    "final sweep",
+    "final verification",
+    "final scan",
+    "verdict",
+    "strengths",
+    "background",
+    "context",
+    "conclusion",
+    "next steps",
+    "notes",
+    "references",
+    "critical issues",
+    "design issues",
+    "completeness gaps",
+    "completeness",
+    "verified correct",
+    "new issues",
+    "items resolved with remaining concerns",
 })
 
 
@@ -173,9 +196,10 @@ def extract_confirmations(content: str) -> list[Confirmation]:
         issue_id = f"R{match.group(1)}-{match.group(2)}"
         status_text = match.group(3).lower().strip()
         is_resolved = "resolved" in status_text and "still" not in status_text
+        is_accepted = "accepted" in status_text
 
         reason = ""
-        if not is_resolved:
+        if not is_resolved and not is_accepted:
             line_end = content.find("\n", match.end())
             if line_end == -1:
                 line_end = len(content)
@@ -186,6 +210,7 @@ def extract_confirmations(content: str) -> list[Confirmation]:
         confirmations.append(Confirmation(
             issue_id=issue_id,
             is_resolved=is_resolved,
+            is_accepted=is_accepted,
             reason=reason,
         ))
 

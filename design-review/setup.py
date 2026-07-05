@@ -31,6 +31,8 @@ def setup_review(
     title: str,
     source_dirs: list[str],
     adr_root: Path | None = None,
+    issue: str | None = None,
+    mode: str = "spec-review",
 ) -> Path:
     if adr_root is None:
         adr_root = Path.home() / "adr"
@@ -46,12 +48,20 @@ def setup_review(
     for agent in ["reviewer", "implementor"]:
         (ws / "agents" / agent).mkdir(parents=True, exist_ok=True)
 
-    # Store spec path and source dirs — both needed on resume
+    # Store spec path, source dirs, issue, and mode — all needed on resume
     (ws / ".spec-path").write_text(str(spec_path.resolve()))
     (ws / ".source-dirs").write_text("\n".join(source_dirs))
+    (ws / ".mode").write_text(mode)
+    if issue:
+        (ws / ".issue").write_text(issue)
+
+    # Symlink to spec for easy navigation from the review folder
+    spec_link = ws / "spec.md"
+    if not spec_link.exists():
+        spec_link.symlink_to(spec_path.resolve())
 
     _generate_context_md(ws, source_dirs, spec_path)
-    _generate_agent_claude_mds(ws)
+    _generate_agent_claude_mds(ws, mode=mode)
     _init_review_git(ws, adr_root)
 
     return ws
@@ -121,17 +131,25 @@ def _generate_context_md(ws: Path, source_dirs: list[str], spec_path: Path | Non
     (ws / "context.md").write_text(content)
 
 
-def _generate_agent_claude_mds(ws: Path) -> None:
-    for role, template_name, fallback_fn in [
+_MODE_GENERATORS: dict = {}
+
+
+def _generate_agent_claude_mds(ws: Path, mode: str = "spec-review") -> None:
+    generators = _MODE_GENERATORS.get(mode, {})
+    for role, template_name, default_fallback in [
         ("reviewer", "reviewer.md", _default_reviewer_md),
         ("implementor", "implementor.md", _default_implementor_md),
     ]:
-        template = TEMPLATES_DIR / template_name
         target = ws / "agents" / role / "CLAUDE.md"
-        if template.exists():
-            content = template.read_text()
+        mode_template = TEMPLATES_DIR / mode / f"{role}.md"
+        base_template = TEMPLATES_DIR / template_name
+        if mode_template.exists():
+            content = mode_template.read_text()
+        elif base_template.exists():
+            content = base_template.read_text()
         else:
-            content = fallback_fn()
+            gen = generators.get(role, default_fallback)
+            content = gen()
         content = content.replace("{REVIEW_ROOT}", str(ws))
         target.write_text(content)
 
@@ -143,7 +161,7 @@ def _init_review_git(ws: Path, adr_root: Path) -> None:
                        cwd=adr_root, capture_output=True, check=True)
         subprocess.run(["git", "config", "user.name", "ADR Tool"],
                        cwd=adr_root, capture_output=True, check=True)
-        (adr_root / ".gitignore").write_text("progress.log\n.system-prompt.md\n.spec-path\n")
+        (adr_root / ".gitignore").write_text("progress.log\n.system-prompt.md\n.spec-path\n.status\n.hil-timeout\n")
         subprocess.run(["git", "add", ".gitignore"], cwd=adr_root, capture_output=True, check=True)
         subprocess.run(["git", "commit", "-m", "init: adr root"],
                        cwd=adr_root, capture_output=True, check=True)
@@ -342,16 +360,32 @@ Any deferred concerns or out-of-scope items must be captured as GitHub
 issues, not just noted in the spec."""
 
 _INTELLIJ_OPEN = """\
-First, open the project in IntelliJ using ide_open_project with the
-project path from your prompt's source directories. If this fails, STOP
-and write "ABORTED: IntelliJ MCP not available.\""""
+Open ONLY your project repo using ide_open_project with the first
+source directory from your prompt. Do NOT use ide_open_workspace —
+aggregate workspaces with 100+ projects make every MCP call slow.
+If you need a second repo for cross-project context, use
+ide_import_modules to add just that repo. If ide_open_project fails,
+STOP and write "ABORTED: IntelliJ MCP not available.\""""
 
 _INTELLIJ_USE = """\
 Use IntelliJ index MCP for all code navigation — never bash grep/find.
+Pass project_path on EVERY MCP call to scope to your project — without
+it, calls search all open projects and are orders of magnitude slower.
 Use ide_find_class, ide_find_references, ide_find_symbol,
 ide_find_definition, ide_type_hierarchy, ide_call_hierarchy. When you
 need to analyse bytecode of a dependency, use ide_read_file with the
 qualified class name — do not download jars."""
+
+_NARRATION = """\
+Write a one-line status to {REVIEW_ROOT}/agents/{ROLE}/.status whenever
+you start a significant action — reading a file, navigating code,
+analysing a section, writing findings. Examples:
+  "Reading ARC42STORIES.MD for architectural context"
+  "Navigating WorkItemRef type hierarchy via ide_type_hierarchy"
+  "Analysing §4.1 payment flow for failure modes"
+  "Writing review findings to response file"
+This is monitored by the orchestrator and shown in progress.log.
+Without it, progress.log is silent for 10+ minutes."""
 
 _ARCH_DOCS = """\
 Use ARC42STORIES.MD (look in each source directory listed in context.md),
@@ -409,6 +443,36 @@ and defensible, defend it with clear rationale. Convergence toward the
 safest common denominator is a failure mode — the goal is the best
 design, not the least controversial one."""
 
+# ---------------------------------------------------------------------------
+# Pre-review specific constraints
+# ---------------------------------------------------------------------------
+
+_PRE_REVIEW_APPROACH_REVIEWER = """\
+Be skeptical and adversarial for the goal of finding the best approach.
+Challenge the approach itself, not the details — the spec may be an
+outline or early draft and implementation details will come later. Focus
+on whether this is the right way to solve the problem at all."""
+
+_PRE_REVIEW_STARTING_POINTS = """\
+Starting points (not restrictions — go beyond these):
+- Are there simpler ways to achieve the same goal?
+- Does this align with the platform's architectural trajectory?
+- Are there proven patterns, libraries, or industry practices this ignores?
+- Will this design age well or create technical debt?
+- Is the scope right — too much, too little?
+- Does this contradict existing architecture (ARC42STORIES, PLATFORM.md)?
+- What are the strongest arguments AGAINST this approach?"""
+
+_PRE_REVIEW_APPROACH_IMPLEMENTOR = """\
+You chose this approach for a reason. Defend it where it's sound, pivot
+where the reviewer raises a genuine concern. The goal is to commit to
+the right approach before investing in detailed spec writing."""
+
+_PRE_REVIEW_IMPLEMENTOR_SKEPTICISM = """\
+Be skeptical of the reviewer's alternatives — verify they actually solve
+the problem better, not just differently. A genuine improvement is worth
+pivoting for; a lateral move is not."""
+
 
 # ---------------------------------------------------------------------------
 # Assembly — role-specific composition from shared elements
@@ -437,6 +501,8 @@ def _default_reviewer_md() -> str:
         "### Code navigation",
         _INTELLIJ_OPEN,
         _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "reviewer"),
         "### Context sources",
         _ARCH_DOCS,
         _SPECS_AND_ADRS,
@@ -466,6 +532,8 @@ def _default_implementor_md() -> str:
         "### Code navigation",
         _INTELLIJ_OPEN,
         _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "implementor"),
         "### Context sources",
         _ARCH_DOCS,
         _SPECS_AND_ADRS,
@@ -495,5 +563,89 @@ where you agree, push back where you don't (with reasoning).
 
 {_IMPLEMENTOR_STAND_GROUND}
 """
+
+
+# ---------------------------------------------------------------------------
+# Pre-review mode generators
+# ---------------------------------------------------------------------------
+
+def _pre_review_reviewer_md() -> str:
+    constraints = _assemble_constraints([
+        _PRE_REVIEW_APPROACH_REVIEWER,
+        _PRE_REVIEW_STARTING_POINTS,
+        "### Code navigation",
+        _INTELLIJ_OPEN,
+        _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "reviewer"),
+        "### Context sources",
+        _ARCH_DOCS,
+        _SPECS_AND_ADRS,
+        _DIARIES,
+        _GIT_ISSUES,
+        _INTERNET,
+        "### Design philosophy",
+        _NO_END_USERS,
+        _DESIGN_QUALITY,
+    ])
+    return f"""\
+# Role: Approach Reviewer
+
+You are reviewing a proposed approach before detailed spec writing begins.
+Your job is to challenge the approach itself — is this the right way to
+solve the problem? Are there better alternatives? Will this age well?
+
+Do not critique implementation details, section structure, or completeness
+of edge cases — those belong in the spec review phase. Focus on the
+fundamental direction.
+
+{constraints}
+"""
+
+
+def _pre_review_implementor_md() -> str:
+    constraints = _assemble_constraints([
+        _PRE_REVIEW_APPROACH_IMPLEMENTOR,
+        _PRE_REVIEW_IMPLEMENTOR_SKEPTICISM,
+        "### Code navigation",
+        _INTELLIJ_OPEN,
+        _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "implementor"),
+        "### Context sources",
+        _ARCH_DOCS,
+        _SPECS_AND_ADRS,
+        _DIARIES,
+        _GIT_ISSUES,
+        _INTERNET,
+        "### Design philosophy",
+        _NO_END_USERS,
+        _DESIGN_QUALITY,
+    ])
+    return f"""\
+# Role: Approach Author
+
+You proposed this approach. Defend it where it's sound, pivot where the
+reviewer raises a genuine concern. The goal is to commit to the right
+approach before investing in detailed spec writing.
+
+{constraints}
+
+## Your responsibilities
+
+- Address every challenge from the tracker
+- If the reviewer proposes a better approach, evaluate it honestly —
+  pivot if it's genuinely better, not just different
+- Reject challenges that misunderstand the problem or the constraints
+- Escalate genuine strategic decisions to the human (DECISION_NEEDED)
+
+{_IMPLEMENTOR_STAND_GROUND}
+"""
+
+
+_MODE_GENERATORS["pre-review"] = {
+    "reviewer": _pre_review_reviewer_md,
+    "implementor": _pre_review_implementor_md,
+}
 
 

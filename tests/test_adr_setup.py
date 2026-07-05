@@ -224,3 +224,88 @@ class TestBuildClaudeCommand:
 
         add_dir_indices = [i for i, v in enumerate(cmd) if v == "--add-dir"]
         assert len(add_dir_indices) >= 4  # 3 source dirs + adr root
+
+
+class TestPreReviewMode:
+
+    def test_setup_stores_mode_file(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Approach\n")
+        ws = setup_review(
+            spec_path=spec, title="approach-check",
+            source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr", mode="pre-review",
+        )
+        mode_file = ws / ".mode"
+        assert mode_file.exists()
+        assert mode_file.read_text().strip() == "pre-review"
+
+    def test_setup_default_mode_is_spec_review(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Spec\n")
+        ws = setup_review(
+            spec_path=spec, title="test",
+            source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr",
+        )
+        assert (ws / ".mode").read_text().strip() == "spec-review"
+
+    def test_pre_review_reviewer_md_generated(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Approach\n")
+        ws = setup_review(
+            spec_path=spec, title="test",
+            source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr", mode="pre-review",
+        )
+        reviewer_md = (ws / "agents" / "reviewer" / "CLAUDE.md").read_text()
+        assert "Approach Reviewer" in reviewer_md
+        assert "challenge the approach" in reviewer_md.lower()
+
+    def test_pre_review_implementor_md_generated(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Approach\n")
+        ws = setup_review(
+            spec_path=spec, title="test",
+            source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr", mode="pre-review",
+        )
+        impl_md = (ws / "agents" / "implementor" / "CLAUDE.md").read_text()
+        assert "Approach Author" in impl_md
+        assert "pivot" in impl_md.lower()
+
+    def test_spec_review_uses_original_templates(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Spec\n")
+        ws = setup_review(
+            spec_path=spec, title="test",
+            source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr", mode="spec-review",
+        )
+        reviewer_md = (ws / "agents" / "reviewer" / "CLAUDE.md").read_text()
+        assert "Adversarial Design Reviewer" in reviewer_md
+
+    def test_pre_review_constraints_include_shared_elements(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Approach\n")
+        ws = setup_review(
+            spec_path=spec, title="test",
+            source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr", mode="pre-review",
+        )
+        reviewer_md = (ws / "agents" / "reviewer" / "CLAUDE.md").read_text()
+        assert "ide_open_project" in reviewer_md
+        assert ".status" in reviewer_md
+        assert "ARC42STORIES" in reviewer_md

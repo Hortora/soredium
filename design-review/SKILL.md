@@ -2,16 +2,20 @@
 name: design-review
 description: >
   Use when a design spec needs adversarial review — user says "review this design",
-  "design review", "tear this spec apart", or invokes /design-review.
+  "design review", "tear this spec apart", "pre-review this", or invokes /design-review.
   Orchestrates two independent Claude sessions (reviewer + implementor) with a Python PM
-  tracking every issue to evidence-based resolution. NOT for code review (use code-review).
-  NOT for brainstorming (use superpowers:brainstorming).
+  tracking every issue to evidence-based resolution. Supports multiple review phases:
+  pre-review (approach validation), spec review (detailed adversarial review).
+  NOT for code review (use code-review). NOT for brainstorming (use superpowers:brainstorming).
 ---
 
 # Adversarial Design Review
 
 Orchestrates adversarial design review between independent Claude sessions with
 issue-level tracking, evidence-based verification, and human-in-the-loop escalation.
+
+Supports multiple review phases — each phase uses different reviewer briefs and
+round counts appropriate to the review stage.
 
 ## Step 0 — Verify permissions (first run only)
 
@@ -29,6 +33,45 @@ If MISSING, add it using the `update-config` skill or tell the user:
 > `"Bash(python3 */.claude/skills/design-review/review.py *)"`
 
 This is a one-time setup. Once added, the skill runs without prompts.
+
+## Step 0.5 — Select review phase
+
+Present the phase checklist. Default selection depends on context:
+- If the user said "pre-review" or "validate the approach" → default to pre-review only
+- Otherwise → default to spec review only (current behavior)
+
+```
+Review phases — toggle to select:
+
+[ ] 1  Pre-review     Approach validation (2-3 rounds, lightweight)
+[x] 2  Spec review    Full adversarial review (4-10 rounds)
+[ ] 3  Code review    Implementation vs reviewed spec (coming soon)
+[ ] 4  Final review   Production-readiness check (coming soon)
+
+Type numbers to toggle, "go" to proceed:
+```
+
+Phases 3-4 are shown but disabled — they are not yet implemented.
+
+**If the user just says "design review" or "review this spec"**, skip the checklist
+entirely and proceed with spec review (phase 2). Only show the checklist when
+the user explicitly mentions phases or pre-review, or asks to choose.
+
+**If multiple phases are selected**, they run in sequence. Pre-review completes first
+(approach validated), then spec review begins on the same artifact. Between phases,
+tell the user:
+
+> Pre-review complete. The approach has been validated.
+> Ready to begin spec review on the same spec?
+
+Wait for confirmation before starting the next phase. The user may want to revise
+the spec based on pre-review findings before the heavier spec review.
+
+**Mapping to `--mode`:**
+- Phase 1 → `--mode pre-review`
+- Phase 2 → `--mode spec-review` (default, current behavior)
+- Phase 3 → `--mode code-review` (not yet available)
+- Phase 4 → `--mode final-review` (not yet available)
 
 ## Step 1 — Identify the spec
 
@@ -98,8 +141,12 @@ Then run in the background:
 python3 /Users/mdproctor/.claude/skills/design-review/review.py \
   --spec {spec_path} \
   --title {title} \
+  --mode {mode} \
   --source-dirs {dirs}
 ```
+
+Where `{mode}` is `pre-review` or `spec-review` based on the phase selected
+in Step 0.5. If mode is `spec-review` (the default), you may omit `--mode`.
 
 Use `run_in_background: true` on the Bash tool call.
 
@@ -110,22 +157,30 @@ to monitor progress. This is mandatory — without it, stalls go undetected.
 
 Use `CronCreate` with a 5-minute interval and this prompt:
 
-> Check the design review progress for {title}. Read the last 5 lines of
-> ~/adr/*/{title}-*/progress.log. If the last line contains "REVIEW DONE",
-> report the results to the user (read tracker.md for the summary) and delete
-> this cron job. If the last line contains "REVIEW FAILED" or "REVIEW CRASHED",
-> report the error and suggest resuming. If the progress log exists but hasn't
-> been updated in 10+ minutes (compare the last timestamp to now), warn the
-> user that the review appears stalled and suggest checking or resuming.
+> Check the design review progress for {title}. Read the last 10 lines of
+> ~/adr/*/{title}-*/progress.log.
+>
+> Terminal status lines:
+> - `REVIEW DONE` — read tracker.md AND the spec (symlinked at spec.md in
+>   the workspace). Validate that the review's changes are present in the
+>   spec, then report results. Delete this cron job.
+> - `REVIEW PAUSED` — the review needs human input (timeout or SIGTERM).
+>   Tell the user what happened and offer to resume.
+> - `REVIEW ABORTED` — user chose to abort. Report and delete cron.
+> - `REVIEW FAILED` / `REVIEW CRASHED` — report the error, suggest resuming.
+> - `REVIEW INTERRUPTED` — KeyboardInterrupt. Suggest resuming.
+>
+> Also check for `.hil-timeout` marker file in the workspace. If it exists,
+> the agent hit the soft timeout (600s) and is still running (up to 1800s
+> hard timeout). Read the marker, tell the user the agent is still exploring,
+> and ask: continue or kill? If kill, write "kill" to the marker file.
+> If continue, write "extend" to reset the timer.
+>
+> If progress.log exists but hasn't been updated in 10+ minutes and no
+> terminal line is present, warn the user that the review appears stalled.
 
 Set `recurring: true`. Store the cron job ID so you can delete it when the
 review completes.
-
-The script writes terminal status lines to progress.log:
-- `REVIEW DONE` — completed successfully
-- `REVIEW FAILED (exit N)` — main() returned non-zero
-- `REVIEW CRASHED: {error}` — unhandled exception
-- `REVIEW INTERRUPTED` — KeyboardInterrupt
 
 ## Step 6 — Handle notifications
 
@@ -157,13 +212,37 @@ If the process exits with an error:
      --source-dirs {dirs}
    ```
 
-## Step 8 — Present results
+## Step 8 — Validate and present results
 
-When the review completes, summarize:
-- Total rounds and issues raised
-- How many verified, accepted, deferred
-- Cost
-- Where to find the final spec and tracker
+When the review completes:
+
+1. **Read the final spec** — the spec is symlinked at `spec.md` in the workspace
+   (or read the path from `.spec-path`). Read it end to end.
+2. **Read the tracker** — `tracker.md` in the workspace. Check which items are
+   verified, accepted, deferred, and any still unresolved.
+3. **Validate** — confirm the tracker's verified/accepted items are actually
+   reflected in the spec. Don't trust the tracker alone — the spec is the evidence.
+4. **Report** — use this exact template (fill in values, omit lines that are 0):
+
+```
+Design review complete.
+
+- {N} rounds, {M} issues raised
+- {V} verified (reviewer confirmed fixes in the spec)
+- {A} accepted (reviewer accepted implementor's rejection)
+- {D} deferred
+- {U} unresolved
+- Cost: ${C}
+- Health: {no issues | N timeout(s), M error(s)}
+- Spec: file://{spec_path}
+
+{If unresolved items exist, list each with ID, title, and status}
+```
+
+Do NOT substitute a narrative summary for this template. The structured
+format is what the user needs to make a go/no-go decision. You can add
+a brief narrative AFTER the template if the review surfaced notable
+findings worth highlighting.
 
 ## Resuming a failed/interrupted review
 
@@ -182,6 +261,7 @@ from the next round.
 
 | User says | Flag |
 |-----------|------|
+| "pre-review this" / "validate the approach" | `--mode pre-review` |
 | "use sonnet" / "cheap mode" | `--model sonnet` |
 | "fresh sessions" / "no continuity" | `--fresh-sessions` |
 | "more rounds" / "up to 15" | `--max-rounds 15` |
@@ -189,6 +269,7 @@ from the next round.
 
 ## What this skill does NOT do
 
-- **Code review** — use `code-review` for that
-- **Brainstorming** — use `superpowers:brainstorming` to create the spec first
+- **Code review** — use `code-review` for that (Phase 3/4 coming soon)
+- **Brainstorming** — use `superpowers:brainstorming` to create the spec first,
+  then use pre-review to validate the approach
 - **Implementation** — this reviews design specs, not code

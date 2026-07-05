@@ -11,7 +11,13 @@ def build_reviewer_prompt(
     source_dirs: list[str] | None = None,
     workspace_root: str = "",
     spec_path: str = "",
+    mode: str = "spec-review",
 ) -> str:
+    if mode == "pre-review":
+        return _build_pre_review_reviewer_prompt(
+            round_num, focus_items, handover_path, convergence_override_ids,
+            source_dirs, workspace_root, spec_path,
+        )
     ws = workspace_root
     parts: list[str] = []
 
@@ -64,11 +70,26 @@ def build_reviewer_prompt(
             + ", ".join(focus_items)
         )
 
+    if round_num >= 2:
+        parts.append("")
+        parts.append(
+            "EVIDENCE REQUIRED for confirmations — bare assertions are not accepted:\n"
+            "- For each ADDRESSED item you confirm as resolved: cite the specific "
+            "section (§N.N) that addresses it and state what the section now says "
+            "that resolves the concern.\n"
+            "- For each REJECTED item you accept: state why the implementor's "
+            "reasoning is correct, with specific evidence.\n"
+            "- SIGNAL: APPROVED will only be accepted when ALL items are in terminal "
+            "state (VERIFIED or ACCEPTED). If any item is still OPEN, ADDRESSED, or "
+            "REJECTED, the tracker will override your APPROVED and send you back."
+        )
+
     if convergence_override_ids:
         parts.append("")
         parts.append(
-            "The following items were not explicitly confirmed in your previous review. "
-            "You MUST confirm each individually before APPROVED can be accepted: "
+            "The following items are NOT in terminal state. You MUST provide evidence "
+            "for each — cite the section that addresses it and explain how it resolves "
+            "the concern — before APPROVED can be accepted: "
             + ", ".join(convergence_override_ids)
         )
 
@@ -81,7 +102,12 @@ def build_implementor_prompt(
     source_dirs: list[str] | None = None,
     workspace_root: str = "",
     spec_path: str = "",
+    mode: str = "spec-review",
 ) -> str:
+    if mode == "pre-review":
+        return _build_pre_review_implementor_prompt(
+            round_num, focus_items, source_dirs, workspace_root, spec_path,
+        )
     ws = workspace_root
     parts: list[str] = []
 
@@ -146,3 +172,130 @@ def build_sweep_prompt(role: str, round_num: int, workspace_root: str = "") -> s
         f"This handover will inform your successor's approach. Be candid about "
         f"uncertainty."
     )
+
+
+# ---------------------------------------------------------------------------
+# Pre-review prompts — approach-level, not section-level
+# ---------------------------------------------------------------------------
+
+def _build_pre_review_reviewer_prompt(
+    round_num: int,
+    focus_items: list[str],
+    handover_path: str | None,
+    convergence_override_ids: list[str] | None = None,
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+) -> str:
+    ws = workspace_root
+    parts: list[str] = []
+
+    parts.append("ultrathink")
+    parts.append("")
+    parts.append(f"This is round {round_num} of a pre-review — validating the proposed approach.")
+    parts.append("")
+    parts.append(f"Read the proposal at {spec_path or ws + '/spec.md'}.")
+    if round_num > 1:
+        parts.append(f"Read the tracker at {ws}/tracker.md for issue status and focus items.")
+    parts.append("")
+    if source_dirs:
+        parts.append("Project directories (full read access — explore the existing codebase to understand what this approach builds on):")
+        for sd in source_dirs:
+            parts.append(f"  - {sd}")
+        parts.append("")
+    parts.append(
+        f"Write your review to {ws}/responses/reviewer-{round_num}.md following the structured "
+        "output format described in the review context appended to your system prompt."
+    )
+    parts.append("")
+    parts.append(
+        "Focus on the APPROACH, not the details. Is this the right way to solve "
+        "the problem? Are there better alternatives the author hasn't considered? "
+        "Will this age well? Is the scope right?"
+    )
+    parts.append("")
+    parts.append("Do NOT update the spec. Do NOT implement anything. Review only.")
+
+    if handover_path:
+        parts.append("")
+        parts.append(
+            f"Read the prior reviewer's handover at {ws}/{handover_path} for accumulated "
+            f"insights from previous rounds."
+        )
+
+    if round_num >= 2:
+        parts.append("")
+        parts.append(
+            "Check whether the author has addressed your concerns from the "
+            "previous round. If the approach has shifted, evaluate the new "
+            "direction on its own merits."
+        )
+
+    if focus_items:
+        parts.append("")
+        parts.append(
+            f"The tracker shows {len(focus_items)} open/contested items. Focus on these: "
+            + ", ".join(focus_items)
+        )
+
+    if round_num >= 2:
+        parts.append("")
+        parts.append(
+            "EVIDENCE REQUIRED for confirmations — bare assertions are not accepted:\n"
+            "- For each ADDRESSED item you confirm as resolved: cite what changed "
+            "in the proposal that addresses it.\n"
+            "- For each REJECTED item you accept: state why the author's "
+            "reasoning is correct.\n"
+            "- SIGNAL: APPROVED will only be accepted when ALL items are in terminal "
+            "state (VERIFIED or ACCEPTED)."
+        )
+
+    if convergence_override_ids:
+        parts.append("")
+        parts.append(
+            "The following items are NOT in terminal state. You MUST provide evidence "
+            "for each before APPROVED can be accepted: "
+            + ", ".join(convergence_override_ids)
+        )
+
+    return "\n".join(parts)
+
+
+def _build_pre_review_implementor_prompt(
+    round_num: int,
+    focus_items: list[str],
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+) -> str:
+    ws = workspace_root
+    parts: list[str] = []
+
+    parts.append(f"This is round {round_num} of a pre-review — validating the proposed approach.")
+    parts.append("")
+    parts.append(f"Read the reviewer's challenges at {ws}/responses/reviewer-{round_num}.md.")
+    parts.append(f"Read the tracker at {ws}/tracker.md for focus items and issue statuses.")
+    if source_dirs:
+        parts.append("")
+        parts.append("Project directories (full read access):")
+        for sd in source_dirs:
+            parts.append(f"  - {sd}")
+    parts.append("")
+    sp = spec_path or f"{ws}/spec.md"
+    parts.append(
+        f"Address each challenge. Where the reviewer has found a genuine weakness "
+        f"in the approach, revise the proposal at {sp}. Where they haven't, defend "
+        "your choice with specific reasoning. If the reviewer proposes a better "
+        "approach, evaluate it honestly — pivot if it's genuinely better."
+    )
+    parts.append("")
+    parts.append(
+        f"Write your response to {ws}/responses/implementor-{round_num}.md following the "
+        "structured output format described in the review context appended to your system prompt."
+    )
+
+    if focus_items:
+        parts.append("")
+        parts.append(f"Focus items: {', '.join(focus_items)}")
+
+    return "\n".join(parts)

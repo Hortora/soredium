@@ -49,8 +49,25 @@ from adversarial_design_review.setup import build_claude_command, setup_review
 from adversarial_design_review.tracker import Tracker, IssueStatus, verify_against_diff
 
 SESSION_TIMEOUT: Final = 600
+SESSION_HARD_TIMEOUT: Final = 1800
+
+
+class ReviewAborted(Exception):
+    """Raised when the user deliberately aborts the review."""
+
+
+class ReviewPaused(Exception):
+    """Raised when the review pauses for human intervention (non-interactive timeout)."""
+
+
+MAX_MISSING_FILE_RETRIES: Final = 2
 
 _LOG_FILE: Path | None = None
+_REVIEW_WS: Path | None = None
+_REVIEW_NAME: str = ""
+_SPEC_PATH: str = ""
+_TIMEOUT_COUNT: int = 0
+_ERROR_COUNT: int = 0
 
 
 def _log(msg: str) -> None:
@@ -64,7 +81,7 @@ def _log(msg: str) -> None:
 
 
 def main() -> int:
-    global _LOG_FILE
+    global _LOG_FILE, _REVIEW_WS, _REVIEW_NAME, _SPEC_PATH, _TIMEOUT_COUNT, _ERROR_COUNT
     args = parse_args()
 
     if not args.workspace and not (args.spec and args.title and args.source_dirs):
@@ -78,6 +95,11 @@ def main() -> int:
         if not ws.is_dir():
             print(f"Review not found: {ws}", flush=True)
             return 1
+        mode_file = ws / ".mode"
+        if mode_file.exists():
+            saved_mode = mode_file.read_text().strip()
+            if saved_mode in REVIEW_MODES:
+                args.mode = saved_mode
         if not args.title:
             name = ws.name
             args.title = name.rsplit("-", 2)[0]
@@ -89,6 +111,10 @@ def main() -> int:
                 ]
             else:
                 args.source_dirs = []
+        if not args.source_dirs:
+            _LOG_FILE = ws / "progress.log"
+            _log("WARNING: No source directories — agents will have no project context.")
+            _log("  Provide --source-dirs or create .source-dirs in the workspace.")
         _LOG_FILE = ws / "progress.log"
         last_round, reviewer_only = _detect_last_round(ws)
         if reviewer_only:
@@ -126,10 +152,15 @@ def main() -> int:
             spec_path=Path(args.spec),
             title=args.title,
             source_dirs=args.source_dirs,
+            issue=args.issue,
+            mode=args.mode,
             )
         _LOG_FILE = ws / "progress.log"
-        _log(f"Review: {ws}")
+        _log(f"Review ({args.mode}): {ws}")
 
+    _REVIEW_WS = ws
+    _REVIEW_NAME = f"{ws.parent.name}/{ws.name}"
+    _log(f"Mode: {args.mode}")
     _log(f"Progress log: {ws}/progress.log (tail -f to watch)")
 
     spec_path_file = ws / ".spec-path"
@@ -140,6 +171,7 @@ def main() -> int:
     else:
         _log("ERROR: No spec path found — provide --spec or use a workspace with .spec-path")
         return 1
+    _SPEC_PATH = spec_path
     _log(f"Spec: {spec_path}")
 
     tracker = Tracker(project_name=args.title)
@@ -169,7 +201,7 @@ def main() -> int:
             catchup_prompt = build_implementor_prompt(
                 round_num=start_round - 1, focus_items=focus,
                 source_dirs=args.source_dirs, workspace_root=str(ws),
-                spec_path=spec_path,
+                spec_path=spec_path, mode=args.mode,
             )
             catchup_prompt += "\n\nThis is a catch-up run. Previous rounds left these items unaddressed. Address all of them."
             catchup_file = f"responses/implementor-{start_round - 1}.md"
@@ -214,6 +246,7 @@ def main() -> int:
     implementor_session_id: str | None = None
     cumulative_cost = 0.0
     session_window = args.session_window
+    convergence_override_ids: list[str] | None = None
 
     for round_num in range(start_round, args.max_rounds + 1):
         _log(f"\n{'='*60}")
@@ -245,41 +278,49 @@ def main() -> int:
                 round_num=round_num,
                 focus_items=focus,
                 handover_path=handover_path,
+                convergence_override_ids=convergence_override_ids,
                 source_dirs=args.source_dirs,
                 workspace_root=str(ws),
                 spec_path=spec_path,
+                mode=args.mode,
             )
+            convergence_override_ids = None
 
             if is_window_end:
                 reviewer_prompt += "\n\n" + build_sweep_prompt("reviewer", round_num, workspace_root=str(ws))
 
             use_reviewer_sid = reviewer_session_id if not args.fresh_sessions else None
-            _log(f"  Reviewer {'(continued — cached context)' if use_reviewer_sid else '(fresh session)'}... (this may take 1-2 minutes)")
-            result = _invoke_claude(
-                ws, "reviewer", reviewer_prompt, args.source_dirs,
-                model, budget, effort,
-                session_id=use_reviewer_sid,
-                expected_file=f"responses/reviewer-{round_num}.md",
-            )
-            if result is None:
-                return 1
-
-            cumulative_cost += result.get("cost", 0.0)
-            new_sid = result.get("session_id")
-            if reviewer_session_id is None and new_sid:
-                reviewer_session_id = new_sid
-            elif reviewer_session_id and not new_sid and result.get("timed_out"):
-                _log(f"  WARNING: reviewer session ID lost to timeout — next round will be fresh")
-                reviewer_session_id = None
-            _log(f"  Reviewer done (${result.get('cost', 0.0):.2f})")
-
             reviewer_file = ws / "responses" / f"reviewer-{round_num}.md"
-            if not reviewer_file.exists():
-                _log(f"  WARNING: reviewer-{round_num}.md not created")
-                action = _prompt_hil("Response file missing. [r]etry / [a]bort? ")
+            missing_retries = 0
+            while True:
+                _log(f"  Reviewer {'(continued — cached context)' if use_reviewer_sid else '(fresh session)'}... (this may take 1-2 minutes)")
+                result = _invoke_claude(
+                    ws, "reviewer", reviewer_prompt, args.source_dirs,
+                    model, budget, effort,
+                    session_id=use_reviewer_sid,
+                    expected_file=f"responses/reviewer-{round_num}.md",
+                )
+                if result is None:
+                    return 1
+
+                cumulative_cost += result.get("cost", 0.0)
+                new_sid = result.get("session_id")
+                if reviewer_session_id is None and new_sid:
+                    reviewer_session_id = new_sid
+                elif reviewer_session_id and not new_sid and result.get("timed_out"):
+                    _log(f"  WARNING: reviewer session ID lost to timeout — next round will be fresh")
+                    reviewer_session_id = None
+                _log(f"  Reviewer done (${result.get('cost', 0.0):.2f})")
+
+                if reviewer_file.exists():
+                    break
+                missing_retries += 1
+                _log(f"  WARNING: reviewer-{round_num}.md not created (attempt {missing_retries}/{MAX_MISSING_FILE_RETRIES})")
+                if missing_retries >= MAX_MISSING_FILE_RETRIES:
+                    raise ReviewPaused(f"Reviewer failed to produce output after {MAX_MISSING_FILE_RETRIES} attempts — resume with --workspace to retry")
+                action = _prompt_hil("Response file missing. [r]etry / [a]bort? ", default="r")
                 if action == "a":
                     return 1
-                continue
 
             reviewer_content = reviewer_file.read_text()
             signal = extract_signal(reviewer_content)
@@ -299,8 +340,11 @@ def main() -> int:
                 if not tracker.has_issue(conf.issue_id):
                     continue
                 try:
-                    if conf.is_resolved:
-                        tracker.mark_verified(conf.issue_id)
+                    if conf.is_resolved or conf.is_accepted:
+                        try:
+                            tracker.mark_verified(conf.issue_id)
+                        except ValueError:
+                            tracker.mark_accepted(conf.issue_id)
                     else:
                         tracker.mark_contested(conf.issue_id, reason=conf.reason)
                 except ValueError:
@@ -318,79 +362,112 @@ def main() -> int:
                 if round_num < args.min_rounds:
                     _log(f"  APPROVED in round {round_num} but min-rounds is {args.min_rounds} — overriding to CONTINUE")
                     _log(f"  Reviewer: look deeper. You are not expected to approve before round {args.min_rounds}.")
-                elif not tracker.check_premature_convergence(round_num).should_override:
-                    _log(f"\n  APPROVED by reviewer in round {round_num}")
-                    _print_summary(tracker, round_num, cumulative_cost)
-                    return 0
+                elif not tracker.all_resolved():
+                    unresolved = tracker.get_focus_items()
+                    _log(f"  APPROVED overridden — {len(unresolved)} item(s) not in terminal state:")
+                    for iid in unresolved:
+                        issue = tracker.get_issue(iid)
+                        _log(f"    {iid}: {issue.summary} [{issue.status.value}]")
+                    convergence_override_ids = unresolved
                 else:
-                    _log(f"  Premature convergence detected — overriding APPROVED")
+                    convergence = tracker.check_premature_convergence(round_num)
+                    if not convergence.should_override:
+                        _log(f"\n  APPROVED by reviewer in round {round_num}")
+                        continue_with = _check_unresolved_before_done(tracker, round_num, cumulative_cost, spec_path)
+                        if not continue_with:
+                            _print_summary(tracker, round_num, cumulative_cost, spec_path)
+                            return 0
+                        _log(f"  Continuing with {len(continue_with)} item(s): {', '.join(continue_with)}")
+                    else:
+                        _log(f"  Premature convergence detected — overriding APPROVED")
+                        convergence_override_ids = convergence.unconfirmed_ids
 
             if signal.signal_type == "DECISION_NEEDED":
-                _handle_decision_needed(ws, tracker, round_num, signal.description or "")
+                _handle_decision_needed(ws, tracker, round_num, signal.description or "", role="reviewer")
                 tracker.write(ws / "tracker.md")
-                _git_commit(ws, ["tracker.md", f"decisions/decision-{round_num}.md"],
+                _git_commit(ws, ["tracker.md", f"decisions/decision-{round_num}-reviewer.md"],
                              f"tracker: round {round_num} human decision")
 
         # --- Step 3: Implementor ---
         focus = tracker.get_focus_items()
         implementor_prompt = build_implementor_prompt(
             round_num=round_num, focus_items=focus, source_dirs=args.source_dirs,
-            workspace_root=str(ws), spec_path=spec_path,
+            workspace_root=str(ws), spec_path=spec_path, mode=args.mode,
         )
 
         if is_window_end:
             implementor_prompt += "\n\n" + build_sweep_prompt("implementor", round_num, workspace_root=str(ws))
 
         use_impl_sid = implementor_session_id if not args.fresh_sessions else None
-        _log(f"  Implementor {'(continued — cached context)' if use_impl_sid else '(fresh session)'}... (this may take 1-2 minutes)")
-        result = _invoke_claude(
-            ws, "implementor", implementor_prompt, args.source_dirs,
-            model, budget, effort,
-            session_id=use_impl_sid,
-            expected_file=f"responses/implementor-{round_num}.md",
-            focus_count=len(focus),
-        )
-        if result is None:
-            return 1
-
-        cumulative_cost += result.get("cost", 0.0)
-        new_sid = result.get("session_id")
-        if implementor_session_id is None and new_sid:
-            implementor_session_id = new_sid
-        elif implementor_session_id and not new_sid and result.get("timed_out"):
-            _log(f"  WARNING: implementor session ID lost to timeout — next round will be fresh")
-            implementor_session_id = None
-        _log(f"  Implementor done (${result.get('cost', 0.0):.2f})")
-
         implementor_file = ws / "responses" / f"implementor-{round_num}.md"
+        missing_retries = 0
+        while True:
+            _log(f"  Implementor {'(continued — cached context)' if use_impl_sid else '(fresh session)'}... (this may take 1-2 minutes)")
+            result = _invoke_claude(
+                ws, "implementor", implementor_prompt, args.source_dirs,
+                model, budget, effort,
+                session_id=use_impl_sid,
+                expected_file=f"responses/implementor-{round_num}.md",
+                focus_count=len(focus),
+            )
+            if result is None:
+                return 1
 
-        # Timeout with partial output — find what's missing and retry
-        if implementor_file.exists() and result.get("timed_out"):
-            addressed_ids = {r.issue_id for r in extract_issue_responses(implementor_file.read_text())}
-            missing = [f for f in focus if f not in addressed_ids]
-            if missing:
-                _log(f"  {len(missing)} items unaddressed after timeout: {', '.join(missing)} — retrying")
-                retry_prompt = build_implementor_prompt(
-                    round_num=round_num, focus_items=missing,
-                    source_dirs=args.source_dirs, workspace_root=str(ws),
-                    spec_path=spec_path,
-                )
-                retry_prompt += f"\n\nYour previous response is at responses/implementor-{round_num}.md — read it. Address only the items listed above that are not yet covered. Do not duplicate items already addressed."
-                retry_result = _invoke_claude(
-                    ws, "implementor", retry_prompt, args.source_dirs,
-                    model, budget, effort,
-                    expected_file=f"responses/implementor-{round_num}.md",
-                    focus_count=len(missing),
-                )
-                if retry_result:
-                    cumulative_cost += retry_result.get("cost", 0.0)
+            cumulative_cost += result.get("cost", 0.0)
+            new_sid = result.get("session_id")
+            if implementor_session_id is None and new_sid:
+                implementor_session_id = new_sid
+            elif implementor_session_id and not new_sid and result.get("timed_out"):
+                _log(f"  WARNING: implementor session ID lost to timeout — next round will be fresh")
+                implementor_session_id = None
+            _log(f"  Implementor done (${result.get('cost', 0.0):.2f})")
 
-        if not implementor_file.exists():
-            _log(f"  WARNING: implementor-{round_num}.md not created")
-            action = _prompt_hil("Response file missing. [r]etry / [a]bort? ")
+            # Timeout with partial output — find what's missing and retry
+            if implementor_file.exists() and result.get("timed_out"):
+                partial_content = implementor_file.read_text()
+                partial_responses = extract_issue_responses(partial_content)
+                addressed_ids = {r.issue_id for r in partial_responses}
+                missing = [f for f in focus if f not in addressed_ids]
+                if missing:
+                    # Pre-apply partial responses so they survive if retry overwrites
+                    for resp in partial_responses:
+                        if not tracker.has_issue(resp.issue_id):
+                            continue
+                        try:
+                            if resp.status == "FIXED":
+                                tracker.mark_addressed(resp.issue_id, section_ref=resp.section_ref or "",
+                                                       commit_hash="", rationale=resp.body[:200])
+                            elif resp.status == "REJECTED":
+                                tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
+                            elif resp.status == "ESCALATED":
+                                tracker.mark_deferred(resp.issue_id, note="DECISION_NEEDED")
+                        except ValueError:
+                            pass
+                    _log(f"  {len(missing)} items unaddressed after timeout: {', '.join(missing)} — retrying")
+                    retry_prompt = build_implementor_prompt(
+                        round_num=round_num, focus_items=missing,
+                        source_dirs=args.source_dirs, workspace_root=str(ws),
+                        spec_path=spec_path, mode=args.mode,
+                    )
+                    retry_prompt += f"\n\nYour previous response is at responses/implementor-{round_num}.md — read it. Address only the items listed above that are not yet covered. Do not duplicate items already addressed."
+                    retry_result = _invoke_claude(
+                        ws, "implementor", retry_prompt, args.source_dirs,
+                        model, budget, effort,
+                        expected_file=f"responses/implementor-{round_num}.md",
+                        focus_count=len(missing),
+                    )
+                    if retry_result:
+                        cumulative_cost += retry_result.get("cost", 0.0)
+
+            if implementor_file.exists():
+                break
+            missing_retries += 1
+            _log(f"  WARNING: implementor-{round_num}.md not created (attempt {missing_retries}/{MAX_MISSING_FILE_RETRIES})")
+            if missing_retries >= MAX_MISSING_FILE_RETRIES:
+                raise ReviewPaused(f"Implementor failed to produce output after {MAX_MISSING_FILE_RETRIES} attempts — resume with --workspace to retry")
+            action = _prompt_hil("Response file missing. [r]etry / [a]bort? ", default="r")
             if action == "a":
                 return 1
-            continue
 
         # Commit implementor response to review folder
         _git_commit(ws, [f"responses/implementor-{round_num}.md"],
@@ -427,6 +504,7 @@ def main() -> int:
                         if not vr.section_changed and resp.section_ref:
                             issue = tracker.get_issue(resp.issue_id)
                             issue.notes = f"claimed §{resp.section_ref} but no diff found"
+                            _log(f"  WARNING: {resp.issue_id} claims §{resp.section_ref} but section not found in diff")
                     elif resp.status == "REJECTED":
                         tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
                     elif resp.status == "ESCALATED":
@@ -443,7 +521,7 @@ def main() -> int:
                 )
 
             if impl_signal.signal_type == "DECISION_NEEDED":
-                _handle_decision_needed(ws, tracker, round_num, impl_signal.description or "")
+                _handle_decision_needed(ws, tracker, round_num, impl_signal.description or "", role="implementor")
 
         tracker.current_round = round_num
         tracker.record_round(round_num)
@@ -456,8 +534,10 @@ def main() -> int:
 
         if all_resolved:
             _log(f"\n  All issues resolved in round {round_num}")
-            _print_summary(tracker, round_num, cumulative_cost)
-            return 0
+            continue_with = _check_unresolved_before_done(tracker, round_num, cumulative_cost, spec_path)
+            if not continue_with:
+                _print_summary(tracker, round_num, cumulative_cost, spec_path)
+                return 0
 
         cost_per_round = cumulative_cost / round_num if round_num > 0 else 0
         _log(f"  Round {round_num} complete — ~${cost_per_round:.2f}/round, ${cumulative_cost:.2f} cumulative")
@@ -469,7 +549,7 @@ def main() -> int:
     _log(f"\n{'='*60}")
     _log(f"  CHECKPOINT — Round {args.max_rounds}")
     _log(f"{'='*60}")
-    _print_summary(tracker, args.max_rounds, cumulative_cost)
+    _print_summary(tracker, args.max_rounds, cumulative_cost, spec_path)
     _log(f"\nOptions:")
     _log(f"  [c] Continue for N more rounds")
     _log(f"  [d] Defer remaining and finish")
@@ -481,17 +561,26 @@ def main() -> int:
         _log("  Non-interactive mode — deferring remaining items and finishing.")
         choice = "d"
     if choice == "d":
-        for iid in tracker.get_focus_items():
+        deferred_ids = tracker.get_focus_items()
+        for iid in deferred_ids:
             try:
                 tracker.mark_deferred(iid, note="deferred at checkpoint")
             except ValueError:
                 issue = tracker.get_issue(iid)
                 issue.status = IssueStatus.DEFERRED
                 issue.notes = "deferred at checkpoint (forced)"
+        checkpoint_file = ws / "responses" / f"checkpoint-{args.max_rounds}.md"
+        checkpoint_lines = [f"### {iid}: ESCALATED" for iid in deferred_ids]
+        checkpoint_lines.append("\n---\nSIGNAL: CONTINUE\n")
+        checkpoint_file.write_text("\n".join(checkpoint_lines))
         tracker.write(ws / "tracker.md")
-        _print_summary(tracker, args.max_rounds, cumulative_cost)
+        _git_commit(ws, ["tracker.md", f"responses/checkpoint-{args.max_rounds}.md"],
+                     "tracker: checkpoint — remaining items deferred")
+        _print_summary(tracker, args.max_rounds, cumulative_cost, spec_path)
     elif choice.startswith("c"):
-        _log("Re-run with --max-rounds to continue.")
+        _log(f"Re-run with --workspace {ws} --max-rounds N to continue.")
+    elif choice == "a":
+        raise ReviewAborted("User aborted at checkpoint")
 
     return 0
 
@@ -512,6 +601,7 @@ def _invoke_claude(
     expected_file: str | None = None,
     focus_count: int = 0,
 ) -> dict | None:
+    global _TIMEOUT_COUNT, _ERROR_COUNT
     cmd = build_claude_command(
         role_dir=ws / "agents" / role,
         context_md=ws / "context.md",
@@ -525,6 +615,7 @@ def _invoke_claude(
     )
 
     import time
+    invoke_retries = 0
 
     while True:
         proc = subprocess.Popen(
@@ -537,6 +628,9 @@ def _invoke_claude(
         file_seen = False
         file_size = 0
         check_interval = 30
+
+        soft_timeout_logged = False
+        hil_marker = ws / ".hil-timeout"
 
         while proc.poll() is None:
             elapsed = int(time.time() - start_time)
@@ -555,54 +649,108 @@ def _invoke_claude(
                     elif elapsed >= 120 and not file_seen:
                         _log(f"    [{elapsed}s] no output file yet — agent may be reading/exploring")
 
-                if elapsed >= SESSION_TIMEOUT:
+                # Check agent narration status file
+                status_file = ws / "agents" / role / ".status"
+                if status_file.exists():
+                    try:
+                        agent_status = status_file.read_text().strip()
+                        if agent_status:
+                            _log(f"    [{elapsed}s] {role}: {agent_status}")
+                            status_file.write_text("")
+                    except OSError:
+                        pass
+
+                # Soft timeout: log status, write HIL marker, keep running
+                if elapsed >= SESSION_TIMEOUT and not soft_timeout_logged:
+                    soft_timeout_logged = True
+                    _TIMEOUT_COUNT += 1
+                    if file_seen:
+                        _log(f"  [{elapsed}s] SOFT TIMEOUT — output file exists ({file_size} bytes), agent still running")
+                        _log(f"  Agent will continue until {SESSION_HARD_TIMEOUT}s or HIL response")
+                    else:
+                        _log(f"  [{elapsed}s] SOFT TIMEOUT — no output yet, agent still exploring")
+                        _log(f"  Agent will continue until {SESSION_HARD_TIMEOUT}s or HIL response")
+                    hil_marker.write_text(f"timeout:{elapsed}\nfile_seen:{file_seen}\nfile_size:{file_size}\n")
+
+                # Check for HIL response: parent writes "kill" or "extend" to marker
+                if soft_timeout_logged and hil_marker.exists():
+                    response = hil_marker.read_text().strip()
+                    if response == "kill":
+                        _log(f"  [{elapsed}s] HIL: kill requested")
+                        hil_marker.unlink(missing_ok=True)
+                        proc.kill()
+                        proc.wait()
+                        break
+                    elif response == "extend":
+                        _log(f"  [{elapsed}s] HIL: extending timeout by {SESSION_TIMEOUT}s")
+                        start_time = time.time() - SESSION_TIMEOUT + SESSION_TIMEOUT
+                        soft_timeout_logged = False
+                        hil_marker.unlink(missing_ok=True)
+
+                # Hard timeout: kill unconditionally
+                if elapsed >= SESSION_HARD_TIMEOUT:
+                    _log(f"  [{elapsed}s] HARD TIMEOUT — killing agent")
                     proc.kill()
                     proc.wait()
-                    if file_seen:
-                        _log(f"  Timed out after {elapsed}s — output file written ({file_size} bytes)")
-                        ef = ws / expected_file
-                        if ef.exists():
-                            content = ef.read_text()
-                            import re
-                            addressed = len(re.findall(r"###\s+R\d+-\d+:\s+(?:FIXED|REJECTED|ESCALATED)", content, re.IGNORECASE))
-                            findings = len(re.findall(r"^###\s+", content, re.MULTILINE))
-                            if "implementor" in expected_file and addressed > 0:
-                                if focus_count > 0:
-                                    pct = int(addressed / focus_count * 100)
-                                    _log(f"  Progress: {addressed}/{focus_count} issues addressed ({pct}%)")
-                                else:
-                                    _log(f"  Progress: {addressed} issues addressed in partial response")
-                            elif "reviewer" in expected_file and findings > 0:
-                                _log(f"  Progress: {findings} findings written in partial response")
-                        action = _prompt_hil(
-                            "Output exists. [c]ontinue with it / [r]etry / [a]bort? ",
-                            default="c",
-                        )
-                        if action == "r":
-                            continue
-                        if action == "a":
-                            return None
-                        return {"cost": 0.0, "timed_out": True}
-                    else:
-                        _log(f"  Timed out after {elapsed}s — no output file written")
-                        _log(f"  Agent may be stuck. Check IntelliJ, permissions, or connectivity.")
-                        action = _prompt_hil(
-                            "No output. [r]etry / [a]bort / [s]kip? ",
-                            default="s",
-                        )
-                        if action == "r":
-                            continue
-                        if action == "a":
-                            return None
-                        return {"cost": 0.0, "timed_out": True}
+                    hil_marker.unlink(missing_ok=True)
+                    break
 
             time.sleep(1)
+
+        hil_marker.unlink(missing_ok=True)
+
+        # Drain pipes after kill to capture any error output
+        if proc.returncode is not None and proc.returncode < 0:
+            try:
+                stderr_after_kill = proc.stderr.read()[:500] if proc.stderr else ""
+                if stderr_after_kill:
+                    _log(f"  stderr after timeout: {stderr_after_kill[:200]}")
+                    if "permission" in stderr_after_kill.lower() or "trust" in stderr_after_kill.lower():
+                        _log(f"  LIKELY CAUSE: permission prompt blocked the agent")
+                        _log(f"  Check ~/.claude/settings.json permissions.allow")
+            except Exception:
+                pass
+
+        # If process was killed by timeout, handle the result
+        if proc.returncode is not None and proc.returncode < 0:
+            if file_seen and expected_file:
+                ef = ws / expected_file
+                if ef.exists():
+                    content = ef.read_text()
+                    import re
+                    addressed = len(re.findall(r"###\s+R\d+-\d+:\s+(?:FIXED|REJECTED|ESCALATED)", content, re.IGNORECASE))
+                    findings = len(re.findall(r"^###\s+", content, re.MULTILINE))
+                    if "implementor" in expected_file and addressed > 0:
+                        if focus_count > 0:
+                            pct = int(addressed / focus_count * 100)
+                            _log(f"  Progress: {addressed}/{focus_count} issues addressed ({pct}%)")
+                        else:
+                            _log(f"  Progress: {addressed} issues addressed in partial response")
+                    elif "reviewer" in expected_file and findings > 0:
+                        _log(f"  Progress: {findings} findings written in partial response")
+                action = _prompt_hil(
+                    "Agent timed out. [c]ontinue with output / [r]etry / [a]bort? " if file_seen
+                    else f"No output (attempt {invoke_retries + 1}). [r]etry / [a]bort / [s]kip? ",
+                    default="c" if file_seen else "r",
+                )
+                if action == "r":
+                    invoke_retries += 1
+                    if invoke_retries >= MAX_MISSING_FILE_RETRIES:
+                        raise ReviewPaused(f"Agent timed out {invoke_retries} times — resume with --workspace to retry")
+                    continue
+                if action == "a":
+                    return None
+                if file_seen:
+                    return {"cost": 0.0, "timed_out": True}
+                return {"cost": 0.0, "timed_out": True}
+            continue
 
         stdout = proc.stdout.read()
         stderr = proc.stderr.read()
         result_code = proc.returncode
 
         if result_code != 0:
+            _ERROR_COUNT += 1
             stderr_text = stderr[:500] if stderr else ""
             if "permission" in stderr_text.lower() or "trust" in stderr_text.lower():
                 _log(f"  PERMISSION ERROR: claude -p needs permission approval.")
@@ -691,16 +839,16 @@ def _rebuild_tracker(ws: Path, tracker: Tracker, through_round: int) -> None:
             for conf in extract_confirmations(content):
                 if not tracker.has_issue(conf.issue_id):
                     continue
-                if conf.is_resolved:
-                    try:
-                        tracker.mark_verified(conf.issue_id)
-                    except ValueError:
-                        pass
-                else:
-                    try:
+                try:
+                    if conf.is_resolved or conf.is_accepted:
+                        try:
+                            tracker.mark_verified(conf.issue_id)
+                        except ValueError:
+                            tracker.mark_accepted(conf.issue_id)
+                    else:
                         tracker.mark_contested(conf.issue_id, reason=conf.reason)
-                    except ValueError:
-                        pass
+                except ValueError:
+                    pass
 
             for assumption in extract_assumptions(content):
                 tracker.add_assumption(assumption, round_surfaced=rn, source=f"reviewer-{rn}.md")
@@ -727,9 +875,23 @@ def _rebuild_tracker(ws: Path, tracker: Tracker, through_round: int) -> None:
             for decision in extract_settled_decisions(content):
                 tracker.add_settled_decision(decision.text, from_issue=decision.from_issue, rationale="")
 
+        # Checkpoint deferrals (written at max-rounds checkpoint)
+        checkpoint_file = ws / "responses" / f"checkpoint-{rn}.md"
+        if checkpoint_file.exists():
+            content = checkpoint_file.read_text()
+            for resp in extract_issue_responses(content):
+                if not tracker.has_issue(resp.issue_id):
+                    continue
+                try:
+                    if resp.status == "ESCALATED":
+                        tracker.mark_deferred(resp.issue_id, note="deferred at checkpoint")
+                except ValueError:
+                    issue = tracker.get_issue(resp.issue_id)
+                    issue.status = IssueStatus.DEFERRED
+                    issue.notes = "deferred at checkpoint (forced)"
+
         tracker.current_round = rn
         tracker.record_round(rn)
-
 
 
 def _git_commit(ws: Path, files: list[str], message: str) -> None:
@@ -788,7 +950,7 @@ def _find_latest_handover(ws: Path, role: str) -> Path | None:
 
 def _handle_decision_needed(
     ws: Path, tracker: Tracker, round_num: int, description: str,
-    issue_id: str = "",
+    issue_id: str = "", role: str = "",
 ) -> None:
     _log(f"\n  {'─'*50}")
     _log(f"  DECISION NEEDED (round {round_num})")
@@ -804,14 +966,15 @@ def _handle_decision_needed(
         decision = "skip"
         _log("  Non-interactive mode — deferring decision.")
     if decision.lower() == "abort":
-        raise RuntimeError("Review aborted by user at DECISION_NEEDED prompt")
+        raise ReviewAborted("User aborted at DECISION_NEEDED prompt")
 
     parts = [f"---", f"round: {round_num}"]
     if issue_id:
         parts.append(f"issue: {issue_id}")
     parts.extend([f"decision: {decision}", "---", ""])
 
-    decision_file = ws / "decisions" / f"decision-{round_num}.md"
+    suffix = f"-{role}" if role else ""
+    decision_file = ws / "decisions" / f"decision-{round_num}{suffix}.md"
     decision_file.write_text("\n".join(parts))
 
 
@@ -828,19 +991,78 @@ def _prompt_hil(message: str, default: str = "s") -> str:
     return input(f"  {message}").strip().lower()
 
 
-def _print_summary(tracker: Tracker, round_num: int, cost: float) -> None:
+def _check_unresolved_before_done(
+    tracker: Tracker, round_num: int, cumulative_cost: float,
+    spec_path: str = "",
+) -> list[str]:
+    """HIL gate before accepting review completion with unresolved items.
+
+    Returns issue IDs to continue with, or empty list to accept the review.
+    """
+    focus = tracker.get_focus_items()
+    if not focus:
+        return []
+
+    _log(f"\n  {len(focus)} unresolved item(s):")
+    items: list[str] = []
+    for i, iid in enumerate(focus, 1):
+        issue = tracker.get_issue(iid)
+        _log(f"    {i}. {iid}: {issue.summary} [{issue.status.value}]")
+        items.append(iid)
+
+    _print_summary(tracker, round_num, cumulative_cost, spec_path)
+    action = _prompt_hil(
+        "[a]ccept review / [f]ix all / or item numbers (e.g. 1,3): ",
+        default="a",
+    )
+
+    if action == "a":
+        return []
+    if action == "f":
+        return items
+    try:
+        indices = [int(x.strip()) for x in action.split(",") if x.strip()]
+        selected = [items[i - 1] for i in indices if 1 <= i <= len(items)]
+        return selected if selected else []
+    except (ValueError, IndexError):
+        _log(f"  Could not parse '{action}' — accepting review")
+        return []
+
+
+def _print_summary(tracker: Tracker, round_num: int, cost: float, spec_path: str = "") -> None:
     counts = {"VERIFIED": 0, "ACCEPTED": 0, "DEFERRED": 0, "OPEN": 0, "CONTESTED": 0, "ADDRESSED": 0, "REJECTED": 0}
     for issue in tracker.issues():
         counts[issue.status.value] = counts.get(issue.status.value, 0) + 1
 
     total = len(tracker.issues())
-    _log(f"\n  Issues:  {total} raised")
+    unresolved = counts['OPEN'] + counts['CONTESTED'] + counts['ADDRESSED'] + counts['REJECTED']
+    _log(f"\n  Rounds:  {round_num}")
+    _log(f"  Issues:  {total} raised")
     _log(f"           {counts['VERIFIED']} verified")
     _log(f"           {counts['ACCEPTED']} accepted")
     _log(f"           {counts['DEFERRED']} deferred")
-    _log(f"           {counts['OPEN'] + counts['CONTESTED'] + counts['ADDRESSED'] + counts['REJECTED']} unresolved")
+    _log(f"           {unresolved} unresolved")
     _log(f"  Cost:    ${cost:.2f}")
-    _log(f"  Spec:    {tracker.project_name}")
+    health_parts = []
+    if _TIMEOUT_COUNT:
+        health_parts.append(f"{_TIMEOUT_COUNT} timeout(s)")
+    if _ERROR_COUNT:
+        health_parts.append(f"{_ERROR_COUNT} error(s)")
+    _log(f"  Health:  {', '.join(health_parts) if health_parts else 'no issues'}")
+    if spec_path:
+        _log(f"  Spec:    file://{spec_path}")
+    else:
+        _log(f"  Spec:    {tracker.project_name}")
+
+
+REVIEW_MODES: Final = ("pre-review", "spec-review", "code-review", "final-review")
+
+MODE_DEFAULTS: Final = {
+    "pre-review": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 3.0},
+    "spec-review": {"max_rounds": 10, "min_rounds": 4, "budget_per_session": 5.0},
+    "code-review": {"max_rounds": 4, "min_rounds": 2, "budget_per_session": 5.0},
+    "final-review": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 5.0},
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -848,29 +1070,86 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--spec", default=None, help="Path to the design spec (not needed with --workspace)")
     parser.add_argument("--title", default=None, help="Short name for the review (not needed with --workspace)")
     parser.add_argument("--source-dirs", nargs="+", default=None, help="Context directories")
-    parser.add_argument("--max-rounds", type=int, default=10)
-    parser.add_argument("--min-rounds", type=int, default=4,
-                        help="Minimum rounds before APPROVED is accepted (default 4)")
+    parser.add_argument("--mode", choices=REVIEW_MODES, default="spec-review",
+                        help="Review phase (default: spec-review)")
+    parser.add_argument("--max-rounds", type=int, default=None)
+    parser.add_argument("--min-rounds", type=int, default=None,
+                        help="Minimum rounds before APPROVED is accepted")
     parser.add_argument("--session-window", type=int, default=5)
     parser.add_argument("--model", default="opus")
-    parser.add_argument("--budget-per-session", type=float, default=5.0)
+    parser.add_argument("--budget-per-session", type=float, default=None)
     parser.add_argument("--fresh-sessions", action="store_true")
     parser.add_argument("--workspace", default=None,
                         help="Resume from an existing workspace directory")
-    return parser.parse_args()
+    parser.add_argument("--issue", default=None,
+                        help="GitHub issue number associated with this spec")
+    args = parser.parse_args()
+    defaults = MODE_DEFAULTS[args.mode]
+    if args.max_rounds is None:
+        args.max_rounds = defaults["max_rounds"]
+    if args.min_rounds is None:
+        args.min_rounds = defaults["min_rounds"]
+    if args.budget_per_session is None:
+        args.budget_per_session = defaults["budget_per_session"]
+    return args
+
+
+def _build_notify_command(message: str, ws: Path | None = None) -> list[str]:
+    """Build the notification command. Separated for testability."""
+    import shutil
+    tn = shutil.which("terminal-notifier")
+    if tn:
+        cmd = [tn, "-title", "Design Review", "-message", message]
+        if ws:
+            cmd.extend(["-execute", f"open {ws}"])
+        return cmd
+    return ["osascript", "-e", f'display notification "{message}" with title "Design Review"']
+
+
+def _notify(message: str, ws: Path | None = None) -> None:
+    try:
+        cmd = _build_notify_command(message, ws)
+        subprocess.run(cmd, capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
+def _handle_sigterm(signum, frame):
+    _log("REVIEW PAUSED: received SIGTERM — parent session likely ended")
+    _notify(f"{_REVIEW_NAME or 'unknown'}\nPaused — parent session ended", _REVIEW_WS)
+    sys.exit(3)
 
 
 if __name__ == "__main__":
+    import signal
+    signal.signal(signal.SIGTERM, _handle_sigterm)
     try:
         code = main()
+        name = _REVIEW_NAME or "unknown"
+        spec = Path(_SPEC_PATH).name if _SPEC_PATH else ""
+        label = f"{name}\n{spec}" if spec else name
         if code == 0:
             _log("REVIEW DONE")
+            _notify(f"{label}\nReview complete", _REVIEW_WS)
         else:
             _log(f"REVIEW FAILED (exit {code})")
+            _notify(f"{label}\nReview failed (exit {code})", _REVIEW_WS)
         sys.exit(code)
     except KeyboardInterrupt:
         _log("REVIEW INTERRUPTED")
         sys.exit(130)
+    except ReviewAborted as exc:
+        _log(f"REVIEW ABORTED: {exc}")
+        spec = Path(_SPEC_PATH).name if _SPEC_PATH else ""
+        label = f"{_REVIEW_NAME or 'unknown'}\n{spec}" if spec else (_REVIEW_NAME or "unknown")
+        _notify(f"{label}\nReview aborted", _REVIEW_WS)
+        sys.exit(2)
+    except ReviewPaused as exc:
+        _log(f"REVIEW PAUSED: {exc}")
+        spec = Path(_SPEC_PATH).name if _SPEC_PATH else ""
+        label = f"{_REVIEW_NAME or 'unknown'}\n{spec}" if spec else (_REVIEW_NAME or "unknown")
+        _notify(f"{label}\nPaused — needs input", _REVIEW_WS)
+        sys.exit(3)
     except Exception as exc:
         _log(f"REVIEW CRASHED: {exc}")
         import traceback
