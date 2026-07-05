@@ -7,7 +7,7 @@
   "date_fixed": "2026-03-30",
 
   "original_violation": {
-    "skill": "superpowers:execute-plan",
+    "skill": "executing-plans",
     "description": "Use when executing plans - dispatches subagent per task with code review between tasks"
   },
 
@@ -37,7 +37,7 @@
     },
     {
       "test_name": "Specific skill passes CSO check",
-      "command": "python scripts/validation/validate_cso.py superpowers:executing-plans/SKILL.md",
+      "command": "python scripts/validation/validate_cso.py executing-plans/SKILL.md",
       "expected_exit_code": 0
     }
   ],

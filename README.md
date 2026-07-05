@@ -12,7 +12,7 @@ Development workflow and knowledge garden skills for Claude Code.
 
 ## What's Included
 
-33 skills across seven categories.
+47 skills across nine categories.
 
 ### Lifecycle
 
@@ -24,6 +24,17 @@ Development workflow and knowledge garden skills for Claude Code.
 | `work-pause` | Commits WIP, pushes to pause stack, switches to main |
 | `work-resume` | Restores a paused branch, rebases onto current main |
 | `workspace-init` | One-time companion workspace setup (prompted by project hook) |
+| `using-git-worktrees` | Feature branch isolation via worktrees or native tools |
+
+### Design & Planning
+
+| Skill | What it does |
+|-------|-------------|
+| `brainstorming` | Explores problem space before implementation — intent, requirements, design |
+| `writing-plans` | Creates detailed implementation plans from specs |
+| `executing-plans` | Executes plans in a separate session with review checkpoints |
+| `subagent-driven-development` | Dispatches independent plan tasks to subagents |
+| `dispatching-parallel-agents` | Concurrent investigation of 2+ independent tasks |
 
 ### Development
 
@@ -32,15 +43,22 @@ Development workflow and knowledge garden skills for Claude Code.
 | `java-dev` | Java/Quarkus — safety, concurrency, Vert.x event loop awareness |
 | `ts-dev` | TypeScript/Node.js — strict mode, async patterns, testing |
 | `python-dev` | Python — type hints, async, pytest |
+| `test-driven-development` | Red-green-refactor discipline before implementation code |
+| `systematic-debugging` | Root-cause investigation before proposing fixes |
+| `fix-ci` | Reproduce CI failures locally, root-cause, verify green |
 
 ### Quality
 
 | Skill | What it does |
 |-------|-------------|
 | `code-review` | Routes to Java/TS/Python review with OWASP-aware escalation |
+| `requesting-code-review` | Independent subagent review for features before merge |
+| `receiving-code-review` | Technical rigor when receiving review feedback |
+| `verification-before-completion` | Evidence gate — run verification before claiming done |
 | `security-audit` | OWASP Top 10 audit, triggered by code-review or on demand |
 | `project-health` | Correctness, completeness, consistency checks by project type |
 | `project-refine` | Improvement opportunities — duplication, bloat, doc quality |
+| `design-review` | Multi-round adversarial review of design specs |
 
 ### Commits & Docs
 
@@ -69,35 +87,19 @@ Development workflow and knowledge garden skills for Claude Code.
 | `write-content` | Universal content creation — diary, article, brief, tutorial |
 | `publish-blog` | Routes blog entries to external git destinations |
 | `handover` | End-of-session context preservation for next session |
-| `design-snapshot` | Freeze and record current design state |
+| `writing-skills` | Skill authoring, editing, evaluation, and optimization |
 
 ### Infrastructure
 
 | Skill | What it does |
 |-------|-------------|
 | `project` | Project setup verification at session start |
+| `using-superpowers` | Session-start skill routing and discipline enforcement |
 | `issue-workflow` | GitHub issue tracking, epic planning, split detection |
 | `retro-issues` | Retrospective mapping of git history to GitHub issues |
 | `dependency-update` | Maven/npm/pip dependency management |
-| `fix-ci` | Reproduce CI failures locally, root-cause, verify green |
 | `ide-tooling` | IntelliJ MCP routing — rename, find-references, diagnostics |
-
-## Superpowers Integration
-
-Soredium skills work alongside [superpowers](https://github.com/anthropics/claude-code) — Claude Code's built-in development skills. Each handles a different concern in the same workflow.
-
-| Stage | Soredium skill | Superpowers skill | Who does what |
-|-------|---------------|-------------------|---------------|
-| Design | — | `brainstorming` | Superpowers explores the problem space |
-| Planning | — | `writing-plans` | Superpowers creates the implementation plan |
-| Branch setup | `work-start` | `using-git-worktrees` | Soredium creates branches; superpowers isolates the workspace |
-| Implementation | `java-dev` / `ts-dev` / `python-dev` | `test-driven-development` | Soredium sets language rules; superpowers enforces TDD |
-| Debugging | — | `systematic-debugging` | Superpowers owns the debugging workflow |
-| Pre-commit review | `code-review` | `verification-before-completion` | Soredium reviews per-language; superpowers verifies claims |
-| Feature review | — | `requesting-code-review` | Superpowers runs the full-feature review gate |
-| Execution | — | `subagent-driven-development` | Superpowers dispatches plan tasks to subagents |
-
-Soredium skills auto-trigger (file type, commit hooks, session start). Superpowers are invoked deliberately at stage transitions.
+| `sync-local` | Sync installed skills from cloned repository (dev-only) |
 
 ## Garden Engine
 
