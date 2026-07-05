@@ -472,3 +472,23 @@ IntelliJ: ✅ connected / ✅ connected, project auto-opened / ⚠️ MCP unavai
 
 Proceeding to brainstorming.  (or: Ready for work.)
 ```
+
+## Skill Chaining
+
+**Invoked by:**
+- `work` — routing skill, when on main with no pause stack
+- `handover` — resume path directs user to `/work` which detects existing `.meta`
+- Session hooks — triggered at session start
+
+**Invokes:**
+- `project` — Step 0, mandatory pre-check before path resolution
+- `issue-workflow` (Phase 2) — Step 4, same-repo issue resolution
+- `brainstorming` — Step 12, offered after branch creation
+
+**Complements:**
+- `work` — routing dispatcher
+- `work-end` — branch closure (work-start opens, work-end closes)
+- `work-pause` / `work-resume` — pause stack detection in Step 2
+
+**Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, GitHub issues API,
+garden (gardenSearch or fallback), `ARC42STORIES.MD`

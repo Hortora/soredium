@@ -1282,8 +1282,9 @@ Bypass with `git push --no-verify` after manually confirming history is clean.
 
 ## Skill Chaining
 
-**Invoked by:** User directly via `/git-squash`; pre-push hook when squash
-candidates detected
+**Invoked by:** User directly via `/git-squash`; `work-end` — Step 8j
+(mandatory squash before fork push); pre-push hook when squash candidates
+detected
 
 **Reads:** `~/.claude/skills/git-squash/squash-policy.md` — the classification rules
 

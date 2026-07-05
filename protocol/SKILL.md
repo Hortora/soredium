@@ -427,6 +427,7 @@ HEALTH is complete when:
 **Invoked by:**
 - User directly ("protocol CAPTURE", "add a protocol", "protocol SEARCH", "protocol HEALTH")
 - `handover` — protocol SWEEP is added to the wrap checklist alongside forage sweep
+- `work-end` — SWEEP as part of Step 3b pre-close sweep
 
 **Complements:**
 - `forage` — garden techniques are the upstream source for protocol decisions. When a protocol is derived from a technique, link back via `garden_ref` in the protocol frontmatter and add `protocol: "PP-ID"` to the garden entry via forage REVISE (protocol-link kind).

@@ -106,6 +106,7 @@ class TestMarketplaceCompleteness(unittest.TestCase):
             else:
                 m = re.search(r"^description:\s*(.+)", content, re.MULTILINE)
                 frontmatter_desc = m.group(1).strip() if m else ""
+            frontmatter_desc = frontmatter_desc.strip('"').strip("'")
 
             marketplace_desc = self.marketplace.get(name, "")
             mp_entry = None

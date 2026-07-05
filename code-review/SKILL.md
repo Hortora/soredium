@@ -47,7 +47,8 @@ Read the file, then execute the review workflow it describes.
 
 **Invoked by:** `java-dev`, `ts-dev`, `python-dev` before committing;
 `java-git-commit` when no review has been run this session;
-`executing-plans` before final commit
+`executing-plans` before final commit;
+`work-end` — Step 3c, mandatory gate before artifact promotion
 
 **Invokes:** `security-audit` for auth/payment/PII code (offered, not
 automatic); `git-commit` after approval if user wants to commit

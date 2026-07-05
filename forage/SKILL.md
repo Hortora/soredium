@@ -838,7 +838,7 @@ SEARCH is complete when:
 
 ## Skill Chaining
 
-**Invoked by:** `handover` — garden SWEEP is Step 2b of the wrap checklist; user directly ("submit to the garden", "add this to the garden", "forage CAPTURE")
+**Invoked by:** `handover` — garden SWEEP is Step 2b of the wrap checklist; `work-end` — SWEEP as part of Step 3b pre-close sweep; user directly ("submit to the garden", "add this to the garden", "forage CAPTURE")
 
 **Chains to:** `harvest` — for DEDUPE only
 

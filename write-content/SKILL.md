@@ -250,6 +250,9 @@ decision before writing to disk. See `mandatory-gates.md` for full procedure.
 "update the What it adds section"; also automatically as part of `work-end` Step 3b
 pre-close sweep and `handover` wrap checklist (diary type).
 
+**Invokes:** `git-commit` to commit the written content; `update-claude-md` on the
+first blog entry in a project (adds mandatory Writing Style Guide section)
+
 **Loads:**
 - `write-content/modes/_universal.md` — always
 - `write-content/mandatory-gates.md` — always (Step 2, Step 4)

@@ -363,7 +363,7 @@ Commit is complete when:
 
 ## Skill Chaining
 
-**Invoked by:** User says "commit", "make a commit", or invokes `/git-commit`; [`adr`] to commit a new ADR; [`idea-log`] to commit IDEAS.md additions; [`write-content`] to commit a new blog entry; [`python-code-review`] and [`ts-code-review`] after review approval when user wants to commit
+**Invoked by:** User says "commit", "make a commit", or invokes `/git-commit`; [`adr`] to commit a new ADR; [`idea-log`] to commit IDEAS.md additions; [`write-content`] to commit a new blog entry; [`code-review`] after review approval when user wants to commit; [`dependency-update`] to commit dependency changes; [`issue-workflow`] to commit issue-related changes
 
 **Routes to specialized workflows based on CLAUDE.md declaration:**
 - type: java → Reads `~/.claude/skills/git-commit/java.md` and follows Java workflow
@@ -374,6 +374,10 @@ Commit is complete when:
 **Invokes (when handling directly):**
 - Follows `skill-validation.md` workflow for SKILL.md validation (automatic if SKILL.md files staged, type: skills only)
 - [`update-claude-md`] for workflow sync (automatic if CLAUDE.md exists)
+- [`update-design`] when commits affect architecture
+- [`issue-workflow`] for commit-split detection
+- [`project-health`] when commits affect build/test patterns
+- [`verification-before-completion`] to verify claims before committing
 - Follows `readme-sync.md` workflow for skill collection sync (automatic if README.md exists and skill changes detected, type: skills only)
 
 **Interactive setup:** If CLAUDE.md missing or no Project Type declared, guides user through setup and creates CLAUDE.md

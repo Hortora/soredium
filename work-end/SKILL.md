@@ -847,3 +847,31 @@ Session wrap complete.
 ```
 
 Show every item — both ticked and skipped with reason.
+
+## Skill Chaining
+
+**Invoked by:**
+- `work` — routing skill, when user says "work end" or selects end from feature branch menu
+- `executing-plans` — after all plan tasks complete
+- `subagent-driven-development` — final close step
+
+**Invokes:**
+- `code-review` — Step 3c, mandatory gate before artifact promotion
+- `forage` — SWEEP (Step 3b pre-close sweep)
+- `protocol` — SWEEP (Step 3b pre-close sweep)
+- `update-claude-md` — Step 3b pre-close sweep
+- `implementation-doc-sync` — Step 3b pre-close sweep
+- `adr` — Step 3b pre-close sweep
+- `write-content` — Step 3b pre-close sweep (last, after other artifacts)
+- `publish-blog` — Step 8g
+- `git-squash` — Step 8j (mandatory before fork push)
+
+**Complements:**
+- `work` — routing entry point
+- `work-pause` — alternative (pause mid-work vs. close the branch)
+- `handover` — work-end includes the full wrap (Step 12); handover is for
+  mid-work sessions only
+- `work-start` — opens branches; work-end closes them
+
+**Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, `ARC42STORIES.MD`,
+GitHub issues API, workspace artifact directories, `JOURNAL.md`

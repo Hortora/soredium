@@ -291,7 +291,8 @@ rules:
 
 ## Skill Chaining
 
-**Invoked by:** User directly — "publish blog", "cross-post entries", `/publish-blog`
+**Invoked by:** User directly — "publish blog", "cross-post entries", `/publish-blog`;
+`work-end` — Step 8g (publishes workspace blog entries to destination)
 
 **Reads output of:** [`write-content`] — the blog entries in the resolved `$BLOG_DIR`
 

@@ -27,7 +27,7 @@
     {
       "name": "forage",
       "source": "./forage",
-      "description": "Session-time garden operations: CAPTURE, SWEEP, SEARCH, REVISE",
+      "description": "Use when non-obvious technical knowledge surfaces during session work — bugs whose symptoms mislead about root cause, tools that contradict documentation, silent failures with no error, workarounds found only via multiple failed approaches, techniques a skilled developer wouldn't naturally reach for.",
       "version": "1.0.0"
     },
     {
@@ -45,19 +45,19 @@
     {
       "name": "handover",
       "source": "./handover",
-      "description": "Use when ending a session and wanting to preserve context for resumption, OR when a session is beginning and needing ...",
+      "description": "Use when ending a mid-work session (branch stays open) and wanting to preserve context for resumption, OR when a session is beginning and needing to resume from where things left off.",
       "version": "1.0.0"
     },
     {
       "name": "harvest",
       "source": "./harvest",
-      "description": "Garden maintenance operations: MERGE, DEDUPE",
+      "description": "Use when deduplicating existing garden entries (DEDUPE) or reviewing all stale entries across the garden (REVIEW). Dedicated session only — do not use during normal session work; use forage for session-time operations.",
       "version": "1.0.0"
     },
     {
       "name": "ide-tooling",
       "source": "./ide-tooling",
-      "description": "INVOKE IMMEDIATELY when two IntelliJ MCPs are visible: mcp__intellij-index__* and mcp__intellij__*. These are NOT int...",
+      "description": "INVOKE IMMEDIATELY when mcp__intellij-index__* tools are visible. Use for ALL code navigation, editing, refactoring, and diagnostics. Also invoke for any IDE operation: rename, move, edit member, find references, type hierarchy, diagnostics.",
       "version": "1.0.0"
     },
     {
@@ -268,6 +268,18 @@
       "name": "writing-skills",
       "source": "./writing-skills",
       "description": "Use when creating new skills, editing existing skills, or verifying skills work before deployment",
+      "version": "1.0.0"
+    },
+    {
+      "name": "design-review",
+      "source": "./design-review",
+      "description": "Use when a design spec needs adversarial review — user says \"review this design\", \"design review\", \"tear this spec apart\", \"pre-review this\", or invokes /design-review. Orchestrates two independent Claude sessions (reviewer + implementor) with a Python PM tracking every issue to evidence-based resolution.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "fix-ci",
+      "source": "./fix-ci",
+      "description": "Use when CI is red and the user asks to fix it, or when a push fails CI and the user asks \"is CI green?\" after a fix. Ensures all failures are reproduced locally, root-caused, and verified green before any push. Never use CI as a test runner.",
       "version": "1.0.0"
     }
   ]

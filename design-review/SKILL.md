@@ -270,6 +270,24 @@ from the next round.
 ## What this skill does NOT do
 
 - **Code review** — use `code-review` for that (Phase 3/4 coming soon)
-- **Brainstorming** — use `superpowers:brainstorming` to create the spec first,
+- **Brainstorming** — use `brainstorming` to create the spec first,
   then use pre-review to validate the approach
 - **Implementation** — this reviews design specs, not code
+
+## Skill Chaining
+
+**Invoked by:** User directly (`/design-review`, "review this design",
+"pre-review this", "tear this spec apart")
+
+**Invokes:** None — runs an external Python orchestration script; does not
+delegate to other skills
+
+**Complements:**
+- `brainstorming` — brainstorming creates the spec; design-review validates it
+  (pre-review mode for approach, spec-review mode for detail)
+- `code-review` — different scope. design-review is multi-round adversarial
+  review of design specs. code-review is routine pre-commit checklist review
+  of staged changes
+
+**Reads from:** User-provided spec path, CLAUDE.md for source directories,
+`.spec-path` and `progress.log` in the workspace for resume

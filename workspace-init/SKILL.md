@@ -1120,7 +1120,7 @@ If n → skip. Do not ask again this session.
 
 ## Skill Chaining
 
-**Invoked by:** User directly at project setup time; session-start hook when
-no workspace is detected
+**Invoked by:** User directly at project setup time; `project` when workspace
+missing and user accepts; session-start hook when no workspace is detected
 
 **Invokes (optional):** `issue-workflow` Phase 0 — if user accepts the offer in Step 10b; superpowers install command shown (user must run `/plugin install superpowers` manually) — if user accepts the offer in Step 10c

@@ -619,6 +619,8 @@ user confirmation to skip. Skipping silently is not permitted.**
 - `git-commit` Step 0b → Phase 0: Setup (offered when Work Tracking absent)
 - `workspace-init` Step 10b → Phase 0: Setup (offered at workspace creation)
 - `git-commit` Step 2 → Phase 3: Pre-Commit (automatic when Work Tracking enabled)
+- `project` — Phase 0 (offered when issue tracking missing and user accepts)
+- `work-start` — Phase 2 (Task Intake) for same-repo issue resolution
 - Work Tracking automatic behaviours in CLAUDE.md → Phase 1 or Phase 2 (automatic)
 - [`idea-log`] PROMOTE flow → creates a tracked GitHub issue from a promoted idea
 

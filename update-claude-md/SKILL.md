@@ -379,7 +379,7 @@ CLAUDE.md update is complete when:
 
 **Invoked by:** [`git-commit`] when committing in any repository, [`java-git-commit`] alongside update-design, [`git-commit`] when committing blog changes, [`custom-git-commit`] when committing custom project changes, [`work-end`] as part of Step 3b pre-close sweep, [`handover`] as part of the session wrap checklist (mid-work sessions), [`write-content`] on the first blog entry ever in a project (adds the mandatory Writing Style Guide section)
 
-**Invokes:** None (terminal skill in the chain)
+**Invokes:** `update-design` when architecture-affecting changes are detected
 
 **Can be invoked independently:** User can run `/update-claude-md` directly to sync CLAUDE.md without committing
 

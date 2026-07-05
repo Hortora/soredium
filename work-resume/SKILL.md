@@ -157,3 +157,19 @@ Run Steps 0, 2, 3, 11 from work-start:
 - **Step 11**: IntelliJ MCPs — call both; hard stop if unavailable
 
 Skip all branch creation steps — the branch already exists.
+
+## Skill Chaining
+
+**Invoked by:** `work` — routing skill, when user selects a paused branch
+from the stack picker or says "work resume"
+
+**Invokes:** `work-start` (partial) — Steps 0, 2, 3, 11 only for pre-checks
+after branch restoration
+
+**Complements:**
+- `work` — routing entry point
+- `work-pause` — paired operation (pause saves, resume restores)
+- `work-start` — runs partial pre-checks from work-start (not full branch creation)
+
+**Reads from:** `.pause-stack` (paused branches list), branch metadata,
+WIP commit state

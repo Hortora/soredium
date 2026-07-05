@@ -251,7 +251,7 @@ ADR creation is complete when:
 
 ## Skill Chaining
 
-**Invoked by:** [`dependency-update`] when major version upgrades or new extensions are proposed, [`update-design`] when significant new components are captured, [`idea-log`] when a parked idea is promoted to a formal decision
+**Invoked by:** [`dependency-update`] when major version upgrades or new extensions are proposed, [`update-design`] when significant new components are captured, [`idea-log`] when a parked idea is promoted to a formal decision, [`work-end`] as part of Step 3b pre-close sweep
 
 **Invokes:** [`git-commit`] to stage and commit the ADR (routes to `git-commit`, `git-commit`, etc. per CLAUDE.md project type)
 

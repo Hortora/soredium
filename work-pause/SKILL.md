@@ -127,3 +127,21 @@ instead — it writes HANDOFF.md so the next session can resume on the same bran
 | Switch to a different branch now, come back later | work-pause |
 | End the session, continue this branch next time | handover (wrap) |
 | Branch is done, close everything | work-end |
+
+## Skill Chaining
+
+**Invoked by:** `work` — routing skill, when user says "work pause" or
+selects pause from feature branch menu
+
+**Invokes:** None — uses Python helper scripts (`pause_exec.py`, `stack.py`)
+internally; does not delegate to other skills
+
+**Complements:**
+- `work` — routing entry point
+- `work-resume` — paired operation (pause saves, resume restores)
+- `work-end` — alternative when the branch is complete, not just paused
+- `handover` — different intent: handover preserves session context for next
+  session on the same branch; work-pause switches branches mid-session
+
+**Reads from:** `.meta` (branch, issue), project/workspace working tree state,
+`.pause-stack` on workspace main
