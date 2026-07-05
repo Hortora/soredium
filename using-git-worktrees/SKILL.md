@@ -202,9 +202,10 @@ Ready to implement <feature-name>
 **Invoked by:**
 - `subagent-driven-development` — ensures isolated workspace for
   execution
-- `work-start` — worktree setup can happen as part of branch creation
 
 **Complements:**
+- `work-start` — work-start creates branches; worktree isolation is
+  an additional layer when uncommitted work needs protecting
 - `workspace-init` — different concept. workspace-init creates the
   companion methodology workspace. This skill creates git worktree
   isolation. They are orthogonal.

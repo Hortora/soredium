@@ -140,6 +140,7 @@ internally; does not delegate to other skills
 - `work` — routing entry point
 - `work-resume` — paired operation (pause saves, resume restores)
 - `work-end` — alternative when the branch is complete, not just paused
+- `work-start` — work-start creates branches and detects pause stack state
 - `handover` — different intent: handover preserves session context for next
   session on the same branch; work-pause switches branches mid-session
 

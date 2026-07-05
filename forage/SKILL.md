@@ -842,6 +842,14 @@ SEARCH is complete when:
 
 **Chains to:** `harvest` — for DEDUPE only
 
+**Complements:**
+- `brainstorming` — SEARCH during context gathering surfaces prior decisions
+  and known gotchas before design work begins
+- `protocol` — forage captures universal technical knowledge; protocol captures
+  project-specific rules. A forage technique can be promoted to a protocol.
+- `systematic-debugging` — SEARCH before investigation surfaces known gotchas;
+  CAPTURE after fix preserves the knowledge
+
 **Does NOT handle:** DEDUPE — that is a harvest operation.
 
 **Garden location:** `${HORTORA_GARDEN:-~/.hortora/garden}/`

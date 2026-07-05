@@ -233,3 +233,5 @@ See [visual-companion.md](visual-companion.md) for the full guide.
   during context gathering.
 - `work-start` — if work-start has run, `.meta` provides the issue group
   context. If not, brainstorming gathers all context itself.
+- `design-review` — brainstorming creates the spec; design-review validates
+  it (pre-review mode for approach, spec-review mode for detail)

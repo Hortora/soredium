@@ -1124,3 +1124,7 @@ If n → skip. Do not ask again this session.
 missing and user accepts; session-start hook when no workspace is detected
 
 **Invokes (optional):** `issue-workflow` Phase 0 — if user accepts the offer in Step 10b; superpowers install command shown (user must run `/plugin install superpowers` manually) — if user accepts the offer in Step 10c
+
+**Complements:** `using-git-worktrees` — different concept. workspace-init
+creates the companion methodology workspace (one-time). using-git-worktrees
+creates git worktree isolation for feature branches (per-task).

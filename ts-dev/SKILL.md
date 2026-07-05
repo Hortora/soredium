@@ -473,3 +473,5 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 - **For security-critical code:** invoke `security-audit` when handling authentication, authorization, payment, or PII
 - **For dependency updates:** invoke `dependency-update` when adding or upgrading packages
 - **For architectural decisions:** suggest running `adr` to document significant design choices
+- **Complements:** `fix-ci` — when CI fails on TypeScript code, fix-ci handles
+  reproduction and root-cause; ts-dev provides the language-specific guidance

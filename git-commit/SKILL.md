@@ -380,6 +380,9 @@ Commit is complete when:
 - [`verification-before-completion`] to verify claims before committing
 - Follows `readme-sync.md` workflow for skill collection sync (automatic if README.md exists and skill changes detected, type: skills only)
 
+**Complements:** `fix-ci` — fix-ci reproduces and fixes CI failures;
+git-commit captures the fix
+
 **Interactive setup:** If CLAUDE.md missing or no Project Type declared, guides user through setup and creates CLAUDE.md
 
 **Can be invoked independently:** Yes, this is the entry point for all commit workflows. It reads project type and routes accordingly.

@@ -197,3 +197,9 @@ Prefer `intellij-index` equivalents where they exist:
 `test-driven-development`, `systematic-debugging`,
 `subagent-driven-development`, `executing-plans`,
 `dispatching-parallel-agents`, `brainstorming`
+
+**Complements:**
+- `verification-before-completion` — `ide_build_project` and `ide_diagnostics`
+  are verification tools used as part of the VBC gate function
+- `writing-plans` — IDE navigation tools inform file structure analysis
+  during plan creation

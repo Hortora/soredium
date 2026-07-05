@@ -146,13 +146,20 @@ This is non-negotiable.
 **Invoked by:**
 - `subagent-driven-development` — after each task's review passes, before marking done
 - `executing-plans` — after each task completes, before moving to the next
-- `work-end` — before merge to main
 - `git-commit` — before committing
 
 **Complements:**
+- `work-end` — verification is implicit in work-end's pre-merge checks
 - `test-driven-development` — TDD verifies each unit (red-green-refactor).
   This skill verifies the whole (run the full command, read the full output).
   Both are required: TDD ensures correctness during development,
   verification-before-completion ensures honesty at completion boundaries.
+- `dispatching-parallel-agents` — VBC applies after each parallel agent completes
+- `fix-ci` — VBC is the final green check after CI fix
+- `receiving-code-review` — verify before implementing review suggestions
+- `requesting-code-review` — VBC gate before dispatching the review subagent
+- `systematic-debugging` — verify the fix actually works before claiming done
+- `writing-plans` — VBC applies at plan execution checkpoints
+- `writing-skills` — VBC applies when testing skill changes
 - `ide-tooling` — `ide_build_project` and `ide_diagnostics` are verification
   tools. Use them as part of the gate function.

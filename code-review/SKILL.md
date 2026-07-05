@@ -53,7 +53,9 @@ Read the file, then execute the review workflow it describes.
 **Invokes:** `security-audit` for auth/payment/PII code (offered, not
 automatic); `git-commit` after approval if user wants to commit
 
-**Complements:** `requesting-code-review` — different scope. This skill
-is the routine pre-commit checklist review of staged changes. 
-`requesting-code-review` dispatches an independent subagent review for
-significant work (feature completion, pre-merge).
+**Complements:**
+- `requesting-code-review` — different scope. This skill is the routine
+  pre-commit checklist review of staged changes. requesting-code-review
+  dispatches an independent subagent review for significant work.
+- `design-review` — different scope. design-review is multi-round adversarial
+  review of design specs. This skill reviews code.

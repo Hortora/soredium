@@ -259,3 +259,6 @@ Health check is complete when:
 
 **Companion skill:**
 - [`project-refine`] — once health is green, use project-refine for improvement opportunities (bloat, structure, deduplication). They share the same CLAUDE.md Health Check Configuration section.
+
+**Complements:** `implementation-doc-sync` — doc-sync updates docs after
+implementation; project-health verifies docs are consistent and complete

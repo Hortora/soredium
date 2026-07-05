@@ -661,6 +661,10 @@ the resume output directs the user to `/work` which handles branch resumption
 - `work-end` — branch closure includes full wrap; this skill is for mid-work only
 - `write-content` — narrative context the handover points to
 - `forage` — technical gotcha index the handover references
+- `implementation-doc-sync` — doc-sync handles session-scoped doc updates;
+  handover captures operational context for the next session
+- `work-pause` — different intent: work-pause switches branches mid-session;
+  handover ends the session preserving context for resumption
 
 **Does NOT replace:** CLAUDE.md (auto-loaded), `--resume`/`--continue` flags
 (restore conversation history for same-machine continuation)

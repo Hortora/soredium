@@ -273,3 +273,6 @@ the red-green-refactor cycle:
   VBC verifies the whole before completion claims.
 - `systematic-debugging` — bug found → write failing test (this skill's
   bug fix workflow) → then apply root-cause methodology.
+- `dispatching-parallel-agents` — concurrent investigation uses TDD per agent
+- `writing-plans` — plans reference TDD as the implementation methodology
+- `writing-skills` — skill testing follows the same red-green-refactor cycle

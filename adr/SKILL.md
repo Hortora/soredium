@@ -257,6 +257,9 @@ ADR creation is complete when:
 
 **Can be followed by:** [`write-content`] — after a major architectural decision is recorded, the user may want to narrate the story of how that decision was reached (offered, not automatic)
 
+**Complements:** `protocol` — protocols are recurring standing rules;
+ADRs are one-off architectural decisions
+
 **Not decided yet?** Use `idea-log` to park the question first; promote to `adr` when the decision is made.
 
 **Can be invoked independently:** User can run `/adr` or say "create an ADR" directly when making architectural decisions

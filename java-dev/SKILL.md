@@ -452,3 +452,6 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 - **For architectural decisions:** suggest running `adr` to document significant decisions
 - **For security-critical code:** invoke `security-audit` when handling authentication, authorization, payment, or PII
 - **If architectural impact without commit:** suggest running `java-update-design` independently
+- **Complements:** `fix-ci` — when CI fails on Java code, fix-ci handles
+  reproduction and root-cause; java-dev provides the language-specific
+  implementation guidance

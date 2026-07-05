@@ -489,6 +489,8 @@ Proceeding to brainstorming.  (or: Ready for work.)
 - `work` — routing dispatcher
 - `work-end` — branch closure (work-start opens, work-end closes)
 - `work-pause` / `work-resume` — pause stack detection in Step 2
+- `using-git-worktrees` — additional code isolation layer when uncommitted
+  work needs protecting during branch creation
 
 **Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, GitHub issues API,
 garden (gardenSearch or fallback), `ARC42STORIES.MD`

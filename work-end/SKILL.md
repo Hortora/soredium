@@ -872,6 +872,9 @@ Show every item — both ticked and skipped with reason.
 - `handover` — work-end includes the full wrap (Step 12); handover is for
   mid-work sessions only
 - `work-start` — opens branches; work-end closes them
+- `using-git-worktrees` — worktree cleanup happens during branch closure
+- `verification-before-completion` — verification is implicit in work-end's
+  pre-merge checks
 
 **Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, `ARC42STORIES.MD`,
 GitHub issues API, workspace artifact directories, `JOURNAL.md`

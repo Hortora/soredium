@@ -432,6 +432,10 @@ HEALTH is complete when:
 **Complements:**
 - `forage` — garden techniques are the upstream source for protocol decisions. When a protocol is derived from a technique, link back via `garden_ref` in the protocol frontmatter and add `protocol: "PP-ID"` to the garden entry via forage REVISE (protocol-link kind).
 - `adr` — one-off architectural decisions; protocol handles recurring standing rules
+- `brainstorming` — protocol SEARCH during context gathering surfaces standing
+  rules that constrain design choices
+- `receiving-code-review` — protocol SEARCH before implementing architectural
+  review suggestions catches conflicts with standing rules
 
 **Does NOT handle:**
 - Universal garden entries (use `forage`)

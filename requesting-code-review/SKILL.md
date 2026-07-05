@@ -36,7 +36,6 @@ independent review of significant work.
 **Mandatory:**
 - After each task in subagent-driven-development
 - After completing a major feature
-- Before merge to main (work-end Step 3c)
 
 **Optional but valuable:**
 - When stuck (fresh perspective)
@@ -120,7 +119,6 @@ See template at: [code-reviewer.md](code-reviewer.md)
 **Invoked by:**
 - `subagent-driven-development` — final whole-branch review after all
   tasks complete
-- `work-end` — Step 3c, mandatory code review before merge
 
 **Complements:**
 - `code-review` — different scope. `code-review` is the routine
