@@ -20,7 +20,7 @@ Follows the [Arc42Stories specification](docs/arc42stories-spec.md).
 
 ## S1 Introduction and Goals
 
-**What soredium is:** A Claude Code skill collection (33 skills), Python tooling (~65 scripts, 5 utility modules, 20 validators, ~2010 tests), and a Quarkus/Java 21 engine (52 Java files) for garden deduplication and pattern detection.
+**What soredium is:** A Claude Code skill collection (46 skills), Python tooling (~65 scripts, 5 utility modules, 20 validators, ~2010 tests), and a Quarkus/Java 21 engine (52 Java files) for garden deduplication and pattern detection.
 
 Named after the lichen's dispersal unit -- a self-contained bundle carrying everything needed to establish a new colony wherever it lands.
 
@@ -68,7 +68,7 @@ C4Context
 
   Person(dev, "Developer", "Uses Claude Code for professional workflows")
 
-  System(soredium, "soredium", "33 skills + Python tooling + Java engine")
+  System(soredium, "soredium", "46 skills + Python tooling + Java engine")
 
   System_Ext(claude, "Claude Code", "AI assistant runtime; loads and executes skills")
   System_Ext(github, "GitHub", "Marketplace distribution, issue tracking, garden hosting")

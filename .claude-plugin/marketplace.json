@@ -191,6 +191,84 @@
       "source": "./write-content",
       "description": "Use when writing any piece of content — project diary entry, blog post, article, note, brief, README, news item, tech...",
       "version": "1.0.0"
+    },
+    {
+      "name": "brainstorming",
+      "source": "./brainstorming",
+      "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "dispatching-parallel-agents",
+      "source": "./dispatching-parallel-agents",
+      "description": "Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies",
+      "version": "1.0.0"
+    },
+    {
+      "name": "executing-plans",
+      "source": "./executing-plans",
+      "description": "Use when you have a written implementation plan to execute in a separate session with review checkpoints",
+      "version": "1.0.0"
+    },
+    {
+      "name": "receiving-code-review",
+      "source": "./receiving-code-review",
+      "description": "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation",
+      "version": "1.0.0"
+    },
+    {
+      "name": "requesting-code-review",
+      "source": "./requesting-code-review",
+      "description": "Use when completing tasks, implementing major features, or before merging to verify work meets requirements. Dispatches a fresh subagent for review — distinct from the session-level code-review skill which reviews staged changes using language-specific checklists.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "subagent-driven-development",
+      "source": "./subagent-driven-development",
+      "description": "Use when executing implementation plans with independent tasks in the current session",
+      "version": "1.0.0"
+    },
+    {
+      "name": "systematic-debugging",
+      "source": "./systematic-debugging",
+      "description": "Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes",
+      "version": "1.0.0"
+    },
+    {
+      "name": "test-driven-development",
+      "source": "./test-driven-development",
+      "description": "Use when implementing any feature or bugfix, before writing implementation code",
+      "version": "1.0.0"
+    },
+    {
+      "name": "using-git-worktrees",
+      "source": "./using-git-worktrees",
+      "description": "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace exists via native tools or git worktree fallback",
+      "version": "1.0.0"
+    },
+    {
+      "name": "using-superpowers",
+      "source": "./using-superpowers",
+      "description": "Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions",
+      "version": "1.0.0"
+    },
+    {
+      "name": "verification-before-completion",
+      "source": "./verification-before-completion",
+      "description": "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always",
+      "version": "1.0.0"
+    },
+    {
+      "name": "writing-plans",
+      "source": "./writing-plans",
+      "description": "Use when you have a spec or requirements for a multi-step task, before touching code",
+      "version": "1.0.0"
+    },
+    {
+      "name": "writing-skills",
+      "source": "./writing-skills",
+      "description": "Use when creating new skills, editing existing skills, or verifying skills work before deployment",
+      "version": "1.0.0"
     }
   ]
 }

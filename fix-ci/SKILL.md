@@ -200,11 +200,18 @@ git stash pop
 
 ## Skill Chaining
 
-**Invoked by:** User saying "fix CI", "CI is red", "is CI green?" after a push,
-or when a pre-push hook or CI check fails.
+**Invoked by:** User saying "fix CI", "CI is red", "is CI green?" after
+a push, or when a pre-push hook or CI check fails.
 
 **Invokes:** Nothing — standalone diagnostic and fix workflow.
 
-**Complements:** `java-dev`, `ts-dev`, `python-dev` for the actual code fixes;
-`git-commit` for committing the fixes; `superpowers:verification-before-completion`
-for the final green check.
+**Complements:** `java-dev`, `ts-dev`, `python-dev` for the actual code
+fixes; `git-commit` for committing the fixes;
+`verification-before-completion` for the final green check.
+
+**The debugging toolkit:** Three skills covering the debugging spectrum:
+- `systematic-debugging` — single root cause investigation
+- `dispatching-parallel-agents` — multiple independent root causes,
+  investigated concurrently
+- `fix-ci` (this skill) — CI-specific failures (local reproduction,
+  CI-specific patterns)

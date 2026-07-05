@@ -321,7 +321,7 @@ Some skills in this repository are **developer-only** -- they require a cloned r
 
 **Rules:**
 - **Document only user-authored skills** in README.md and CLAUDE.md
-- **Never document third-party skills** (skills from superpowers:*, external repos, etc.)
+- **Never document third-party skills** (skills from external repos, etc.)
 - **Add third-party skills to .gitignore** immediately upon discovery
 - **Never reference third-party skills** in documentation (chaining tables, workflows, repository structure)
 
@@ -337,8 +337,12 @@ Some skills in this repository are **developer-only** -- they require a cloned r
 3. Remove all references from CLAUDE.md (Key Skills section)
 4. Verify removal with: `grep -r "skill-name" README.md CLAUDE.md`
 
+**Note:** The original obra/superpowers skills were integrated as
+first-party soredium citizens (committed to git, validated, maintained
+here). They are no longer third-party. The `skill-creator` skill remains
+third-party and excluded.
+
 **Examples of third-party skills to exclude:**
-- `superpowers:*` (all superpowers skills)
 - `skill-creator` (external skill authoring tool)
 - `frontend-design:*` (third-party frontend skills)
 - Any skill not in version control for this repository

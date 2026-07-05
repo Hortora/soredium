@@ -453,6 +453,7 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 
 ## Skill Chaining
 
+- **Process layer:** `test-driven-development` defines HOW to work (test first, watch fail, minimal code, refactor). This skill defines WHAT tools to use (pytest, fixtures, parametrize). Follow TDD for all implementation work.
 - **Before committing:** invoke `code-review` to catch safety, type, and async issues before they reach the repository
 - **For security-critical code:** invoke `security-audit` when handling authentication, authorisation, user input, or PII
 - **For dependency updates:** invoke `dependency-update` when adding or upgrading packages
