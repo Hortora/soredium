@@ -266,6 +266,7 @@ from the next round.
 | "fresh sessions" / "no continuity" | `--fresh-sessions` |
 | "more rounds" / "up to 15" | `--max-rounds 15` |
 | "shorter windows" | `--session-window 3` |
+| "use these arch files" / specific arch context | `--arch-files /path/to/PLATFORM.md /path/to/ARC42.md` |
 
 ## What this skill does NOT do
 

@@ -115,6 +115,12 @@ def main() -> int:
             _LOG_FILE = ws / "progress.log"
             _log("WARNING: No source directories — agents will have no project context.")
             _log("  Provide --source-dirs or create .source-dirs in the workspace.")
+        if not args.arch_files:
+            arch_files_file = ws / ".arch-files"
+            if arch_files_file.exists():
+                args.arch_files = [
+                    line for line in arch_files_file.read_text().splitlines() if line.strip()
+                ]
         _LOG_FILE = ws / "progress.log"
         last_round, reviewer_only = _detect_last_round(ws)
         if reviewer_only:
@@ -154,7 +160,8 @@ def main() -> int:
             source_dirs=args.source_dirs,
             issue=args.issue,
             mode=args.mode,
-            )
+            arch_files=args.arch_files,
+        )
         _LOG_FILE = ws / "progress.log"
         _log(f"Review ({args.mode}): {ws}")
 
@@ -952,6 +959,11 @@ def _handle_decision_needed(
     ws: Path, tracker: Tracker, round_num: int, description: str,
     issue_id: str = "", role: str = "",
 ) -> None:
+    if not issue_id and description:
+        import re
+        m = re.search(r"R\d+-\d+", description)
+        if m:
+            issue_id = m.group(0)
     _log(f"\n  {'─'*50}")
     _log(f"  DECISION NEEDED (round {round_num})")
     if issue_id:
@@ -1083,6 +1095,8 @@ def parse_args() -> argparse.Namespace:
                         help="Resume from an existing workspace directory")
     parser.add_argument("--issue", default=None,
                         help="GitHub issue number associated with this spec")
+    parser.add_argument("--arch-files", nargs="+", default=None,
+                        help="Architectural files for agents to prioritise (overrides auto-detection)")
     args = parser.parse_args()
     defaults = MODE_DEFAULTS[args.mode]
     if args.max_rounds is None:

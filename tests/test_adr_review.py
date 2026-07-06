@@ -395,6 +395,100 @@ class TestReviewAborted:
 
 
 # ---------------------------------------------------------------------------
+# Pre-review mode prompts and templates
+# ---------------------------------------------------------------------------
+
+class TestPreReviewPrompts:
+
+    def test_reviewer_prompt_is_approach_focused(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="pre-review", spec_path="/tmp/spec.md",
+        )
+
+        assert "pre-review" in prompt
+        assert "APPROACH" in prompt
+        assert "Do NOT update the spec" in prompt
+
+    def test_reviewer_prompt_round2_has_evidence_requirement(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+
+        prompt = build_reviewer_prompt(
+            round_num=2, focus_items=["R1-01"], handover_path=None,
+            mode="pre-review", spec_path="/tmp/spec.md",
+        )
+
+        assert "EVIDENCE REQUIRED" in prompt
+        assert "R1-01" in prompt
+
+    def test_implementor_prompt_is_approach_focused(self) -> None:
+        from adversarial_design_review.prompts import build_implementor_prompt
+
+        prompt = build_implementor_prompt(
+            round_num=1, focus_items=[], mode="pre-review",
+            workspace_root="/tmp/ws", spec_path="/tmp/spec.md",
+        )
+
+        assert "pre-review" in prompt
+        assert "challenges" in prompt.lower()
+        assert "pivot" in prompt.lower()
+
+    def test_reviewer_prompt_convergence_override(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+
+        prompt = build_reviewer_prompt(
+            round_num=2, focus_items=["R1-01"], handover_path=None,
+            convergence_override_ids=["R1-02", "R1-03"],
+            mode="pre-review", spec_path="/tmp/spec.md",
+        )
+
+        assert "R1-02" in prompt
+        assert "R1-03" in prompt
+        assert "NOT in terminal state" in prompt
+
+
+class TestPreReviewTemplates:
+
+    def test_reviewer_template_has_approach_constraints(self) -> None:
+        from adversarial_design_review.setup import _pre_review_reviewer_md
+
+        md = _pre_review_reviewer_md()
+
+        assert "Approach Reviewer" in md
+        assert "simpler ways" in md.lower() or "simpler" in md.lower()
+        assert "architectural trajectory" in md.lower() or "platform" in md.lower()
+        assert "technical debt" in md.lower() or "age well" in md.lower()
+
+    def test_implementor_template_has_approach_constraints(self) -> None:
+        from adversarial_design_review.setup import _pre_review_implementor_md
+
+        md = _pre_review_implementor_md()
+
+        assert "Approach Author" in md
+        assert "pivot" in md.lower()
+        assert "DECISION_NEEDED" in md
+
+    def test_reviewer_template_differs_from_spec_review(self) -> None:
+        from adversarial_design_review.setup import _default_reviewer_md, _pre_review_reviewer_md
+
+        spec_md = _default_reviewer_md()
+        pre_md = _pre_review_reviewer_md()
+
+        assert "Adversarial Design Reviewer" in spec_md
+        assert "Approach Reviewer" in pre_md
+        assert spec_md != pre_md
+
+    def test_mode_generators_registered(self) -> None:
+        from adversarial_design_review.setup import _MODE_GENERATORS
+
+        assert "pre-review" in _MODE_GENERATORS
+        assert "reviewer" in _MODE_GENERATORS["pre-review"]
+        assert "implementor" in _MODE_GENERATORS["pre-review"]
+
+
+# ---------------------------------------------------------------------------
 # Convergence override wiring
 # ---------------------------------------------------------------------------
 
@@ -511,6 +605,39 @@ class TestDecisionFileNaming:
             _handle_decision_needed(ws, tracker, 3, "test decision")
 
         assert (ws / "decisions" / "decision-3.md").exists()
+
+    def test_decision_file_extracts_issue_id_from_description(self, tmp_path: Path) -> None:
+        """Issue ID should be auto-extracted from signal description."""
+        from adversarial_design_review.review import _handle_decision_needed
+        from adversarial_design_review.tracker import Tracker
+        from unittest.mock import patch
+
+        ws = _make_workspace(tmp_path)
+        tracker = Tracker(project_name="test")
+
+        with patch("adversarial_design_review.review._is_interactive", return_value=False):
+            _handle_decision_needed(ws, tracker, 2, "R1-03 needs human decision on retry strategy", role="reviewer")
+
+        decision_file = ws / "decisions" / "decision-2-reviewer.md"
+        assert decision_file.exists()
+        content = decision_file.read_text()
+        assert "issue: R1-03" in content
+
+    def test_decision_file_no_issue_id_when_absent_from_description(self, tmp_path: Path) -> None:
+        """No issue line when description has no issue reference."""
+        from adversarial_design_review.review import _handle_decision_needed
+        from adversarial_design_review.tracker import Tracker
+        from unittest.mock import patch
+
+        ws = _make_workspace(tmp_path)
+        tracker = Tracker(project_name="test")
+
+        with patch("adversarial_design_review.review._is_interactive", return_value=False):
+            _handle_decision_needed(ws, tracker, 2, "general design question", role="reviewer")
+
+        decision_file = ws / "decisions" / "decision-2-reviewer.md"
+        content = decision_file.read_text()
+        assert "issue:" not in content
 
 
 # ---------------------------------------------------------------------------
@@ -738,6 +865,92 @@ class TestSpecSymlink:
         )
 
         assert not (ws / ".issue").exists()
+
+
+# ---------------------------------------------------------------------------
+# Arch files
+# ---------------------------------------------------------------------------
+
+class TestArchFiles:
+
+    def test_arch_files_persisted_on_setup(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Test\n")
+
+        ws = setup_review(
+            spec_path=spec, title="test", source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr",
+            arch_files=["/path/to/PLATFORM.md", "/path/to/ARC42STORIES.MD"],
+        )
+
+        arch_file = ws / ".arch-files"
+        assert arch_file.exists()
+        lines = [l for l in arch_file.read_text().splitlines() if l.strip()]
+        assert lines == ["/path/to/PLATFORM.md", "/path/to/ARC42STORIES.MD"]
+
+    def test_arch_files_in_context_md(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Test\n")
+
+        ws = setup_review(
+            spec_path=spec, title="test", source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr",
+            arch_files=["/path/to/PLATFORM.md"],
+        )
+
+        context = (ws / "context.md").read_text()
+        assert "Architectural Files" in context
+        assert "/path/to/PLATFORM.md" in context
+
+    def test_no_arch_files_section_when_omitted(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Test\n")
+
+        ws = setup_review(
+            spec_path=spec, title="test", source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr",
+        )
+
+        context = (ws / "context.md").read_text()
+        assert "Architectural Files" not in context
+        assert not (ws / ".arch-files").exists()
+
+    def test_arch_files_parse_args(self) -> None:
+        from adversarial_design_review.review import parse_args
+        import sys
+        from unittest.mock import patch
+
+        test_args = [
+            "--spec", "/tmp/spec.md",
+            "--title", "test",
+            "--source-dirs", "/tmp/src",
+            "--arch-files", "/path/PLATFORM.md", "/path/ARC42.md",
+        ]
+        with patch.object(sys, "argv", ["review.py"] + test_args):
+            args = parse_args()
+
+        assert args.arch_files == ["/path/PLATFORM.md", "/path/ARC42.md"]
+
+    def test_arch_files_default_none(self) -> None:
+        from adversarial_design_review.review import parse_args
+        import sys
+        from unittest.mock import patch
+
+        test_args = [
+            "--spec", "/tmp/spec.md",
+            "--title", "test",
+            "--source-dirs", "/tmp/src",
+        ]
+        with patch.object(sys, "argv", ["review.py"] + test_args):
+            args = parse_args()
+
+        assert args.arch_files is None
 
 
 # ---------------------------------------------------------------------------

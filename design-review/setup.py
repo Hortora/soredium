@@ -33,6 +33,7 @@ def setup_review(
     adr_root: Path | None = None,
     issue: str | None = None,
     mode: str = "spec-review",
+    arch_files: list[str] | None = None,
 ) -> Path:
     if adr_root is None:
         adr_root = Path.home() / "adr"
@@ -54,13 +55,15 @@ def setup_review(
     (ws / ".mode").write_text(mode)
     if issue:
         (ws / ".issue").write_text(issue)
+    if arch_files:
+        (ws / ".arch-files").write_text("\n".join(arch_files))
 
     # Symlink to spec for easy navigation from the review folder
     spec_link = ws / "spec.md"
     if not spec_link.exists():
         spec_link.symlink_to(spec_path.resolve())
 
-    _generate_context_md(ws, source_dirs, spec_path)
+    _generate_context_md(ws, source_dirs, spec_path, arch_files=arch_files)
     _generate_agent_claude_mds(ws, mode=mode)
     _init_review_git(ws, adr_root)
 
@@ -107,7 +110,10 @@ def annotate_spec_headings(content: str) -> str:
     return "\n".join(result)
 
 
-def _generate_context_md(ws: Path, source_dirs: list[str], spec_path: Path | None = None) -> None:
+def _generate_context_md(
+    ws: Path, source_dirs: list[str], spec_path: Path | None = None,
+    arch_files: list[str] | None = None,
+) -> None:
     template = TEMPLATES_DIR / "context.md"
     if template.exists():
         content = template.read_text()
@@ -127,6 +133,14 @@ def _generate_context_md(ws: Path, source_dirs: list[str], spec_path: Path | Non
         "HANDOFF.md, and any other relevant files.\n"
     )
     content += source_lines
+
+    if arch_files:
+        arch_lines = "\n## Architectural Files\n\n"
+        arch_lines += "These files are authoritative architectural context. Read them before reviewing:\n\n"
+        for af in arch_files:
+            arch_lines += f"- {af}\n"
+        arch_lines += "\n"
+        content += arch_lines
 
     (ws / "context.md").write_text(content)
 
