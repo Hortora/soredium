@@ -18,6 +18,11 @@ def build_reviewer_prompt(
             round_num, focus_items, handover_path, convergence_override_ids,
             source_dirs, workspace_root, spec_path,
         )
+    if mode == "code-review":
+        return _build_code_review_reviewer_prompt(
+            round_num, focus_items, handover_path, convergence_override_ids,
+            source_dirs, workspace_root, spec_path,
+        )
     ws = workspace_root
     parts: list[str] = []
 
@@ -106,6 +111,10 @@ def build_implementor_prompt(
 ) -> str:
     if mode == "pre-review":
         return _build_pre_review_implementor_prompt(
+            round_num, focus_items, source_dirs, workspace_root, spec_path,
+        )
+    if mode == "code-review":
+        return _build_code_review_implementor_prompt(
             round_num, focus_items, source_dirs, workspace_root, spec_path,
         )
     ws = workspace_root
@@ -287,6 +296,135 @@ def _build_pre_review_implementor_prompt(
         f"in the approach, revise the proposal at {sp}. Where they haven't, defend "
         "your choice with specific reasoning. If the reviewer proposes a better "
         "approach, evaluate it honestly — pivot if it's genuinely better."
+    )
+    parts.append("")
+    parts.append(
+        f"Write your response to {ws}/responses/implementor-{round_num}.md following the "
+        "structured output format described in the review context appended to your system prompt."
+    )
+
+    if focus_items:
+        parts.append("")
+        parts.append(f"Focus items: {', '.join(focus_items)}")
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Code review prompts — code vs spec alignment
+# ---------------------------------------------------------------------------
+
+def _build_code_review_reviewer_prompt(
+    round_num: int,
+    focus_items: list[str],
+    handover_path: str | None,
+    convergence_override_ids: list[str] | None = None,
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+) -> str:
+    ws = workspace_root
+    parts: list[str] = []
+
+    parts.append("ultrathink")
+    parts.append("")
+    parts.append(f"This is round {round_num} of a code review against the reviewed spec.")
+    parts.append("")
+    parts.append(f"Read the reviewed spec at {spec_path or ws + '/spec.md'}.")
+    parts.append("Then read the implementation code in the source directories below.")
+    if round_num > 1:
+        parts.append(f"Read the tracker at {ws}/tracker.md for issue status and focus items.")
+    parts.append("")
+    if source_dirs:
+        parts.append("Implementation directories (full read access — this is the code to review against the spec):")
+        for sd in source_dirs:
+            parts.append(f"  - {sd}")
+        parts.append("")
+    parts.append(
+        f"Write your review to {ws}/responses/reviewer-{round_num}.md following the structured "
+        "output format described in the review context appended to your system prompt."
+    )
+    parts.append("")
+    parts.append(
+        "Check whether the code delivers what the spec promised. For each "
+        "divergence, cite the specific spec section and the specific code "
+        "location. Do NOT re-review the spec — it has been through adversarial "
+        "review already. Focus on spec-to-code alignment."
+    )
+    parts.append("")
+    parts.append("Do NOT modify the code. Review only.")
+
+    if handover_path:
+        parts.append("")
+        parts.append(
+            f"Read the prior reviewer's handover at {ws}/{handover_path} for accumulated "
+            f"insights from previous rounds."
+        )
+
+    if round_num >= 2:
+        parts.append("")
+        parts.append(
+            "Check whether the implementor has fixed the divergences you identified. "
+            "Verify each fix against the spec — not just that the code changed, but "
+            "that it now matches what the spec requires."
+        )
+
+    if focus_items:
+        parts.append("")
+        parts.append(
+            f"The tracker shows {len(focus_items)} open/contested items. Focus on these: "
+            + ", ".join(focus_items)
+        )
+
+    if round_num >= 2:
+        parts.append("")
+        parts.append(
+            "EVIDENCE REQUIRED for confirmations — bare assertions are not accepted:\n"
+            "- For each ADDRESSED item you confirm as resolved: cite the specific "
+            "code change that now aligns with the spec.\n"
+            "- For each REJECTED item you accept: state why the implementor's "
+            "reasoning is correct and the spec should be updated.\n"
+            "- SIGNAL: APPROVED will only be accepted when ALL items are in terminal "
+            "state (VERIFIED or ACCEPTED)."
+        )
+
+    if convergence_override_ids:
+        parts.append("")
+        parts.append(
+            "The following items are NOT in terminal state. You MUST provide evidence "
+            "for each before APPROVED can be accepted: "
+            + ", ".join(convergence_override_ids)
+        )
+
+    return "\n".join(parts)
+
+
+def _build_code_review_implementor_prompt(
+    round_num: int,
+    focus_items: list[str],
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+) -> str:
+    ws = workspace_root
+    parts: list[str] = []
+
+    parts.append(f"This is round {round_num} of a code review against the reviewed spec.")
+    parts.append("")
+    parts.append(f"Read the reviewer's findings at {ws}/responses/reviewer-{round_num}.md.")
+    parts.append(f"Read the tracker at {ws}/tracker.md for focus items and issue statuses.")
+    parts.append(f"Read the spec at {spec_path or ws + '/spec.md'} to verify the reviewer's claims.")
+    if source_dirs:
+        parts.append("")
+        parts.append("Implementation directories (full read and write access):")
+        for sd in source_dirs:
+            parts.append(f"  - {sd}")
+    parts.append("")
+    parts.append(
+        "Address each divergence the reviewer identified. Where the code genuinely "
+        "deviates from the spec, fix the code. Where you deliberately deviated, "
+        "explain why and propose a spec update. Where the reviewer misreads the "
+        "spec, cite the specific section that supports your implementation."
     )
     parts.append("")
     parts.append(

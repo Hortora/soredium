@@ -34,6 +34,7 @@ def setup_review(
     issue: str | None = None,
     mode: str = "spec-review",
     arch_files: list[str] | None = None,
+    diff_base: str | None = None,
 ) -> Path:
     if adr_root is None:
         adr_root = Path.home() / "adr"
@@ -57,6 +58,8 @@ def setup_review(
         (ws / ".issue").write_text(issue)
     if arch_files:
         (ws / ".arch-files").write_text("\n".join(arch_files))
+    if diff_base:
+        (ws / ".diff-base").write_text(diff_base)
 
     # Symlink to spec for easy navigation from the review folder
     spec_link = ws / "spec.md"
@@ -487,6 +490,40 @@ Be skeptical of the reviewer's alternatives — verify they actually solve
 the problem better, not just differently. A genuine improvement is worth
 pivoting for; a lateral move is not."""
 
+# ---------------------------------------------------------------------------
+# Code review specific constraints
+# ---------------------------------------------------------------------------
+
+_CODE_REVIEW_APPROACH_REVIEWER = """\
+You are reviewing implementation code against a reviewed design spec.
+Read the spec first to understand what was promised, then read the code
+to verify it delivers. Your stance is adversarial — assume the code
+drifted from the spec until proven otherwise."""
+
+_CODE_REVIEW_STARTING_POINTS = """\
+Starting points (not restrictions — go beyond these):
+- Does the code deliver every capability the spec promises?
+- Are edge cases identified in the spec review handled in the code?
+- Are design decisions from the spec reflected in the implementation?
+- Is there scope creep — code that does more than the spec specified?
+- Are error handling strategies from the spec implemented correctly?
+- Do naming conventions in the code match the spec's domain model?
+- Are any spec requirements silently dropped or deferred without a TODO?
+- Does the test coverage match the spec's stated quality requirements?"""
+
+_CODE_REVIEW_APPROACH_IMPLEMENTOR = """\
+You wrote this code to implement the reviewed spec. Defend your
+implementation choices where they are sound, fix them where they
+genuinely diverge from the spec. If you deliberately deviated from
+the spec, explain why — the reviewer needs to know if the spec
+should be updated to match."""
+
+_CODE_REVIEW_IMPLEMENTOR_SKEPTICISM = """\
+Be skeptical of the reviewer's spec interpretations. The reviewer
+reads the spec; you wrote the code AND read the spec. When they
+claim a divergence, verify their reading of the spec is correct
+before accepting the critique."""
+
 
 # ---------------------------------------------------------------------------
 # Assembly — role-specific composition from shared elements
@@ -660,6 +697,86 @@ approach before investing in detailed spec writing.
 _MODE_GENERATORS["pre-review"] = {
     "reviewer": _pre_review_reviewer_md,
     "implementor": _pre_review_implementor_md,
+}
+
+
+# ---------------------------------------------------------------------------
+# Code review mode generators
+# ---------------------------------------------------------------------------
+
+def _code_review_reviewer_md() -> str:
+    constraints = _assemble_constraints([
+        _CODE_REVIEW_APPROACH_REVIEWER,
+        _CODE_REVIEW_STARTING_POINTS,
+        _TODO_CHECK,
+        _DEFERRED_ITEMS,
+        "### Code navigation",
+        _INTELLIJ_OPEN,
+        _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "reviewer"),
+        "### Context sources",
+        _ARCH_DOCS,
+        _SPECS_AND_ADRS,
+        _GIT_ISSUES,
+        _INTERNET,
+    ])
+    return f"""\
+# Role: Code vs Spec Reviewer
+
+You are reviewing implementation code against a reviewed design specification.
+Your job is to verify the code delivers what the spec promised — every
+capability, every edge case, every design decision. Find divergences,
+scope creep, and silent omissions.
+
+Do not re-review the spec itself — it has already been through adversarial
+review. Focus on whether the code faithfully implements it.
+
+{constraints}
+"""
+
+
+def _code_review_implementor_md() -> str:
+    constraints = _assemble_constraints([
+        _CODE_REVIEW_APPROACH_IMPLEMENTOR,
+        _CODE_REVIEW_IMPLEMENTOR_SKEPTICISM,
+        _DEFERRED_ITEMS,
+        "### Code navigation",
+        _INTELLIJ_OPEN,
+        _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "implementor"),
+        "### Context sources",
+        _ARCH_DOCS,
+        _SPECS_AND_ADRS,
+        _GIT_ISSUES,
+        _INTERNET,
+    ])
+    return f"""\
+# Role: Implementation Author
+
+You wrote the code that implements the reviewed spec. Defend your
+implementation where it is faithful to the spec. Fix genuine divergences.
+Explain deliberate deviations — the spec may need updating to match.
+
+{constraints}
+
+## Your responsibilities
+
+- Address every divergence the reviewer identifies
+- Where you deliberately deviated from the spec, explain why and propose
+  a spec update if the deviation is an improvement
+- Where the reviewer misreads the spec, cite the specific section that
+  supports your implementation
+- Escalate genuine spec-vs-code conflicts to the human (DECISION_NEEDED)
+
+{_IMPLEMENTOR_STAND_GROUND}
+"""
+
+
+_MODE_GENERATORS["code-review"] = {
+    "reviewer": _code_review_reviewer_md,
+    "implementor": _code_review_implementor_md,
 }
 
 

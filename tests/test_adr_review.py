@@ -489,6 +489,164 @@ class TestPreReviewTemplates:
 
 
 # ---------------------------------------------------------------------------
+# Code review mode prompts and templates
+# ---------------------------------------------------------------------------
+
+class TestCodeReviewPrompts:
+
+    def test_reviewer_prompt_is_code_vs_spec(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="code-review", spec_path="/tmp/spec.md",
+        )
+
+        assert "code review against the reviewed spec" in prompt
+        assert "Do NOT modify the code" in prompt
+
+    def test_reviewer_prompt_round2_has_evidence_requirement(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+
+        prompt = build_reviewer_prompt(
+            round_num=2, focus_items=["R1-01"], handover_path=None,
+            mode="code-review", spec_path="/tmp/spec.md",
+        )
+
+        assert "EVIDENCE REQUIRED" in prompt
+        assert "R1-01" in prompt
+        assert "code change that now aligns with the spec" in prompt
+
+    def test_implementor_prompt_is_code_focused(self) -> None:
+        from adversarial_design_review.prompts import build_implementor_prompt
+
+        prompt = build_implementor_prompt(
+            round_num=1, focus_items=[], mode="code-review",
+            workspace_root="/tmp/ws", spec_path="/tmp/spec.md",
+        )
+
+        assert "code review against the reviewed spec" in prompt
+        assert "divergence" in prompt.lower()
+        assert "fix the code" in prompt.lower()
+
+    def test_reviewer_prompt_convergence_override(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+
+        prompt = build_reviewer_prompt(
+            round_num=2, focus_items=["R1-01"], handover_path=None,
+            convergence_override_ids=["R1-02"],
+            mode="code-review", spec_path="/tmp/spec.md",
+        )
+
+        assert "R1-02" in prompt
+        assert "NOT in terminal state" in prompt
+
+
+class TestCodeReviewTemplates:
+
+    def test_reviewer_template_has_code_review_constraints(self) -> None:
+        from adversarial_design_review.setup import _code_review_reviewer_md
+
+        md = _code_review_reviewer_md()
+
+        assert "Code vs Spec Reviewer" in md
+        assert "spec" in md.lower()
+        assert "implementation" in md.lower() or "code" in md.lower()
+
+    def test_implementor_template_has_code_review_constraints(self) -> None:
+        from adversarial_design_review.setup import _code_review_implementor_md
+
+        md = _code_review_implementor_md()
+
+        assert "Implementation Author" in md
+        assert "DECISION_NEEDED" in md
+        assert "spec" in md.lower()
+
+    def test_reviewer_template_differs_from_spec_review(self) -> None:
+        from adversarial_design_review.setup import _default_reviewer_md, _code_review_reviewer_md
+
+        spec_md = _default_reviewer_md()
+        code_md = _code_review_reviewer_md()
+
+        assert "Adversarial Design Reviewer" in spec_md
+        assert "Code vs Spec Reviewer" in code_md
+        assert spec_md != code_md
+
+    def test_mode_generators_registered(self) -> None:
+        from adversarial_design_review.setup import _MODE_GENERATORS
+
+        assert "code-review" in _MODE_GENERATORS
+        assert "reviewer" in _MODE_GENERATORS["code-review"]
+        assert "implementor" in _MODE_GENERATORS["code-review"]
+
+
+# ---------------------------------------------------------------------------
+# Diff base
+# ---------------------------------------------------------------------------
+
+class TestDiffBase:
+
+    def test_diff_base_persisted_on_setup(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Test\n")
+
+        ws = setup_review(
+            spec_path=spec, title="test", source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr", diff_base="main",
+        )
+
+        assert (ws / ".diff-base").exists()
+        assert (ws / ".diff-base").read_text() == "main"
+
+    def test_no_diff_base_file_when_omitted(self, tmp_path: Path) -> None:
+        from adversarial_design_review.setup import setup_review
+
+        spec = tmp_path / "spec.md"
+        spec.write_text("# Test\n")
+
+        ws = setup_review(
+            spec_path=spec, title="test", source_dirs=[str(tmp_path)],
+            adr_root=tmp_path / "adr",
+        )
+
+        assert not (ws / ".diff-base").exists()
+
+    def test_diff_base_parse_args(self) -> None:
+        from adversarial_design_review.review import parse_args
+        import sys
+        from unittest.mock import patch
+
+        test_args = [
+            "--spec", "/tmp/spec.md",
+            "--title", "test",
+            "--source-dirs", "/tmp/src",
+            "--mode", "code-review",
+            "--diff-base", "main",
+        ]
+        with patch.object(sys, "argv", ["review.py"] + test_args):
+            args = parse_args()
+
+        assert args.diff_base == "main"
+
+    def test_diff_base_default_none(self) -> None:
+        from adversarial_design_review.review import parse_args
+        import sys
+        from unittest.mock import patch
+
+        test_args = [
+            "--spec", "/tmp/spec.md",
+            "--title", "test",
+            "--source-dirs", "/tmp/src",
+        ]
+        with patch.object(sys, "argv", ["review.py"] + test_args):
+            args = parse_args()
+
+        assert args.diff_base is None
+
+
+# ---------------------------------------------------------------------------
 # Convergence override wiring
 # ---------------------------------------------------------------------------
 

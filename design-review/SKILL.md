@@ -45,13 +45,13 @@ Review phases — toggle to select:
 
 [ ] 1  Pre-review     Approach validation (2-3 rounds, lightweight)
 [x] 2  Spec review    Full adversarial review (4-10 rounds)
-[ ] 3  Code review    Implementation vs reviewed spec (coming soon)
+[ ] 3  Code review    Implementation vs reviewed spec (2-4 rounds)
 [ ] 4  Final review   Production-readiness check (coming soon)
 
 Type numbers to toggle, "go" to proceed:
 ```
 
-Phases 3-4 are shown but disabled — they are not yet implemented.
+Phase 4 is shown but disabled — it is not yet implemented.
 
 **If the user just says "design review" or "review this spec"**, skip the checklist
 entirely and proceed with spec review (phase 2). Only show the checklist when
@@ -70,7 +70,7 @@ the spec based on pre-review findings before the heavier spec review.
 **Mapping to `--mode`:**
 - Phase 1 → `--mode pre-review`
 - Phase 2 → `--mode spec-review` (default, current behavior)
-- Phase 3 → `--mode code-review` (not yet available)
+- Phase 3 → `--mode code-review`
 - Phase 4 → `--mode final-review` (not yet available)
 
 ## Step 1 — Identify the spec
@@ -267,10 +267,12 @@ from the next round.
 | "more rounds" / "up to 15" | `--max-rounds 15` |
 | "shorter windows" | `--session-window 3` |
 | "use these arch files" / specific arch context | `--arch-files /path/to/PLATFORM.md /path/to/ARC42.md` |
+| "review code against spec" / "code review mode" | `--mode code-review` |
+| "diff against main" / "changes since release" | `--diff-base main` or `--diff-base v1.0` |
 
 ## What this skill does NOT do
 
-- **Code review** — use `code-review` for that (Phase 3/4 coming soon)
+- **Routine code review** — use `code-review` for pre-commit checklist review (Phase 4 coming soon)
 - **Brainstorming** — use `brainstorming` to create the spec first,
   then use pre-review to validate the approach
 - **Implementation** — this reviews design specs, not code

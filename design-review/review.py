@@ -121,6 +121,10 @@ def main() -> int:
                 args.arch_files = [
                     line for line in arch_files_file.read_text().splitlines() if line.strip()
                 ]
+        if not args.diff_base:
+            diff_base_file = ws / ".diff-base"
+            if diff_base_file.exists():
+                args.diff_base = diff_base_file.read_text().strip() or None
         _LOG_FILE = ws / "progress.log"
         last_round, reviewer_only = _detect_last_round(ws)
         if reviewer_only:
@@ -161,6 +165,7 @@ def main() -> int:
             issue=args.issue,
             mode=args.mode,
             arch_files=args.arch_files,
+            diff_base=args.diff_base,
         )
         _LOG_FILE = ws / "progress.log"
         _log(f"Review ({args.mode}): {ws}")
@@ -1097,6 +1102,8 @@ def parse_args() -> argparse.Namespace:
                         help="GitHub issue number associated with this spec")
     parser.add_argument("--arch-files", nargs="+", default=None,
                         help="Architectural files for agents to prioritise (overrides auto-detection)")
+    parser.add_argument("--diff-base", default=None,
+                        help="Git ref to diff against for code-review mode (branch, SHA, or tag)")
     args = parser.parse_args()
     defaults = MODE_DEFAULTS[args.mode]
     if args.max_rounds is None:
