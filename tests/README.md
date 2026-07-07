@@ -30,7 +30,7 @@ Functional tests execute skills against real scenarios to verify they work as ex
 
 **Example:**
 ```
-java-git-commit/
+git-commit/
   SKILL.md
   tests/
     test_cases.json         # Test definitions
@@ -41,7 +41,7 @@ java-git-commit/
 **Test Case Format:**
 ```json
 {
-  "skill_name": "java-git-commit",
+  "skill_name": "git-commit",
   "tests": [
     {
       "id": "basic-commit",
@@ -122,7 +122,7 @@ python scripts/testing/run_skill_tests.py --all
 
 ```bash
 # Not yet implemented
-python scripts/testing/run_skill_tests.py java-git-commit
+python scripts/testing/run_skill_tests.py git-commit
 ```
 
 ### Run All Regression Tests
@@ -172,7 +172,7 @@ Skill Test Coverage Report
 ===========================
 
 User-Invocable Skills:
-  java-git-commit:     5/5 branches tested (100%) ✅
+  git-commit:          5/5 branches tested (100%) ✅
   git-commit:          3/4 branches tested (75%)  ⚠️
   skill-review:        8/8 validations tested (100%) ✅
 

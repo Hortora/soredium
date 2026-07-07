@@ -9,6 +9,11 @@ Quarkus BOM — never let managed versions drift.
 **Load `~/.hortora/garden/approaches/dependency-management.md`** before proceeding.
 Apply all principles from that file, then the Maven-specific patterns below.
 
+## Maven Command
+
+`./mvnw` is the default Maven wrapper; projects may declare a specific Maven path
+in CLAUDE.md (e.g. `/opt/homebrew/bin/mvn`). Use whichever the project specifies.
+
 ## Core Rules
 
 - **BOM first**: if a dependency is managed by the Quarkus BOM or the
@@ -190,7 +195,7 @@ Dependency update is complete when:
 - ✅ User has confirmed changes with **YES**
 - ✅ BOM alignment verified (no version drift)
 - ✅ Compilation succeeds (`mvn compile` passes)
-- ✅ pom.xml changes committed (via java-git-commit if applicable)
+- ✅ pom.xml changes committed (via git-commit if applicable)
 - ✅ For major upgrades: ADR created documenting decision
 
 **Not complete until** all criteria met and changes committed.
@@ -223,6 +228,6 @@ Dependency update is complete when:
 
 **Invokes:**
 - [`adr`] when major version upgrades or new extensions detected (offers to user)
-- [`java-git-commit`] after successful dependency updates
+- [`git-commit`] after successful dependency updates
 
 **Can be invoked independently:** User says "update dependencies", "upgrade Quarkus", or explicitly invokes when pom.xml changes are needed

@@ -37,14 +37,14 @@ flowchart TD
     Q3{"Stay in this session?"}
     SDD["subagent-driven-development"]
     EP["executing-plans"]
-    MANUAL["Manual execution or brainstorm first"]
+    NOPLAN["Brainstorm first"]
 
     Q1 -->|"yes"| Q2
-    Q1 -->|"no"| MANUAL
+    Q1 -->|"no"| NOPLAN
     Q2 -->|"yes"| Q3
-    Q2 -->|"no — tightly coupled"| MANUAL
+    Q2 -->|"no — tightly coupled"| EP
     Q3 -->|"yes"| SDD
-    Q3 -->|"no — parallel session"| EP
+    Q3 -->|"no — inline execution"| EP
 ```
 
 **vs. executing-plans:**
@@ -52,7 +52,10 @@ flowchart TD
 - Fresh subagent per task (no context pollution)
 - Review after each task (spec compliance + code quality), broad review
   at the end
-- Faster iteration (no human-in-loop between tasks)
+- **Continuous execution** — runs all tasks without stopping to check in.
+  EP takes the opposite approach: **stop and ask** on any blocker.
+  SDD can do this because subagents isolate failures — a stuck task
+  doesn't pollute the coordinator's context.
 
 ## The Process
 
@@ -87,6 +90,14 @@ flowchart TD
     MORE -->|"yes"| BRIEF
     MORE -->|"no"| FINAL
     FINAL --> WORKEND
+```
+
+## Step 0 — Branch Guard
+
+Verify you are NOT on main before proceeding:
+
+```bash
+[ "$(git -C "$PROJECT" branch --show-current)" = "main" ] && echo '⚠️ Cannot execute on main. Create a feature branch first.' && exit 1
 ```
 
 ## Pre-Flight Plan Review
@@ -161,12 +172,14 @@ correctness or scope, address them before review. If they're observations
 Provide the missing context and re-dispatch.
 
 **BLOCKED:** The implementer cannot complete the task. Assess the blocker:
-1. If it's a context problem, provide more context and re-dispatch with
+1. If it's an unexpected bug or failure, invoke `systematic-debugging`
+   to root-cause before retrying
+2. If it's a context problem, provide more context and re-dispatch with
    the same model
-2. If the task requires more reasoning, re-dispatch with a more capable
+3. If the task requires more reasoning, re-dispatch with a more capable
    model
-3. If the task is too large, break it into smaller pieces
-4. If the plan itself is wrong, escalate to the human
+4. If the task is too large, break it into smaller pieces
+5. If the plan itself is wrong, escalate to the human
 
 **Never** ignore an escalation or force the same model to retry without
 changes. If the implementer said it's stuck, something needs to change.
@@ -315,7 +328,7 @@ progress in a ledger file, not only in todos.
 **Final whole-branch review:** invoke `design-review --mode final-review --depth standard`
 as a background subprocess. Read `tracker.md` from the review workspace for results.
 
-## Red Flags
+## Common Pitfalls
 
 **Never:**
 - Start implementation on main/master branch without explicit user
@@ -363,7 +376,9 @@ as a background subprocess. Read `tracker.md` from the review workspace for resu
   independent tasks or when review between tasks adds value)
 
 **Invokes:**
-- `design-review --mode final-review` — final whole-branch review after all tasks
+- `design-review --mode final-review` — final whole-branch review after all tasks.
+  Note: design-review --mode final-review is heavyweight (multi-round,
+  10-30 min). For quick single-reviewer feedback, use code-review instead.
 - `work-end` — complete development after all tasks and final review
 
 **Complements:**
@@ -381,4 +396,5 @@ as a background subprocess. Read `tracker.md` from the review workspace for resu
 - `executing-plans` — alternative execution mode for simple sequential
   plans where subagent overhead isn't justified.
 - `writing-plans` — creates the plan this skill executes.
-- `using-git-worktrees` — ensures isolated workspace for execution.
+- `using-git-worktrees` — subagents may use worktrees for isolation
+  independently; SDD does not set up or manage worktrees itself.

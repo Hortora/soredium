@@ -162,4 +162,4 @@ These extend universal categories with TypeScript-specific items (tier 2+):
 | Flagging `devDependencies` separation without checking actual usage | A package listed under `dependencies` may be intentionally bundled | Verify the package is unused at runtime before flagging it as miscategorised |
 | Calling skipped tests a CRITICAL finding | Skipped tests slow down quality but don't break production | Severity is LOW unless the skip count is high (>10% of suite) or skips are undocumented |
 
-**Related skills:** `ts-dev`, `ts-code-review`, `npm-dependency-update`, `project-refine`
+**Related skills:** `ts-dev`, `code-review`, `dependency-update`, `project-refine`

@@ -2,7 +2,7 @@
 name: update-claude-md
 description: >
   Use when CLAUDE.md needs updating due to workflow or convention changes, or
-  when invoked automatically by git-commit/java-git-commit when commits
+  when invoked automatically by git-commit when commits
   affect build commands, testing patterns, naming conventions, or repository
   structure.
 slash-command: false
@@ -29,7 +29,7 @@ changes.
 
 - CLAUDE.md lives at repository root
 - **Never apply changes without explicit user confirmation** (a plain "YES" or equivalent)
-- **Never modify the Project Type section** — this is user-configured and defines repository behavior (type: skills, type: java, type: blog, type: custom, type: generic)
+- **Never modify an existing Project Type section** — this is user-configured and defines repository behavior. Adding a missing section (as git-commit Step 0 does) is allowed; changing an existing one is not.
 - Focus on **workflow and convention changes**: new tools, build commands, testing
   patterns, naming conventions, repository structure changes
 - Keep prose concise and professional. Prefer bullet points and tables
@@ -161,6 +161,8 @@ Map changes to CLAUDE.md sections:
 **This check applies to ALL project types** (skills/java/blog/custom/generic).
 
 ### Step 4b: Check for missing Work Tracking section
+
+(Skip this offer if issue tracking was already offered or set up earlier in this session.)
 
 Run `python3 ~/.claude/skills/project/ctx.py` if not already run this session.
 Read `ISSUES_STATUS` from the output.
@@ -358,7 +360,7 @@ After applying updates, run:
 python scripts/validation/validate_doc_structure.py CLAUDE.md
 ```
 
-If exit code 1 or 2, follow the nudge workflow described in `java-update-design` § Document Structure Check — same conversation, same threshold adjustment, same CLAUDE.md persistence pattern.
+If exit code 1 or 2, follow the nudge workflow described in `update-design` (java.md) § Document Structure Check — same conversation, same threshold adjustment, same CLAUDE.md persistence pattern.
 
 ## Success Criteria
 
@@ -377,7 +379,7 @@ CLAUDE.md update is complete when:
 
 ## Skill Chaining
 
-**Invoked by:** [`git-commit`] when committing in any repository, [`java-git-commit`] alongside update-design, [`git-commit`] when committing blog changes, [`custom-git-commit`] when committing custom project changes, [`work-end`] as part of Step 3b pre-close sweep, [`handover`] as part of the session wrap checklist (mid-work sessions), [`write-content`] on the first blog entry ever in a project (adds the mandatory Writing Style Guide section)
+**Invoked by:** [`git-commit`] when committing in any repository (routes to java.md, custom.md, or generic depending on project type), [`work-end`] as part of Step 3b pre-close sweep, [`handover`] as part of the session wrap checklist (mid-work sessions), [`write-content`] on the first blog entry ever in a project (adds the mandatory Writing Style Guide section)
 
 **Invokes:** `update-design` when architecture-affecting changes are detected
 

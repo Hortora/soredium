@@ -24,14 +24,16 @@ Before any checks run, read the project type:
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-Read `PROJECT_TYPE` from the output.
+Read `PROJECT_TYPE` and `MATURITY_STAGE` from the output.
 
-Extract the type: `skills` | `java` | `blog` | `custom` | `generic`
+`PROJECT_TYPE` may be comma-separated (e.g. `java,ts`) for mixed-language repos.
+Check whether it **contains** a given type rather than matching exactly.
+`MATURITY_STAGE` is `pre-release` (default) or `released`.
 
 If `PROJECT_TYPE` is empty, treat as `generic` and note it as a `config` finding.
 
-Store the type — type-aware checks (`primary-doc`, `artifacts`, `conventions`,
-`framework`) use it throughout this skill.
+Store the type and stage — type-aware checks (`primary-doc`, `artifacts`,
+`conventions`, `framework`) use them throughout this skill.
 
 ---
 
@@ -140,25 +142,39 @@ refinement checklists for all 12 universal categories before running checks:
 `docs-sync`, `consistency`, `logic`, `config`, `security`, `release`,
 `user-journey`, `git`, `primary-doc`, `artifacts`, `conventions`, `framework`.
 
+**Maturity-stage-aware checks (applied within relevant categories):**
+
+If `MATURITY_STAGE=released`:
+- **`config`**: Verify CLAUDE.md declares `**Stage:** released` explicitly
+- **`release`**: Check that public API changes have migration docs or deprecation annotations
+- **`consistency`**: Verify semver compliance — breaking changes should bump the major version
+
+If `MATURITY_STAGE=pre-release`:
+- **`config`**: No finding — pre-release is the default and expected for projects without consumers
+- Skip all backward-compat and migration checks — they do not apply
+
 ---
 
 ## Step 6 — Run Type-Specific Checks (Tier 3+)
 
-At tier 3 and 4, after universal checks complete, read the type-specific content file
-and execute the checks it describes. Type-specific findings are prefixed with `[type]`
+At tier 3 and 4, after universal checks complete, read the type-specific content file(s)
+and execute the checks they describe. Type-specific findings are prefixed with `[type]`
 (e.g. `[java]`).
 
-| Project type | File to read |
+If PROJECT_TYPE contains multiple languages (e.g., `java,ts`), run each applicable
+type-specific check file in sequence.
+
+| Language / type | File to read |
 |---|---|
 | `skills` | `~/.claude/skills/project-health/skills-repo.md` |
 | `java` | `~/.claude/skills/project-health/java.md` |
 | `blog` | `~/.claude/skills/project-health/blog.md` |
 | `custom` | `~/.claude/skills/project-health/custom.md` |
 | `python` | `~/.claude/skills/project-health/python.md` |
-| `ts` / TypeScript detected | `~/.claude/skills/project-health/typescript.md` |
+| `ts` | `~/.claude/skills/project-health/typescript.md` |
 | `generic` | Skip — universal checks only |
 
-Read the file, then execute the checks described in it.
+Read the file(s), then execute the checks described in them.
 
 If the project type is `generic` but TypeScript or Python files are found, suggest
 running the relevant section manually.

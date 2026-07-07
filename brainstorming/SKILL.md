@@ -1,6 +1,9 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: >
+  Use when starting any creative work — creating features, building components, adding
+  functionality, or modifying behavior. Explores user intent, requirements and design
+  before implementation.
 ---
 
 # Brainstorming Ideas Into Designs
@@ -23,6 +26,11 @@ utility, a config change — all of them. "Simple" projects are where
 unexamined assumptions cause the most wasted work. The design can be short
 (a few sentences for truly simple projects), but you MUST present it and
 get approval.
+
+## Branch Context
+
+If no feature branch exists, brainstorming results may not be tracked. Consider
+running work-start first to establish a branch and issue context.
 
 ## Checklist
 

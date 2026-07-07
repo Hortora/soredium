@@ -34,6 +34,7 @@ Skills are markdown files with YAML frontmatter that Claude Code loads to execut
 ## Project Type
 
 **Type:** skills
+**Stage:** pre-release
 
 ## Project Type Awareness
 
@@ -50,6 +51,8 @@ This repository follows the **type: skills** project model. All repositories usi
 | **`blog`** | GitHub Pages / Jekyll blogs |
 | **`custom`** | Working groups, research, docs with custom sync |
 | **`generic`** | Everything else |
+
+Comma-separate for mixed repos: `**Type:** java, ts`. Add `**Stage:** released` when the project has consumers.
 
 This repository is **type: skills**. See [docs/PROJECT-TYPES.md](docs/PROJECT-TYPES.md) for full type definitions, routing logic, and when to use each.
 
@@ -142,7 +145,7 @@ Both are user-invocable; neither auto-triggers the other
 ### Canonical Path Resolution Block
 
 Several workspace-aware skills (`work-start`, `work-end`, `work-pause`, `work-resume`,
-`java-update-design`, `handover`, `adr`) resolve workspace and project paths via symlinks.
+`update-design`, `handover`, `adr`) resolve workspace and project paths via symlinks.
 The canonical form -- identical across all of them -- is:
 
 ```bash
@@ -260,6 +263,16 @@ When editing skills, maintain these conventions:
 - "Prerequisites" (for layered skills)
 - "Success Criteria" (for artifact-producing skills)
 - "Common Pitfalls" (table format: Mistake | Why It's Wrong | Fix)
+
+### Invoke vs Follow Convention
+
+When skills reference other skills, use precise language:
+
+- **"Invoke `skill-name`"** — call it via the Skill tool (explicit tool invocation)
+- **"Follow `skill-name`"** — apply its methodology/rules without a Skill tool call
+- **"Complements `skill-name`"** — used alongside, neither invokes nor follows
+
+Example: EP says "every task follows TDD" (methodology), not "invoke TDD" (tool call).
 
 ### Cross-Reference Format
 
@@ -613,19 +626,21 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `publish-blog` -- routes blog entries to external git destinations via blog-routing.yaml; Level 2 blog routing (per-entry cross-posting), independent of epic Level 1 routing
 - `handover` -- end-of-session HANDOFF.md generator; lazy references to blog, design-snapshot, and CLAUDE.md rather than loading them; invokes write-blog, design-snapshot, and update-claude-md via user-confirmed wrap checklist
 
-**TypeScript/Node.js skills:**
+**TypeScript/Node.js:**
 - `ts-dev` -- TypeScript development; strict mode, async patterns, error handling, testing
-- `ts-code-review` -- extends `code-review-principles` for TypeScript/Node.js
-- `ts-security-audit` -- OWASP Top 10 for TypeScript/Node.js, triggered by `ts-code-review`
-- `npm-dependency-update` -- npm/yarn/pnpm dependency management, builds on `dependency-management-principles`
-- `ts-project-health` -- extends project-health for TypeScript projects
+- Router skill content files for TypeScript/Node.js:
+  - `code-review` routes to `typescript.md` -- TypeScript/Node.js review rules
+  - `security-audit` routes to `typescript.md` -- OWASP Top 10 for TypeScript/Node.js
+  - `dependency-update` routes to `npm.md` -- npm/yarn/pnpm dependency management
+  - `project-health` routes to `typescript.md` -- TypeScript-specific health checks
 
-**Python skills:**
+**Python:**
 - `python-dev` -- Python development; type hints, async patterns, safety, testing with pytest
-- `python-code-review` -- extends `code-review-principles` for Python
-- `python-security-audit` -- OWASP Top 10 for Python, triggered by `python-code-review`
-- `pip-dependency-update` -- pip/poetry/pipenv dependency management, builds on `dependency-management-principles`
-- `python-project-health` -- extends project-health for Python projects
+- Router skill content files for Python:
+  - `code-review` routes to `python.md` -- Python review rules
+  - `security-audit` routes to `python.md` -- OWASP Top 10 for Python
+  - `dependency-update` routes to `pip.md` -- pip/poetry/pipenv dependency management
+  - `project-health` routes to `python.md` -- Python-specific health checks
 
 **Health & quality skills** (correctness and improvement):
 - `project-health` -- universal health check; answers "is the project correct, complete, and consistent?"; auto-chains to type-specific skill at tier 3+

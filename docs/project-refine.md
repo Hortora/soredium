@@ -227,7 +227,7 @@ Findings presented as opportunities, rated by bloat score:
   for each tier; extract to a shared helper. Est. -40 lines. [code]
 
 ### 🟡B — Medium impact
-- update-primary-doc/SKILL.md (312 lines): Steps 4–7 cover two unrelated
+- update-design/java.md (312 lines): Steps 4–7 cover two unrelated
   concerns; splitting would improve navigation. Est. -20 lines. [docs]
 
 ### 🟢C — Low impact, cosmetic

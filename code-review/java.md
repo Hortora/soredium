@@ -13,7 +13,7 @@ Also apply all rules from **`java-dev`**: Safety patterns (resource leaks, deadl
 
 ## Workflow
 
-Follow the `code-review-principles` workflow (Steps 1–4). Java-specific Step 3 example:
+Follow the workflow in `code-review/SKILL.md` (Steps 1–4). Java-specific Step 3 example:
 
 ```
 🔴 CRITICAL — ClassName.java:42
@@ -29,6 +29,7 @@ Suggested fix:
 
 Step 2 uses the Java Review Checklist below.
 
+<!-- garden consultation block — duplicated across language files intentionally (no include mechanism) -->
 ## Garden Consultation
 
 After collecting the diff (Step 1), search the garden for gotchas relevant
@@ -312,8 +313,8 @@ class OrderServiceTest {
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
 | Skipping review for "small changes" | Small changes cause production incidents | Review ALL changes, size doesn't matter |
-| Only checking syntax/compilation | Misses resource leaks, race conditions, security | Follow full checklist from code-review-principles |
-| Leaving any finding unfixed | Unfixed findings accumulate and rot | Fix every finding — CRITICAL, WARNING, and NOTE — before completing the review. If the fix itself is troublesome (risky, out of scope, or needs investigation), defer as a GitHub issue rather than applying a hasty fix |
+| Only checking syntax/compilation | Misses resource leaks, race conditions, security | Follow full checklist from `code-review/SKILL.md` |
+| Leaving CRITICAL/WARNING findings unfixed | Unfixed findings accumulate and rot | Fix CRITICAL and WARNING findings before completing the review. NOTEs are advisory — fix if straightforward, skip if not. Defer risky fixes as GitHub issues rather than applying hasty changes |
 | Not checking thread safety | Quarkus event loop violations cause crashes | Verify @Blocking, avoid shared mutable state |
 | Ignoring test coverage gaps | Untested code breaks in production | Require tests for business logic |
 | Accepting mocked tests | Mocks hide integration issues | Prefer real CDI wiring over mocks |

@@ -13,6 +13,7 @@ def build_reviewer_prompt(
     spec_path: str = "",
     mode: str = "spec-review",
     depth: str | None = None,
+    maturity_stage: str = "pre-release",
 ) -> str:
     if mode == "pre-review":
         return _build_pre_review_reviewer_prompt(
@@ -23,12 +24,14 @@ def build_reviewer_prompt(
         return _build_code_review_reviewer_prompt(
             round_num, focus_items, handover_path, convergence_override_ids,
             source_dirs, workspace_root, spec_path,
+            maturity_stage=maturity_stage,
         )
     if mode == "final-review":
         return _build_final_review_reviewer_prompt(
             round_num, focus_items, handover_path,
             convergence_override_ids, source_dirs,
-            workspace_root, spec_path, depth)
+            workspace_root, spec_path, depth,
+            maturity_stage=maturity_stage)
     ws = workspace_root
     parts: list[str] = []
 
@@ -102,6 +105,15 @@ def build_reviewer_prompt(
             "for each — cite the section that addresses it and explain how it resolves "
             "the concern — before APPROVED can be accepted: "
             + ", ".join(convergence_override_ids)
+        )
+
+    if maturity_stage == "released":
+        parts.append("")
+        parts.append(
+            "**This project is RELEASED — it has external consumers.** "
+            "When reviewing the spec, flag any proposed change that would break "
+            "public APIs, config keys, serialization formats, database schemas, "
+            "or CLI flags without a documented migration path."
         )
 
     return "\n".join(parts)
@@ -333,6 +345,7 @@ def _build_code_review_reviewer_prompt(
     source_dirs: list[str] | None = None,
     workspace_root: str = "",
     spec_path: str = "",
+    maturity_stage: str = "pre-release",
 ) -> str:
     ws = workspace_root
     parts: list[str] = []
@@ -407,6 +420,16 @@ def _build_code_review_reviewer_prompt(
             + ", ".join(convergence_override_ids)
         )
 
+    if maturity_stage == "released":
+        parts.append("")
+        parts.append(
+            "**This project is RELEASED — it has external consumers.** "
+            "Flag any breaking change to public APIs, config keys, "
+            "serialization formats, database schemas, or CLI flags "
+            "without a documented migration path as WARNING. "
+            "Public API removal without prior deprecation is CRITICAL."
+        )
+
     return "\n".join(parts)
 
 
@@ -463,6 +486,7 @@ def _build_final_review_reviewer_prompt(
     workspace_root: str = "",
     spec_path: str = "",
     depth: str | None = None,
+    maturity_stage: str = "pre-release",
 ) -> str:
     depth = depth or "standard"
     parts: list[str] = []
@@ -519,6 +543,15 @@ def _build_final_review_reviewer_prompt(
             f"\n**CONVERGENCE OVERRIDE:** Items {ids} were marked resolved "
             "without sufficient evidence. You MUST provide concrete evidence "
             "for each — quote the code or explain why the concern no longer applies."
+        )
+
+    if maturity_stage == "released":
+        parts.append(
+            "\n**This project is RELEASED — it has external consumers.** "
+            "Flag any breaking change to public APIs, config keys, "
+            "serialization formats, database schemas, or CLI flags "
+            "without a documented migration path as WARNING. "
+            "Public API removal without prior deprecation is CRITICAL."
         )
 
     if handover_path:

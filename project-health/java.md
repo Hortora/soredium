@@ -21,7 +21,7 @@ These extend universal categories with Java-specific items (tier 2+):
 ### `primary-doc` augmentations
 
 **Quality:**
-- [ ] `ARC42STORIES.MD` exists and reflects current architecture (java-git-commit blocks without it)
+- [ ] `ARC42STORIES.MD` exists and reflects current architecture (git-commit blocks without it)
 - [ ] No stale entity, service, or repository references in ARC42STORIES.MD for classes that were removed
 - [ ] Module structure in ARC42STORIES.MD matches actual Maven/Gradle module layout
 
@@ -32,7 +32,7 @@ These extend universal categories with Java-specific items (tier 2+):
 ### `artifacts` augmentations
 
 **Quality:**
-- [ ] `docs/ARC42STORIES.MD` exists (required by `java-git-commit` workflow) — if missing, offer to create a stub using the java ARC42STORIES.MD template from `workspace-init` Step 6b, commit it, and note it needs content
+- [ ] `docs/ARC42STORIES.MD` exists (required by `git-commit` workflow) — if missing, offer to create a stub using the java ARC42STORIES.MD template from `workspace-init` Step 6b, commit it, and note it needs content
 - [ ] Root `pom.xml` or `build.gradle` is present and parseable
 - [ ] All Maven modules declared in parent `pom.xml` have corresponding directories
 
@@ -146,4 +146,4 @@ These extend universal categories with Java-specific items (tier 2+):
 | Treating every code similarity as duplication | Some patterns are intentionally repeated per layer | Flag only identical logic blocks (3+) that diverge silently on bug fixes |
 | Flagging an `@Entity` in a DTO as a violation | The concern is `@Entity` used AS the API type | Separate DTO classes that happen to share field names are fine |
 
-**Related skills:** `java-git-commit`, `java-code-review`, `java-update-design`, `maven-dependency-update`, `project-refine`
+**Related skills:** `git-commit`, `code-review`, `update-design`, `maven-dependency-update`, `project-refine`

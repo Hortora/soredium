@@ -503,7 +503,7 @@ Run `add-dir <absolute-path-to-project>` and `add-dir <absolute-path-to-workspac
 | writing-plans (plans) | `plans/` |
 | handover | `HANDOFF.md` |
 | idea-log | `IDEAS.md` |
-| java-update-design / update-primary-doc | `design/JOURNAL.md` (created by `work-start`) |
+| update-design | `design/JOURNAL.md` (created by `work-start`) |
 | adr | `adr/` |
 | write-content | `blog/` |
 

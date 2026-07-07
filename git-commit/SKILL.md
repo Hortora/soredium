@@ -40,13 +40,17 @@ Commit messages describe **WHAT changed and WHY**. Not who or what wrote them. T
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-Read `PROJECT_TYPE` and `ISSUES_STATUS` from the output.
+Read `PROJECT_TYPE`, `MATURITY_STAGE`, and `ISSUES_STATUS` from the output.
+
+`PROJECT_TYPE` may be comma-separated (e.g. `java,ts`) for mixed-language repos.
+`MATURITY_STAGE` is `pre-release` (default) or `released`.
 
 | Type | Action |
 |------|--------|
-| `java` | Read `~/.claude/skills/git-commit/java.md` and follow that workflow |
-| `custom` | Read `~/.claude/skills/git-commit/custom.md` and follow that workflow |
-| `blog` | STOP and tell user: "This is a type: blog project. Please use `/blog-git-commit` or say 'blog commit'." |
+| `java` (sole type — no comma) | Read `~/.claude/skills/git-commit/java.md` and follow that workflow |
+| `custom` (sole type — no comma) | Read `~/.claude/skills/git-commit/custom.md` and follow that workflow |
+| `blog` | Handle directly — blog projects use the generic workflow below with blog-aware commit conventions (date-prefixed filenames, Jekyll frontmatter validation) |
+| Mixed-type (PROJECT_TYPE contains a comma, e.g. `java,ts`) | Continue with generic workflow below |
 | `skills`, `generic`, all others | Continue with generic workflow below |
 
 **If CLAUDE.md missing or no Project Type section:**
@@ -73,6 +77,8 @@ Wait for user response.
 ---
 
 ### Step 0b — Offer issue tracking (when absent)
+
+(Skip this offer if issue tracking was already offered or set up earlier in this session.)
 
 Read `ISSUES_STATUS` from the ctx.py output (already run in Step 0).
 

@@ -101,10 +101,14 @@ else:
     issues_status = "absent"
 
 project_type = ""
+maturity_stage = "pre-release"
 if "## Project Type" in cwd_claude_text:
-    m = re.search(r"(?:^type:\s*|^\*\*Type:\*\*\s*)(\S+)", cwd_claude_text, re.MULTILINE)
+    m = re.search(r"(?:^type:\s*|^\*\*Type:\*\*\s*)(.+)", cwd_claude_text, re.MULTILINE)
     if m:
-        project_type = m.group(1)
+        project_type = re.sub(r'\s*,\s*', ',', m.group(1).strip())
+    m = re.search(r"(?:^stage:\s*|^\*\*Stage:\*\*\s*)(\S+)", cwd_claude_text, re.MULTILINE)
+    if m:
+        maturity_stage = m.group(1).lower()
 
 has_meta = "yes" if meta_path.exists() else "no"
 
@@ -153,6 +157,7 @@ print(f"CLAUDE_OK={claude_ok}")
 print(f"WORKSPACE_OK={workspace_ok}")
 print(f"ISSUES_STATUS={issues_status}")
 print(f"PROJECT_TYPE={project_type}")
+print(f"MATURITY_STAGE={maturity_stage}")
 print(f"HAS_META={has_meta}")
 print(f"DESIGN_REPO_KEY={design_repo_key}")
 print(f"HAS_ARC42STORIES={has_arc42stories}")

@@ -324,7 +324,7 @@ Do NOT read any project files to answer these. Work from conversation memory.
 not by invoking forage and asking it to find things. Forage
 is only called once specific entries have been identified.
 
-Review the session across all three categories. For each one, think
+Review the session across all four categories. For each one, think
 through what actually happened in the conversation:
 
 **Gotchas** — did anything go wrong in a non-obvious way?
@@ -342,10 +342,14 @@ through what actually happened in the conversation:
 > features that work but have no documentation; things discovered through
 > trial and error or commit history.
 
+**Conventions** — was a deliberate style choice made where alternatives exist?
+> Scan for: naming schemes, module structures, config strategies, or other
+> choices where another project could legitimately choose differently.
+
 For each finding, **propose it explicitly** before proceeding:
 
 > "During this session we hit X — [brief description]. Worth submitting
-> to the garden as a [gotcha / technique / undocumented]?"
+> to the garden as a [gotcha / technique / undocumented / convention]?"
 
 If confirmed → invoke `forage` CAPTURE with the specific content already
 known from context. Do NOT invoke forage and ask it to find things.
@@ -357,9 +361,9 @@ If nothing surfaces in any category → proceed to Step 3.
 > from context; the cost of missing an entry is rediscovery time later.
 
 The sweep is **always done** (even if it finds nothing). Completeness
-matters — checking all three categories explicitly prevents the common
+matters — checking all four categories explicitly prevents the common
 failure of only catching the most obvious kind (usually gotchas) and
-missing techniques and undocumented items.
+missing techniques, undocumented items, and conventions.
 
 ### Step 2c — ARC42STORIES.MD stale scan (if checked)
 
@@ -541,7 +545,7 @@ flowchart TD
     Trigger((Session ending))
     WrapChecklist[Show wrap checklist:\nwrite-content / update-claude-md /\nforage sweep / protocol sweep /\njournal-entry\nmost on by default]
     UserToggles[User toggles items\nor types 'all' / Enter]
-    GardenSweep[Forage sweep if checked:\ncheck gotchas / techniques /\nundocumented — all 3 categories]
+    GardenSweep[Forage sweep if checked:\ncheck gotchas / techniques /\nundocumented / conventions — all 4 categories]
     GardenFound{Anything\nworth submitting?}
     SubmitGarden[Invoke forage CAPTURE\nto write submission]
     WriteBlog[Invoke write-content\nsingle-entry for this session]
@@ -612,7 +616,7 @@ flowchart TD
 Handover is complete when:
 
 - ✅ Wrap checklist shown and user selections confirmed
-- ✅ Forage sweep performed — all three categories checked (gotchas, techniques, undocumented)
+- ✅ Forage sweep performed — all four categories checked (gotchas, techniques, undocumented, conventions)
 - ✅ Any garden-worthy entries submitted via forage CAPTURE before writing the handover
 - ✅ Protocol sweep performed (if checked) — session scanned for project-specific rules worth formalising; confirmed entries captured and committed
 - ✅ write-content (diary) invoked (if checked) — session diary entry written

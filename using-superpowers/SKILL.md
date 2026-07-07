@@ -37,12 +37,12 @@ Process skills enforce discipline. They come before implementation skills — al
 
 ## Common Flows
 
-These are the typical skill chains. Don't skip intermediate skills.
+These are the typical skill chains. Flows compose — Fix then Close is normal.
 
 - **Build:** brainstorming → writing-plans → subagent-driven-development (or executing-plans) → work-end
-- **Fix:** systematic-debugging → test-driven-development → domain skill → verification-before-completion
-- **Multi-failure:** systematic-debugging → dispatching-parallel-agents → verification-before-completion
-- **Close:** verification-before-completion → code-review → git-commit → work-end
+- **Fix:** systematic-debugging → test-driven-development → domain skill → verification-before-completion → git-commit
+- **Multi-failure:** systematic-debugging → dispatching-parallel-agents → verification-before-completion → git-commit
+- **Close:** work-end (includes verification, code-review, squash, and push internally)
 
 ## Lifecycle Integration
 
@@ -71,6 +71,28 @@ These thoughts mean STOP — you're rationalizing:
 | "I'll just do this one thing first" | Check BEFORE doing anything. |
 | "This feels productive" | Undisciplined action wastes time. Skills prevent this. |
 | "I know what that means" | Knowing the concept ≠ using the skill. Invoke it. |
+
+## Skill Chaining
+
+**Invoked by:** Automatic — loaded at session start for every conversation
+
+**References** (skills this skill documents as common flows and lifecycle points):
+- `brainstorming` — process gate: no implementation without approved design
+- `systematic-debugging` — process gate: no fix without root cause
+- `test-driven-development` — process gate: no production code without failing test
+- `verification-before-completion` — process gate: no "done" claim without evidence
+- `writing-plans` — process gate: no execution without detailed plan
+- `subagent-driven-development` — Build flow execution
+- `executing-plans` — Build flow execution (alternative to SDD)
+- `dispatching-parallel-agents` — Multi-failure flow parallel dispatch
+- `work` — lifecycle: session start routing
+- `work-start` — lifecycle: branch creation
+- `work-resume` — lifecycle: paused branch resumption
+- `work-end` — lifecycle: branch closure
+- `forage` — lifecycle: mid-session SWEEP for knowledge capture
+- `protocol` — lifecycle: mid-session SWEEP for convention capture
+- `code-review` — lifecycle: pre-commit review
+- `git-commit` — lifecycle: commit creation
 
 ## User Instructions
 

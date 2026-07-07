@@ -22,6 +22,7 @@ This skill controls where individual entries are cross-posted to blog platforms.
 - `blog-routing.yaml` exists at `~/.claude/blog-routing.yaml` (global) and optionally
   at `<workspace>/blog-routing.yaml` (project override)
 - Blog entries have `entry_type`, `projects`, and optionally `tags` in frontmatter
+- **Field naming:** `entry_type` is the blog entry's content type (article, note). `type` in blog-routing.yaml is the destination transport type (git). Different contexts, same word — do not confuse them.
 - Each destination path in the routing config is a valid directory
 
 ---

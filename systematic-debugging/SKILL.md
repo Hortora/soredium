@@ -119,6 +119,7 @@ You MUST complete each phase before proceeding to the next.
 6. **Check for Multiple Independent Root Causes**
    - If investigation reveals 2+ independent failures (different subsystems, different root causes), use dispatching-parallel-agents to investigate concurrently
    - Don't fix them sequentially when they can be diagnosed in parallel
+   - **Recursion guard:** parallel agents follow systematic-debugging methodology but do NOT re-dispatch to dispatching-parallel-agents. One level of fan-out only.
 
 ### Phase 2: Pattern Analysis
 

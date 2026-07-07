@@ -190,7 +190,7 @@ After adding a significant new package (especially auth, ORM, HTTP client,
 or payments):
 
 > "This adds [package] as a new dependency. Would you like me to do a quick
-> `ts-code-review` of the integration to check for misuse or security issues?"
+> `code-review` of the integration to check for misuse or security issues?"
 
 ---
 
@@ -298,6 +298,6 @@ Dependency update is complete when:
 
 **Invokes:**
 - [`adr`] when major version upgrades or significant new packages detected (offered to user)
-- [`ts-code-review`] after adding new packages with security implications (offered to user)
+- [`code-review`] after adding new packages with security implications (offered to user)
 
 **Can be invoked independently:** User says "update dependencies", "add a package", "npm audit", or whenever `package.json` changes are needed

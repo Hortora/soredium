@@ -5,11 +5,13 @@ they reach the repository, with particular focus on safety violations, type
 system bypasses, and async correctness — the issues most likely to cause silent
 production failures in Python codebases.
 
+**Invoke `ide-tooling` first** when IntelliJ MCPs are available — it establishes which MCP to use for reading files and navigating code. With two IntelliJ MCPs available (`mcp__intellij-index__*` and `mcp__intellij__*`), using the wrong one silently fails. `ide-tooling` resolves this before you read a single file.
+
 Also apply all rules from **`python-dev`**: Safety patterns (mutable defaults, context managers, bare except), type safety (`Any`, missing hints, `TypedDict`), async correctness, testing practices, code quality conventions.
 
 ## Workflow
 
-Follow the `code-review-principles` workflow (Steps 1–4). Python-specific Step 3 example:
+Follow the workflow in `code-review/SKILL.md` (Steps 1–4). Python-specific Step 3 example:
 
 ```
 🔴 CRITICAL — user_service.py:42
@@ -26,6 +28,7 @@ Suggested fix:
 
 Step 2 uses the Python Review Checklist below.
 
+<!-- garden consultation block — duplicated across language files intentionally (no include mechanism) -->
 ## Garden Consultation
 
 After collecting the diff (Step 1), search the garden for gotchas relevant

@@ -39,7 +39,7 @@ Read only what the task requires. Use git show / grep for surgical reads.
 |---------|-------|---------------|
 | Design state | `snapshots/<latest>.md` | `cat` that file |
 | Project narrative | `blog/<latest>.md` | `cat` that file |
-| Technical gotchas | `~/claude/knowledge-garden/GARDEN.md` | index only; detail on demand |
+| Technical gotchas | `${HORTORA_GARDEN:-~/.hortora/garden}/` | index only; detail on demand |
 | Open ideas | `IDEAS.md` | `cat` that file |
 | Previous handover | git history | `git show HEAD~1:HANDOFF.md` |
 | Specific section of prev | git history | `git show HEAD~1:HANDOFF.md \| grep -A 10 "## Section"` |

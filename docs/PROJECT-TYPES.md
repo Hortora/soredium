@@ -96,20 +96,20 @@ git-commit (for type: skills)
 
 **Built-in Behavior:**
 ```
-java-git-commit (for type: java)
+git-commit → java.md (for type: java)
   ├─ Check ARC42STORIES.MD exists (BLOCKS if missing)
-  ├─ java-code-review (if not done this session)
+  ├─ code-review → java.md (if not done this session)
   │   └─ java-security-audit (for security-critical code)
-  ├─ java-update-design (syncs ARC42STORIES.MD with code changes)
+  ├─ update-design → java.md (syncs ARC42STORIES.MD with code changes)
   │   └─ Maps .java changes to architecture sections
   ├─ update-claude-md (syncs CLAUDE.md if exists)
   └─ Conventional commit with Java-specific scopes
 ```
 
 **Sync Logic (Hardcoded):**
-- `java-update-design` knows: New @Entity → Update "Domain Model" section
-- `java-update-design` knows: New module in pom.xml → Update "Component Structure"
-- `java-code-review` knows: Check for safety violations, concurrency bugs
+- `update-design` (java.md) knows: New @Entity → Update "Domain Model" section
+- `update-design` (java.md) knows: New module in pom.xml → Update "Component Structure"
+- `code-review` (java.md) knows: Check for safety violations, concurrency bugs
 
 **This type is ONLY for Java/Maven/Gradle projects.** Don't use for other code projects.
 
@@ -147,10 +147,10 @@ java-git-commit (for type: java)
 
 **User-Configured Behavior:**
 ```
-custom-git-commit (for type: custom)
+git-commit → custom.md (for type: custom)
   ├─ Verify Primary Document exists (path from CLAUDE.md)
   ├─ Read Sync Rules table from CLAUDE.md
-  ├─ update-primary-doc (generic, table-driven)
+  ├─ update-design (generic, table-driven)
   │   ├─ Match staged files against patterns
   │   └─ Propose updates to specified sections
   ├─ Optional validators (if configured)
@@ -226,9 +226,9 @@ git-commit (for type: blog)
   └─ Conventional commit with blog-aware scopes
 ```
 
-**Current Behavior — `blog-git-commit`:**
+**Current Behavior — `git-commit` → `blog.md`:**
 ```
-blog-git-commit (for type: blog)
+git-commit → blog.md (for type: blog)
   ├─ Validate post filename format (YYYY-MM-DD-title.md)
   ├─ Validate commit message type (post/edit/draft/asset/config)
   ├─ Validate message via scripts/validation/validate_blog_commit.py
@@ -277,13 +277,63 @@ git-commit (for type: generic)
 - Personal projects
 - Experiments
 - Anything without special documentation needs
-- **TypeScript/Node.js projects** — use `type: generic` with the TypeScript skill suite (`ts-dev`, `ts-code-review`, `ts-security-audit`, `npm-dependency-update`, `ts-project-health`) loaded via description matching. TypeScript does not have a dedicated project type because there is no TypeScript-specific architecture document (equivalent of Java's ARC42STORIES.MD) that needs automated sync.
+- **TypeScript/Node.js projects** — use `type: generic` with the TypeScript skill suite (`ts-dev`, `code-review`, `security-audit`, `dependency-update`, `project-health` — each routing to their TypeScript/npm content files) loaded via description matching. TypeScript does not have a dedicated project type because there is no TypeScript-specific architecture document (equivalent of Java's ARC42STORIES.MD) that needs automated sync.
+
+---
+
+## Mixed-Type Projects
+
+Projects using multiple languages declare all types comma-separated:
+
+```markdown
+## Project Type
+
+**Type:** java, ts
+**Stage:** pre-release
+```
+
+**What it means:** The project contains code in multiple languages. Router skills
+(code-review, security-audit, dependency-update) partition staged files by extension
+and load each language's checklist for its file set.
+
+**When to use:** When the project regularly develops in both languages. If you only
+occasionally touch a secondary language, keep the primary type and let fallback
+detection handle it.
+
+**How routing works:**
+- `code-review` and `security-audit` — partition staged files by extension, apply
+  each language's checklist to its file set
+- `git-commit` — mixed-type projects use the generic commit workflow
+- `dependency-update` — detects from file markers (pom.xml, package.json)
+- `project-health` — runs type-specific checks for each type
+
+---
+
+## Project Maturity Stage
+
+Controls whether review skills include backward-compatibility checks.
+
+```markdown
+**Stage:** pre-release
+```
+
+| Stage | Behavior |
+|-------|----------|
+| `pre-release` (default) | Bold changes welcome. Rename freely, delete freely, restructure freely. No backward compat, no migration paths, no deprecation shims. |
+| `released` | Check breaking changes against consumers. Migration paths required for API/schema changes. Deprecate before removing. |
+
+**When to switch:** When the project has external consumers who depend on current
+behavior — other services calling your API, users running your CLI, libraries
+consumed by other projects.
+
+ctx.py outputs `MATURITY_STAGE=pre-release` or `MATURITY_STAGE=released`.
+Default is `pre-release` when the field is absent.
 
 ---
 
 ### Decision Matrix: When to Create a New Built-in Type
 
-**Question: Should I create a new `<type>-git-commit` skill?**
+**Question: Should I create a new built-in type with hardcoded commit logic?**
 
 **Ask these questions:**
 
@@ -309,7 +359,7 @@ git-commit (for type: generic)
 
 ```
 Can we hardcode sync logic universally?
-├─ YES → Create built-in type (<type>-git-commit)
+├─ YES → Create built-in type (add content file to git-commit router)
 │        Examples: java, skills
 │
 └─ NO → Use type: custom
@@ -326,19 +376,19 @@ Can we hardcode sync logic universally?
 - Not all working groups have vision documents
 - Section names vary (some have "Projects", others "Members", others "Deliverables")
 - Milestones vary (phases vs chapters vs versions vs sprints)
-- **Solution:** One `custom-git-commit` with user config
+- **Solution:** Use `type: custom` — `git-commit` routes to `custom.md` with user config
 
 **❌ Don't create `research-git-commit`:**
 - Not all theses have the same structure
 - Some have Methodology → Results, others have Theory → Application
 - Citation styles vary (APA, MLA, Chicago, IEEE)
-- **Solution:** One `custom-git-commit` with user config
+- **Solution:** Use `type: custom` — `git-commit` routes to `custom.md` with user config
 
 **❌ Don't create `api-docs-git-commit`:**
 - Some use OpenAPI, others use GraphQL schemas, others use custom formats
 - Some sync with code, others don't
 - Section organization varies
-- **Solution:** One `custom-git-commit` with user config
+- **Solution:** Use `type: custom` — `git-commit` routes to `custom.md` with user config
 
 **❌ Don't try to auto-detect project types:**
 - Too many edge cases
@@ -346,7 +396,7 @@ Can we hardcode sync logic universally?
 - User knows best what their project is
 - **Solution:** Explicit declaration in CLAUDE.md
 
-**The Pattern: Two built-in types (skills, java) + one configurable type (custom) + one fallback (generic) = handles everything.**
+**The Pattern: Built-in types (skills, java, blog) + one configurable type (custom) + one fallback (generic) = handles everything. All routed through `git-commit`.**
 
 ---
 
@@ -358,35 +408,39 @@ Can we hardcode sync logic universally?
 Step 1: Read CLAUDE.md
   └─ Extract: Type: [skills | java | blog | custom | generic]
 
-Step 2: Route based on type
-  ├─ skills → Continue with git-commit (skills mode)
+Step 2: Route based on type (git-commit loads content file)
+  ├─ skills → git-commit (skills mode)
   │           ├─ skill-review
   │           ├─ docs/development/readme-sync.md
   │           └─ update-claude-md
   │
-  ├─ java → STOP: "Use java-git-commit instead"
+  ├─ java → git-commit → java.md
+  │         ├─ code-review → java.md
+  │         ├─ update-design → java.md
+  │         └─ update-claude-md
   │
-  ├─ custom → STOP: "Use custom-git-commit instead"
+  ├─ blog → git-commit → blog.md
   │
-  └─ generic → Continue with git-commit (basic mode)
+  ├─ custom → git-commit → custom.md
+  │           ├─ update-design (table-driven)
+  │           └─ update-claude-md
+  │
+  └─ generic → git-commit (basic mode)
               └─ update-claude-md (if exists)
 
 Step 3: If CLAUDE.md missing or no type
   └─ Interactive setup:
-     "What kind of project is this? [1-4]"
+     "What kind of project is this? [1-5]"
      Create/update CLAUDE.md based on answer
 ```
 
-**Each specialized skill verifies its type:**
+**The router verifies type before loading content:**
 
 ```
-java-git-commit:
-  Step 0: Verify CLAUDE.md declares type: java
-          If wrong/missing → Offer to fix or redirect
-
-custom-git-commit:
-  Step 0: Verify CLAUDE.md declares type: custom
-          If missing config → Interactive setup
+git-commit:
+  Step 0: Read CLAUDE.md, extract project type
+          Route to java.md / custom.md / blog.md / skills mode / generic
+          If wrong/missing → Offer to fix or interactive setup
 ```
 
 ---
@@ -404,7 +458,7 @@ custom-git-commit:
 
 **If YES to all three:**
 
-**Option A: Create `python-git-commit` (new built-in type)**
+**Option A: Add a built-in type (new content files in router skills)**
 
 ```markdown
 ## Project Type
@@ -413,8 +467,8 @@ custom-git-commit:
 ```
 
 **You must create:**
-- `python-git-commit` skill (like java-git-commit)
-- `update-architecture-doc` skill for Python (like java-update-design)
+- `git-commit/python.md` content file (like `git-commit/java.md`)
+- `update-design/python.md` content file (like `update-design/java.md`)
 - Define what "architecture doc" means for Python
 - Hardcode sync logic (what code changes map to what doc sections)
 
@@ -444,13 +498,13 @@ User configures in their CLAUDE.md:
 | `requirements.txt` | "Dependencies" | Update dependency list |
 ```
 
-**No new skills needed. Just use existing `custom-git-commit`.**
+**No new content files needed. Just use existing `git-commit` → `custom.md` routing.**
 
 #### Real-World Example: Adding Python Support
 
 **Scenario:** User wants commit workflow for Python project with architecture docs.
 
-**Question:** Should we create `python-git-commit` (new built-in type)?
+**Question:** Should we add Python as a built-in type (new content files in router skills)?
 
 **Analysis:**
 1. **Do we understand Python architecture universally?**
@@ -473,7 +527,7 @@ User configures in their CLAUDE.md:
 - Python is too diverse to hardcode sync logic
 - Every Python project structures docs differently
 - User knows their architecture better than we do
-- One `custom-git-commit` with user's Sync Rules handles ALL Python variants
+- `git-commit` routing to `custom.md` with user's Sync Rules handles ALL Python variants
 
 **How user would configure:**
 
@@ -496,7 +550,7 @@ User configures in their CLAUDE.md:
 **Current Milestone:** Version 2.1.0
 ```
 
-**Result:** Works perfectly without creating `python-git-commit`, `python-update-design`, etc.
+**Result:** Works perfectly without creating new content files (`python.md`) in the router skills.
 
 **Key insight:** If you can't answer "what does architecture doc mean for ALL X projects", it's not a built-in type.
 

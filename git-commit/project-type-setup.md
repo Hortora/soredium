@@ -20,6 +20,7 @@ Create or update CLAUDE.md:
 ## Project Type
 
 **Type:** skills
+**Stage:** pre-release
 ```
 
 Stage CLAUDE.md:
@@ -58,25 +59,20 @@ Create or update CLAUDE.md:
 ## Project Type
 
 **Type:** java
+**Stage:** pre-release
 ```
 
 Stage CLAUDE.md, then tell user:
 > ✅ Created CLAUDE.md with type: java
 >
-> This is a Java project. For best results, please use `java-git-commit`
-> instead of `git-commit`. It provides:
+> This is a Java project. `git-commit` provides:
 > - ARC42STORIES.MD synchronization
 > - Java-specific code review
 > - Java-specific commit scopes
 >
-> Would you like me to:
-> 1. Continue with basic commit (not recommended for Java)
-> 2. Switch to java-git-commit (recommended)
->
-> Reply with 1 or 2.
+> Proceeding with your commit...
 
-Wait for response. If 2, stop and tell user to invoke java-git-commit.
-If 1, continue to Step 1 (but warn about missing ARC42STORIES.MD sync).
+Continue to Step 1.
 
 ---
 
@@ -95,6 +91,7 @@ Create or update CLAUDE.md:
 ## Project Type
 
 **Type:** blog
+**Stage:** pre-release
 ```
 
 Stage CLAUDE.md, then tell user:
@@ -150,6 +147,7 @@ Create CLAUDE.md:
 ## Project Type
 
 **Type:** custom
+**Stage:** pre-release
 **Primary Document:** {primary_doc_path}
 
 **Sync Strategy:** bidirectional-consistency
@@ -199,6 +197,7 @@ Create or update CLAUDE.md:
 ## Project Type
 
 **Type:** generic
+**Stage:** pre-release
 ```
 
 Stage CLAUDE.md, then tell user:

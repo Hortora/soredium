@@ -27,6 +27,8 @@ the correct commit skill.
 
 ### Step 0b — Offer issue tracking (when absent)
 
+(Skip this offer if issue tracking was already offered or set up earlier in this session.)
+
 ```bash
 grep -q "Issue tracking.*enabled" CLAUDE.md 2>/dev/null && echo "exists" || echo "absent"
 ```

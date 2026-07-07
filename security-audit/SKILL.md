@@ -22,19 +22,37 @@ Reads project type, then loads the language-specific audit checklist.
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-Read `PROJECT_TYPE` from the output.
+Read `PROJECT_TYPE` and `MATURITY_STAGE` from the output.
 
-Extract: `java` | `ts` | `python`
+`PROJECT_TYPE` may be comma-separated (e.g. `java,ts`) for mixed-language repos.
+`MATURITY_STAGE` is `pre-release` (default) or `released`.
 
-## Step 2 — Load language-specific checklist
+If type is missing, `generic`, or the specific language is not in the type list,
+inspect staged files and project structure to determine applicable languages.
 
-| Project type | File to read |
-|---|---|
-| `java` | `~/.claude/skills/security-audit/java.md` |
-| `ts` | `~/.claude/skills/security-audit/typescript.md` |
-| `python` | `~/.claude/skills/security-audit/python.md` |
+## Step 2 — Load language-specific checklist(s)
 
-Read the file, then execute the audit workflow it describes.
+If PROJECT_TYPE contains a single language, load that checklist.
+
+If PROJECT_TYPE contains multiple languages (e.g., `java,ts`), determine which
+languages appear in the audit scope:
+
+| Language | Checklist | File extensions |
+|---|---|---|
+| `java` | `~/.claude/skills/security-audit/java.md` | `.java` |
+| `ts` | `~/.claude/skills/security-audit/typescript.md` | `.ts`, `.tsx` |
+| `python` | `~/.claude/skills/security-audit/python.md` | `.py` |
+
+Load each applicable checklist and apply it to the relevant files. Present
+findings grouped by language.
+
+## Step 2b — Released-project constraints
+
+If `MATURITY_STAGE=released`: read `~/.claude/skills/code-review/constraints-released.md`
+(shared with code-review) and apply its checks to the audit scope.
+
+If `MATURITY_STAGE=pre-release` (default): skip. Pre-release projects may rename,
+delete, and restructure freely.
 
 ## Skill Chaining
 

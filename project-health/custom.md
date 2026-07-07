@@ -121,4 +121,4 @@ These extend universal categories with custom-project-specific items (tier 2+):
 | Checking only CLAUDE.md, not the primary doc | Primary doc may have drifted even if CLAUDE.md is current | Always read both and compare |
 | Treating absent external links as CRITICAL | External tools go offline temporarily | Flag as MEDIUM unless the linked content is referenced by active workflows |
 
-**Related skills:** `custom-git-commit`, `project-refine`
+**Related skills:** `git-commit`, `project-refine`

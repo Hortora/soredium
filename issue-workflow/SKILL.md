@@ -559,7 +559,7 @@ Ask once before complying:
 > ⚠️ This commit won't be linked to any issue — it won't appear in release notes
 > and breaks traceability. Are you sure? **(YES to confirm)**
 
-If YES: proceed without a footer. If anything else: return to issue selection.
+If YES: add `no-issue: <reason>` to the commit body (matches git-commit's skip token so the commit-msg hook won't reject it). If anything else: return to issue selection.
 
 ---
 

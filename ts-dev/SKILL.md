@@ -3,7 +3,7 @@ name: ts-dev
 description: >
   Use when writing new TypeScript code, fixing bugs, refactoring, or adding
   tests — user says "implement", "fix", "refactor", "add tests", or is editing
-  .ts, .tsx, tsconfig.json, or package.json files. Does NOT apply to reading
+  .ts, .tsx, or tsconfig.json files. Does NOT apply to reading
   or discussing existing code without changes.
 slash-command: false
 ---
@@ -425,7 +425,7 @@ processAll(user, orders, invoices);
 ## Refactoring — IntelliJ First
 
 **Prerequisites: `ide-tooling`** — invoke it for the full IntelliJ MCP tool guide.
-Always prefer IntelliJ MCPs over bash for any rename, move, find-references, or navigation.
+Always prefer IntelliJ MCPs over bash for any rename, move, find-references, navigation, or bulk structural edit (including adding/removing parameters and fixing call sites across files). Never write Python or bash scripts to manipulate TypeScript source text — that is what IntelliJ is for.
 If no MCP is available for a semantic operation, inform the user — do not silently fall back.
 
 ## Common Pitfalls — These Thoughts Mean STOP
@@ -469,6 +469,7 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 ## Skill Chaining
 
 - **Process layer:** `test-driven-development` defines HOW to work (test first, watch fail, minimal code, refactor). This skill defines WHAT tools to use (Jest/Vitest, real implementations). Follow TDD for all implementation work.
+- **After implementation, before review:** invoke `verification-before-completion` to type-check and run diagnostics
 - **Before committing:** invoke `code-review` to catch type safety, async, and error handling issues
 - **For security-critical code:** invoke `security-audit` when handling authentication, authorization, payment, or PII
 - **For dependency updates:** invoke `dependency-update` when adding or upgrading packages

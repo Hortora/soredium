@@ -413,6 +413,108 @@ Some other content here.
         assert data["PROJECT_TYPE"] == ""
 
 
+    def test_project_type_multi_value(self, tmp_path):
+        """PROJECT_TYPE handles comma-separated types."""
+        claude_md = """
+## Project Type
+
+type: java, ts
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        data = parse(run_ctx(repo))
+        assert data["PROJECT_TYPE"] == "java,ts"
+
+    def test_project_type_multi_value_no_spaces(self, tmp_path):
+        """PROJECT_TYPE normalizes comma-separated without spaces."""
+        claude_md = """
+## Project Type
+
+type: java,ts
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        data = parse(run_ctx(repo))
+        assert data["PROJECT_TYPE"] == "java,ts"
+
+    def test_project_type_multi_value_bold(self, tmp_path):
+        """PROJECT_TYPE handles bold format with multiple types."""
+        claude_md = """
+## Project Type
+
+**Type:** java, ts
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        data = parse(run_ctx(repo))
+        assert data["PROJECT_TYPE"] == "java,ts"
+
+    def test_project_type_triple(self, tmp_path):
+        """PROJECT_TYPE handles three comma-separated types."""
+        claude_md = """
+## Project Type
+
+type: java, ts, python
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        data = parse(run_ctx(repo))
+        assert data["PROJECT_TYPE"] == "java,ts,python"
+
+
+class TestMaturityStage:
+    """Test MATURITY_STAGE field extraction."""
+
+    def test_maturity_stage_default_when_absent(self, tmp_path):
+        """MATURITY_STAGE defaults to pre-release when no stage field."""
+        claude_md = """
+## Project Type
+
+type: java
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        data = parse(run_ctx(repo))
+        assert data["MATURITY_STAGE"] == "pre-release"
+
+    def test_maturity_stage_pre_release(self, tmp_path):
+        """MATURITY_STAGE reads pre-release value."""
+        claude_md = """
+## Project Type
+
+type: java
+stage: pre-release
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        data = parse(run_ctx(repo))
+        assert data["MATURITY_STAGE"] == "pre-release"
+
+    def test_maturity_stage_released(self, tmp_path):
+        """MATURITY_STAGE reads released value."""
+        claude_md = """
+## Project Type
+
+type: java
+stage: released
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        data = parse(run_ctx(repo))
+        assert data["MATURITY_STAGE"] == "released"
+
+    def test_maturity_stage_bold_format(self, tmp_path):
+        """MATURITY_STAGE reads bold markdown format."""
+        claude_md = """
+## Project Type
+
+**Type:** java
+**Stage:** released
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        data = parse(run_ctx(repo))
+        assert data["MATURITY_STAGE"] == "released"
+
+    def test_maturity_stage_no_project_type_section(self, tmp_path):
+        """MATURITY_STAGE defaults when no Project Type section at all."""
+        repo = init_repo(tmp_path / "repo", "# Project\n")
+        data = parse(run_ctx(repo))
+        assert data["MATURITY_STAGE"] == "pre-release"
+
+
 class TestIssuesStatus:
     """Test ISSUES_STATUS field (replaces ISSUES_OK)."""
 

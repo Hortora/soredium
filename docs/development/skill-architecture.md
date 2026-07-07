@@ -44,10 +44,11 @@ Skills follow a hierarchical naming pattern:
 - `observability-principles` — universal logging/tracing/metrics
 
 **Language-specific skills** (prefix: language name):
-- `java-dev`, `java-code-review`, `java-security-audit`, `java-git-commit`
+- `java-dev`, `ts-dev`, `python-dev`
 
-**Tool-specific skills** (prefix: tool name):
-- `maven-dependency-update`, `npm-dependency-update`, `pip-dependency-update`
+**Router content files** (not standalone skills — live inside router directories):
+- `security-audit/java.md`, `security-audit/typescript.md`, `security-audit/python.md`
+- `dependency-update/maven.md`, `dependency-update/npm.md`, `dependency-update/pip.md`
 
 **Framework-specific skills** (prefix: framework name):
 - `quarkus-flow-dev`, `quarkus-flow-testing`, `quarkus-observability`
@@ -73,7 +74,7 @@ Skills explicitly reference each other to create workflows:
 Example patterns:
 ```
 # Java repositories:
-java-dev → java-code-review → java-git-commit → java-update-design + update-claude-md
+java-dev → code-review → git-commit → update-design + update-claude-md
 
 # Any repository:
 git-commit → update-claude-md (automatic)

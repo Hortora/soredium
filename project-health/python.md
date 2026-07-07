@@ -170,4 +170,4 @@ These extend universal categories with Python-specific items (tier 2+):
 | Skipping `mypy` because "it's too strict" | Incremental adoption is possible — start with `ignore_missing_imports = true` and add coverage over time | Configure `mypy` narrowly rather than not at all; no config means no coverage |
 | Ignoring missing `__init__.py` files | The absence is only caught at import time, not by linting — it causes silent test collection failures | Check all intended package directories; flag missing `__init__.py` as MEDIUM |
 
-**Related skills:** `python-dev`, `python-code-review`, `pip-dependency-update`, `project-refine`
+**Related skills:** `python-dev`, `code-review`, `dependency-update`, `project-refine`

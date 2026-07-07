@@ -71,6 +71,19 @@ When creating: use the minimal template — project type declaration plus
 build/test commands if detectable from the repo (pom.xml, package.json,
 pyproject.toml). Do not pad with boilerplate.
 
+After writing the type, ask:
+
+> **Project maturity?**
+> - **pre-release** (default) — bold changes welcome, no backward compat
+> - **released** — has consumers, review skills check backward compat
+>
+> Enter choice (default: pre-release):
+
+Write the stage into CLAUDE.md under the type:
+```markdown
+**Stage:** pre-release
+```
+
 CLAUDE.md creation is required. If the user refuses, hard stop — no other
 check can run without a project type.
 
@@ -113,6 +126,7 @@ below the project type line:
 ## Project Type
 
 type: java
+**Stage:** pre-release
 workspace: declined
 ```
 
@@ -155,7 +169,7 @@ Issue tracking: declined
 Skip if: workspace was just set up this session (workspace-init offered it).
 
 ```bash
-python3 -c 'import json,os; s=json.load(open(os.path.expanduser("~/.claude/settings.json"))); print("installed" if "superpowers@claude-plugins-official" in s.get("enabledPlugins",{}) else "missing")' 2>/dev/null || echo "missing"
+python3 -c 'import json,os; s=json.load(open(os.path.expanduser("~/.claude/settings.json"))); print("installed" if any(k.startswith("superpowers@") for k in s.get("enabledPlugins",{})) else "missing")' 2>/dev/null || echo "missing"
 ```
 
 | State | Action |

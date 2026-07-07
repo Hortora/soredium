@@ -4,12 +4,12 @@ Process control for content generation. These are not writing rules — they are
 control flow gates that must run at specific points in the workflow regardless
 of form, mode, voice, or invocation context.
 
-Loaded explicitly in SKILL.md Step 5 (pre-draft gate) and Step 7 (quality check
+Loaded explicitly in SKILL.md Step 2 (pre-draft gate) and Step 4 (quality check
 + third-party review). Cannot be skipped.
 
 ---
 
-## Pre-Draft Gate (Step 5 — before writing begins)
+## Pre-Draft Gate (Step 2 — before writing begins)
 
 Do not generate any prose until all items below are resolved.
 
@@ -42,7 +42,7 @@ For any duration, count, or magnitude claim:
 
 ---
 
-## Third-Party Reference Review (Step 7 — after drafting, before writing to disk)
+## Third-Party Reference Review (Step 4 — after drafting, before writing to disk)
 
 **Non-negotiable. Cannot be skipped due to invocation context or time pressure.**
 

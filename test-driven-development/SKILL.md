@@ -260,7 +260,7 @@ universal testing principles referenced by all three language skills.
 
 **Pipeline integration:** During `subagent-driven-development` or
 `executing-plans`, every implementation task follows TDD. The execution
-skills don't repeat TDD's rules — they invoke this skill.
+skills reference TDD as methodology — they don't Skill-tool invoke it, but implementers follow its red-green-refactor cycle.
 
 **IDE integration:** Use `ide-tooling` for structural editing during
 the red-green-refactor cycle:

@@ -410,7 +410,7 @@ msg = f"User {user.name} logged in from {ip_address}"
 ## Refactoring — IntelliJ First
 
 **Prerequisites: `ide-tooling`** — invoke it for the full IntelliJ MCP tool guide.
-Always prefer IntelliJ MCPs over bash for any rename, move, find-references, or navigation.
+Always prefer IntelliJ MCPs over bash for any rename, move, find-references, navigation, or bulk structural edit (including adding/removing parameters and fixing call sites across files). Never write bash scripts to manipulate Python source text — that is what IntelliJ is for.
 If no MCP is available for a semantic operation, inform the user — do not silently fall back.
 
 ## Common Pitfalls — These Thoughts Mean STOP
@@ -454,6 +454,7 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 ## Skill Chaining
 
 - **Process layer:** `test-driven-development` defines HOW to work (test first, watch fail, minimal code, refactor). This skill defines WHAT tools to use (pytest, fixtures, parametrize). Follow TDD for all implementation work.
+- **After implementation, before review:** invoke `verification-before-completion` to type-check and run diagnostics
 - **Before committing:** invoke `code-review` to catch safety, type, and async issues before they reach the repository
 - **For security-critical code:** invoke `security-audit` when handling authentication, authorisation, user input, or PII
 - **For dependency updates:** invoke `dependency-update` when adding or upgrading packages

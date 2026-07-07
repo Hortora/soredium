@@ -13,7 +13,7 @@ Also apply all rules from **`java-dev`**: Safety patterns (resource leaks, excep
 
 ## Workflow
 
-Follow the `security-audit-principles` workflow (Steps 1–4). Java-specific Step 3 example:
+Follow the workflow in `security-audit/SKILL.md` (Steps 1–4). Java-specific Step 3 example:
 
 ```
 🔴 CRITICAL — UserService.java:67
@@ -380,10 +380,10 @@ flowchart TD
 
 ## Skill Chaining
 
-**Invoked by:** [`java-code-review`] when reviewing auth/payment/PII handling (offered as option, not automatic)
+**Invoked by:** [`code-review`] when reviewing auth/payment/PII handling (offered as option, not automatic)
 
 **Invokes:** None (terminal skill in the chain)
 
 **Can be invoked independently:** User says "security review", "audit security", or explicitly invokes for security-critical implementations
 
-**Works alongside:** `java-code-review` — while java-code-review catches general safety and concurrency issues, this skill focuses specifically on OWASP Top 10 security vulnerabilities
+**Works alongside:** `code-review` (routes to java.md) — while code-review catches general safety and concurrency issues, this skill focuses specifically on OWASP Top 10 security vulnerabilities

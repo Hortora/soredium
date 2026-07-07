@@ -82,7 +82,7 @@ git -C $GARDEN rebase HEAD
 ## What This Is Not
 
 - **Not an idea log** — ideas go in `idea-log`
-- **Not an ADR** — architecture decisions go in `adr`
+- **Not an ADR** — project-specific architecture decisions go in `adr`. Garden `decisions` entries capture cross-project technology choices with transferable reasoning (e.g. "why picocli over JCommander"). ADRs capture project-bound commitments (e.g. "ADR-0003: we use hex IDs in this garden").
 - **Not how-to content** — step-by-step tutorials for standard documented APIs don't belong; the distinction is *non-obvious* knowledge vs *documented* knowledge
 - **Not project-specific** — if it says "in ProjectX, the foo() method..." skip it; if it says "JavaParser's getByName() only searches top-level types..." it does
 - **Not expected errors** — if it's in the docs with the fix, skip it
@@ -163,6 +163,8 @@ Classify the type: **gotcha**, **technique**, **undocumented**, or **convention*
 **Convention:** A deliberate style choice where alternatives exist and are equally valid. Not universally true — another project could legitimately choose a different style. Examples: naming schemes, module structures, config strategy choices. If same-title alternatives will exist, each entry carries `variant:`. Solo convention entries (first of their title) omit `variant:` and add it via REVISE when a second entry is submitted.
 
 **Technique → protocol promotion:** A technique that a specific project decides to enforce consistently should become a project protocol. The garden entry stays as universal knowledge (descriptive, optional); the protocol (in `docs/protocols/`) is the project-specific commitment (prescriptive, enforced). When that happens, link the two: add `protocol: "PP-ID"` to the garden entry via REVISE (`protocol-link` kind), and set `garden_ref: "GE-ID"` in the protocol frontmatter.
+
+**Convention vs protocol — terminology boundary:** A garden *convention* entry describes a style choice that any project could adopt (universal, descriptive). A project *protocol* entry enforces a rule in a specific project (local, prescriptive). The word "convention" appears in both domains — the distinction is scope: garden conventions are cross-project options; project protocols are binding commitments.
 
 Is it cross-project? (Not tied to one specific codebase's logic.) If no → skip.
 

@@ -53,7 +53,7 @@ This framework ensures reliability, consistency, and correctness across all docu
 ### With This Framework
 
 **In Java projects:**
-- ✅ java-code-review blocks commits with resource leaks (CRITICAL findings)
+- ✅ code-review blocks commits with resource leaks (CRITICAL findings)
 - ✅ Event loop safety enforced (Red Flags section prevents rationalization)
 - ✅ Security audit catches OWASP Top 10 before merge
 - ✅ ARC42STORIES.MD auto-synced with architecture changes (validated before staging)
@@ -76,7 +76,7 @@ This framework ensures reliability, consistency, and correctness across all docu
 - ✅ Modular documentation with integrity guarantees (link validation, atomic sync, completeness checks)
 - ✅ Split large docs without breaking (automatic discovery, cross-file validation, backwards compatible)
 
-**Real impact:** The java-dev skill was tested under combined time pressure, authority pressure, and sunk cost bias — it successfully prevented resource leaks that baseline Claude (without the skill) introduced. This framework ensures that level of reliability across all project types.
+**Real impact:** The `java-dev` skill was tested under combined time pressure, authority pressure, and sunk cost bias — it successfully prevented resource leaks that baseline Claude (without the skill) introduced. This framework ensures that level of reliability across all project types.
 
 ---
 
@@ -104,10 +104,10 @@ This framework ensures reliability, consistency, and correctness across all docu
 
 | Protection | What It Prevents | When It Runs |
 |------------|------------------|--------------|
-| **java-code-review blocking** | Resource leaks, concurrency bugs, safety violations | Before commits (CRITICAL findings block) |
+| **code-review blocking** | Resource leaks, concurrency bugs, safety violations | Before commits (CRITICAL findings block) |
 | **java-security-audit** | OWASP Top 10 vulnerabilities (injection, auth, crypto) | When security-critical code detected |
-| **ARC42STORIES.MD sync accuracy** | Architecture docs drifting from code | After java-update-design applies changes |
-| **ARC42STORIES.MD enforcement** | Missing architecture documentation | java-git-commit blocks if docs/ARC42STORIES.MD doesn't exist |
+| **ARC42STORIES.MD sync accuracy** | Architecture docs drifting from code | After update-design applies changes |
+| **ARC42STORIES.MD enforcement** | Missing architecture documentation | git-commit blocks if docs/ARC42STORIES.MD doesn't exist |
 | **BOM alignment verification** | Version drift, dependency conflicts | maven-dependency-update workflow |
 | **Quarkus event loop safety** | Blocking I/O on event loop threads | java-dev Red Flags section |
 | **ADR enforcement** | Major upgrades without documenting decisions | maven-dependency-update detects major versions |
@@ -120,9 +120,9 @@ This framework ensures reliability, consistency, and correctness across all docu
 
 | Protection | What It Prevents | When It Runs |
 |------------|------------------|--------------|
-| **Primary doc sync accuracy** | VISION.md/THESIS.md/API.md drifting from work | After update-primary-doc applies changes |
+| **Primary doc sync accuracy** | VISION.md/THESIS.md/API.md drifting from work | After update-design applies changes |
 | **User-configured validation** | Project-specific consistency violations | Custom validators in CLAUDE.md |
-| **Sync rules enforcement** | File changes not reflected in primary doc | custom-git-commit reads Sync Rules table |
+| **Sync rules enforcement** | File changes not reflected in primary doc | git-commit reads Sync Rules table |
 | **Milestone tracking** | Work not aligned with current phase/chapter | Commit messages reference current milestone |
 
 **Example:** Your working group's VISION.md stays synchronized with catalog entries, research THESIS.md reflects experimental results, API design doc stays current with OpenAPI spec changes.
@@ -526,9 +526,8 @@ When sync workflows update modular documents:
 
 | Workflow | Document | Validation Trigger |
 |----------|----------|-------------------|
-| **java-update-design** | ARC42STORIES.MD + modules | After applying proposals, before staging |
+| **update-design** | ARC42STORIES.MD / User-configured doc + modules | After applying proposals, before staging |
 | **update-claude-md** | CLAUDE.md + modules | After applying proposals, before staging |
-| **update-primary-doc** | User-configured + modules | After applying proposals, before staging |
 | **docs/development/readme-sync.md** | README.md + modules | After applying proposals, before staging |
 
 **git-commit universal validation:**
@@ -546,9 +545,8 @@ When sync workflows update modular documents:
 - `scripts/validate_document.py` - Added `validate_document_group()` entry point
 
 **Skills updated (4 workflows):**
-- `java-update-design/SKILL.md` - Step 1a: discover group, Step 6: validate group
+- `update-design/SKILL.md` - Step 1a: discover group, Step 6: validate group
 - `update-claude-md/SKILL.md` - Step 1a: discover group, Step 6: validate group
-- `update-primary-doc/SKILL.md` - Step 1a: discover group, Step 7: validate group
 - `docs/development/readme-sync.md` - Step 1a: discover group, Step 6: validate group
 
 ### Philosophy: Excellence in Documentation
@@ -600,15 +598,14 @@ git commit -m "..."
 **Post-sync (automatic revert on failure):**
 ```bash
 # After any sync workflow applies changes:
-# → update-claude-md, java-update-design, update-primary-doc, docs/development/readme-sync.md
+# → update-claude-md, update-design, docs/development/readme-sync.md
 # → validates modified document
 # → if CRITICAL issues → git restore <file> + stop
 ```
 
 **Applies to:**
 - All projects (if CLAUDE.md exists): update-claude-md
-- Type: java: java-update-design
-- Type: custom: update-primary-doc
+- Type: java / custom: update-design
 - Type: skills: docs/development/readme-sync.md
 
 **Pre-push (cross-document checks):**
@@ -625,10 +622,10 @@ git push origin main
 **On-demand deep analysis:**
 ```bash
 # Review specific skill
-/skill-review java-code-review/SKILL.md
+/skill-review code-review/SKILL.md
 
 # Review staged code
-/java-code-review
+/code-review
 
 # Full repository validation
 python scripts/validate_all.py
@@ -806,16 +803,16 @@ Claude:
 - ✅ Comprehensive quality review complete (278 issues found, 2 CRITICAL fixed)
 
 **Type: java:**
-- ✅ Code review (java-code-review)
+- ✅ Code review (code-review)
 - ✅ Security audit (java-security-audit)
-- ✅ ARC42STORIES.MD sync (java-update-design)
+- ✅ ARC42STORIES.MD sync (update-design)
 - ✅ ARC42STORIES.MD enforcement (blocks if missing)
 - ✅ BOM alignment (maven-dependency-update)
 - ✅ Modular ARC42STORIES.MD support (primary + architecture/api/data-model modules)
 
 **Type: custom:**
-- ✅ Primary document sync (update-primary-doc)
-- ✅ Sync Rules enforcement (custom-git-commit)
+- ✅ Primary document sync (update-design)
+- ✅ Sync Rules enforcement (git-commit)
 - ✅ Modular document support (VISION.md, THESIS.md, etc. + modules)
 - ✅ Table-driven sync configuration
 

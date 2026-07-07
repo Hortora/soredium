@@ -186,10 +186,10 @@ These extend universal categories with skills-repository-specific items (tier 2+
 - [skills][coverage] issue-workflow missing from README § Skill Chaining Reference
 
 ### HIGH (should fix)
-- [skills][cross-refs] git-commit says it routes to blog-git-commit but blog-git-commit doesn't mention being invoked by git-commit
+- [skills][cross-refs] git-commit references a blog route but no blog content file exists for git-commit
 
 ### LOW (nice to fix)
-- [skills][performance] update-primary-doc/SKILL.md is 312 lines — approaching budget
+- [skills][performance] update-design/java.md is 312 lines — approaching budget
 
 ### PASS
 ✅ docs-sync, consistency, security, naming, dependencies

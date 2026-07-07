@@ -13,7 +13,7 @@ Also apply all rules from **`ts-dev`**: TypeScript safety patterns, strict mode,
 
 ## Workflow
 
-Follow the `security-audit-principles` workflow (Steps 1–4). TypeScript-specific Step 3 example:
+Follow the workflow in `security-audit/SKILL.md` (Steps 1–4). TypeScript-specific Step 3 example:
 
 ```
 🔴 CRITICAL — userService.ts:34
@@ -471,10 +471,10 @@ flowchart TD
 
 ## Skill Chaining
 
-**Invoked by:** [`ts-code-review`] when reviewing auth/payment/PII handling (offered as option, not automatic)
+**Invoked by:** [`code-review`] when reviewing auth/payment/PII handling (offered as option, not automatic)
 
 **Invokes:** None (terminal skill in the chain)
 
 **Can be invoked independently:** User says "security review", "audit security", or explicitly invokes for security-critical TypeScript/Node.js implementations
 
-**Works alongside:** `ts-code-review` — while ts-code-review catches general type safety and logic issues, this skill focuses specifically on OWASP Top 10 security vulnerabilities
+**Works alongside:** `code-review` (routes to typescript.md) — while code-review catches general type safety and logic issues, this skill focuses specifically on OWASP Top 10 security vulnerabilities

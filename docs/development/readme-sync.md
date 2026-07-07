@@ -18,9 +18,9 @@ This workflow is invoked by `git-commit` when:
 
 ## Prerequisites
 
-**This skill extends `update-primary-doc`** with skills-repository-specific knowledge:
+**This skill extends `update-design`** with skills-repository-specific knowledge:
 
-- **update-primary-doc**: Generic document sync patterns (read path, match files, propose updates, validate)
+- **update-design**: Generic document sync patterns (read path, match files, propose updates, validate)
 
 **Skills-specific additions:**
 - Hardcoded Primary Document: `README.md`
@@ -138,7 +138,7 @@ Skip the following changes, unless they signal a broader pattern:
 | **New documentation sync capability** | Update Key Features section |
 
 **Recent example (learned from regression):**
-- **What happened:** Validation added to 4 sync workflows (update-claude-md, java-update-design, update-primary-doc, readme-sync.md)
+- **What happened:** Validation added to 4 sync workflows (update-claude-md, update-design, readme-sync.md)
 - **Framework change:** All sync workflows now validate documents before staging
 - **README.md impact:** Should have updated:
   - Key Features: "Universal document validation"
@@ -203,7 +203,7 @@ Group proposals by file:
 > (new entry)
 
 **With:**
-> | `java-git-commit` | `java-update-design` | Always (if docs/ARC42STORIES.MD exists) |
+> | `git-commit` (type: java) | `update-design` | Always (if docs/ARC42STORIES.MD exists) |
 
 **Reason:** New automatic chaining relationship documented
 ```

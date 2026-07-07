@@ -3,10 +3,9 @@ name: design-review
 description: >
   Use when a design spec needs adversarial review — user says "review this design",
   "design review", "tear this spec apart", "pre-review this", or invokes /design-review.
-  Orchestrates two independent Claude sessions (reviewer + implementor) with a Python PM
-  tracking every issue to evidence-based resolution. Supports multiple review phases:
-  pre-review (approach validation), spec review (detailed adversarial review).
-  NOT for code review (use code-review). NOT for brainstorming (use superpowers:brainstorming).
+  Supports multiple review phases: pre-review (approach validation), spec review
+  (detailed adversarial review). NOT for code review (use code-review).
+  NOT for brainstorming (use superpowers:brainstorming).
 ---
 
 # Adversarial Design Review
@@ -141,11 +140,15 @@ python3 /Users/mdproctor/.claude/skills/design-review/review.py \
   --spec {spec_path} \
   --title {title} \
   --mode {mode} \
+  --stage {maturity_stage} \
   --source-dirs {dirs}
 ```
 
 Where `{mode}` is `pre-review` or `spec-review` based on the phase selected
 in Step 0.5. If mode is `spec-review` (the default), you may omit `--mode`.
+
+`{maturity_stage}` comes from `MATURITY_STAGE` in the ctx.py output. If `pre-release`
+(the default), you may omit `--stage`.
 
 Use `run_in_background: true` on the Bash tool call.
 
@@ -278,10 +281,26 @@ from the next round.
   then use pre-review to validate the approach
 - **Implementation** — this reviews design specs, not code
 
+## Success Criteria
+
+Design review is complete when:
+
+- ✅ All issues tracked to resolution (accepted, rejected, or deferred)
+- ✅ Spec updated to reflect accepted changes
+- ✅ Decision log captures rationale for each resolution
+- ✅ No open CRITICAL issues remain
+
+**Not complete until** the review tracker shows zero unresolved items.
+
 ## Skill Chaining
 
-**Invoked by:** User directly (`/design-review`, "review this design",
-"pre-review this", "tear this spec apart")
+**Invoked by:**
+- User directly (`/design-review`, "review this design",
+  "pre-review this", "tear this spec apart")
+- `subagent-driven-development` — after implementation, SDD may invoke
+  design-review `--mode final-review` for adversarial review
+- `work-end` — before branch closure, work-end may invoke design-review
+  for final validation
 
 **Invokes:** None — runs an external Python orchestration script; does not
 delegate to other skills
@@ -289,9 +308,13 @@ delegate to other skills
 **Complements:**
 - `brainstorming` — brainstorming creates the spec; design-review validates it
   (pre-review mode for approach, spec-review mode for detail)
+- `verification-before-completion` — run VBC after design-review resolves
+  all issues and before committing the updated spec
 - `code-review` — different scope. design-review is multi-round adversarial
   review of design specs. code-review is routine pre-commit checklist review
   of staged changes
+
+**Boundary with code-review:** design-review --mode code-review checks whether implementation matches the spec. code-review checks code quality, safety, and style on staged changes.
 
 **Reads from:** User-provided spec path, CLAUDE.md for source directories,
 `.spec-path` and `progress.log` in the workspace for resume

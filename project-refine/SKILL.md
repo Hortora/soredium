@@ -263,7 +263,7 @@ Common 🟢A patterns (small change, large impact):
   sentences. [docs]
 
 ### 🟡B — Medium impact
-- update-primary-doc/SKILL.md (312 lines): Steps 4–7 cover two unrelated
+- update-design/SKILL.md (312 lines): Steps 4–7 cover two unrelated
   concerns; splitting would improve navigation. Est. -20 lines. [docs]
 
 ### 🟢C — Low impact, cosmetic

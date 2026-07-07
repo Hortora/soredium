@@ -1,11 +1,10 @@
 ---
 name: ide-tooling
 description: >
-  INVOKE IMMEDIATELY when mcp__intellij-index__* tools are visible.
-  Use for ALL code navigation, editing, refactoring, and diagnostics.
-  Also invoke for any IDE operation: rename, move, edit member, find
-  references, type hierarchy, diagnostics. Never fall back to bash
-  grep or text tools for semantic code operations.
+  Use when mcp__intellij-index__* tools are visible — for ALL code navigation, editing,
+  refactoring, and diagnostics. Also invoke for any IDE operation: rename, move, edit member,
+  find references, type hierarchy, diagnostics. Never fall back to bash grep or text tools
+  for semantic code operations.
 ---
 
 # IDE Tooling — IntelliJ MCP Guide
@@ -139,10 +138,12 @@ When authoring code, prefer tools in this order:
    files, markdown, non-class code, file-level changes outside any
    class body.
 
-**When IntelliJ MCP is unavailable:** Fall back to text tools (Edit,
-Write). Check `ide_index_status` first — the project may still be
-indexing. If no MCP server is available for a semantic operation, stop
-and inform the user rather than silently falling back.
+**When IntelliJ MCP is unavailable:** For non-structural text edits
+(config, markdown, non-class code), use Edit/Write directly — no MCP
+needed. For semantic operations (rename, move, find-references), check
+`ide_index_status` first — the project may still be indexing. If no
+MCP server is available for a semantic operation, stop and inform the
+user rather than silently falling back.
 
 ---
 

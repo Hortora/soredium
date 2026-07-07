@@ -2,11 +2,9 @@
 name: protocol
 description: >
   Use when working with project-level protocol files — project-specific rules, architectural
-  constraints, and conventions that apply within a single project. Session-time operations:
-  CAPTURE (create a new protocol entry), SWEEP (scan session for rules worth formalising),
-  SEARCH (find protocols by keyword), HEALTH (validate schema completeness and ref integrity).
-  DEEP-SCAN is stubbed — requires Hortora audits 1–4 to implement. NOT for universal technical
-  knowledge (use forage for that). NOT for architectural decisions (use adr).
+  constraints, and conventions that apply within a single project. Operations: CAPTURE, SWEEP,
+  SEARCH, HEALTH, DEEP-SCAN. NOT for universal technical knowledge (use forage for that).
+  NOT for architectural decisions (use adr).
 ---
 
 # Protocol — Project-Level Rule Operations

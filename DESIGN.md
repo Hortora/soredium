@@ -20,7 +20,7 @@ Skills write methodology artifacts to a companion workspace directory (`~/claude
 - Claude Code follows a CLAUDE.md symlink for session initialisation — confirmed via smoke test on cccli (2026-04-13).
 - soredium does not use the workspace model — its CLAUDE.md is a public artifact committed to the repo, not personal workflow config. Opening Claude in the project directory is the correct workflow.
 
-**Workspace mode detection (java-update-design):** Workspace mode was previously detected by checking for an `epic-*` branch prefix. This broke silently for `issue-NNN-*` branches — every commit wrote directly to `DESIGN.md`, bypassing the journal with no error. The fix uses three conditions: `.meta` exists, `JOURNAL.md` exists, workspace not on main. Branch name plays no part. (Refs cc-praxis#94)
+**Workspace mode detection (update-design):** Workspace mode was previously detected by checking for an `epic-*` branch prefix. This broke silently for `issue-NNN-*` branches — every commit wrote directly to `DESIGN.md`, bypassing the journal with no error. The fix uses three conditions: `.meta` exists, `JOURNAL.md` exists, workspace not on main. Branch name plays no part. (Refs cc-praxis#94)
 
 **Routing decision stability:** `design-repo: project|workspace` is stored in `.meta` at branch creation (work-start Step 8) and read verbatim at close (work-end Step 3). Re-deriving from routing config at close time is incorrect — the config may have changed since the branch was created, producing a different answer. (Refs cc-praxis#94)
 
@@ -85,7 +85,7 @@ Unified entry point detects branch state and handles the full session lifecycle.
 
 | Decision | Chosen | Why | Alternatives Rejected |
 |---|---|---|---|
-| Branch naming | `issue-NNN-<slug>` for all branches | Issue number is the stable key; slug is a convenience | `epic-<name>` prefix (forces artificial epic vs issue distinction; breaks java-update-design detection) |
+| Branch naming | `issue-NNN-<slug>` for all branches | Issue number is the stable key; slug is a convenience | `epic-<name>` prefix (forces artificial epic vs issue distinction; breaks update-design detection) |
 | `.meta` present on all branches | Every branch gets `.meta` + `JOURNAL.md` | No lightweight vs epic distinction — consistent behaviour regardless of scope | Separate lightweight/epic branch types (maintenance complexity, detection ambiguity) |
 | `design-repo` stored in `.meta` | `design-repo: workspace|project` persisted at branch creation | Routing config may change between sessions; `.meta` is the stable source of truth at close | Re-derive from routing config at `work-end` (stale routing config causes wrong merge target) |
 | Detection state ordering | Orphaned `.meta` check (state 3) before misaligned branches (state 4) | Orphaned state also satisfies "misaligned" — wrong order causes Branch Switch Helper to switch to a deleted branch | Checking misalignment first (breaks for branches deleted after PR merge) |
@@ -95,7 +95,7 @@ Unified entry point detects branch state and handles the full session lifecycle.
 | `EPIC-CLOSED.md` location | `$WORKSPACE/design/EPIC-CLOSED.md` on the workspace epic branch | Consistent with all other lifecycle files (`.meta`, `JOURNAL.md`); hygiene scan already traverses epic branches for `.meta` detection | Workspace root (inconsistent location; no advantage over design/) |
 | Epic deprecation | `epic/SKILL.md` retained with deprecation header; not deleted | Migration period — existing sessions still invoke it | Hard delete (breaks in-flight sessions) |
 
-**java-update-design workspace mode detection (corrected):**
+**update-design workspace mode detection (corrected):**
 
 Previously checked `epic-*` branch prefix, silently bypassing journal on `issue-NNN-*` branches.
 Now checks `.meta` + `JOURNAL.md` + not-on-main using `$WORKSPACE` path (not CWD).

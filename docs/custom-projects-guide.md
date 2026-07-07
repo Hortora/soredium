@@ -54,7 +54,7 @@ A working group catalog typically starts simple and grows over time.
 
 2. **Test with one new row first**
    - Make a change matching the new pattern
-   - Run custom-git-commit
+   - Run git-commit
    - Verify primary doc updates correctly
    - Then add more rules
 
@@ -74,7 +74,7 @@ A working group catalog typically starts simple and grows over time.
 |---------|----------------|-----|
 | Replacing entire table | Loses existing sync patterns | Add new rows at bottom |
 | Overlapping patterns | Two rules match same file → conflict | Make patterns mutually exclusive |
-| Vague "Update Type" | `update-primary-doc` doesn't know what to do | Be specific: "Add entry", "Update status", "Document pattern" |
+| Vague "Update Type" | `update-design` doesn't know what to do | Be specific: "Add entry", "Update status", "Document pattern" |
 | Not testing incrementally | All 5 new rules at once → hard to debug | Add 1 rule, test, then add next |
 
 **Result:** Your Sync Rules evolve with your project. Start simple, grow as needed, no skill changes required.

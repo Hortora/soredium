@@ -4,7 +4,7 @@ description: >
   Use when documentation needs syncing — user says "sync docs", "update docs",
   "doc sweep", or invoked from a prompt snippet at session end. Scoped to what
   changed this session only, not a full project sweep. NOT a design journal
-  update (java-git-commit handles that).
+  update (git-commit handles that).
 slash-command: false
 ---
 
@@ -86,7 +86,7 @@ are filed as GitHub issues — **never committed from this session**.
 | Existing protocol updated | The protocol file + any files that reference it | home repo |
 | Convention or workflow change | `CLAUDE.md` (invoke `update-claude-md`) | home repo |
 | Architecture decision | `adr/` (invoke `adr` if not yet recorded) | home repo |
-| Design journal (epic branch) | `design/JOURNAL.md` (invoke `java-update-design`) | home repo |
+| Design journal (epic branch) | `design/JOURNAL.md` (invoke `update-design`) | home repo |
 | Maven coordinate change | `docs/protocols/maven-coordinate-standard.md` if convention changed | home repo |
 | Cross-repo artifact rename | `docs/PLATFORM.md` → Cross-Repo Dependency Map | **peer repo** (parent) |
 
@@ -186,7 +186,6 @@ git -C "$HOME_REPO" commit -m "docs: sync documentation to session changes
 
 [brief description of what was updated and why]
 
-Co-Authored-By: Claude Sonnet 4.6 (1M context) <noreply@anthropic.com>"
 ```
 
 Docs and code in separate commits keeps the history readable.
@@ -199,11 +198,11 @@ issues in Step 4 and are the responsibility of the peer repo's session.
 ## What This Skill Does NOT Do
 
 - **Does not** check docs unrelated to the session scope — that is `project-health`
-- **Does not** update the design journal — that is `java-update-design` (via `java-git-commit`)
+- **Does not** update the design journal — that is `update-design` (via `git-commit`)
 - **Does not** update CLAUDE.md for convention changes — that is `update-claude-md`
   (but it will invoke those skills if the session scope triggers them)
 - **Does not** write ADRs — it will flag the gap and suggest invoking `adr`
-- **Does not** run tests or check code correctness — that is `superpowers:requesting-code-review`
+- **Does not** run tests or check code correctness — that is `design-review --mode final-review`
 
 ---
 
@@ -214,11 +213,11 @@ issues in Step 4 and are the responsibility of the peer repo's session.
 
 **Invokes when triggered by session scope:**
 - `update-claude-md` — if conventions or workflows changed
-- `java-update-design` — if on an epic branch and design decisions were made
+- `update-design` — if on an epic branch and design decisions were made
 - suggests `adr` — if a significant architectural decision lacks a record
 
 **Complements:**
 - `project-health` — full project correctness check (not session-scoped)
-- `java-git-commit` — chains to `java-update-design` for design journal
+- `git-commit` — chains to `update-design` for design journal
 - `work-end` — runs this as part of Step 3b pre-close sweep; writes HANDOFF.md after
 - `handover` — runs this as part of the wrap checklist (mid-work sessions only)

@@ -13,7 +13,7 @@ Also apply all rules from **`python-dev`**: Python safety patterns, type hints, 
 
 ## Workflow
 
-Follow the `security-audit-principles` workflow (Steps 1–4). Python-specific Step 3 example:
+Follow the workflow in `security-audit/SKILL.md` (Steps 1–4). Python-specific Step 3 example:
 
 ```
 🔴 CRITICAL — views.py:42
@@ -485,10 +485,10 @@ flowchart TD
 
 ## Skill Chaining
 
-**Invoked by:** [`python-code-review`] when reviewing auth/payment/PII handling (offered as option, not automatic)
+**Invoked by:** [`code-review`] when reviewing auth/payment/PII handling (offered as option, not automatic)
 
 **Invokes:** None (terminal skill in the chain)
 
 **Can be invoked independently:** User says "security review", "audit security", or explicitly invokes for security-critical Python implementations
 
-**Works alongside:** `python-code-review` — while python-code-review catches general quality and logic issues, this skill focuses specifically on OWASP Top 10 security vulnerabilities
+**Works alongside:** `code-review` (routes to python.md) — while code-review catches general quality and logic issues, this skill focuses specifically on OWASP Top 10 security vulnerabilities

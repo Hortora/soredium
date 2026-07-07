@@ -259,6 +259,6 @@ Idea promotion is complete when:
 
 **Invoked by:** User directly ("log this idea", "park that thought"). Code review skills *mention* `/idea-log` as a pointer but do not invoke it automatically.
 
-**Invokes:** [`adr`] — when promoting an idea to a formal architectural decision; [`issue-workflow`] — when promoting an idea to implementation work (creates a tracked GitHub issue); [`git-commit`] — to commit IDEAS.md additions and status updates (routes to `java-git-commit`, `custom-git-commit`, etc. per CLAUDE.md project type)
+**Invokes:** [`adr`] — when promoting an idea to a formal architectural decision; [`issue-workflow`] — when promoting an idea to implementation work (creates a tracked GitHub issue); [`git-commit`] — to commit IDEAS.md additions and status updates (routes per CLAUDE.md project type)
 
 **Does NOT invoke:** `project-health` (idea log is a working document, not a quality gate)

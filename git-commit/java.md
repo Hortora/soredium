@@ -37,7 +37,7 @@ flowchart TD
     Staged_changes_{Staged changes?}
     Stop__ask_user_to_stage[Stop: ask user to stage]
     DESIGN_md_exists_{ARC42STORIES.MD exists?}
-    Error__Create_DESIGN_md_first[Error: Create ARC42STORIES.MD first]
+    Warn__no_DESIGN_md[Warning: No ARC42STORIES.MD]
     SKILL_md_files_{SKILL.md files?}
     Review_skills[Review skills]
     Generate_commit_message[Generate commit message]
@@ -58,7 +58,8 @@ flowchart TD
     Offer_issue_tracking --> Staged_changes_
     Staged_changes_ -->|no| Stop__ask_user_to_stage
     Staged_changes_ -->|yes| DESIGN_md_exists_
-    DESIGN_md_exists_ -->|no| Error__Create_DESIGN_md_first
+    DESIGN_md_exists_ -->|no| Warn__no_DESIGN_md
+    Warn__no_DESIGN_md --> SKILL_md_files_
     DESIGN_md_exists_ -->|yes| SKILL_md_files_
     SKILL_md_files_ -->|yes| Review_skills
     SKILL_md_files_ -->|no| Generate_commit_message
@@ -158,6 +159,8 @@ Continue to Step 0b.
 
 ### Step 0b — Offer issue tracking (when absent)
 
+(Skip this offer if issue tracking was already offered or set up earlier in this session.)
+
 Check if CLAUDE.md already has Work Tracking configured:
 ```bash
 grep -q "Issue tracking.*enabled" CLAUDE.md 2>/dev/null && echo "exists" || echo "absent"
@@ -196,15 +199,12 @@ If nothing is staged, stop and tell the user:
 ls docs/ARC42STORIES.MD 2>/dev/null
 ```
 
-If ARC42STORIES.MD doesn't exist, stop and tell the user:
-> "❌ **Java projects require ARC42STORIES.MD for architectural documentation.**
->
-> This file should live at `docs/ARC42STORIES.MD`. I can help you create it.
->
-> Would you like me to invoke `update-design` to generate a starter ARC42STORIES.MD,
-> or would you prefer to create it manually first?"
+If ARC42STORIES.MD doesn't exist, warn the user but proceed:
+> "⚠️ No ARC42STORIES.MD found. Recommended for Java projects — run
+> `update-design` to create one. Proceeding without it."
 
-Do not proceed with the commit until ARC42STORIES.MD exists.
+Continue to Step 2. The ARC42STORIES.MD sync in Step 3 will be skipped automatically
+since the file does not exist.
 
 ### Step 2 — Generate commit message
 
@@ -258,6 +258,10 @@ Read `**Project repo:**` from CLAUDE.md to get the absolute project path. Use `g
    - Stage: `git -C <Project repo> add CLAUDE.md`
 
 **Then commit:**
+
+> **Note:** Use `commit_exec.py` for commit execution when available (provides
+> pre-commit validation). Fall back to raw `git commit` if the script is not present.
+
 ```bash
 git -C <Project repo> commit -m "<message>"
 git -C <Project repo> log --oneline -1   # confirm
@@ -269,7 +273,7 @@ git -C <Project repo> log --oneline -1   # confirm
 
 | Situation | Action |
 |---|---|
-| ARC42STORIES.MD missing | STOP — offer to create it via update-design or manually |
+| ARC42STORIES.MD missing | WARNING — recommend creating it via update-design, proceed without it |
 | Only test files staged | Suggest `test` type, note ARC42STORIES.MD likely unchanged |
 | Only `pom.xml` / `build.gradle` changed | Suggest `build` type, check for new deps that need design doc mention |
 | New `@Entity`, `@Service`, `@Repository` | Ensure update-design captures architectural significance |
@@ -323,7 +327,7 @@ All pitfalls from `git-commit` apply, plus:
 
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
-| Committing without ARC42STORIES.MD | Java projects need architectural docs | Check for docs/ARC42STORIES.MD first, create if missing |
+| Committing without ARC42STORIES.MD | Design doc sync is skipped | Warn user, recommend running update-design to create it |
 | Skipping ARC42STORIES.MD sync | Design doc drifts from code | Always invoke update-design first |
 | Committing pom.xml changes without testing | Build may be broken | Run `mvn compile` before committing |
 | Generic scope when Java-specific exists | Less context for reviewers | Use `repository` not `data`, `rest` not `api` |
@@ -333,7 +337,7 @@ All pitfalls from `git-commit` apply, plus:
 
 ## Skill Chaining
 
-**Invoked by:** [`java-code-review`] after all critical issues resolved; [`maven-dependency-update`] after successful dependency updates; [`adr`] when committing an ADR alongside related changes; [`idea-log`] to commit IDEAS.md additions; [`write-content`] to commit a blog entry
+**Invoked by:** [`code-review`] (routes to java.md) after all critical issues resolved; [`maven-dependency-update`] after successful dependency updates; [`adr`] when committing an ADR alongside related changes; [`idea-log`] to commit IDEAS.md additions; [`write-content`] to commit a blog entry
 
 **Invokes:** [`update-design`] and [`update-claude-md`] before proposing commit (automatic)
 

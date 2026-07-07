@@ -178,7 +178,7 @@ the same feature area and collapse them into one issue:
 
 | Pattern | Example | Collapse to |
 |---------|---------|-------------|
-| Common prefix | `java-dev`, `java-code-review`, `java-git-commit` | "Add Java development skills" |
+| Common prefix | `java-dev`, `code-review`, `git-commit` | "Add Java development skills" |
 | Same feature, split by layer | `marketplace`, `install-skills`, `uninstall-skills` | "Build marketplace and installation" |
 | Same tool, split by concern | `validation`, `validate-cso`, `validate-docs` | "Add skill validation framework" |
 

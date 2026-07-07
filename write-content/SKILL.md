@@ -1,13 +1,10 @@
 ---
 name: write-content
 description: >
-  Use when writing any piece of content — project diary entry, blog post,
-  article, note, brief, README, news item, technical documentation section, or essay.
-  User says "write", "draft", "write a diary entry", "log what we built",
-  "document this pivot", "blog all the work to date", "create a post",
-  "write up", "write the README", "rewrite the README", or provides a topic/subject to write about.
-  Documentation types (tutorial, how-to, explanation, reference) are in scope.
-  NOT for generating code (use java-dev, ts-dev etc.).
+  Use when writing a diary entry, note, article, brief, README, technical documentation
+  section, or news item. User says "write", "draft", "write a diary entry", "log what
+  we built", "create a post", "write up", "write the README", or provides a topic/subject
+  to write about. NOT for generating code (use java-dev, ts-dev etc.).
 ---
 
 # Write Content
@@ -53,6 +50,8 @@ What are you writing?
   [T] Technical documentation
   [W] News / announcement
 ```
+
+**Diary taxonomy note:** Diary is promoted to a top-level form for UX convenience, but is implemented as a Note subtype internally (`entry_type: note, subtype: diary`). This affects frontmatter generation, not the writing workflow.
 
 ### Q2 — Sub-type or section
 
@@ -242,6 +241,19 @@ Scan draft for named persons or identifiable groups; flag each; wait for author
 decision before writing to disk. See `mandatory-gates.md` for full procedure.
 
 ---
+
+## Success Criteria
+
+Content creation is complete when:
+
+- ✅ Content form determined (diary, article, note, brief, news, or technical doc)
+- ✅ Voice classification completed (pre-draft gate passed)
+- ✅ Style guide verified (anti-slop and mandatory rules checked)
+- ✅ Third-party reference review passed (zero unresolved flags)
+- ✅ Content written to disk at the correct path
+- ✅ Factual accuracy verified (durations, counts, magnitudes checked against evidence)
+
+**Not complete until** content is on disk and all mandatory gates have passed.
 
 ## Skill Chaining
 

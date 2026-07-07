@@ -111,6 +111,9 @@ All values — `WORKSPACE`, `PROJECT`, `OWNER_REPO`, `BASE_BRANCH`, `BRANCH_NAME
 `PROJECT_SHA`, `ISSUE_N`, `ISSUE_REPO`, `COVERS` — come from `ctx.py` output.
 Do not re-extract them with shell commands.
 
+Note: ctx.py outputs `BASE_BRANCH`. This skill uses `PROJECT_BASE_BRANCH` as the
+variable name. They refer to the same value.
+
 `COVERS` is a comma-separated list of all issue numbers this branch closes (e.g. `"5,19,32,24"`).
 When the branch was started for a single issue, `COVERS` equals `ISSUE_N`. When absent from
 `.meta` (branches created before this feature), `COVERS` defaults to `ISSUE_N`.
@@ -342,12 +345,12 @@ If drift: `[U]` update journal anchors, `[S]` skip drifted sections, `[A]` abort
 
 **5c — Anchor validation**
 Count `^### .*·.*§` lines vs total `^### ` lines in JOURNAL.md.
-If any entries lack anchors: `[F]` fix via java-update-design, `[S]` skip merge,
+If any entries lack anchors: `[F]` fix via update-design, `[S]` skip merge,
 `[C]` continue accepting loss.
 
 **5d — Empty journal**
 If no entries at all:
-- `[W]` Write retrospective via java-update-design
+- `[W]` Write retrospective via update-design
 - `[S]` Skip and accept permanent loss
 
 ---

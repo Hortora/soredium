@@ -14,6 +14,11 @@ main, and switches both repos to their base branch. Supports multiple paused bra
 Uncommitted changes are always committed as a `WIP:` commit on the branch —
 no stash used. On resume, the WIP commit is reset so work continues cleanly.
 
+**Single-repo mode:** When no workspace exists (`SINGLE_REPO=yes` from ctx.py),
+all operations apply to the project repo only — skip workspace-specific steps
+(workspace WIP commit, workspace branch switch). The pause stack lives at
+`$PROJECT/.pause-stack` instead of `$WORKSPACE/design/.pause-stack`.
+
 ---
 
 ## Path Resolution (run first, always)
@@ -127,6 +132,16 @@ instead — it writes HANDOFF.md so the next session can resume on the same bran
 | Switch to a different branch now, come back later | work-pause |
 | End the session, continue this branch next time | handover (wrap) |
 | Branch is done, close everything | work-end |
+
+## Success Criteria
+
+Work-pause is complete when:
+
+- ✅ WIP commit created on the branch (all changes preserved)
+- ✅ Pause stack entry pushed to workspace main
+- ✅ Both repos switched to their base branches
+
+**Not complete until** both repos are on main/base and the stack entry is committed.
 
 ## Skill Chaining
 

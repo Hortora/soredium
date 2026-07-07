@@ -438,7 +438,7 @@ error (not a project-not-found error):
 
 > "Start a brainstorm? (y/n)"
 
-If yes: invoke `superpowers:brainstorming`. Specs write to `$WORKSPACE/specs/<branch-name>/`.
+If yes: invoke `brainstorming`. Specs write to `$WORKSPACE/specs/<branch-name>/`.
 Specs always route to `project` (`$PROJECT/docs/specs/`) at close — the three-layer
 cascade covers blog/adr/snapshots/plans/design only.
 
@@ -473,10 +473,24 @@ IntelliJ: ✅ connected / ✅ connected, project auto-opened / ⚠️ MCP unavai
 Proceeding to brainstorming.  (or: Ready for work.)
 ```
 
+## Success Criteria
+
+Work-start is complete when:
+
+- ✅ Project setup verified (CLAUDE.md, workspace, issue tracking)
+- ✅ Issue identified and confirmed (or hotfix mode acknowledged)
+- ✅ Branches created in both repos (project + workspace) on matching names
+- ✅ `.meta` scaffolded with issue, SHA baseline, and design routing
+- ✅ IntelliJ MCP connected and project indexed
+
+**Not complete until** the Done report is printed with all fields populated.
+
 ## Skill Chaining
 
 **Invoked by:**
 - `work` — routing skill, when on main with no pause stack
+- `work-resume` — when resuming a paused branch, work-resume delegates to
+  work-start for platform coherence and pre-checks
 - `handover` — resume path directs user to `/work` which detects existing `.meta`
 - Session hooks — triggered at session start
 

@@ -21,18 +21,24 @@ python3 ~/.claude/skills/project/ctx.py
 
 Read `PROJECT_TYPE` from the output. Also read `HAS_ARC42STORIES` for design doc routing.
 
-Extract: `java` | `ts` | `python` | `generic`
+`PROJECT_TYPE` may be comma-separated (e.g. `java,ts`) for mixed-language repos.
 
-## Step 2 — Load workflow
+## Step 2 — Load workflow(s)
 
-| Project type | File to read |
+If PROJECT_TYPE contains a single language, load that workflow.
+
+If PROJECT_TYPE contains multiple languages (e.g., `java,ts`), load each
+applicable workflow and execute them in sequence — each updates the design
+doc with its language-specific perspective.
+
+| Language | File to read |
 |---|---|
 | `java` | `~/.claude/skills/update-design/java.md` |
 | `ts` | `~/.claude/skills/update-design/typescript.md` |
 | `python` | `~/.claude/skills/update-design/python.md` |
-| `generic` | `~/.claude/skills/update-design/typescript.md` (lightweight fallback) |
+| `generic` (or no match) | `~/.claude/skills/update-design/typescript.md` (lightweight fallback) |
 
-Read the file, then execute the workflow it describes.
+Read the file(s), then execute the workflow(s) they describe.
 
 ## Skill Chaining
 

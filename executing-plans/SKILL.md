@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: Use when you have a written implementation plan to execute in a separate session with review checkpoints
+description: Use when you have a written implementation plan to execute inline in the current session with review checkpoints
 ---
 
 # Executing Plans
@@ -19,9 +19,18 @@ subagent-driven-development instead.
 
 ## The Process
 
+### Step 0 — Branch guard
+
+Verify you are NOT on main before proceeding:
+```bash
+[ "$(git -C "$PROJECT" branch --show-current)" = "main" ] && echo '⚠️ Cannot execute on main. Create a feature branch first.' && exit 1
+```
+
 ### Step 1: Load and Review Plan
 
-1. Read the plan file
+1. Read the plan file (default: `docs/plans/YYYY-MM-DD-*.md` — writing-plans
+   prints the path when it saves; if not in context, check `docs/plans/` for
+   the most recent file)
 2. Review critically — identify any questions or concerns about the plan
 3. If concerns: Raise them with your human partner before starting
 4. If no concerns: Create todos for all plan items and proceed
@@ -46,7 +55,9 @@ For each task:
 ### Step 3: Complete Development
 
 After all tasks complete and verified:
-1. Run code-review on the staged changes
+1. Run code-review on the full branch diff (not just the last commit)
+   For structural changes or multi-task branches, consider
+   `design-review --mode final-review` for deeper adversarial review.
 2. Invoke work-end to verify, close the branch, and push
 
 ## When to Stop and Ask for Help
@@ -56,6 +67,9 @@ After all tasks complete and verified:
 - Plan has critical gaps preventing progress
 - You don't understand an instruction
 - Verification fails repeatedly
+
+**When encountering unexpected failures or bugs during execution,** invoke
+`systematic-debugging` to root-cause them before attempting fixes.
 
 **Ask for clarification rather than guessing.**
 
@@ -67,6 +81,14 @@ After all tasks complete and verified:
 
 **Don't force through blockers** — stop and ask.
 
+## Model Selection
+
+EP executes inline — no subagent dispatch, so model selection is simpler
+than SDD. If the session model is Opus, use it throughout. If the user
+switches mid-task, respect the switch. The only recommendation: suggest
+Opus at session start if the plan has complex tasks (same guidance as
+the design-implementation norms).
+
 ## Remember
 
 - Review plan critically first
@@ -77,6 +99,17 @@ After all tasks complete and verified:
 - Stop when blocked, don't guess
 - Never start implementation on main/master branch without explicit
   user consent
+
+## Success Criteria
+
+Plan execution is complete when:
+
+- ✅ All plan tasks implemented and verified
+- ✅ TDD followed for each task (test first, then implementation)
+- ✅ Code review passed
+- ✅ work-end invoked to close the branch
+
+**Not complete until** work-end has run and the branch is closed.
 
 ## Skill Chaining
 

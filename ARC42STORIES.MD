@@ -41,7 +41,7 @@ Named after the lichen's dispersal unit -- a self-contained bundle carrying ever
 |---|---|---|
 | 1 | Token efficiency | Router pattern loads only relevant content; lazy file reads; no cross-language waste |
 | 2 | Correctness | 2010 tests, 19 validators across 3 tiers, functional tests per skill |
-| 3 | Universality | Skills work across 5 project types (skills, java, blog, custom, generic) without type-specific hacks |
+| 3 | Universality | Skills work across 5 commit-workflow types + language routing values (ts, python), with comma-separated mixed-type support and maturity-stage-gated constraints, without type-specific hacks |
 
 ---
 
@@ -323,7 +323,8 @@ C4Deployment
 | Token efficiency | CLAUDE.md -- Skill Architecture | Router pattern, lazy content file loading, no cross-language waste |
 | No AI attribution | ADR-0005, CLAUDE.md -- No AI Attribution | Commit messages: WHAT and WHY only; no Co-Authored-By or Generated-by |
 | Workspace model | DESIGN.md -- Workspace Model, CLAUDE.md -- Workspace Model | Workspace as CWD; project via add-dir; `proj/` and `wksp/` symlinks |
-| Project type routing | ADR-0009, docs/PROJECT-TYPES.md | 5 types (skills, java, blog, custom, generic); declared in CLAUDE.md |
+| Project type routing | ADR-0009, docs/PROJECT-TYPES.md | 5 commit-workflow types (skills, java, blog, custom, generic) + language routing values (ts, python); comma-separated for mixed repos; declared in CLAUDE.md |
+| Project maturity stage | docs/PROJECT-TYPES.md | `pre-release` (default) or `released`; gates backward-compat checks in code-review, security-audit, and design-review (code-review + final-review modes) |
 | Canonical path resolution | CLAUDE.md -- Canonical Path Resolution Block | `readlink -f proj` for project; `readlink -f wksp` for workspace; never parse CLAUDE.md |
 | Issue tracking | CLAUDE.md -- Work Tracking | Step 0b in all commit skills; `Refs #N` or `Closes #N` in every message |
 | Foundation skills | ADR-0006 | Generic principles (`code-review-principles`, etc.) never invoked directly; referenced via Prerequisites |
@@ -1102,6 +1103,7 @@ Cross-reference to `docs/adr/INDEX.md`. Most decisions are captured inline in S4
 | Forage | The skill for session-time garden operations: CAPTURE, SWEEP, SEARCH, REVISE |
 | Harvest | The skill for dedicated garden maintenance: MERGE, DEDUPE, REVIEW |
 | Protocol | A standing rule in `docs/protocols/` that constrains how specific operations work (e.g. validation boundaries, taxonomy naming) |
-| Project type | One of 5 values (skills, java, blog, custom, generic) declared in a project's CLAUDE.md to control routing |
+| Project type | 5 commit-workflow types (skills, java, blog, custom, generic) + language routing values (ts, python); comma-separated for mixed repos; declared in CLAUDE.md to control routing |
+| Maturity stage | `pre-release` (default) or `released`; declared in CLAUDE.md alongside project type; gates backward-compat checks in review skills |
 | `.meta` | A metadata file on every working branch storing creation-time routing decisions (e.g. `design-repo: workspace`) |
 | Validator | A Python script in `scripts/validation/` that checks one aspect of skill quality; assigned to a tier (COMMIT, PUSH, CI) |

@@ -19,22 +19,28 @@ python3 ~/.claude/skills/project/ctx.py
 
 Read `PROJECT_TYPE` from the output.
 
-Extract: `java` | `ts` | `python`
+`PROJECT_TYPE` may be comma-separated (e.g. `java,ts`) for mixed-language repos.
+Check whether it **contains** a given language rather than matching exactly.
 
 If type is missing or `generic`, inspect files:
-- `pom.xml` present → treat as `java`
-- `package.json` present → treat as `ts`
-- `pyproject.toml` or `requirements.txt` present → treat as `python`
+- `pom.xml` present → treat as containing `java`
+- `package.json` present → treat as containing `ts`
+- `pyproject.toml` or `requirements.txt` present → treat as containing `python`
 
-## Step 2 — Load package manager workflow
+## Step 2 — Load package manager workflow(s)
 
-| Project type | File to read |
+If PROJECT_TYPE contains a single language, load that workflow.
+
+If PROJECT_TYPE contains multiple languages (e.g., `java,ts`), load each
+applicable workflow and run them in sequence.
+
+| Language | File to read |
 |---|---|
 | `java` | `~/.claude/skills/dependency-update/maven.md` |
 | `ts` | `~/.claude/skills/dependency-update/npm.md` |
 | `python` | `~/.claude/skills/dependency-update/pip.md` |
 
-Read the file, then execute the workflow it describes.
+Read the file(s), then execute the workflow(s) they describe.
 
 ## Skill Chaining
 

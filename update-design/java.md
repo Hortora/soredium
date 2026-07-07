@@ -14,14 +14,14 @@ This skill is invoked by `git-commit` when:
 
 **Do NOT use this skill for:**
 - type: skills repositories (skills are self-documenting, no ARC42STORIES.MD)
-- type: custom repositories (use update-primary-doc with user-configured primary document)
+- type: custom repositories (use `update-design` with user-configured primary document)
 - type: generic repositories (no automatic ARC42STORIES.MD sync)
 
 ## Prerequisites
 
 **This skill extends `git-commit`** with Java-specific knowledge:
 
-- **update-primary-doc**: Generic document sync patterns (read path, match files, propose updates, validate)
+- **update-design**: Generic document sync patterns (read path, match files, propose updates, validate)
 
 **Java-specific additions:**
 - In **workspace mode** (when `design/JOURNAL.md` exists): writes journal entries to `design/JOURNAL.md`

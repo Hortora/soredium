@@ -166,7 +166,7 @@ skip reading the skill body.
 | Pattern | Examples |
 |---------|----------|
 | Generic principles | `*-principles` suffix: `code-review-principles`, `security-audit-principles` |
-| Language-specific | Language prefix: `java-dev`, `java-code-review`, `python-dev` |
+| Language-specific | Language prefix: `java-dev`, `java-security-audit`, `python-dev` |
 | Tool-specific | Tool prefix: `maven-dependency-update`, `gradle-dependency-update` |
 | Framework-specific | Framework prefix: `quarkus-flow-dev`, `spring-security-audit` |
 

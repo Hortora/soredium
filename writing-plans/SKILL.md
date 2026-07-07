@@ -225,6 +225,18 @@ execution with checkpoints.
 - Invoke executing-plans
 - Batch execution with checkpoints for review
 
+## Success Criteria
+
+Plan is complete when:
+
+- ✅ Spec reviewed and understood (gaps identified and resolved)
+- ✅ Tasks decomposed with clear acceptance criteria
+- ✅ Dependencies between tasks identified
+- ✅ Plan written to file and path communicated to execution skill
+- ✅ User approved the plan
+
+**Not complete until** the user confirms and an execution skill is invoked.
+
 ## Skill Chaining
 
 **Invoked by:**

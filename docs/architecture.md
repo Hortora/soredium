@@ -8,35 +8,32 @@
 
 This collection follows a **layered architecture** where foundation skills provide universal principles, and specialized skills extend them for specific languages, frameworks, and workflows.
 
-### Layer 1: Commit Workflow (4 skills)
+### Layer 1: Commit Workflow (1 router skill)
 
-**Pattern:** Router → Specialized Handlers
+**Pattern:** Router → Content Files
 
 | Skill | Purpose | Project Types |
 |-------|---------|---------------|
-| **git-commit** | Entry point, routes based on project type | skills, generic |
-| **java-git-commit** | Java-specific commits with ARC42STORIES.MD sync | java |
-| **custom-git-commit** | User-configured commits with primary doc sync | custom |
+| **git-commit** | Entry point, routes to `java.md`, `blog.md`, `custom.md` based on project type | all |
 
-### Layer 2: Documentation Sync (4 skills)
+### Layer 2: Documentation Sync (3 skills)
 
 **Pattern:** Document Type Specialists
 
 | Skill | Document | Project Types | Auto-Invoked By |
 |-------|----------|---------------|-----------------|
-| **update-claude-md** | CLAUDE.md (workflows) | all | git-commit, java-git-commit, custom-git-commit |
-| **java-update-design** | ARC42STORIES.MD (architecture) | java | java-git-commit |
+| **update-claude-md** | CLAUDE.md (workflows) | all | git-commit |
+| **update-design** | ARC42STORIES.MD (java) / User-configured doc (custom) | java, custom | git-commit |
 | **readme-sync.md** | README.md (skill catalog) | skills | git-commit |
-| **update-primary-doc** | User-configured doc | custom | custom-git-commit |
 
 ### Layer 3: Review (2 skills)
 
-**Pattern:** Domain-Specific Review Specialists
+**Pattern:** Router → Language-Specific Content Files
 
 | Skill | Reviews | Auto-Invoked By | Blocks On |
 |-------|---------|-----------------|-----------|
-| **java-code-review** | Java code quality | java-git-commit | CRITICAL findings |
-| **java-security-audit** | OWASP Top 10 | java-code-review | Security vulnerabilities |
+| **code-review** | Code quality (routes to `java.md`, `typescript.md`, `python.md`) | git-commit | CRITICAL findings |
+| **security-audit** | OWASP Top 10 (routes to `java.md`, `typescript.md`, `python.md`) | code-review | Security vulnerabilities |
 
 **Note:** SKILL.md validation for type: skills repositories is handled by the skill-validation.md workflow (not a portable skill), automatically invoked by git-commit when SKILL.md files are staged.
 
@@ -46,9 +43,9 @@ This collection follows a **layered architecture** where foundation skills provi
 
 | Skill | Domain | Extended By |
 |-------|--------|-------------|
-| **code-review-principles** | Universal code review | java-code-review, ts-code-review, python-code-review |
-| **security-audit-principles** | Universal OWASP Top 10 | java-security-audit, ts-security-audit, python-security-audit |
-| **dependency-management-principles** | Universal BOM patterns | maven-dependency-update, npm-dependency-update, pip-dependency-update |
+| **code-review-principles** | Universal code review | code-review (java.md, typescript.md, python.md) |
+| **security-audit-principles** | Universal OWASP Top 10 | security-audit (`java.md`, `typescript.md`, `python.md`) |
+| **dependency-management-principles** | Universal BOM patterns | dependency-update (`maven.md`, `npm.md`, `pip.md`) |
 | **observability-principles** | Universal logging/tracing/metrics | quarkus-observability |
 
 ### Layer 5: Java/Quarkus Development (4 skills)
@@ -66,7 +63,7 @@ This collection follows a **layered architecture** where foundation skills provi
 
 | Skill | Purpose | Builds On |
 |-------|---------|-----------|
-| **maven-dependency-update** | Maven BOM management | dependency-management-principles |
+| **dependency-update** | BOM management (routes to `maven.md`, `npm.md`, `pip.md`) | dependency-management-principles |
 | **adr** | Architecture Decision Records | (standalone) |
 | **design-snapshot** | Immutable dated design state record | (standalone) |
 | **idea-log** | Living log for undecided possibilities | (standalone) |
@@ -84,25 +81,21 @@ This collection follows a **layered architecture** where foundation skills provi
 | **java-project-health** | Java project health checks | project-health |
 | **blog-project-health** | Blog project health checks | project-health |
 | **custom-project-health** | Custom project health checks | project-health |
-| **ts-project-health** | TypeScript/Node.js health checks | project-health |
-| **python-project-health** | Python health checks | project-health |
+| **project-health** | Routes to `typescript.md`, `python.md`, `java.md`, `skills-repo.md`, `blog.md`, `custom.md` | (standalone router) |
 
-### Layer 8: TypeScript/Node.js Development (4 skills)
+### Layer 8: TypeScript/Node.js Development (1 skill)
 
 | Skill | Purpose | Builds On |
 |-------|---------|-----------|
 | **ts-dev** | TypeScript development guidance | (standalone) |
-| **ts-code-review** | TypeScript code review | code-review-principles |
-| **ts-security-audit** | TypeScript/Node.js OWASP security audit | security-audit-principles |
-| **npm-dependency-update** | npm/yarn/pnpm dependency management | dependency-management-principles |
 
-### Layer 9: Python Development (5 skills)
+**Note:** TypeScript code review, security audit, and dependency management are handled by the `code-review`, `security-audit`, and `dependency-update` router skills via their `typescript.md`/`npm.md` content files.
+
+### Layer 9: Python Development (1 skill)
 
 | Skill | Purpose | Builds On |
 |-------|---------|-----------|
 | **python-dev** | Python development guidance | (standalone) |
-| **python-code-review** | Python code review | code-review-principles |
-| **python-security-audit** | Python OWASP security audit | security-audit-principles |
-| **pip-dependency-update** | pip/poetry/pipenv dependency management | dependency-management-principles |
-| **python-project-health** | Python project health checks | project-health |
+
+**Note:** Python code review, security audit, dependency management, and health checks are handled by the `code-review`, `security-audit`, `dependency-update`, and `project-health` router skills via their `python.md`/`pip.md` content files.
 

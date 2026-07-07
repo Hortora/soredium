@@ -12,6 +12,10 @@ Resumes a paused branch from the stack: lets the user pick, rebases the branch
 onto the current project base branch (picking up any work that landed since it was paused), resets
 the WIP commit to restore working state, removes the entry from the stack.
 
+**Single-repo mode:** When no workspace exists (`SINGLE_REPO=yes` from ctx.py),
+all operations apply to the project repo only — skip workspace-specific steps.
+The pause stack lives at `$PROJECT/.pause-stack`.
+
 ---
 
 ## Path Resolution (run first, always)
@@ -74,28 +78,37 @@ If missing from either:
 
 ---
 
-## Step 4 — Remove entry from stack (on workspace main)
+## Step 4 — Switch both repos to branch
 
-```bash
-python3 ~/.claude/skills/project/stack.py pop <WORKSPACE>/design/.pause-stack <RESUME_BRANCH>
-git -C <WORKSPACE> add design/.pause-stack
-git -C <WORKSPACE> commit -m "chore: resume <RESUME_BRANCH> — pop from pause stack"
-git -C <WORKSPACE> push
-```
-
-**If push fails: abort** — do not switch branches. The stack on main must be
-updated before switching, to prevent a second session from also resuming the
-same branch.
-
----
-
-## Step 5 — Switch both repos to branch
+Checkout must succeed before popping the stack — if checkout fails, the stack
+entry must remain so the branch can be retried.
 
 ```bash
 OUTPUT=$(python3 ~/.claude/skills/work-resume/resume_exec.py checkout-branches "$PROJECT" "$WORKSPACE" branch="$RESUME_BRANCH")
 echo "$OUTPUT"
 echo "$OUTPUT" | grep -q "CHECKED_OUT=yes" || { echo "⚠️ Branch checkout failed."; exit 1; }
 ```
+
+---
+
+## Step 5 — Remove entry from stack (on workspace main)
+
+Only after checkout succeeds (Step 4). Pop the entry and push atomically —
+a second session seeing the stack entry will attempt its own checkout, which
+is harmless since the branch is already checked out here.
+
+```bash
+git -C <WORKSPACE> checkout main
+python3 ~/.claude/skills/project/stack.py pop <WORKSPACE>/design/.pause-stack <RESUME_BRANCH>
+git -C <WORKSPACE> add design/.pause-stack
+git -C <WORKSPACE> commit -m "chore: resume <RESUME_BRANCH> — pop from pause stack"
+git -C <WORKSPACE> push
+git -C <WORKSPACE> checkout <RESUME_BRANCH>
+```
+
+**If push fails:** warn but continue — the branch is already checked out and
+work can proceed. The stale stack entry will be cleaned up on next resume or
+work-end.
 
 ---
 
@@ -157,6 +170,28 @@ Run Steps 0, 2, 3, 11 from work-start:
 - **Step 11**: IntelliJ MCPs — call both; hard stop if unavailable
 
 Skip all branch creation steps — the branch already exists.
+
+---
+
+## Step 10 — Garden search
+
+Run `forage SEARCH` for the domain to surface relevant garden entries before
+resuming work. Derive the search term from the branch name or issue title
+(e.g. `issue-94-work-lifecycle` → search for "work lifecycle"). This matches
+the garden search that work-start performs for new branches — resumed branches
+deserve the same context.
+
+## Success Criteria
+
+Work-resume is complete when:
+
+- ✅ Paused branch selected and checked out in both repos
+- ✅ WIP commit reset to restore working state
+- ✅ Branch rebased onto current base (picks up work landed while paused)
+- ✅ Stack entry removed
+- ✅ Garden search performed for domain context
+
+**Not complete until** the branch is active and the WIP commit is unwound.
 
 ## Skill Chaining
 

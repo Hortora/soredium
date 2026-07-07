@@ -14,7 +14,7 @@ This document tracks the design and scope of the `project-health` skill. Update 
 
 Answers the question: **is the project correct, complete, and consistent?**
 
-`project-health` covers the **universal checks** that apply to every project type. It is **bidirectionally chained** with type-specific health skills — it routes *to* them for additional checks, and they invoke it as their prerequisite foundation. This is the same pattern as `git-commit` ↔ `java-git-commit`, `blog-git-commit`, and `custom-git-commit`.
+`project-health` covers the **universal checks** that apply to every project type. It is **bidirectionally chained** with type-specific health skills — it routes *to* them for additional checks, and they invoke it as their prerequisite foundation. This is the same pattern as `git-commit` routing to `java.md`, `blog.md`, and `custom.md` content files.
 
 This bidirectional design keeps each skill focused and composable: `project-health` is truly universal, type-specific skills contain only what is specific to their type, and you can invoke either end of the chain — `/project-health` runs everything for your project type, or `/java-project-health` can be invoked directly and will include the universal checks automatically.
 
@@ -563,7 +563,7 @@ When a skill needs a specific check, it references this skill rather than duplic
 ```
 
 Skills and workflows that should reference project-health:
-- Any commit skill (`git-commit`, `java-git-commit`, etc.) — can suggest `/project-health --commit` subset after commits that affect documentation
+- The `git-commit` router skill — can suggest `/project-health --commit` subset after commits that affect documentation
 - Pre-commit checklist in CLAUDE.md — reference `project-health --prerelease` before releases
 - Type-specific health skills — invoke `project-health` as their prerequisite
 

@@ -38,18 +38,24 @@ don't stop at the first one.
 For each failing test, reproduce the failure locally by running **only that test**.
 Not the full suite — isolated, fast.
 
+> **Maven command:** Use the project's Maven command (per CLAUDE.md — typically
+> `/opt/homebrew/bin/mvn` or `./mvnw`).
+
 ```bash
-# Example for Maven/Quarkus
-scripts/mvn-test <module> -Dtest=FailingTestClass
+# Example for Maven/Quarkus (substitute the project's Maven command)
+mvn test -f <module>/pom.xml -Dtest=FailingTestClass
 
 # Example for npm
 npm test -- --testPathPattern=failing-test
+
+# Example for Python/pytest
+python3 -m pytest tests/path/test_file.py::test_name -v
 ```
 
 **If the test passes locally in isolation:** the failure is test-ordering
 contamination. Run the full module suite to reproduce:
 ```bash
-scripts/mvn-test <module>
+mvn test -f <module>/pom.xml
 ```
 
 **If the test needs infrastructure** (Docker, database, external service):
@@ -93,7 +99,8 @@ For each failure, diagnose the **root cause**, not the symptom.
 4. Where else in the project does the same pattern exist? (blast radius)
 5. Fix all instances, not just the one that failed.
 
-**Exhaustive means exhaustive.** Use `grep`, `find`, or IDE search to locate
+**Exhaustive means exhaustive.** Use IDE search (`ide_search_text`,
+`ide_find_references`) first, then `grep`/`find` as fallback, to locate
 every instance of the pattern. A tenancyId fix that catches runtime but misses
 examples, queues-examples, queues-dashboard, ai, and flow-examples is a symptom
 fix. The root cause is "every module that persists entities needs tenancyId" —
@@ -132,8 +139,11 @@ Run the complete test suite for all modules. This catches:
 - Test ordering issues
 - Transitive dependency breaks
 
+> **Maven command:** Use the project's Maven command (per CLAUDE.md — typically
+> `/opt/homebrew/bin/mvn` or `./mvnw`).
+
 ```bash
-# Maven multi-module
+# Maven multi-module (substitute the project's Maven command)
 mvn test -pl module1,module2,module3,...
 
 # Or the project's full build script
@@ -197,6 +207,11 @@ git stash pop
 ```
 
 ---
+
+## Prerequisites
+
+**This skill builds on `ide-tooling`**. Use IntelliJ MCP tools for code
+navigation and reference search when investigating failures.
 
 ## Skill Chaining
 

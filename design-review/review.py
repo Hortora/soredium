@@ -340,6 +340,7 @@ def main() -> int:
                 spec_path=spec_path,
                 mode=args.mode,
                 depth=resolved_depth,
+                maturity_stage=args.stage,
             )
             convergence_override_ids = None
 
@@ -1263,6 +1264,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth", choices=("light", "standard", "deep"),
                         default=None,
                         help="Review depth for final-review mode (default: auto-detect)")
+    parser.add_argument("--stage", choices=("pre-release", "released"),
+                        default="pre-release",
+                        help="Project maturity stage — released adds backward-compat checks")
     args = parser.parse_args()
     defaults = MODE_DEFAULTS[args.mode]
     if args.max_rounds is None:
