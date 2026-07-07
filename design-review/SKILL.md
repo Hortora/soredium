@@ -46,12 +46,11 @@ Review phases — toggle to select:
 [ ] 1  Pre-review     Approach validation (2-3 rounds, lightweight)
 [x] 2  Spec review    Full adversarial review (4-10 rounds)
 [ ] 3  Code review    Implementation vs reviewed spec (2-4 rounds)
-[ ] 4  Final review   Production-readiness check (coming soon)
+[ ] 4  Final review   Production-readiness check (1-5 rounds, depth-scaled)
 
 Type numbers to toggle, "go" to proceed:
 ```
 
-Phase 4 is shown but disabled — it is not yet implemented.
 
 **If the user just says "design review" or "review this spec"**, skip the checklist
 entirely and proceed with spec review (phase 2). Only show the checklist when
@@ -262,6 +261,8 @@ from the next round.
 | User says | Flag |
 |-----------|------|
 | "pre-review this" / "validate the approach" | `--mode pre-review` |
+| "light review" / "quick check" | `--depth light` |
+| "deep review" / "thorough" | `--depth deep` |
 | "use sonnet" / "cheap mode" | `--model sonnet` |
 | "fresh sessions" / "no continuity" | `--fresh-sessions` |
 | "more rounds" / "up to 15" | `--max-rounds 15` |
@@ -272,7 +273,7 @@ from the next round.
 
 ## What this skill does NOT do
 
-- **Routine code review** — use `code-review` for pre-commit checklist review (Phase 4 coming soon)
+- **Routine code review** — use `code-review` for pre-commit checklist review
 - **Brainstorming** — use `brainstorming` to create the spec first,
   then use pre-review to validate the approach
 - **Implementation** — this reviews design specs, not code

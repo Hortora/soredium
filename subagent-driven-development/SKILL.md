@@ -312,8 +312,8 @@ progress in a ledger file, not only in todos.
   subagent
 - [task-reviewer-prompt.md](task-reviewer-prompt.md) — dispatch task
   reviewer subagent (spec compliance + code quality)
-- Final whole-branch review: use requesting-code-review's
-  [code-reviewer.md](../requesting-code-review/code-reviewer.md)
+**Final whole-branch review:** invoke `design-review --mode final-review --depth standard`
+as a background subprocess. Read `tracker.md` from the review workspace for results.
 
 ## Red Flags
 
@@ -363,7 +363,7 @@ progress in a ledger file, not only in todos.
   independent tasks or when review between tasks adds value)
 
 **Invokes:**
-- `requesting-code-review` — final whole-branch review after all tasks
+- `design-review --mode final-review` — final whole-branch review after all tasks
 - `work-end` — complete development after all tasks and final review
 
 **Complements:**

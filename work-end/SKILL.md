@@ -260,15 +260,35 @@ After all checked items complete, proceed to Step 3c.
 
 ## Step 3c — Code review (mandatory — HARD GATE)
 
-**This step cannot be skipped.** Invoke the `code-review` skill on the branch diff
-before proceeding. The review covers the full branch — all commits from the base
-branch to HEAD.
+**This step cannot be skipped.** Classify the branch diff and invoke the appropriate review.
 
-```bash
-git -C "$PROJECT" diff "$PROJECT_BASE_BRANCH"..HEAD --stat
-```
+Classify the branch diff:
 
-Invoke `code-review` with the branch diff. If the review surfaces issues:
+1. Get diff stats: `git -C "$PROJECT" diff "$PROJECT_BASE_BRANCH"..HEAD --stat`
+2. Check for structural changes:
+   - New files added → structural
+   - Files deleted → structural
+   - Files renamed → structural
+   - New classes/interfaces → structural
+   - Method signature changes → structural
+   - Config files changed (pom.xml, application.properties) → structural
+   - Only method body / import changes → body-only
+
+**If structural:**
+> "Branch diff is structural (N files, M lines, K new files).
+>  Recommended: final-review --depth {auto} (~$cost).
+>  Run final-review? [y]es / [c]ode-review instead / [s]kip review"
+- y → invoke `design-review --mode final-review`
+- c → invoke `code-review` (checklist)
+- s → skip (user takes responsibility)
+
+**If body-only:**
+> "Branch diff is body-only (N files, M lines). Running code-review checklist.
+>  Override with final-review? (y/n)"
+- y → invoke `design-review --mode final-review --depth light`
+- n → invoke `code-review` (checklist, as today)
+
+If the review surfaces issues:
 - **Critical/Important issues** → fix before proceeding. Re-run review after fixes.
 - **Minor issues** → fix or note. Do not block on minors alone.
 
@@ -856,7 +876,8 @@ Show every item — both ticked and skipped with reason.
 - `subagent-driven-development` — final close step
 
 **Invokes:**
-- `code-review` — Step 3c, mandatory gate before artifact promotion
+- `code-review` — Step 3c, mandatory gate before artifact promotion (body-only diffs)
+- `design-review --mode final-review` — Step 3c, mandatory gate for structural diffs
 - `forage` — SWEEP (Step 3b pre-close sweep)
 - `protocol` — SWEEP (Step 3b pre-close sweep)
 - `update-claude-md` — Step 3b pre-close sweep

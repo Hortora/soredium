@@ -1164,3 +1164,332 @@ class TestModeResume:
         from adversarial_design_review.review import REVIEW_MODES
         saved_mode = (ws / ".mode").read_text().strip()
         assert saved_mode not in REVIEW_MODES
+
+
+# ---------------------------------------------------------------------------
+# Depth presets
+# ---------------------------------------------------------------------------
+
+class TestDepthPresets:
+    def test_depth_presets_exist(self) -> None:
+        from adversarial_design_review.review import DEPTH_PRESETS
+        assert "light" in DEPTH_PRESETS
+        assert "standard" in DEPTH_PRESETS
+        assert "deep" in DEPTH_PRESETS
+
+    def test_light_is_single_round(self) -> None:
+        from adversarial_design_review.review import DEPTH_PRESETS
+        assert DEPTH_PRESETS["light"]["max_rounds"] == 1
+        assert DEPTH_PRESETS["light"]["min_rounds"] == 1
+
+    def test_standard_preset(self) -> None:
+        from adversarial_design_review.review import DEPTH_PRESETS
+        assert DEPTH_PRESETS["standard"]["max_rounds"] == 3
+        assert DEPTH_PRESETS["standard"]["min_rounds"] == 2
+        assert DEPTH_PRESETS["standard"]["budget_per_session"] == 5.0
+
+    def test_deep_preset(self) -> None:
+        from adversarial_design_review.review import DEPTH_PRESETS
+        assert DEPTH_PRESETS["deep"]["max_rounds"] == 5
+        assert DEPTH_PRESETS["deep"]["min_rounds"] == 3
+        assert DEPTH_PRESETS["deep"]["budget_per_session"] == 8.0
+
+
+# ---------------------------------------------------------------------------
+# Auto-detect depth
+# ---------------------------------------------------------------------------
+
+class TestAutoDetectDepth:
+    def test_small_diff_is_light(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _auto_detect_depth
+        stats = "2 files changed, 30 insertions(+), 5 deletions(-)"
+        result = _auto_detect_depth(stats, new_file_count=0)
+        assert result == "light"
+
+    def test_medium_diff_is_standard(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _auto_detect_depth
+        stats = "6 files changed, 120 insertions(+), 30 deletions(-)"
+        result = _auto_detect_depth(stats, new_file_count=0)
+        assert result == "standard"
+
+    def test_large_diff_is_deep(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _auto_detect_depth
+        stats = "15 files changed, 400 insertions(+), 100 deletions(-)"
+        result = _auto_detect_depth(stats, new_file_count=0)
+        assert result == "deep"
+
+    def test_new_files_double_count(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _auto_detect_depth
+        # 40 lines + 2 new files = 80 effective lines → standard, not light
+        stats = "3 files changed, 30 insertions(+), 10 deletions(-)"
+        result = _auto_detect_depth(stats, new_file_count=2)
+        assert result == "standard"
+
+    def test_many_files_triggers_deep(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _auto_detect_depth
+        stats = "12 files changed, 100 insertions(+), 20 deletions(-)"
+        result = _auto_detect_depth(stats, new_file_count=0)
+        assert result == "deep"
+
+
+# ---------------------------------------------------------------------------
+# Depth flag
+# ---------------------------------------------------------------------------
+
+class TestDepthFlag:
+    def test_depth_flag_parsed(self) -> None:
+        from adversarial_design_review.review import parse_args
+        import sys
+        from unittest.mock import patch
+
+        test_args = [
+            "--spec", "s.md",
+            "--title", "t",
+            "--source-dirs", "/src",
+            "--mode", "final-review",
+            "--depth", "deep",
+        ]
+        with patch.object(sys, "argv", ["review.py"] + test_args):
+            args = parse_args()
+
+        assert args.depth == "deep"
+
+    def test_depth_default_none(self) -> None:
+        from adversarial_design_review.review import parse_args
+        import sys
+        from unittest.mock import patch
+
+        test_args = [
+            "--spec", "s.md",
+            "--title", "t",
+            "--source-dirs", "/src",
+        ]
+        with patch.object(sys, "argv", ["review.py"] + test_args):
+            args = parse_args()
+
+        assert args.depth is None
+
+    def test_depth_choices(self) -> None:
+        import pytest
+        from adversarial_design_review.review import parse_args
+        import sys
+        from unittest.mock import patch
+
+        test_args = [
+            "--spec", "s.md",
+            "--title", "t",
+            "--source-dirs", "/src",
+            "--mode", "final-review",
+            "--depth", "extreme",
+        ]
+        with patch.object(sys, "argv", ["review.py"] + test_args):
+            with pytest.raises(SystemExit):
+                parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Depth persistence
+# ---------------------------------------------------------------------------
+
+class TestDepthPersistence:
+    def test_depth_file_written(self, tmp_path: Path) -> None:
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        depth_file = ws / ".depth"
+        depth_file.write_text("standard")
+        assert depth_file.read_text() == "standard"
+
+    def test_depth_file_loaded_on_resume(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _load_depth
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / ".depth").write_text("deep")
+        assert _load_depth(ws) == "deep"
+
+    def test_depth_file_missing_returns_none(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _load_depth
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        assert _load_depth(ws) is None
+
+
+# ---------------------------------------------------------------------------
+# Final review mode templates
+# ---------------------------------------------------------------------------
+
+class TestFinalReviewTemplates:
+    def test_mode_generators_registered(self) -> None:
+        from adversarial_design_review.setup import _MODE_GENERATORS
+        assert "final-review" in _MODE_GENERATORS
+        assert "reviewer" in _MODE_GENERATORS["final-review"]
+        assert "implementor" in _MODE_GENERATORS["final-review"]
+
+    def test_reviewer_template_has_final_review_constraints(self) -> None:
+        from adversarial_design_review.setup import _MODE_GENERATORS
+        content = _MODE_GENERATORS["final-review"]["reviewer"]()
+        assert "production" in content.lower() or "readiness" in content.lower()
+        assert "branch diff" in content.lower() or "branch changes" in content.lower()
+
+    def test_implementor_template_has_final_review_constraints(self) -> None:
+        from adversarial_design_review.setup import _MODE_GENERATORS
+        content = _MODE_GENERATORS["final-review"]["implementor"]()
+        assert "fix" in content.lower() or "code" in content.lower()
+
+    def test_reviewer_template_has_main_code_focus(self) -> None:
+        from adversarial_design_review.setup import _MODE_GENERATORS
+        content = _MODE_GENERATORS["final-review"]["reviewer"]()
+        assert "correctness" in content.lower()
+        assert "security" in content.lower()
+        assert "error handling" in content.lower()
+
+    def test_reviewer_template_has_test_code_focus(self) -> None:
+        from adversarial_design_review.setup import _MODE_GENERATORS
+        content = _MODE_GENERATORS["final-review"]["reviewer"]()
+        assert "coverage" in content.lower()
+        assert "assertion" in content.lower()
+
+    def test_reviewer_template_differs_from_spec_review(self) -> None:
+        from adversarial_design_review.setup import _default_reviewer_md, _MODE_GENERATORS
+        spec_content = _default_reviewer_md()
+        final_content = _MODE_GENERATORS["final-review"]["reviewer"]()
+        assert spec_content != final_content
+
+    def test_implementor_fixes_code_not_spec(self) -> None:
+        from adversarial_design_review.setup import _MODE_GENERATORS
+        content = _MODE_GENERATORS["final-review"]["implementor"]()
+        assert "source" in content.lower() or "code" in content.lower()
+
+
+# ---------------------------------------------------------------------------
+# Final-review prompt builders
+# ---------------------------------------------------------------------------
+
+class TestFinalReviewPrompts:
+    def test_reviewer_prompt_is_production_focused(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            convergence_override_ids=None,
+            source_dirs=["/src"], workspace_root="/ws",
+            spec_path="", mode="final-review",
+        )
+        assert "production" in prompt.lower() or "branch diff" in prompt.lower()
+
+    def test_reviewer_prompt_round2_has_evidence_requirement(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+        prompt = build_reviewer_prompt(
+            round_num=2, focus_items=["R1-01: Bug found"],
+            handover_path=None,
+            convergence_override_ids=None,
+            source_dirs=["/src"], workspace_root="/ws",
+            spec_path="", mode="final-review",
+        )
+        assert "R1-01" in prompt
+
+    def test_implementor_prompt_is_code_focused(self) -> None:
+        from adversarial_design_review.prompts import build_implementor_prompt
+        prompt = build_implementor_prompt(
+            round_num=1, focus_items=["R1-01: Bug found"],
+            source_dirs=["/src"], workspace_root="/ws",
+            spec_path="", mode="final-review",
+        )
+        assert "fix" in prompt.lower() or "code" in prompt.lower()
+
+    def test_reviewer_prompt_light_depth_is_focused(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            convergence_override_ids=None,
+            source_dirs=["/src"], workspace_root="/ws",
+            spec_path="", mode="final-review", depth="light",
+        )
+        assert "quick" in prompt.lower() or "sanity" in prompt.lower()
+
+    def test_reviewer_prompt_deep_depth_has_cross_module(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            convergence_override_ids=None,
+            source_dirs=["/src"], workspace_root="/ws",
+            spec_path="", mode="final-review", depth="deep",
+        )
+        assert "cross-module" in prompt.lower() or "cross module" in prompt.lower()
+
+    def test_reviewer_prompt_convergence_override(self) -> None:
+        from adversarial_design_review.prompts import build_reviewer_prompt
+        prompt = build_reviewer_prompt(
+            round_num=2, focus_items=["R1-01: Bug"],
+            handover_path=None,
+            convergence_override_ids=["R1-01"],
+            source_dirs=["/src"], workspace_root="/ws",
+            spec_path="", mode="final-review",
+        )
+        assert "R1-01" in prompt
+
+
+# ---------------------------------------------------------------------------
+# _detect_last_round with depth parameter
+# ---------------------------------------------------------------------------
+
+class TestDetectLastRoundWithDepth:
+    def test_light_depth_reviewer_only_is_complete(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _detect_last_round
+        ws = _make_workspace(tmp_path)
+        _write_reviewer(ws, 1, "review findings")
+        # No implementor-1.md — for light depth this is complete
+        last, reviewer_only = _detect_last_round(ws, depth="light")
+        assert last == 1
+        assert reviewer_only is False  # complete, not partial
+
+    def test_standard_depth_reviewer_only_is_partial(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _detect_last_round
+        ws = _make_workspace(tmp_path)
+        _write_reviewer(ws, 1, "review findings")
+        last, reviewer_only = _detect_last_round(ws, depth="standard")
+        assert last == 1
+        assert reviewer_only is True  # partial — implementor needed
+
+    def test_none_depth_preserves_existing_behavior(self, tmp_path: Path) -> None:
+        from adversarial_design_review.review import _detect_last_round
+        ws = _make_workspace(tmp_path)
+        _write_reviewer(ws, 1, "review findings")
+        last, reviewer_only = _detect_last_round(ws, depth=None)
+        assert last == 1
+        assert reviewer_only is True  # backward compatible
+
+
+# ---------------------------------------------------------------------------
+# Code mode helpers
+# ---------------------------------------------------------------------------
+
+class TestCodeModeHelpers:
+    def test_get_source_diff_combines_repos(self, tmp_path: Path) -> None:
+        import subprocess
+        from adversarial_design_review.review import _get_source_diff
+        # Set up two git repos with changes
+        for name in ("repo1", "repo2"):
+            d = tmp_path / name
+            d.mkdir()
+            subprocess.run(["git", "init"], cwd=d, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=d, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=d, capture_output=True)
+            (d / "file.py").write_text("initial")
+            subprocess.run(["git", "add", "."], cwd=d, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=d, capture_output=True)
+            (d / "file.py").write_text("modified")
+            subprocess.run(["git", "add", "."], cwd=d, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "change"], cwd=d, capture_output=True)
+
+        diff = _get_source_diff([str(tmp_path / "repo1"), str(tmp_path / "repo2")])
+        assert "file.py" in diff
+        assert diff.count("diff --git") == 2  # one per repo
+
+    def test_verify_code_changed_with_diff(self) -> None:
+        from adversarial_design_review.review import verify_code_changed
+        result = verify_code_changed("diff --git a/file.py b/file.py\n+new line")
+        assert result.section_changed is True
+
+    def test_verify_code_changed_empty(self) -> None:
+        from adversarial_design_review.review import verify_code_changed
+        result = verify_code_changed("")
+        assert result.section_changed is False

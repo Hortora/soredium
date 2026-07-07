@@ -12,6 +12,7 @@ def build_reviewer_prompt(
     workspace_root: str = "",
     spec_path: str = "",
     mode: str = "spec-review",
+    depth: str | None = None,
 ) -> str:
     if mode == "pre-review":
         return _build_pre_review_reviewer_prompt(
@@ -23,6 +24,11 @@ def build_reviewer_prompt(
             round_num, focus_items, handover_path, convergence_override_ids,
             source_dirs, workspace_root, spec_path,
         )
+    if mode == "final-review":
+        return _build_final_review_reviewer_prompt(
+            round_num, focus_items, handover_path,
+            convergence_override_ids, source_dirs,
+            workspace_root, spec_path, depth)
     ws = workspace_root
     parts: list[str] = []
 
@@ -108,6 +114,7 @@ def build_implementor_prompt(
     workspace_root: str = "",
     spec_path: str = "",
     mode: str = "spec-review",
+    depth: str | None = None,
 ) -> str:
     if mode == "pre-review":
         return _build_pre_review_implementor_prompt(
@@ -117,6 +124,10 @@ def build_implementor_prompt(
         return _build_code_review_implementor_prompt(
             round_num, focus_items, source_dirs, workspace_root, spec_path,
         )
+    if mode == "final-review":
+        return _build_final_review_implementor_prompt(
+            round_num, focus_items, source_dirs,
+            workspace_root, spec_path, depth)
     ws = workspace_root
     parts: list[str] = []
 
@@ -435,5 +446,123 @@ def _build_code_review_implementor_prompt(
     if focus_items:
         parts.append("")
         parts.append(f"Focus items: {', '.join(focus_items)}")
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Final review prompts — production readiness of branch diff
+# ---------------------------------------------------------------------------
+
+def _build_final_review_reviewer_prompt(
+    round_num: int,
+    focus_items: list[str],
+    handover_path: str | None,
+    convergence_override_ids: list[str] | None = None,
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+    depth: str | None = None,
+) -> str:
+    depth = depth or "standard"
+    parts: list[str] = []
+
+    if round_num == 1:
+        if depth == "light":
+            parts.append(
+                "Quick review of the branch diff. Focus on correctness risks "
+                "and security issues only. Flag items that would cause bugs or "
+                "vulnerabilities in production. This is a single-pass sanity check."
+            )
+        else:
+            parts.append(
+                "Review the branch diff for production readiness. "
+                "Compute `git diff <base>..HEAD` in each source directory. "
+                "Read every changed file and apply production readiness criteria."
+            )
+            parts.append(
+                "\n**Main code:** architecture, correctness, edge cases, error "
+                "handling, performance, concurrency, security, naming, structure, "
+                "layer compliance."
+            )
+            parts.append(
+                "\n**Test code:** coverage completeness, assertion quality, "
+                "missing scenarios, test isolation."
+            )
+            if depth == "deep":
+                parts.append(
+                    "\n**Cross-module impact:** shared interface changes, "
+                    "behavioral changes visible to other modules, transaction "
+                    "boundary changes, configuration changes, test isolation "
+                    "across modules."
+                )
+        if source_dirs:
+            parts.append(f"\nSource directories: {', '.join(source_dirs)}")
+    else:
+        parts.append(f"Round {round_num} review.")
+        if focus_items:
+            parts.append("\nOpen items from previous rounds:\n")
+            for item in focus_items:
+                parts.append(f"- {item}")
+            parts.append(
+                "\nFor each open item: verify the implementor's fix by reading "
+                "the actual code. Mark as RESOLVED (fix confirmed), "
+                "ACCEPTED (rejection is valid), or STILL OPEN (not fixed)."
+            )
+        parts.append(
+            "\nAlso look for new issues not previously raised."
+        )
+
+    if convergence_override_ids:
+        ids = ", ".join(convergence_override_ids)
+        parts.append(
+            f"\n**CONVERGENCE OVERRIDE:** Items {ids} were marked resolved "
+            "without sufficient evidence. You MUST provide concrete evidence "
+            "for each — quote the code or explain why the concern no longer applies."
+        )
+
+    if handover_path:
+        parts.append(f"\nPrevious session handover: {handover_path}")
+
+    parts.append(
+        f"\nWrite your review to {workspace_root}/responses/reviewer-{round_num}.md"
+    )
+
+    return "\n".join(parts)
+
+
+def _build_final_review_implementor_prompt(
+    round_num: int,
+    focus_items: list[str],
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+    depth: str | None = None,
+) -> str:
+    parts: list[str] = []
+
+    parts.append(
+        "The reviewer has raised issues with the branch code. For each item:"
+    )
+    parts.append(
+        "\n- **FIXED:** Fix the code in the source directories. Show what you "
+        "changed. Do NOT update a spec — fix the actual source code."
+    )
+    parts.append(
+        "- **REJECTED:** Defend the implementation with evidence. Quote the "
+        "code, reference tests, explain the design rationale."
+    )
+
+    if focus_items:
+        parts.append("\n## Items to address\n")
+        for item in focus_items:
+            parts.append(f"- {item}")
+
+    if source_dirs:
+        parts.append(f"\nSource directories: {', '.join(source_dirs)}")
+
+    parts.append(
+        f"\nWrite your response to {workspace_root}/responses/implementor-{round_num}.md"
+    )
 
     return "\n".join(parts)

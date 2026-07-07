@@ -84,9 +84,27 @@ def main() -> int:
     global _LOG_FILE, _REVIEW_WS, _REVIEW_NAME, _SPEC_PATH, _TIMEOUT_COUNT, _ERROR_COUNT
     args = parse_args()
 
-    if not args.workspace and not (args.spec and args.title and args.source_dirs):
-        print("Either --workspace (to resume) or --spec + --title + --source-dirs (new review) required.", flush=True)
-        return 1
+    if not args.workspace:
+        if args.mode == "final-review":
+            if not (args.title and args.source_dirs):
+                print("ERROR: --title and --source-dirs required for final-review", flush=True)
+                return 1
+        elif not (args.spec and args.title and args.source_dirs):
+            print("ERROR: --spec, --title, and --source-dirs required", flush=True)
+            return 1
+
+    # Depth resolution for final-review mode
+    resolved_depth: str | None = None
+    if args.mode == "final-review":
+        if args.depth:
+            resolved_depth = args.depth
+        # On resume, depth loaded later from .depth file
+        # On fresh start, default to standard if no --depth
+        if not args.workspace and not resolved_depth:
+            resolved_depth = "standard"
+    else:
+        if args.depth:
+            print(f"WARNING: --depth is only supported for final-review mode, ignored for {args.mode}", flush=True)
 
     start_round = 1
 
@@ -125,8 +143,11 @@ def main() -> int:
             diff_base_file = ws / ".diff-base"
             if diff_base_file.exists():
                 args.diff_base = diff_base_file.read_text().strip() or None
+        # Load depth from workspace for final-review resume
+        if args.mode == "final-review" and not args.depth:
+            resolved_depth = _load_depth(ws)
         _LOG_FILE = ws / "progress.log"
-        last_round, reviewer_only = _detect_last_round(ws)
+        last_round, reviewer_only = _detect_last_round(ws, depth=resolved_depth)
         if reviewer_only:
             start_round = last_round
             _log(f"Resuming review: {ws}")
@@ -158,14 +179,23 @@ def main() -> int:
                     print(f"Aborted. Resume with: --workspace {latest}", flush=True)
                     return 0
 
+        # Apply depth preset overrides for final-review on fresh start
+        if args.mode == "final-review" and resolved_depth:
+            if resolved_depth in DEPTH_PRESETS:
+                preset = DEPTH_PRESETS[resolved_depth]
+                args.max_rounds = preset["max_rounds"]
+                args.min_rounds = preset["min_rounds"]
+                args.budget_per_session = preset["budget_per_session"]
+
         ws = setup_review(
-            spec_path=Path(args.spec),
+            spec_path=Path(args.spec) if args.spec else Path(),
             title=args.title,
             source_dirs=args.source_dirs,
             issue=args.issue,
             mode=args.mode,
             arch_files=args.arch_files,
             diff_base=args.diff_base,
+            depth=resolved_depth,
         )
         _LOG_FILE = ws / "progress.log"
         _log(f"Review ({args.mode}): {ws}")
@@ -181,10 +211,15 @@ def main() -> int:
     elif args.spec:
         spec_path = str(Path(args.spec).resolve())
     else:
-        _log("ERROR: No spec path found — provide --spec or use a workspace with .spec-path")
-        return 1
+        spec_path = ""
+
+    # For final-review, spec_path is not used (operates on branch diff)
+    if args.mode == "final-review":
+        spec_path = ""
+
     _SPEC_PATH = spec_path
-    _log(f"Spec: {spec_path}")
+    if spec_path:
+        _log(f"Spec: {spec_path}")
 
     tracker = Tracker(project_name=args.title)
     model = args.model
@@ -214,6 +249,7 @@ def main() -> int:
                 round_num=start_round - 1, focus_items=focus,
                 source_dirs=args.source_dirs, workspace_root=str(ws),
                 spec_path=spec_path, mode=args.mode,
+                depth=resolved_depth,
             )
             catchup_prompt += "\n\nThis is a catch-up run. Previous rounds left these items unaddressed. Address all of them."
             catchup_file = f"responses/implementor-{start_round - 1}.md"
@@ -246,11 +282,19 @@ def main() -> int:
                         tracker.write(ws / "tracker.md")
                         _git_commit(ws, ["tracker.md", catchup_file],
                                      f"catch-up: implementor addressed {len(focus)} items")
-                        spec_dir = Path(spec_path).parent
-                        spec_name = Path(spec_path).name
-                        subprocess.run(["git", "add", spec_name], cwd=spec_dir, capture_output=True)
-                        subprocess.run(["git", "commit", "-m", "docs: spec revised — catch-up round",
-                                        "--allow-empty"], cwd=spec_dir, capture_output=True)
+                        if args.mode in ("final-review", "code-review"):
+                            for sd in args.source_dirs:
+                                subprocess.run(["git", "add", "-A"], cwd=sd, capture_output=True)
+                                subprocess.run(["git", "commit", "-m",
+                                    f"review: code fixes — {args.mode} catchup",
+                                    "--allow-empty"], cwd=sd, capture_output=True)
+                        else:
+                            if spec_path:
+                                spec_dir = Path(spec_path).parent
+                                spec_name = Path(spec_path).name
+                                subprocess.run(["git", "add", spec_name], cwd=spec_dir, capture_output=True)
+                                subprocess.run(["git", "commit", "-m", "docs: spec revised — catchup",
+                                                "--allow-empty"], cwd=spec_dir, capture_output=True)
                     focus = tracker.get_focus_items()
                     _log(f"  After catch-up: {len(focus)} items still open")
 
@@ -295,6 +339,7 @@ def main() -> int:
                 workspace_root=str(ws),
                 spec_path=spec_path,
                 mode=args.mode,
+                depth=resolved_depth,
             )
             convergence_override_ids = None
 
@@ -370,6 +415,13 @@ def main() -> int:
                          f"tracker: round {round_num} reviewer issues")
             _check_unstaged(ws)
 
+            # Light depth skip — reviewer-only mode
+            if resolved_depth == "light":
+                _log("  Light depth — skipping implementor (reviewer-only mode)")
+                _log(f"\n  Review complete after {round_num} round(s)")
+                _print_summary(tracker, round_num, cumulative_cost, spec_path)
+                return 0
+
             if signal.signal_type == "APPROVED":
                 if round_num < args.min_rounds:
                     _log(f"  APPROVED in round {round_num} but min-rounds is {args.min_rounds} — overriding to CONTINUE")
@@ -405,6 +457,7 @@ def main() -> int:
         implementor_prompt = build_implementor_prompt(
             round_num=round_num, focus_items=focus, source_dirs=args.source_dirs,
             workspace_root=str(ws), spec_path=spec_path, mode=args.mode,
+            depth=resolved_depth,
         )
 
         if is_window_end:
@@ -460,6 +513,7 @@ def main() -> int:
                         round_num=round_num, focus_items=missing,
                         source_dirs=args.source_dirs, workspace_root=str(ws),
                         spec_path=spec_path, mode=args.mode,
+                        depth=resolved_depth,
                     )
                     retry_prompt += f"\n\nYour previous response is at responses/implementor-{round_num}.md — read it. Address only the items listed above that are not yet covered. Do not duplicate items already addressed."
                     retry_result = _invoke_claude(
@@ -484,12 +538,20 @@ def main() -> int:
         # Commit implementor response to review folder
         _git_commit(ws, [f"responses/implementor-{round_num}.md"],
                      f"round {round_num}: implementor response")
-        # Commit spec changes to project repo
-        spec_dir = Path(spec_path).parent
-        spec_name = Path(spec_path).name
-        subprocess.run(["git", "add", spec_name], cwd=spec_dir, capture_output=True)
-        subprocess.run(["git", "commit", "-m", f"docs: spec revised — review round {round_num}",
-                        "--allow-empty"], cwd=spec_dir, capture_output=True)
+        # Mode-conditional commit: code changes for final-review/code-review, spec for others
+        if args.mode in ("final-review", "code-review"):
+            for sd in args.source_dirs:
+                subprocess.run(["git", "add", "-A"], cwd=sd, capture_output=True)
+                subprocess.run(["git", "commit", "-m",
+                    f"review: code fixes — {args.mode} round {round_num}",
+                    "--allow-empty"], cwd=sd, capture_output=True)
+        else:
+            if spec_path:
+                spec_dir = Path(spec_path).parent
+                spec_name = Path(spec_path).name
+                subprocess.run(["git", "add", spec_name], cwd=spec_dir, capture_output=True)
+                subprocess.run(["git", "commit", "-m", f"docs: spec revised — review round {round_num}",
+                                "--allow-empty"], cwd=spec_dir, capture_output=True)
         _check_unstaged(ws)
 
         # --- Step 4: Script verify ---
@@ -499,24 +561,50 @@ def main() -> int:
             impl_signal = extract_signal(impl_content)
             responses = extract_issue_responses(impl_content)
 
-            diff = _get_git_diff(spec_path)
+            # Mode-conditional verification
+            if args.mode in ("final-review", "code-review"):
+                diff = _get_source_diff(args.source_dirs)
+                vr = verify_code_changed(diff)
+            else:
+                if spec_path:
+                    diff = _get_git_diff(spec_path)
+                else:
+                    diff = ""
 
             for resp in responses:
                 if not tracker.has_issue(resp.issue_id):
                     continue
                 try:
                     if resp.status == "FIXED":
-                        vr = verify_against_diff(diff, resp.section_ref)
-                        tracker.mark_addressed(
-                            resp.issue_id,
-                            section_ref=resp.section_ref or "",
-                            commit_hash=_get_head_hash(spec_path),
-                            rationale=resp.body[:200] if resp.body else "",
-                        )
-                        if not vr.section_changed and resp.section_ref:
-                            issue = tracker.get_issue(resp.issue_id)
-                            issue.notes = f"claimed §{resp.section_ref} but no diff found"
-                            _log(f"  WARNING: {resp.issue_id} claims §{resp.section_ref} but section not found in diff")
+                        if args.mode in ("final-review", "code-review"):
+                            # For code modes, just track that code changed
+                            tracker.mark_addressed(
+                                resp.issue_id,
+                                section_ref=resp.section_ref or "",
+                                commit_hash="",
+                                rationale=resp.body[:200] if resp.body else "",
+                            )
+                        else:
+                            # For spec modes, verify section reference
+                            if spec_path:
+                                vr = verify_against_diff(diff, resp.section_ref)
+                                tracker.mark_addressed(
+                                    resp.issue_id,
+                                    section_ref=resp.section_ref or "",
+                                    commit_hash=_get_head_hash(spec_path),
+                                    rationale=resp.body[:200] if resp.body else "",
+                                )
+                                if not vr.section_changed and resp.section_ref:
+                                    issue = tracker.get_issue(resp.issue_id)
+                                    issue.notes = f"claimed §{resp.section_ref} but no diff found"
+                                    _log(f"  WARNING: {resp.issue_id} claims §{resp.section_ref} but section not found in diff")
+                            else:
+                                tracker.mark_addressed(
+                                    resp.issue_id,
+                                    section_ref=resp.section_ref or "",
+                                    commit_hash="",
+                                    rationale=resp.body[:200] if resp.body else "",
+                                )
                     elif resp.status == "REJECTED":
                         tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
                     elif resp.status == "ESCALATED":
@@ -808,11 +896,13 @@ def _inject_issue_ids(reviewer_file: Path, issues: list) -> None:
     reviewer_file.write_text(content)
 
 
-def _detect_last_round(ws: Path) -> tuple[int, bool]:
+def _detect_last_round(ws: Path, depth: str | None = None) -> tuple[int, bool]:
     """Returns (last_round, reviewer_only).
 
     reviewer_only=True means the last round has a reviewer file but
     no implementor file — the implementor still needs to run.
+
+    For depth="light", reviewer-only rounds are considered complete (reviewer_only=False).
     """
     responses = ws / "responses"
     if not responses.is_dir():
@@ -835,7 +925,45 @@ def _detect_last_round(ws: Path) -> tuple[int, bool]:
     max_reviewer = max(reviewer_rounds)
     if max_reviewer in implementor_rounds:
         return max_reviewer, False
-    return max_reviewer, True
+    if depth == "light":
+        return max_reviewer, False  # complete — light is reviewer-only
+    return max_reviewer, True  # partial — implementor needed
+
+
+def _auto_detect_depth(diff_stat_summary: str, new_file_count: int = 0) -> str:
+    """Detect review depth from diff stat summary line.
+
+    Args:
+        diff_stat_summary: The summary line from git diff --stat (e.g.,
+            "6 files changed, 120 insertions(+), 30 deletions(-)").
+        new_file_count: Number of new files in the diff. Each counts double
+            toward the line threshold.
+    """
+    import re
+    files_m = re.search(r"(\d+) files? changed", diff_stat_summary)
+    ins_m = re.search(r"(\d+) insertions?", diff_stat_summary)
+    del_m = re.search(r"(\d+) deletions?", diff_stat_summary)
+
+    file_count = int(files_m.group(1)) if files_m else 0
+    insertions = int(ins_m.group(1)) if ins_m else 0
+    deletions = int(del_m.group(1)) if del_m else 0
+    total_lines = insertions + deletions + (new_file_count * 20)
+
+    if file_count > 10 or total_lines > 300:
+        return "deep"
+    if file_count > 3 or total_lines > 50:
+        return "standard"
+    return "light"
+
+
+def _load_depth(ws: Path) -> str | None:
+    """Load persisted depth from workspace, or None if absent."""
+    depth_file = ws / ".depth"
+    if depth_file.exists():
+        value = depth_file.read_text().strip()
+        if value in DEPTH_PRESETS:
+            return value
+    return None
 
 
 def _rebuild_tracker(ws: Path, tracker: Tracker, through_round: int) -> None:
@@ -945,6 +1073,28 @@ def _get_git_diff(spec_path_str: str) -> str:
         ["git", "diff", "HEAD~1", sp.name], cwd=sp.parent, capture_output=True, text=True,
     )
     return result.stdout
+
+
+def _get_source_diff(source_dirs: list[str]) -> str:
+    """Get combined diff across all source directories."""
+    diffs: list[str] = []
+    for sd in source_dirs:
+        result = subprocess.run(
+            ["git", "diff", "HEAD~1"], cwd=sd, capture_output=True, text=True,
+        )
+        if result.stdout.strip():
+            diffs.append(result.stdout)
+    return "\n".join(diffs)
+
+
+class _VerifyResult:
+    def __init__(self, section_changed: bool) -> None:
+        self.section_changed = section_changed
+
+
+def verify_code_changed(diff: str) -> _VerifyResult:
+    """Check whether any code was modified."""
+    return _VerifyResult(section_changed=bool(diff.strip()))
 
 
 def _get_head_hash(spec_path_str: str) -> str:
@@ -1081,6 +1231,12 @@ MODE_DEFAULTS: Final = {
     "final-review": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 5.0},
 }
 
+DEPTH_PRESETS: Final = {
+    "light":    {"max_rounds": 1, "min_rounds": 1, "budget_per_session": 1.5},
+    "standard": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 5.0},
+    "deep":     {"max_rounds": 5, "min_rounds": 3, "budget_per_session": 8.0},
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Adversarial Design Review")
@@ -1103,7 +1259,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--arch-files", nargs="+", default=None,
                         help="Architectural files for agents to prioritise (overrides auto-detection)")
     parser.add_argument("--diff-base", default=None,
-                        help="Git ref to diff against for code-review mode (branch, SHA, or tag)")
+                        help="Git ref to diff against for code-review and final-review modes (branch, SHA, or tag)")
+    parser.add_argument("--depth", choices=("light", "standard", "deep"),
+                        default=None,
+                        help="Review depth for final-review mode (default: auto-detect)")
     args = parser.parse_args()
     defaults = MODE_DEFAULTS[args.mode]
     if args.max_rounds is None:

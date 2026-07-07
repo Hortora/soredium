@@ -52,13 +52,13 @@ Development workflow and knowledge garden skills for Claude Code.
 | Skill | What it does |
 |-------|-------------|
 | `code-review` | Routes to Java/TS/Python review with OWASP-aware escalation |
-| `requesting-code-review` | Independent subagent review for features before merge |
+| `requesting-code-review` | *(Deprecated — use `design-review --mode final-review`)* |
 | `receiving-code-review` | Technical rigor when receiving review feedback |
 | `verification-before-completion` | Evidence gate — run verification before claiming done |
 | `security-audit` | OWASP Top 10 audit, triggered by code-review or on demand |
 | `project-health` | Correctness, completeness, consistency checks by project type |
 | `project-refine` | Improvement opportunities — duplication, bloat, doc quality |
-| `design-review` | Multi-round adversarial review of design specs |
+| `design-review` | Multi-round adversarial review — spec-review, pre-review, code-review, and final-review modes |
 
 ### Commits & Docs
 

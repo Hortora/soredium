@@ -59,3 +59,6 @@ automatic); `git-commit` after approval if user wants to commit
   dispatches an independent subagent review for significant work.
 - `design-review` — different scope. design-review is multi-round adversarial
   review of design specs. This skill reviews code.
+- `design-review --mode final-review` — branch-level adversarial review.
+  Use code-review for per-commit checklist review; use final-review for
+  pre-merge production readiness checks on structural changes.

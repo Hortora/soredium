@@ -7,6 +7,10 @@ description: >
   using language-specific checklists.
 ---
 
+> **Deprecated:** This skill is superseded by `design-review --mode final-review`.
+> Use `--mode final-review` for branch-level adversarial code review.
+> This skill remains for backward compatibility but will not receive updates.
+
 # Requesting Code Review
 
 Dispatch a code reviewer subagent to catch issues before they cascade.

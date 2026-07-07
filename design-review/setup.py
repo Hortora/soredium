@@ -35,6 +35,7 @@ def setup_review(
     mode: str = "spec-review",
     arch_files: list[str] | None = None,
     diff_base: str | None = None,
+    depth: str | None = None,
 ) -> Path:
     if adr_root is None:
         adr_root = Path.home() / "adr"
@@ -51,7 +52,12 @@ def setup_review(
         (ws / "agents" / agent).mkdir(parents=True, exist_ok=True)
 
     # Store spec path, source dirs, issue, and mode — all needed on resume
-    (ws / ".spec-path").write_text(str(spec_path.resolve()))
+    if spec_path and str(spec_path) != "":
+        (ws / ".spec-path").write_text(str(spec_path.resolve()))
+        # Symlink to spec for easy navigation from the review folder
+        spec_link = ws / "spec.md"
+        if not spec_link.exists():
+            spec_link.symlink_to(spec_path.resolve())
     (ws / ".source-dirs").write_text("\n".join(source_dirs))
     (ws / ".mode").write_text(mode)
     if issue:
@@ -60,11 +66,8 @@ def setup_review(
         (ws / ".arch-files").write_text("\n".join(arch_files))
     if diff_base:
         (ws / ".diff-base").write_text(diff_base)
-
-    # Symlink to spec for easy navigation from the review folder
-    spec_link = ws / "spec.md"
-    if not spec_link.exists():
-        spec_link.symlink_to(spec_path.resolve())
+    if depth:
+        (ws / ".depth").write_text(depth)
 
     _generate_context_md(ws, source_dirs, spec_path, arch_files=arch_files)
     _generate_agent_claude_mds(ws, mode=mode)
@@ -524,6 +527,70 @@ reads the spec; you wrote the code AND read the spec. When they
 claim a divergence, verify their reading of the spec is correct
 before accepting the critique."""
 
+# ---------------------------------------------------------------------------
+# Final review specific constraints
+# ---------------------------------------------------------------------------
+
+_FINAL_REVIEW_APPROACH_REVIEWER = """\
+You are reviewing the **branch diff** for production readiness. This is NOT a \
+spec compliance check — there may be no spec. Your job is to find issues in the \
+actual code changes that would cause bugs, security holes, or maintenance problems \
+in production.
+
+Compute the diff: `git diff <base>..HEAD` in each source directory.
+Read every changed file. Apply production readiness criteria to each change."""
+
+_FINAL_REVIEW_APPROACH_IMPLEMENTOR = """\
+You are defending the implementation. When the reviewer raises a valid issue, \
+fix the code directly in the source directories. When the reviewer raises an \
+invalid concern, defend with evidence — show the code, explain the reasoning, \
+reference tests that cover the case.
+
+Do NOT capitulate on correct code. Do NOT update a spec — fix the source code."""
+
+_FINAL_REVIEW_STARTING_POINTS = """\
+### Starting points — main code and test code
+
+**Main code review areas:**
+- Architecture — does the change fit the existing module structure?
+- Correctness — edge cases, off-by-one, null/empty handling
+- Error handling — are failures caught, logged, and recovered from?
+- Performance — unnecessary allocations, O(n²) where O(n) suffices
+- Concurrency — race conditions, shared mutable state, deadlocks
+- Security — injection, auth bypass, data exposure
+- Naming and structure — clear, consistent, follows project conventions
+- Layer compliance — does the change respect module boundaries?
+
+**Test code review areas:**
+- Coverage completeness — are the important paths tested?
+- Assertion quality — do assertions check the right things, not just "no exception"?
+- Missing scenarios — what edge cases, error paths, or boundary conditions are untested?
+- Test isolation — do tests depend on shared state or execution order?
+- Fixture patterns — are test fixtures clear, minimal, and reusable?"""
+
+_FINAL_REVIEW_MAIN_CODE_FOCUS = """\
+Focus on the main (non-test) code first. These are the areas that affect \
+production behavior and are hardest to fix after release."""
+
+_FINAL_REVIEW_TEST_CODE_FOCUS = """\
+After reviewing main code, shift attention to test code. Poor tests create \
+false confidence — a passing test suite that misses the important cases is \
+worse than no tests at all."""
+
+_CROSS_MODULE_IMPACT = """\
+### Cross-module impact (deep review only)
+
+Check for cross-cutting effects of the branch changes:
+- Changes to shared interfaces/types used by other modules
+- Behavioral changes observable from callers in other packages
+- Transaction boundary changes that affect coordinating services
+- Configuration changes that alter deployment or runtime behavior
+- Test isolation — whether changes could cause flaky tests in unrelated modules"""
+
+_NO_SKILL_TOOL = """\
+Do NOT use the Skill tool during review — all review operations are direct
+file reads, code navigation, and analysis. The Skill tool is disabled."""
+
 
 # ---------------------------------------------------------------------------
 # Assembly — role-specific composition from shared elements
@@ -777,6 +844,48 @@ Explain deliberate deviations — the spec may need updating to match.
 _MODE_GENERATORS["code-review"] = {
     "reviewer": _code_review_reviewer_md,
     "implementor": _code_review_implementor_md,
+}
+
+
+# ---------------------------------------------------------------------------
+# Final review mode generators
+# ---------------------------------------------------------------------------
+
+def _final_review_reviewer_md() -> str:
+    items = [
+        _CORE_APPROACH_REVIEWER,
+        _FINAL_REVIEW_APPROACH_REVIEWER,
+        _FINAL_REVIEW_STARTING_POINTS,
+        _FINAL_REVIEW_MAIN_CODE_FOCUS,
+        _FINAL_REVIEW_TEST_CODE_FOCUS,
+        _CROSS_MODULE_IMPACT,
+        "### Code navigation",
+        _INTELLIJ_OPEN,
+        _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "reviewer"),
+        _NO_SKILL_TOOL,
+    ]
+    return _assemble_constraints(items)
+
+
+def _final_review_implementor_md() -> str:
+    items = [
+        _CORE_APPROACH_IMPLEMENTOR,
+        _FINAL_REVIEW_APPROACH_IMPLEMENTOR,
+        "### Code navigation",
+        _INTELLIJ_OPEN,
+        _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "implementor"),
+        _NO_SKILL_TOOL,
+    ]
+    return _assemble_constraints(items)
+
+
+_MODE_GENERATORS["final-review"] = {
+    "reviewer": _final_review_reviewer_md,
+    "implementor": _final_review_implementor_md,
 }
 
 
