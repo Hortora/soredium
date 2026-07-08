@@ -1,6 +1,10 @@
 ---
 name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: >
+  Use when you have a spec or requirements for a multi-step task, before
+  touching code. Writes a structured plan file to docs/plans/ with TDD steps
+  and task decomposition. This is NOT the built-in EnterPlanMode — use this
+  skill instead of plan mode for implementation planning.
 ---
 
 # Writing Plans
@@ -35,6 +39,19 @@ produce working, testable software on its own.
 Before defining tasks, map out which files will be created or modified
 and what each one is responsible for. This is where decomposition
 decisions get locked in.
+
+**IntelliJ MCP is required.** Before writing the plan, verify IntelliJ
+is available:
+```bash
+# Check via ide_index_status — if this fails, STOP
+```
+If IntelliJ MCP is unavailable, **stop and tell the user**. Do not write
+a plan that assumes bash for code operations — the plan's implementer
+will use the tools the plan specifies, and bash file operations bypass
+reference updates.
+
+If IntelliJ becomes unavailable mid-session (MCP connection drops), stop
+plan execution immediately and inform the user. Do not fall back to bash.
 
 When exploring the existing codebase to determine file paths and
 understand current architecture, use ide-tooling for navigation
@@ -112,6 +129,9 @@ requirements implicitly include this section.]
 **Files:**
 - Create: `exact/path/to/file.py`
 - Modify: `exact/path/to/existing.py:123-145`
+- Move: `old/path.py` → `new/path.py` (use `ide_move_file`)
+- Delete: `exact/path/to/old.py` (use `ide_refactor_safe_delete`)
+- Rename: `OldName` → `NewName` (use `ide_refactor_rename`)
 - Test: `tests/exact/path/to/test.py`
 
 **Interfaces:**
@@ -169,6 +189,9 @@ Every step must contain the actual content an engineer needs. These are
 - Steps that describe what to do without showing how (code blocks
   required for code steps)
 - References to types, functions, or methods not defined in any task
+- **Bash cp/rm/mv for source files** — use `ide_move_file`, `ide_refactor_safe_delete`,
+  `ide_refactor_rename` instead. Bash bypasses reference updates and breaks imports.
+  Only use bash for non-code files (config, docs, scripts).
 
 ## Remember
 - Exact file paths always
@@ -192,6 +215,18 @@ patterns from the "No Placeholders" section above. Fix them.
 names you used in later tasks match what you defined in earlier tasks?
 A function called `clearLayers()` in Task 3 but `clearFullLayers()` in
 Task 7 is a bug.
+
+**4. Tooling safety scan:** Search every task for bash file operations on
+source files. Any `cp`, `rm`, `mv`, `mkdir` targeting `.java`, `.ts`,
+`.tsx`, `.py`, `.kt` files is a plan failure. Replace with:
+- File moves → `ide_move_file`
+- File deletes → `ide_refactor_safe_delete`
+- Renames → `ide_refactor_rename`
+- New members → `ide_insert_member`
+- Body rewrites → `ide_replace_member`
+
+Bash is only acceptable for non-code files (config, docs, scripts, test
+fixtures) and for git/build commands.
 
 If you find issues, fix them inline. No need to re-review — just fix
 and move on. If you find a spec requirement with no task, add the task.

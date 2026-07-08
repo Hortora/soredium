@@ -2,13 +2,29 @@
 
 Use this template when dispatching an implementer subagent.
 
+**Before dispatching:** verify IntelliJ MCP is available to subagents.
+Call `ide_index_status` from the parent session. If it fails, do NOT
+dispatch — switch to inline execution (executing-plans) instead.
+Subagents without IntelliJ will use bash for code operations.
+
+**Agent type:** Do NOT use `general-purpose` — it's a built-in type with
+its own system prompt that may override your instructions. Use the
+`claude` type or omit the type entirely.
+
 ```
-Subagent (general-purpose):
+Agent:
   description: "Implement Task N: [task name]"
   model: [MODEL — REQUIRED: choose per SKILL.md Model Selection; an omitted
          model silently inherits the session's most expensive one]
   prompt: |
     You are implementing Task N: [task name]
+
+    ## Step 0 — Verify IntelliJ MCP
+
+    Before doing anything else, run `ide_index_status` with
+    `project_path: [PROJECT_PATH]`. If it fails or the tool is not
+    available, STOP and report BLOCKED with reason "IntelliJ MCP
+    unavailable — cannot proceed without semantic code tools."
 
     ## Task Description
 
@@ -33,12 +49,9 @@ Subagent (general-purpose):
 
     Once you're clear on requirements:
     1. Follow TDD: write a failing test first, verify it fails for the
-       right reason, then write minimal code to pass it. See
-       test-driven-development for the full red-green-refactor cycle.
-    2. Use ide-tooling for code operations: `ide_insert_member` for new
-       methods, `ide_replace_member` for fixing implementations,
-       `ide_find_references` and `ide_call_hierarchy` for understanding
-       impact. Never use bash grep for code navigation.
+       right reason, then write minimal code to pass it.
+    2. Use IntelliJ MCP for all code operations — see the Tooling
+       section below for the complete reference.
     3. Verify implementation works
     4. Commit your work
     5. Self-review (see below)
@@ -48,21 +61,43 @@ Subagent (general-purpose):
 
     ## Tooling
 
-    For any operation that requires semantic understanding of code —
-    finding references, navigating to definitions, tracing call
-    hierarchies, renaming symbols, moving files, checking type
-    hierarchies, or diagnosing build errors — use IntelliJ MCP tools.
-    See ide-tooling for the full capability catalog.
+    **When working with .java, .ts, .tsx, .py, .kt files — IntelliJ MCP
+    is the default. Pass `project_path` to every call.**
 
-    **Editing preference hierarchy:**
-    1. Structural edits (`ide_edit_member`, `ide_replace_member`,
-       `ide_insert_member`) — for class members
-    2. Semantic refactoring (`ide_refactor_rename`, `ide_move_file`,
-       `ide_refactor_safe_delete`) — for cross-cutting reference updates
-    3. Text edits (Edit tool) — for non-structural changes (config,
-       markdown, non-class code)
+    | Operation | Use | NEVER use |
+    |-----------|-----|-----------|
+    | Read code | `ide_read_file` | bash cat/head/tail |
+    | Search code | `ide_search_text` | bash grep/find |
+    | Navigate | `ide_find_references`, `ide_find_definition`, `ide_find_class`, `ide_file_structure` | bash grep |
+    | Move files | `ide_move_file` | bash mv/git mv |
+    | Rename symbols | `ide_refactor_rename` | find-and-replace |
+    | Delete symbols | `ide_refactor_safe_delete` | bash rm |
+    | Add members | `ide_insert_member` | manual text insertion |
+    | Replace body | `ide_replace_member` | Edit tool on method bodies |
+    | Rewrite member | `ide_edit_member` | Edit tool on signatures |
+    | Format | `ide_reformat_code`, `ide_optimize_imports` | manual formatting |
+    | Diagnostics | `ide_diagnostics`, `ide_build_project` | — |
+    | Edit non-code content | Edit tool | — |
+    | Write new files | Write tool | — |
 
-    Bash is for running tests, git commands, and build tools.
+    **Bash is ONLY for:** running tests (mvn/yarn/pytest), git commands,
+    build tools, and non-code file operations (config, docs, scripts).
+
+    **If IntelliJ MCP fails mid-task** (connection error, timeout, empty
+    response on a file you know exists): STOP. Report BLOCKED with
+    "IntelliJ MCP became unavailable." Do NOT silently fall back to
+    Read/grep and continue — the parent session will either fix IntelliJ
+    or switch to inline execution. Silent fallback produces work that
+    misses references and breaks imports.
+
+    **Exception:** Reading files at known paths (from the plan's file list)
+    via the Read tool is acceptable when `ide_read_file` is unresponsive.
+    Writing new files via Write tool is acceptable (no IntelliJ equivalent).
+    Everything else — edits, refactoring, navigation, search — MUST use
+    IntelliJ or not happen at all. IntelliJ structural edits are faster
+    and more reliable than Edit's exact-string-matching: `ide_replace_member`
+    targets a method by name, Edit requires finding a unique string and
+    matching indentation exactly.
 
     **While you work:** If you encounter something unexpected or unclear,
     **ask questions**. It's always OK to pause and clarify. Don't guess

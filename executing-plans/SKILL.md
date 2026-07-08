@@ -19,12 +19,17 @@ subagent-driven-development instead.
 
 ## The Process
 
-### Step 0 — Branch guard
+### Step 0 — Pre-conditions
 
-Verify you are NOT on main before proceeding:
+**Branch guard:** Verify you are NOT on main before proceeding:
 ```bash
 [ "$(git -C "$PROJECT" branch --show-current)" = "main" ] && echo '⚠️ Cannot execute on main. Create a feature branch first.' && exit 1
 ```
+
+**IntelliJ gate:** Verify IntelliJ MCP is available via `ide_index_status`.
+If unavailable, **stop**. Plans specify IntelliJ operations for code changes —
+executing them with bash bypasses reference updates. If IntelliJ becomes
+unavailable mid-execution, stop and inform the user.
 
 ### Step 1: Load and Review Plan
 
@@ -55,10 +60,10 @@ For each task:
 ### Step 3: Complete Development
 
 After all tasks complete and verified:
-1. Run code-review on the full branch diff (not just the last commit)
-   For structural changes or multi-task branches, consider
-   `design-review --mode final-review` for deeper adversarial review.
-2. Invoke work-end to verify, close the branch, and push
+1. Invoke work-end — it handles the final review (code-review or
+   design-review --mode final-review depending on diff scope),
+   squash, push, and branch closure. Do NOT run a separate review
+   before work-end.
 
 ## When to Stop and Ask for Help
 
@@ -118,10 +123,9 @@ Plan execution is complete when:
   when subagent overhead isn't justified)
 
 **Invokes:**
-- `code-review` — before final commit
 - `verification-before-completion` — after each task, verify before
   marking done
-- `work-end` — complete development after all tasks
+- `work-end` — after all tasks complete (handles code-review, squash, push)
 
 **Complements:**
 - `test-driven-development` — every task follows TDD during execution.

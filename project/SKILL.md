@@ -26,13 +26,33 @@ flags to CLAUDE.md when user says no so they are never asked again.
 Before any other check: if both `mcp__intellij-index__*` and `mcp__intellij__*` tools are
 visible in this session, note this rule and apply it throughout the session:
 
-- **`mcp__intellij-index__*`** — use for ALL code navigation, file search, diagnostics, and
+- **`mcp__intellij-index__*`** — use for code navigation, file search, diagnostics, and
   opening projects. Pass `project_path` to auto-open any closed project. Never ask the user
   to open a project manually.
 - **`mcp__intellij__*`** — use only for build/run, terminal, and formatting. Cannot open projects.
 
-This applies regardless of what work follows — spec writing, code review, implementation, or
-exploration. The rule is in effect for the whole session once noted here.
+**When to use IntelliJ vs bash:**
+
+| Activity | Use | Why |
+|----------|-----|-----|
+| Navigate code (find usages, trace calls, understand types) | IntelliJ (`ide_find_references`, `ide_search_text`, `ide_find_class`, `ide_call_hierarchy`) | Semantically correct — finds all usages, understands types, handles overloads |
+| Edit code (add/replace methods, fields, properties) | IntelliJ (`ide_edit_member`, `ide_replace_member`, `ide_insert_member`) | Structural — works with members not line numbers, auto-reformats |
+| Refactor (rename, move, delete) | IntelliJ (`ide_refactor_rename`, `ide_move_file`, `ide_refactor_safe_delete`) | Updates all references across the project — never use sed/Edit for renames |
+| Verify (compile, diagnostics) | IntelliJ (`ide_build_project`, `ide_diagnostics`) | Catches errors immediately after edits |
+| Code review | IntelliJ for navigation + Read/Edit for review notes | Semantic navigation to understand impact of changes |
+| Quick exploratory lookup ("what does X do?") | Either — bash grep is fine for speed | No correctness requirement, just orientation |
+| Config, markdown, non-code files | bash grep, Read, or Edit tool | IntelliJ indexes code, not all file types |
+
+The default during implementation work is IntelliJ. Bash grep for source files during
+implementation is a smell — if you reach for `grep` on `.java`/`.ts`/`.py` while building
+or reviewing, switch to `ide_search_text` or `ide_find_references`.
+
+**Subagent dispatch rule:** Subagents do not inherit skills or CLAUDE.md. When
+dispatching subagents for code exploration or implementation, include IntelliJ
+MCP tool instructions in the agent prompt explicitly — at minimum:
+"Use `mcp__intellij-index__*` tools (`ide_find_references`, `ide_search_text`,
+`ide_find_class`) for code navigation instead of bash grep/find."
+Without this, subagents will always fall back to bash.
 
 ---
 

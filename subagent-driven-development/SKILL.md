@@ -72,8 +72,7 @@ flowchart TD
     VBC["Run verification-before-completion"]
     DONE["Mark task complete in ledger and todo list"]
     MORE{"More tasks remain?"}
-    FINAL["Dispatch final code reviewer"]
-    WORKEND["Invoke work-end"]
+    WORKEND["Invoke work-end\n(includes final review at Step 3c)"]
 
     PLAN --> BRIEF
     BRIEF --> QUESTIONS
@@ -88,17 +87,25 @@ flowchart TD
     VBC --> DONE
     DONE --> MORE
     MORE -->|"yes"| BRIEF
-    MORE -->|"no"| FINAL
-    FINAL --> WORKEND
+    MORE -->|"no"| WORKEND
 ```
 
-## Step 0 — Branch Guard
+## Step 0 — Pre-conditions
 
-Verify you are NOT on main before proceeding:
+**Branch guard:** Verify you are NOT on main before proceeding:
 
 ```bash
 [ "$(git -C "$PROJECT" branch --show-current)" = "main" ] && echo '⚠️ Cannot execute on main. Create a feature branch first.' && exit 1
 ```
+
+**IntelliJ gate:** Verify IntelliJ MCP is available via `ide_index_status`.
+If unavailable, **do not dispatch subagents** — switch to `executing-plans`
+(inline execution) instead. Subagents without IntelliJ fall back to bash
+for code operations, bypassing reference updates and breaking imports.
+Inline execution keeps IntelliJ tools in the parent session where they work.
+
+If IntelliJ becomes unavailable mid-execution, stop the current task and
+inform the user. Do not continue with bash fallback.
 
 ## Pre-Flight Plan Review
 
@@ -127,8 +134,6 @@ mechanical when the plan is well-specified.
 matching, debugging): use a standard model.
 
 **Architecture and design tasks**: use the most capable available model.
-The final whole-branch review is one of these — dispatch it on the most
-capable available model, not the session default.
 
 **Review tasks**: choose the model with the same judgment, scaled to the
 diff's size, complexity, and risk. A small mechanical diff does not need
@@ -214,6 +219,19 @@ use dispatching-parallel-agents to investigate concurrently rather than
 fixing sequentially. Each agent gets one failure domain with focused
 context.
 
+## Constructing Dispatch Prompts — Mandatory Sections
+
+**The Tooling section from implementer-prompt.md MUST appear in every
+implementer dispatch — no exceptions.** Do not paraphrase it, do not
+skip it for tasks that "only create new files" or "don't navigate code."
+The subagent cannot see skills or CLAUDE.md — if the Tooling section is
+missing from the prompt, the subagent will use bash for everything.
+
+Every task touches code. Every task benefits from `ide_insert_member`
+over raw Edit. Every task should use `ide_refactor_rename` over
+find-and-replace. Include the section. Let the subagent decide what
+applies.
+
 ## Constructing Reviewer Prompts
 
 Per-task reviews are task-scoped gates. The broad review happens once,
@@ -256,10 +274,6 @@ at the final whole-branch review. When you fill a reviewer template:
   finding and the plan text, ask which governs. Do not dismiss the
   finding because the plan mandates it, and do not dispatch a fix that
   contradicts the plan without asking.
-- The final whole-branch review gets a package too: run
-  `scripts/review-package MERGE_BASE HEAD` (MERGE_BASE = the commit the
-  branch started from, e.g. `git merge-base main HEAD`) and include the
-  printed path in the final review dispatch.
 - Every fix dispatch carries the implementer contract: the fix subagent
   re-runs the tests covering its change and reports the results. Name
   the covering test files in the dispatch. Before re-dispatching the
@@ -325,8 +339,9 @@ progress in a ledger file, not only in todos.
   subagent
 - [task-reviewer-prompt.md](task-reviewer-prompt.md) — dispatch task
   reviewer subagent (spec compliance + code quality)
-**Final whole-branch review:** invoke `design-review --mode final-review --depth standard`
-as a background subprocess. Read `tracker.md` from the review workspace for results.
+**Final whole-branch review:** handled by `work-end` Step 3c — it decides whether to run
+`code-review` (body-only diffs) or `design-review --mode final-review` (structural diffs).
+Do NOT dispatch a separate final review before invoking work-end.
 
 ## Common Pitfalls
 
@@ -376,10 +391,9 @@ as a background subprocess. Read `tracker.md` from the review workspace for resu
   independent tasks or when review between tasks adds value)
 
 **Invokes:**
-- `design-review --mode final-review` — final whole-branch review after all tasks.
-  Note: design-review --mode final-review is heavyweight (multi-round,
-  10-30 min). For quick single-reviewer feedback, use code-review instead.
-- `work-end` — complete development after all tasks and final review
+- `work-end` — after all tasks complete. work-end handles the final review
+  (code-review or design-review --mode final-review depending on diff scope),
+  squash, push, and branch closure.
 
 **Complements:**
 - `test-driven-development` — implementer subagents follow TDD for each
