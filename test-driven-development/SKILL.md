@@ -216,7 +216,15 @@ Before marking work complete:
 - [ ] All tests pass
 - [ ] Output clean (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
-- [ ] Edge cases and errors covered
+- [ ] Coverage is comprehensive, not just happy path:
+  - Correctness (right output for valid input)
+  - Boundary values (at threshold, one below, one above)
+  - Edge cases (empty input, single element, zero-duration)
+  - Error/failure paths (null returns, exceptions, invalid input)
+  - Robustness (network failures, timeouts, malformed input)
+  - Validation (reject invalid arguments)
+  - Branch coverage (every new if/else and early return has a test)
+  - Concurrency (if thread-safe by design, prove it)
 
 Can't check all boxes? You skipped TDD. Start over.
 

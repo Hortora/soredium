@@ -97,10 +97,12 @@ Subagent (general-purpose):
     - Proper error handling?
     - DRY without premature abstraction?
     - Edge cases handled?
-    - For language-specific checks, apply the relevant code-review
-      checklist: java-dev for Java/Quarkus, ts-dev for TypeScript,
-      python-dev for Python. These cover framework-specific patterns,
-      assertion libraries, and testing conventions.
+    - For language-specific checks, read the relevant review checklist
+      (you cannot invoke skills — read the file directly):
+      [REVIEW_CHECKLIST — controller fills per PROJECT_TYPE:
+       Java: `~/.claude/skills/code-review/java.md`
+       TypeScript: `~/.claude/skills/code-review/typescript.md`
+       Python: `~/.claude/skills/code-review/python.md`]
 
     **Tests:**
     - Do the new and changed tests verify real behavior, not mocks?

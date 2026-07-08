@@ -287,6 +287,8 @@ class OrderServiceTest {
 ```
 
 - New non-trivial logic added with no corresponding test.
+- Missing test coverage for new branches — every new if/else, early
+  return, and error path needs at least one test.
 - `@QuarkusTest` used where `@QuarkusComponentTest` would suffice
   (unnecessary full container startup).
 

@@ -30,32 +30,41 @@ execute the plan, so execute it.
 
 ## When to Use
 
+**EP (executing-plans) is the default.** Inline execution keeps skills,
+IntelliJ MCP, CLAUDE.md, and project context available throughout — no
+template maintenance, no tool inheritance issues, no dispatch overhead.
+
+SDD is the exception — use it only when **genuine parallelism** justifies
+the cost of losing the parent session's context:
+
 ```mermaid
 flowchart TD
     Q1{"Have implementation plan?"}
-    Q2{"Tasks mostly independent?"}
-    Q3{"Stay in this session?"}
+    Q2{"Tasks genuinely parallelisable?\n(no shared state, no ordering dependency,\ndifferent files/modules)"}
+    Q3{"Parallel execution worth the overhead?\n(3+ tasks, each 30+ min,\nIntelliJ MCP confirmed working)"}
     SDD["subagent-driven-development"]
-    EP["executing-plans"]
+    EP["executing-plans (default)"]
     NOPLAN["Brainstorm first"]
 
     Q1 -->|"yes"| Q2
     Q1 -->|"no"| NOPLAN
+    Q2 -->|"no"| EP
     Q2 -->|"yes"| Q3
-    Q2 -->|"no — tightly coupled"| EP
-    Q3 -->|"yes"| SDD
-    Q3 -->|"no — inline execution"| EP
+    Q3 -->|"yes — parallel saves wall-clock time"| SDD
+    Q3 -->|"no — sequential is fine"| EP
 ```
 
-**vs. executing-plans:**
-- Same session (no context switch)
-- Fresh subagent per task (no context pollution)
-- Review after each task (spec compliance + code quality), broad review
-  at the end
-- **Continuous execution** — runs all tasks without stopping to check in.
-  EP takes the opposite approach: **stop and ask** on any blocker.
-  SDD can do this because subagents isolate failures — a stuck task
-  doesn't pollute the coordinator's context.
+**The cost of SDD:** Subagents cannot invoke skills, read CLAUDE.md, or
+reliably access IntelliJ MCP. Every capability the parent session has
+must be manually replicated in dispatch prompts. This is fragile — a
+missing instruction means the subagent falls back to bash, skips TDD,
+or writes happy-path-only tests.
+
+**When SDD is worth it:** Multiple genuinely independent tasks across
+different modules/packages where parallel execution saves significant
+wall-clock time. Example: 5 independent API endpoints in different
+packages, each taking 30+ minutes — sequential is 2.5 hours, parallel
+is ~40 minutes.
 
 ## The Process
 
@@ -221,15 +230,25 @@ context.
 
 ## Constructing Dispatch Prompts — Mandatory Sections
 
-**The Tooling section from implementer-prompt.md MUST appear in every
-implementer dispatch — no exceptions.** Do not paraphrase it, do not
-skip it for tasks that "only create new files" or "don't navigate code."
-The subagent cannot see skills or CLAUDE.md — if the Tooling section is
-missing from the prompt, the subagent will use bash for everything.
+**Subagents cannot invoke skills or read CLAUDE.md.** Everything they
+need must be in the prompt or accessible via the Read tool. Two sections
+in the templates have `[PLACEHOLDER]` blocks you MUST fill:
 
-Every task touches code. Every task benefits from `ide_insert_member`
-over raw Edit. Every task should use `ide_refactor_rename` over
-find-and-replace. Include the section. Let the subagent decide what
+**1. Language Rules** (`[LANGUAGE_FILES]` in implementer-prompt.md):
+Read `PROJECT_TYPE` from ctx.py. Fill in the file paths:
+
+| PROJECT_TYPE contains | Implementer reads | Reviewer reads |
+|---|---|---|
+| `java` | `~/.claude/skills/java-dev/SKILL.md` | `~/.claude/skills/code-review/java.md` |
+| `ts` | `~/.claude/skills/ts-dev/SKILL.md` | `~/.claude/skills/code-review/typescript.md` |
+| `python` | `~/.claude/skills/python-dev/SKILL.md` | `~/.claude/skills/code-review/python.md` |
+
+For mixed-type projects, include ALL applicable rows.
+
+**2. Tooling** (already inlined in the template — do not remove or
+paraphrase). The Tooling section and TDD section MUST appear in every
+implementer dispatch — no exceptions. Do not skip them for tasks that
+"only create new files." Include both. Let the subagent decide what
 applies.
 
 ## Constructing Reviewer Prompts

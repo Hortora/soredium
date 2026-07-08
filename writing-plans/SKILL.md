@@ -239,26 +239,20 @@ for an independent review.
 
 After saving the plan, offer execution choice:
 
-**"Plan complete and saved to `docs/plans/<filename>.md`. Two execution
-options:**
+**"Plan complete and saved to `docs/plans/<filename>.md`."**
 
-**1. Subagent-Driven (recommended for plans with 3+ independent tasks
-or when review between tasks adds value)** — dispatch a fresh subagent
-per task, two-stage review between tasks, fast iteration.
+**Default: invoke `executing-plans`** — inline execution with full access
+to skills, IntelliJ MCP, and project context. Review the diff after each
+task inline.
 
-**2. Inline Execution (for simple sequential plans or when subagent
-overhead isn't justified)** — execute tasks in this session, batch
-execution with checkpoints.
+**Exception: invoke `subagent-driven-development`** only when tasks are
+genuinely parallelisable (no shared state, different modules, each 30+
+minutes) and parallel execution would save significant wall-clock time.
+SDD subagents lose access to skills and IntelliJ — only use when the
+parallelism justifies that cost.
 
-**Which approach?"**
-
-**If Subagent-Driven chosen:**
-- Invoke subagent-driven-development
-- Fresh subagent per task + two-stage review
-
-**If Inline Execution chosen:**
-- Invoke executing-plans
-- Batch execution with checkpoints for review
+Do not ask the user to choose. Use EP unless the plan clearly meets the
+SDD criteria above.
 
 ## Success Criteria
 

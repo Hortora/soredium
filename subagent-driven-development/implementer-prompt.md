@@ -35,6 +35,31 @@ Agent:
 
     [Scene-setting: where this fits, dependencies, architectural context]
 
+    ## Language Rules — Read Before Coding
+
+    Before writing any code, read the relevant language skill and review
+    checklist. You cannot invoke skills — read the files directly.
+
+    [LANGUAGE_FILES — controller fills this per PROJECT_TYPE. Examples:
+
+    For Java:
+    - Read `~/.claude/skills/java-dev/SKILL.md` — safety, concurrency,
+      performance, testing rules for Java/Quarkus
+    - Read `~/.claude/skills/code-review/java.md` — review checklist
+      you'll self-review against before reporting
+
+    For TypeScript:
+    - Read `~/.claude/skills/ts-dev/SKILL.md` — type safety, async,
+      error handling, testing rules
+    - Read `~/.claude/skills/code-review/typescript.md` — review checklist
+
+    For Python:
+    - Read `~/.claude/skills/python-dev/SKILL.md` — type hints, safety,
+      async, testing rules
+    - Read `~/.claude/skills/code-review/python.md` — review checklist
+
+    For mixed-type projects, read ALL applicable files.]
+
     ## Before You Begin
 
     If you have questions about:
@@ -48,14 +73,63 @@ Agent:
     ## Your Job
 
     Once you're clear on requirements:
-    1. Follow TDD: write a failing test first, verify it fails for the
-       right reason, then write minimal code to pass it.
-    2. Use IntelliJ MCP for all code operations — see the Tooling
-       section below for the complete reference.
+    1. Follow TDD (see TDD section below)
+    2. Use IntelliJ MCP for all code operations (see Tooling section below)
     3. Verify implementation works
     4. Commit your work
     5. Self-review (see below)
     6. Report back
+
+    ## TDD — Non-Negotiable
+
+    Every piece of production code starts with a failing test.
+
+    **RED:** Write one failing test for one behaviour. Clear name that
+    describes the expected behaviour ("rejectsEmptyEmail", not "test1").
+    Real code, not mocks (mock only what is unavoidable: external I/O,
+    network, slow services). Run it — confirm it fails for the right
+    reason (missing feature, not typo). If it passes immediately, you're
+    testing existing behaviour — fix the test.
+
+    **GREEN:** Write the simplest code that makes the test pass. Nothing
+    more. Don't add features the test doesn't ask for.
+
+    **REFACTOR:** Clean up — remove duplication, improve names, extract
+    helpers. Keep tests green throughout.
+
+    **REPEAT** for the next behaviour.
+
+    **Test levels — use the right level for each behaviour:**
+    - **Unit tests** — isolated logic, single function/class, fast
+    - **Integration tests** — components wired together, real DB/CDI/DI
+    - **End-to-end tests** — full request path, system as a user sees it
+    Choose the level that catches the bug. Don't duplicate: if an
+    integration test already covers a function, a unit test adds noise.
+
+    **Test coverage expectations — not just happy path:**
+    - Correctness (does it produce the right output for valid input?)
+    - Boundary values (at threshold, one below, one above)
+    - Edge cases (empty input, single element, zero-duration)
+    - Error/failure paths (null returns, exceptions, invalid input)
+    - Robustness (network failures, timeouts, resource exhaustion,
+      malformed input, unavailable dependencies)
+    - Validation (reject invalid arguments in constructors/methods)
+    - Concurrency (if the code is thread-safe by design, prove it)
+    - Contract tests (verify interface contracts, not just implementations)
+    - Branch coverage (every new if/else, early return, and error path
+      needs at least one test)
+
+    **Combinatorial/configuration testing:** When inputs have multiple
+    dimensions (e.g. 100x100x100 possible configurations), don't test
+    exhaustively or skip entirely. Sample systematically: first few values,
+    last few, and a spread through the middle with varying skip distances
+    (consecutive, skip-1, skip-2, skip-3). ~10 values per dimension
+    gives ~1000 iterations — enough to catch interaction bugs without
+    exploding the test suite.
+
+    Happy-path-only tests are a plan failure. If you wrote 10 tests and
+    none check an error path or boundary, you haven't tested — you've
+    demonstrated.
 
     Work from: [directory]
 

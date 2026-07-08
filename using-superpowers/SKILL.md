@@ -39,7 +39,7 @@ Process skills enforce discipline. They come before implementation skills — al
 
 These are the typical skill chains. Flows compose — Fix then Close is normal.
 
-- **Build:** brainstorming → writing-plans → subagent-driven-development (or executing-plans) → work-end
+- **Build:** brainstorming → writing-plans → executing-plans (default; subagent-driven-development only for genuinely parallel tasks) → work-end
 - **Fix:** systematic-debugging → test-driven-development → domain skill → verification-before-completion → git-commit
 - **Multi-failure:** systematic-debugging → dispatching-parallel-agents → verification-before-completion → git-commit
 - **Close:** work-end (includes verification, code-review, squash, and push internally)
