@@ -152,9 +152,36 @@ See **[github-setup.md](github-setup.md)** for the complete label reference.
 
 **Output:** `CREATED=<count>` — number of newly created labels (existing labels are skipped).
 
+### Step 4b — GitHub project board (optional)
+
+Ask the user whether they use a GitHub Projects board:
+
+> **Do you use a GitHub Projects board for this repo?**
+> If yes, I'll configure work-start to automatically move issues to "In Progress"
+> and assign them when you start a branch.
+>
+> Enter the project number (visible in the project URL), or **skip** to leave unconfigured.
+
+If the user provides a number: store it for Step 5 as `GITHUB_PROJECT_NUMBER`.
+Verify it exists:
+
+```bash
+gh project view <number> --owner <owner> 2>&1
+```
+
+If the project is not found or requires the `project` scope:
+> ⚠️ Could not access project #N. You may need to run `gh auth refresh -s project`
+> to grant the `project` token scope. Skip for now? (y/n)
+
+If the user skips or declines: `GITHUB_PROJECT_NUMBER` stays blank. The `{number}`
+placeholder in the template is omitted from the Work Tracking section.
+
 ### Step 5 — Write Work Tracking to CLAUDE.md
 
 Add or update the `## Work Tracking` section — see **[github-setup.md](github-setup.md)** for the complete template.
+
+If `GITHUB_PROJECT_NUMBER` is blank, omit the `**GitHub project:**` line from the
+template entirely. It can be added later by editing CLAUDE.md directly.
 
 Confirm:
 > ✅ Work Tracking configured in CLAUDE.md. Issue creation is now enforced before

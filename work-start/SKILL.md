@@ -283,6 +283,23 @@ If an open PR branch is found:
 
 If neither check fires, `PROJECT_BRANCH_BASE = PROJECT_BASE_BRANCH` (default — branch from main).
 
+### Step 4c — Activate issues on project board
+
+**Gate:** `GITHUB_PROJECT` is not blank AND `COVERS` is not blank.
+
+If the gate is not met, skip silently.
+
+```bash
+python3 ~/.claude/skills/issue-workflow/issue_setup.py activate-issues $ISSUE_REPO_GITHUB issues=$COVERS project=$GITHUB_PROJECT
+```
+
+This adds all covered issues to the GitHub project board, sets their status to
+"In Progress", and assigns them to the current user (`@me`).
+
+Non-fatal — if activation fails (missing `project` scope, project not found,
+network error), warn and continue. Project board status is informational; it
+must not block branch creation.
+
 ---
 
 ### Step 5 — Branch name
@@ -468,6 +485,7 @@ Platform doc: [read / not found]
 Coherence Protocol: [any concerns raised, or "clear"]
 Protocols checked: [list any relevant ones read]
 Garden search: [N GEs surfaced for <domain> / no matches / skipped]
+Project board: [N issues activated / not configured / failed: <reason>]
 IntelliJ: ✅ connected / ✅ connected, project auto-opened / ⚠️ MCP unavailable after retry — stopped / ⚠️ MCP unavailable (user confirmed docs-only, proceeding explicitly)
 
 Proceeding to brainstorming.  (or: Ready for work.)

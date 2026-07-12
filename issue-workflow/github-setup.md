@@ -56,6 +56,7 @@ Add or update the `## Work Tracking` section:
 
 **Issue tracking:** enabled
 **GitHub repo:** {owner/repo}
+**GitHub project:** {number}
 **Changelog:** GitHub Releases (run `gh release create --generate-notes` at milestones)
 
 **Automatic behaviours (Claude follows these at all times in this project):**

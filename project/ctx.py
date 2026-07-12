@@ -100,6 +100,11 @@ elif "Issue tracking: declined" in clean_claude_text:
 else:
     issues_status = "absent"
 
+github_project = ""
+m = re.search(r"GitHub project:\s*(\S+)", clean_claude_text)
+if m:
+    github_project = m.group(1)
+
 project_type = ""
 maturity_stage = "pre-release"
 if "## Project Type" in cwd_claude_text:
@@ -156,6 +161,7 @@ meta_section_hashes = meta.get("design-section-hashes", "")
 print(f"CLAUDE_OK={claude_ok}")
 print(f"WORKSPACE_OK={workspace_ok}")
 print(f"ISSUES_STATUS={issues_status}")
+print(f"GITHUB_PROJECT={github_project}")
 print(f"PROJECT_TYPE={project_type}")
 print(f"MATURITY_STAGE={maturity_stage}")
 print(f"HAS_META={has_meta}")

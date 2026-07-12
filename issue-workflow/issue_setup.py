@@ -8,10 +8,12 @@ Subcommands:
   create-epic <repo> title=<t> body-file=<path> Create epic issue
   create-issue <repo> title=<t> body-file=<path> labels=<csv> Create issue
   update-scope <repo> epic=<N> body-file=<path> Update epic body
+  activate-issues <repo> issues=<csv> project=<N> [status=<name>] Activate issues on project board
 
 All commands output KEY=VALUE pairs on stdout for easy parsing.
 """
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -253,6 +255,93 @@ def update_scope(repo: str, epic: str | None, body_file: str | None) -> None:
     print("UPDATED=yes")
 
 
+def activate_issues(repo: str, issues: str | None, project: str | None, status: str = "In Progress") -> None:
+    """Add issues to a GitHub project board, set status, and assign @me."""
+    if not issues:
+        print("ERROR=missing_issues")
+        sys.exit(1)
+    if not project:
+        print("ERROR=missing_project")
+        sys.exit(1)
+
+    owner = repo.split("/")[0]
+    issue_nums = [n.strip() for n in issues.split(",") if n.strip()]
+
+    rc, stdout, stderr = run_gh(["project", "view", project, "--owner", owner, "--format", "json"])
+    if rc != 0:
+        if "insufficient" in stderr.lower() or "scope" in stderr.lower():
+            print(f"ERROR=missing_project_scope hint=run: gh auth refresh -s project")
+        else:
+            print(f"ERROR=project_not_found project={project} stderr={stderr.strip()}")
+        sys.exit(1)
+    project_data = json.loads(stdout)
+    project_id = project_data.get("id", "")
+    if not project_id:
+        print("ERROR=project_id_not_found")
+        sys.exit(1)
+
+    rc, stdout, stderr = run_gh(["project", "field-list", project, "--owner", owner, "--format", "json"])
+    if rc != 0:
+        print(f"ERROR=field_list_failed stderr={stderr.strip()}")
+        sys.exit(1)
+
+    fields = json.loads(stdout)
+    if isinstance(fields, dict):
+        fields = fields.get("fields", [])
+
+    status_field_id = None
+    status_option_id = None
+    for field in fields:
+        if field.get("name") == "Status":
+            status_field_id = field["id"]
+            for option in field.get("options", []):
+                if option.get("name") == status:
+                    status_option_id = option["id"]
+                    break
+            break
+
+    if not status_field_id:
+        print("ERROR=status_field_not_found")
+        sys.exit(1)
+    if not status_option_id:
+        print(f"ERROR=status_option_not_found status={status}")
+        sys.exit(1)
+
+    activated = []
+    for issue_num in issue_nums:
+        issue_url = f"https://github.com/{repo}/issues/{issue_num}"
+
+        rc, stdout, stderr = run_gh(["project", "item-add", project, "--owner", owner, "--url", issue_url, "--format", "json"])
+        if rc != 0:
+            print(f"WARN=item_add_failed issue={issue_num} stderr={stderr.strip()}")
+            continue
+
+        item = json.loads(stdout)
+        item_id = item.get("id", "")
+        if not item_id:
+            print(f"WARN=no_item_id issue={issue_num}")
+            continue
+
+        rc, _, stderr = run_gh([
+            "project", "item-edit",
+            "--id", item_id,
+            "--field-id", status_field_id,
+            "--project-id", project_id,
+            "--single-select-option-id", status_option_id,
+        ])
+        if rc != 0:
+            print(f"WARN=status_set_failed issue={issue_num} stderr={stderr.strip()}")
+
+        rc, _, stderr = run_gh(["issue", "edit", issue_num, "-R", repo, "--add-assignee", "@me"])
+        if rc != 0:
+            print(f"WARN=assign_failed issue={issue_num} stderr={stderr.strip()}")
+
+        activated.append(issue_num)
+
+    print(f"ACTIVATED={','.join(activated)}")
+    print(f"COUNT={len(activated)}")
+
+
 def parse_args() -> dict[str, str]:
     """Parse command-line arguments into a dict."""
     parsed = {}
@@ -319,6 +408,13 @@ def main() -> None:
         epic = args.get("epic")
         body_file = args.get("body-file")
         update_scope(repo, epic, body_file)
+
+    elif subcommand == "activate-issues":
+        repo = args.get("target")
+        if not repo:
+            print("ERROR=missing_repo")
+            sys.exit(1)
+        activate_issues(repo, args.get("issues"), args.get("project"), args.get("status", "In Progress"))
 
     else:
         print(f"ERROR=unknown_subcommand subcommand={subcommand}", file=sys.stderr)
