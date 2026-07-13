@@ -56,6 +56,9 @@ class TrackedIssue:
     section_ref: str = ""
     rationale: str = ""
     notes: str = ""
+    location: str = ""
+    priority: str = "LOW"
+    depends: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,12 @@ class SettledDecisionEntry:
     rationale: str
 
 
+@dataclass(frozen=True)
+class EvidenceResult:
+    verified: bool
+    note: str = ""
+
+
 @dataclass
 class RoundSummary:
     round_num: int
@@ -107,9 +116,13 @@ class Tracker:
         self._round_summaries: list[RoundSummary] = []
         self._previous_snapshot: dict[str, IssueStatus] = {}
 
-    def add_issue(self, issue_id: str, summary: str, round_raised: int) -> None:
+    def add_issue(self, issue_id: str, summary: str, round_raised: int,
+                  location: str = "", priority: str = "LOW",
+                  depends: list[str] | None = None) -> None:
         self._issues[issue_id] = TrackedIssue(
             issue_id=issue_id, summary=summary, round_raised=round_raised,
+            location=location, priority=priority,
+            depends=depends if depends is not None else [],
         )
 
     def get_issue(self, issue_id: str) -> TrackedIssue:
@@ -264,6 +277,12 @@ class Tracker:
             reviewer_file = f"responses/reviewer-{issue.round_raised}.md"
             lines.append(f"- **Raised:** Round {issue.round_raised} ([{reviewer_file}]({reviewer_file}#{slug}))")
             lines.append(f"- **Status:** {issue.status.value}")
+            if issue.location:
+                lines.append(f"- **Location:** {issue.location}")
+            if issue.priority and issue.priority != "LOW":
+                lines.append(f"- **Priority:** {issue.priority}")
+            if issue.depends:
+                lines.append(f"- **Depends:** {', '.join(issue.depends)}")
             if issue.contested_rounds:
                 lines.append(f"- **Contested rounds:** {issue.contested_rounds}")
             if issue.commit_after:
@@ -321,17 +340,90 @@ class Tracker:
 
 
 # ---------------------------------------------------------------------------
-# Diff verification (standalone function)
+# Evidence verification (replaces verify_against_diff)
 # ---------------------------------------------------------------------------
 
-def verify_against_diff(diff: str, section_ref: str | None) -> VerifyResult:
-    if section_ref is None:
-        return VerifyResult(section_changed=True, note="No section reference provided")
+def verify_evidence_against_diff(
+    evidence: list,
+    diff: str,
+    spec_content: str,
+) -> EvidenceResult:
+    if not evidence:
+        return EvidenceResult(verified=False, note="no evidence provided")
 
-    pattern = re.compile(
-        rf"(?:§{re.escape(section_ref)}|[Ss]ection\s+{re.escape(section_ref)}|##\s+{re.escape(section_ref)}\b)",
+    for ev in evidence:
+        section_ref = _extract_section_number(ev.location)
+        if section_ref is None:
+            continue
+
+        section_range = _find_section_range(spec_content, section_ref)
+        if section_range is None:
+            return EvidenceResult(
+                verified=False,
+                note=f"section {ev.location} not found in spec",
+            )
+
+        modified_lines = _parse_diff_modified_lines(diff)
+        start, end = section_range
+        if any(start <= line <= end for line in modified_lines):
+            return EvidenceResult(verified=True)
+
+    first_loc = evidence[0].location if evidence else "unknown"
+    return EvidenceResult(
+        verified=False,
+        note=f"{first_loc} not modified in diff",
     )
-    if pattern.search(diff):
-        return VerifyResult(section_changed=True)
 
-    return VerifyResult(section_changed=False, note=f"Section {section_ref} not found in diff")
+
+def _extract_section_number(location: str) -> str | None:
+    m = re.search(r"§(\d+(?:\.\d+)*)", location)
+    return m.group(1) if m else None
+
+
+def _find_section_range(content: str, section_ref: str) -> tuple[int, int] | None:
+    lines = content.split("\n")
+    heading_re = re.compile(r"^(#{1,6})\s+(.+)")
+    start_line = None
+    start_level = 0
+
+    for i, line in enumerate(lines, 1):
+        m = heading_re.match(line)
+        if not m:
+            continue
+        level = len(m.group(1))
+        title = m.group(2)
+        num_match = re.match(r"[§S]?(\d+(?:\.\d+)*)", title)
+        if num_match and num_match.group(1) == section_ref:
+            start_line = i
+            start_level = level
+            continue
+        if start_line is not None and level <= start_level:
+            return (start_line, i - 1)
+
+    if start_line is not None:
+        return (start_line, len(lines))
+
+    for i, line in enumerate(lines, 1):
+        if f"§{section_ref}" in line:
+            return (i, i)
+
+    return None
+
+
+def _parse_diff_modified_lines(diff: str) -> set[int]:
+    modified: set[int] = set()
+    current_line = 0
+    for line in diff.split("\n"):
+        if line.startswith("@@"):
+            m = re.search(r"\+(\d+)", line)
+            if m:
+                current_line = int(m.group(1))
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            modified.add(current_line)
+            current_line += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            pass
+        else:
+            current_line += 1
+    return modified

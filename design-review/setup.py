@@ -313,6 +313,34 @@ the tracker's ACCEPTED status (reviewer accepts implementor's rejection).
 
     SETTLED: Strong consistency for all financial aggregate writes (from R1-04)
 
+### Issue metadata (reviewer: after each issue heading)
+
+    ### Missing failure mode for payment timeout
+    LOCATION: §4.1 Payment Flow
+    PRIORITY: HIGH
+    DEPENDS: R1-02
+
+    The spec doesn't handle the case where...
+
+LOCATION, PRIORITY, and DEPENDS must appear on separate lines immediately
+after the issue heading, before the body text. All three are optional:
+- LOCATION: the spec section this issue relates to (§N.N format)
+- PRIORITY: HIGH, MEDIUM, or LOW (default: LOW if omitted)
+- DEPENDS: comma-separated issue IDs (e.g. R1-01, R1-03)
+
+### Evidence markers (implementor: FIXED responses only)
+
+    ### R1-01: FIXED
+    EVIDENCE: §4.1 | commit:abc123
+    EVIDENCE: §4.2 | commit:abc123
+
+    Updated §4.1 with terminal PAYMENT_FAILED state.
+
+EVIDENCE lines must appear immediately after the FIXED heading, before
+the rationale text. Each line is: location | commit:<hash>
+Optionally add | lines:<start>-<end> for code changes.
+At least one EVIDENCE line is required for every FIXED response.
+
 ### Signal (must be the last section of your response)
 
     ---
@@ -394,7 +422,10 @@ it, calls search all open projects and are orders of magnitude slower.
 Use ide_find_class, ide_find_references, ide_find_symbol,
 ide_find_definition, ide_type_hierarchy, ide_call_hierarchy. When you
 need to analyse bytecode of a dependency, use ide_read_file with the
-qualified class name — do not download jars."""
+qualified class name — do not download jars.
+If IntelliJ MCP fails mid-session (connection error, timeout, empty
+response on a file you know exists): STOP and write "ABORTED: IntelliJ
+MCP became unavailable." Do not silently fall back to bash grep."""
 
 _NARRATION = """\
 Write a one-line status to {REVIEW_ROOT}/agents/{ROLE}/.status whenever

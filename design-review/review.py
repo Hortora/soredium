@@ -46,7 +46,7 @@ from adversarial_design_review.prompts import (
     build_sweep_prompt,
 )
 from adversarial_design_review.setup import build_claude_command, setup_review
-from adversarial_design_review.tracker import Tracker, IssueStatus, verify_against_diff
+from adversarial_design_review.tracker import Tracker, IssueStatus, EvidenceResult, verify_evidence_against_diff
 
 SESSION_TIMEOUT: Final = 600
 SESSION_HARD_TIMEOUT: Final = 1800
@@ -78,6 +78,147 @@ def _log(msg: str) -> None:
     if _LOG_FILE is not None:
         with open(_LOG_FILE, "a") as f:
             f.write(line + "\n")
+
+
+def _write_jsonl(ws: Path, role: str, round_num: int, events: list[dict]) -> None:
+    jsonl_path = ws / "responses" / f"{role}-{round_num}.jsonl"
+    tmp_path = jsonl_path.with_suffix(".jsonl.tmp")
+    with open(tmp_path, "w") as f:
+        f.write(json.dumps({"event": "schema_version", "version": 1}) + "\n")
+        for event in events:
+            f.write(json.dumps(event) + "\n")
+    os.rename(tmp_path, jsonl_path)
+
+
+def _build_reviewer_events(
+    round_num: int,
+    issues: list,
+    signal: tuple[str, str | None],
+    assumptions: list[str],
+    confirmations: list,
+    source_file: str,
+) -> list[dict]:
+    events: list[dict] = []
+    for conf in confirmations:
+        events.append({
+            "event": "confirmation",
+            "round": round_num,
+            "id": conf.issue_id,
+            "verdict": conf.verdict,
+            "reason": conf.reason,
+        })
+    for issue in issues:
+        events.append({
+            "event": "issue_raised",
+            "round": round_num,
+            "id": issue.issue_id,
+            "title": issue.title,
+            "body": issue.body,
+            "location": issue.location,
+            "priority": issue.priority,
+            "depends": issue.depends,
+            "scope": None,
+        })
+    for text in assumptions:
+        events.append({
+            "event": "assumption",
+            "round": round_num,
+            "text": text,
+            "source": source_file,
+        })
+    events.append({
+        "event": "round_signal",
+        "round": round_num,
+        "role": "reviewer",
+        "signal": signal[0],
+        "description": signal[1],
+    })
+    return events
+
+
+def _build_implementor_events(
+    round_num: int,
+    responses: list,
+    signal: tuple[str, str | None],
+    assumptions: list[str],
+    settled: list,
+) -> list[dict]:
+    events: list[dict] = []
+    for resp in responses:
+        event_type = {
+            "FIXED": "issue_fixed",
+            "REJECTED": "issue_rejected",
+            "ESCALATED": "issue_escalated",
+        }.get(resp.status, "issue_fixed")
+        ev: dict = {
+            "event": event_type,
+            "round": round_num,
+            "id": resp.issue_id,
+            "rationale": resp.rationale or resp.body,
+        }
+        if resp.status == "FIXED":
+            ev["sectionRef"] = resp.section_ref
+            ev["evidence"] = [
+                {"location": e.location, "commit": e.commit, "lines": e.lines}
+                for e in resp.evidence
+            ]
+        events.append(ev)
+    for sd in settled:
+        events.append({
+            "event": "settled_decision",
+            "round": round_num,
+            "text": sd.text,
+            "fromIssue": sd.from_issue,
+        })
+    for text in assumptions:
+        events.append({
+            "event": "assumption",
+            "round": round_num,
+            "text": text,
+            "source": f"implementor-{round_num}.md",
+        })
+    events.append({
+        "event": "round_signal",
+        "round": round_num,
+        "role": "implementor",
+        "signal": signal[0],
+        "description": signal[1],
+    })
+    return events
+
+
+def _verify_evidence(evidence: list, spec_path: str | None) -> EvidenceResult:
+    if not evidence:
+        return EvidenceResult(verified=False, note="no evidence provided")
+    if not spec_path:
+        return EvidenceResult(verified=False, note="no spec path")
+    e = evidence[0]
+    diff = _get_commit_diff(e.commit, spec_path)
+    if diff is None:
+        return EvidenceResult(verified=False, note=f"commit {e.commit} not found")
+    try:
+        spec_content = Path(spec_path).read_text()
+    except OSError:
+        return EvidenceResult(verified=False, note="spec file not readable")
+    return verify_evidence_against_diff(evidence, diff, spec_content)
+
+
+def _get_commit_diff(commit: str, spec_path_str: str) -> str | None:
+    sp = Path(spec_path_str)
+    result = subprocess.run(
+        ["git", "diff", f"{commit}~1", commit, "--", sp.name],
+        cwd=sp.parent, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        result2 = subprocess.run(
+            ["git", "show", f"{commit}:{sp.name}"],
+            cwd=sp.parent, capture_output=True, text=True,
+        )
+        if result2.returncode == 0:
+            lines = result2.stdout.splitlines()
+            return f"@@ -0,0 +1,{len(lines)} @@\n" + "\n".join(f"+{line}" for line in lines)
+        return None
+    return result.stdout
 
 
 def main() -> int:
@@ -388,7 +529,10 @@ def main() -> int:
             existing_ids = tracker.issue_ids()
             new_issues = extract_new_issues(reviewer_content, round_num, existing_ids)
             for issue in new_issues:
-                tracker.add_issue(issue.issue_id, issue.title, round_raised=round_num)
+                tracker.add_issue(issue.issue_id, issue.title, round_raised=round_num,
+                                  location=issue.location or "",
+                                  priority=issue.priority,
+                                  depends=issue.depends)
             if new_issues:
                 _log(f"  {len(new_issues)} new issue(s) raised")
                 _inject_issue_ids(reviewer_file, new_issues)
@@ -398,11 +542,10 @@ def main() -> int:
                 if not tracker.has_issue(conf.issue_id):
                     continue
                 try:
-                    if conf.is_resolved or conf.is_accepted:
-                        try:
-                            tracker.mark_verified(conf.issue_id)
-                        except ValueError:
-                            tracker.mark_accepted(conf.issue_id)
+                    if conf.verdict == "resolved":
+                        tracker.mark_verified(conf.issue_id)
+                    elif conf.verdict == "accepted":
+                        tracker.mark_accepted(conf.issue_id)
                     else:
                         tracker.mark_contested(conf.issue_id, reason=conf.reason)
                 except ValueError:
@@ -411,8 +554,18 @@ def main() -> int:
             for assumption in extract_assumptions(reviewer_content):
                 tracker.add_assumption(assumption, round_surfaced=round_num, source=f"reviewer-{round_num}.md")
 
+            reviewer_events = _build_reviewer_events(
+                round_num, new_issues,
+                (signal.signal_type, signal.description),
+                extract_assumptions(reviewer_content),
+                confirmations,
+                f"reviewer-{round_num}.md",
+            )
+            _write_jsonl(ws, "reviewer", round_num, reviewer_events)
+
             tracker.write(ws / "tracker.md")
-            _git_commit(ws, ["tracker.md", f"responses/reviewer-{round_num}.md"],
+            _git_commit(ws, ["tracker.md", f"responses/reviewer-{round_num}.md",
+                              f"responses/reviewer-{round_num}.jsonl"],
                          f"tracker: round {round_num} reviewer issues")
             _check_unstaged(ws)
 
@@ -536,8 +689,22 @@ def main() -> int:
             if action == "a":
                 return 1
 
+        # Build and write implementor JSONL
+        if implementor_file.exists():
+            _impl_content = implementor_file.read_text()
+            _impl_sig = extract_signal(_impl_content)
+            _impl_responses = extract_issue_responses(_impl_content)
+            impl_events = _build_implementor_events(
+                round_num, _impl_responses,
+                (_impl_sig.signal_type, _impl_sig.description),
+                extract_assumptions(_impl_content),
+                extract_settled_decisions(_impl_content),
+            )
+            _write_jsonl(ws, "implementor", round_num, impl_events)
+
         # Commit implementor response to review folder
-        _git_commit(ws, [f"responses/implementor-{round_num}.md"],
+        _git_commit(ws, [f"responses/implementor-{round_num}.md",
+                          f"responses/implementor-{round_num}.jsonl"],
                      f"round {round_num}: implementor response")
         # Mode-conditional commit: code changes for final-review/code-review, spec for others
         if args.mode in ("final-review", "code-review"):
@@ -586,26 +753,19 @@ def main() -> int:
                                 rationale=resp.body[:200] if resp.body else "",
                             )
                         else:
-                            # For spec modes, verify section reference
+                            # For spec modes, verify evidence
+                            tracker.mark_addressed(
+                                resp.issue_id,
+                                section_ref=resp.section_ref or "",
+                                commit_hash=_get_head_hash(spec_path) if spec_path else "",
+                                rationale=resp.body[:200] if resp.body else "",
+                            )
                             if spec_path:
-                                vr = verify_against_diff(diff, resp.section_ref)
-                                tracker.mark_addressed(
-                                    resp.issue_id,
-                                    section_ref=resp.section_ref or "",
-                                    commit_hash=_get_head_hash(spec_path),
-                                    rationale=resp.body[:200] if resp.body else "",
-                                )
-                                if not vr.section_changed and resp.section_ref:
+                                ev_result = _verify_evidence(resp.evidence, spec_path)
+                                if not ev_result.verified:
                                     issue = tracker.get_issue(resp.issue_id)
-                                    issue.notes = f"claimed §{resp.section_ref} but no diff found"
-                                    _log(f"  WARNING: {resp.issue_id} claims §{resp.section_ref} but section not found in diff")
-                            else:
-                                tracker.mark_addressed(
-                                    resp.issue_id,
-                                    section_ref=resp.section_ref or "",
-                                    commit_hash="",
-                                    rationale=resp.body[:200] if resp.body else "",
-                                )
+                                    issue.notes = ev_result.note
+                                    _log(f"  WARNING: {resp.issue_id} {ev_result.note}")
                     elif resp.status == "REJECTED":
                         tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
                     elif resp.status == "ESCALATED":
@@ -981,11 +1141,10 @@ def _rebuild_tracker(ws: Path, tracker: Tracker, through_round: int) -> None:
                 if not tracker.has_issue(conf.issue_id):
                     continue
                 try:
-                    if conf.is_resolved or conf.is_accepted:
-                        try:
-                            tracker.mark_verified(conf.issue_id)
-                        except ValueError:
-                            tracker.mark_accepted(conf.issue_id)
+                    if conf.verdict == "resolved":
+                        tracker.mark_verified(conf.issue_id)
+                    elif conf.verdict == "accepted":
+                        tracker.mark_accepted(conf.issue_id)
                     else:
                         tracker.mark_contested(conf.issue_id, reason=conf.reason)
                 except ValueError:

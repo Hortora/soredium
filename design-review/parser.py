@@ -28,13 +28,22 @@ class Issue:
     issue_id: str
     title: str
     body: str
+    location: str | None = None
+    priority: str = "LOW"
+    depends: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Evidence:
+    location: str
+    commit: str
+    lines: str | None = None
 
 
 @dataclass(frozen=True)
 class Confirmation:
     issue_id: str
-    is_resolved: bool
-    is_accepted: bool = False
+    verdict: str  # "resolved" | "accepted" | "contested"
     reason: str = ""
 
 
@@ -45,6 +54,7 @@ class IssueResponse:
     section_ref: str | None = None
     rationale: str = ""
     body: str = ""
+    evidence: list[Evidence] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -84,6 +94,23 @@ _ASSUMPTION_RE: Final = re.compile(r"^ASSUMPTION:\s*(.+)$", re.MULTILINE)
 
 _SETTLED_RE: Final = re.compile(
     r"^SETTLED:\s*(.+?)(?:\(from\s+(R\d+-\d+)\))?\s*$", re.MULTILINE
+)
+
+_LOCATION_RE: Final = re.compile(r"^LOCATION:\s*(.+)$", re.MULTILINE)
+
+_PRIORITY_RE: Final = re.compile(
+    r"^PRIORITY:\s*(HIGH|MEDIUM|LOW)\b", re.IGNORECASE | re.MULTILINE,
+)
+
+_DEPENDS_RE: Final = re.compile(r"^DEPENDS:\s*(.+)$", re.MULTILINE)
+
+_EVIDENCE_RE: Final = re.compile(
+    r"^EVIDENCE:\s*(.+?)\s*\|\s*commit:(\S+)(?:\s*\|\s*lines:(\S+))?\s*$",
+    re.MULTILINE,
+)
+
+_METADATA_STRIP_RE: Final = re.compile(
+    r"^(?:LOCATION|PRIORITY|DEPENDS|EVIDENCE):\s*.+$\n?", re.MULTILINE,
 )
 
 _KNOWN_SECTIONS: Final = frozenset({
@@ -178,8 +205,25 @@ def extract_new_issues(
         if signal_match:
             body = body[:signal_match.start()].strip()
 
+        location_match = _LOCATION_RE.search(body)
+        location = location_match.group(1).strip() if location_match else None
+
+        priority_match = _PRIORITY_RE.search(body)
+        priority = priority_match.group(1).upper() if priority_match else "LOW"
+
+        depends_match = _DEPENDS_RE.search(body)
+        depends = (
+            [d.strip() for d in depends_match.group(1).split(",") if d.strip()]
+            if depends_match else []
+        )
+
+        body = _METADATA_STRIP_RE.sub("", body).strip()
+
         issue_id = f"R{round_num}-{seq:02d}"
-        issues.append(Issue(issue_id=issue_id, title=title, body=body))
+        issues.append(Issue(
+            issue_id=issue_id, title=title, body=body,
+            location=location, priority=priority, depends=depends,
+        ))
         seq += 1
 
     return issues
@@ -195,11 +239,16 @@ def extract_confirmations(content: str) -> list[Confirmation]:
     for match in _CONFIRMATION_RE.finditer(content):
         issue_id = f"R{match.group(1)}-{match.group(2)}"
         status_text = match.group(3).lower().strip()
-        is_resolved = "resolved" in status_text and "still" not in status_text
-        is_accepted = "accepted" in status_text
+
+        if "resolved" in status_text and "still" not in status_text:
+            verdict = "resolved"
+        elif "accepted" in status_text:
+            verdict = "accepted"
+        else:
+            verdict = "contested"
 
         reason = ""
-        if not is_resolved and not is_accepted:
+        if verdict == "contested":
             line_end = content.find("\n", match.end())
             if line_end == -1:
                 line_end = len(content)
@@ -209,8 +258,7 @@ def extract_confirmations(content: str) -> list[Confirmation]:
 
         confirmations.append(Confirmation(
             issue_id=issue_id,
-            is_resolved=is_resolved,
-            is_accepted=is_accepted,
+            verdict=verdict,
             reason=reason,
         ))
 
@@ -245,6 +293,16 @@ def extract_issue_responses(content: str) -> list[IssueResponse]:
         if ref_match:
             section_ref = ref_match.group(1) or ref_match.group(2)
 
+        evidence: list[Evidence] = []
+        if status == "FIXED":
+            for ev_match in _EVIDENCE_RE.finditer(body):
+                evidence.append(Evidence(
+                    location=ev_match.group(1).strip(),
+                    commit=ev_match.group(2),
+                    lines=ev_match.group(3),
+                ))
+            body = _METADATA_STRIP_RE.sub("", body).strip()
+
         rationale = ""
         if status == "REJECTED":
             rationale = body
@@ -257,6 +315,7 @@ def extract_issue_responses(content: str) -> list[IssueResponse]:
             section_ref=section_ref,
             rationale=rationale,
             body=body,
+            evidence=evidence,
         ))
 
     return responses
