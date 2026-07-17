@@ -425,7 +425,7 @@ processAll(user, orders, invoices);
 ## Refactoring — IntelliJ First
 
 **Prerequisites: `ide-tooling`** — invoke it for the full IntelliJ MCP tool guide.
-Always prefer IntelliJ MCPs over bash for any rename, move, find-references, navigation, or bulk structural edit (including adding/removing parameters and fixing call sites across files). Never write Python or bash scripts to manipulate TypeScript source text — that is what IntelliJ is for.
+Always prefer IntelliJ MCPs over bash for any rename, move, find-references, navigation, or structural edit. Use `ide_edit_member`/`ide_replace_member`/`ide_insert_member` for class members, `ide_change_signature` for parameter changes (updates all callers), and `ide_structural_search_replace` for bulk pattern-based migrations. Never write Python or bash scripts to manipulate TypeScript source text — that is what IntelliJ is for.
 If no MCP is available for a semantic operation, inform the user — do not silently fall back.
 
 ## Common Pitfalls — These Thoughts Mean STOP

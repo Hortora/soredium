@@ -1,10 +1,11 @@
 ---
 name: ide-tooling
 description: >
-  Use when mcp__intellij-index__* tools are visible — for ALL code navigation, editing,
-  refactoring, and diagnostics. Also invoke for any IDE operation: rename, move, edit member,
-  find references, type hierarchy, diagnostics. Never fall back to bash grep or text tools
-  for semantic code operations.
+  INVOKE IMMEDIATELY when mcp__intellij-index__* tools are visible. Use for ALL code
+  navigation, editing, refactoring, and diagnostics. Also invoke for any IDE operation:
+  rename, move, edit member, change signature, structural search/replace, find references,
+  type hierarchy, diagnostics. Never fall back to bash grep or text tools for semantic
+  code operations.
 ---
 
 # IDE Tooling — IntelliJ MCP Guide
@@ -58,8 +59,9 @@ not line numbers and string matching. Auto-reformats by default.
 
 | Tool | What it does | When to use |
 |------|-------------|-------------|
-| `ide_edit_member` | Replace entire member declaration (signature + body) | Changing a method's API and implementation together |
-| `ide_replace_member` | Replace only the body — signature preserved | Fixing or rewriting implementation without changing the API |
+| `ide_create_file` | Create a new source file, immediately indexed | **Use instead of Write** for .java/.kt/.ts/.tsx files — no sync needed |
+| `ide_edit_member` | Replace entire member or class/record/interface declaration | Changing API, adding type params, changing extends/implements. Use `member = className` for the declaration itself |
+| `ide_replace_member` | Replace only the body — signature preserved | Fixing or rewriting implementation without changing the API. Use `member = "static"` for static init blocks |
 | `ide_insert_member` | Insert new member at a structural position (before/after/first/last) | Adding new methods, fields, or properties |
 
 **Parameters common to all three:** `file` (required), `class` (optional —
@@ -88,6 +90,8 @@ expression for fields.
 | `ide_refactor_rename` | Rename symbol + update all references | **Never use Edit/sed for renames** — IntelliJ updates all callers |
 | `ide_move_file` | Move file + update package/imports | **Never use bash mv for source files** |
 | `ide_refactor_safe_delete` | Delete symbol, checking for usages first | Lists blocking usages if deletion would break things |
+| `ide_change_signature` | Change method params, return type, visibility — all callers updated | Adding/removing params, changing return type. New params get default values at call sites |
+| `ide_structural_search_replace` | Pattern-based bulk code transformation | Bulk migrations (e.g., `new Sync($fn$)` → `new Sync<>(Map.class, $fn$)`). Uses `$variable$` wildcards |
 | `ide_optimize_imports` | Remove unused imports, organise remaining | After adding new code or moving classes |
 | `ide_reformat_code` | Apply project code style formatting | After manual text edits or when formatting drifts |
 | `ide_convert_java_to_kotlin` | Convert Java files to Kotlin | Migration projects |
@@ -129,12 +133,18 @@ expression for fields.
 
 When authoring code, prefer tools in this order:
 
-1. **Structural edits** (`ide_edit_member`, `ide_replace_member`,
+1. **New files** (`ide_create_file`) — immediately indexed, no sync
+   needed. Use instead of Write for `.java/.kt/.ts/.tsx` files.
+2. **Structural edits** (`ide_edit_member`, `ide_replace_member`,
    `ide_insert_member`) — for class members. Semantically aware,
-   auto-reformats, handles overloads.
-2. **Semantic refactoring** (`ide_refactor_rename`, `ide_move_file`,
+   auto-reformats, handles overloads. Use `member = className` for
+   class/record/interface declarations.
+3. **Signature and bulk refactoring** (`ide_change_signature`,
+   `ide_structural_search_replace`) — for cross-file parameter changes
+   and pattern-based bulk transformations.
+4. **Semantic refactoring** (`ide_refactor_rename`, `ide_move_file`,
    `ide_refactor_safe_delete`) — for cross-cutting reference updates.
-3. **Text edits** (Edit tool) — for non-structural changes: config
+5. **Text edits** (Edit tool) — for non-structural changes: config
    files, markdown, non-class code, file-level changes outside any
    class body.
 
@@ -149,12 +159,24 @@ user rather than silently falling back.
 
 ## Multi-repo workspaces
 
-If a project named `ide-workspace-*` is already open (visible in
-`ide_project_status`), use its path as `project_path` — it provides
-cross-project code intelligence across all modules.
+**Before any code operation, open ALL impacted projects in one workspace:**
 
-If no workspace is open and you need cross-project refactoring, call
-`ide_open_workspace` with the common parent directory.
+```
+ide_open_workspace({"modules": ["/path/to/project-a", "/path/to/project-b"]})
+```
+
+Same module combination reuses the cached workspace. Pass its
+`project_path` to every subsequent tool call.
+
+**Cross-project refactoring (rename, change signature, find references)
+only works when all projects are in the same workspace.** Missed
+projects = missed callers. If a rename touches an interface in `api`
+that is implemented in `engine` and called from `worker`, all three
+must be in the workspace or the refactoring will silently miss callers.
+
+If a project named `ide-workspace-*` is already open (visible in
+`ide_project_status`), use its path as `project_path` — it already
+provides cross-project code intelligence.
 
 ## Lifecycle-managed projects
 
@@ -188,7 +210,7 @@ Prefer `intellij-index` equivalents where they exist:
 - `get_file_problems` → use `ide_diagnostics`
 - `get_project_modules` → use `ide_project_status`
 - `find_files_by_name_keyword` → use `ide_find_file`
-- `replace_text_in_file` → use `ide_edit_member` / `ide_replace_member`
+- `replace_text_in_file` → use `ide_edit_member` / `ide_replace_member` / `ide_structural_search_replace`
 
 ---
 

@@ -105,7 +105,7 @@ Run `python3 ~/.claude/skills/project/ctx.py` first. Use `CURRENT_BRANCH` from i
 
 ---
 
-## Step 0 + Step 1 — Context (resolved by Path Resolution script)
+## Step 0 — Context (resolved by Path Resolution script)
 
 All values — `WORKSPACE`, `PROJECT`, `OWNER_REPO`, `BASE_BRANCH`, `BRANCH_NAME`,
 `PROJECT_SHA`, `ISSUE_N`, `ISSUE_REPO`, `COVERS` — come from `ctx.py` output.
@@ -118,39 +118,108 @@ variable name. They refer to the same value.
 When the branch was started for a single issue, `COVERS` equals `ISSUE_N`. When absent from
 `.meta` (branches created before this feature), `COVERS` defaults to `ISSUE_N`.
 
-### Branch summary — always print before proceeding
+---
 
-Immediately after running the Path Resolution script, print a summary using concrete values from its output — one command per line, no shell variables:
+## Step 1 — Branch Reconnaissance (delegated to subagent)
 
-```bash
-gh issue view <ISSUE_N> --repo <ISSUE_REPO> --json title --jq '.title' 2>/dev/null
-git -C <PROJECT> log --oneline <BASE_BRANCH>..<BRANCH_NAME> 2>/dev/null
-git -C <PROJECT> diff --shortstat <PROJECT_SHA>..HEAD 2>/dev/null
-grep "^### " <WORKSPACE>/design/JOURNAL.md 2>/dev/null | wc -l
+Dispatch a read-only Sonnet subagent to gather branch state and validate
+the journal. Runs AFTER Step 3 (routing resolution) which provides
+`DESIGN_REPO`. The subagent's execution stays in its own context — only
+the JSON return enters the parent window.
+
+**Dispatch:**
+
+```
+Agent(
+  description: "Branch reconnaissance for work-end",
+  model: "sonnet",
+  prompt: "You are a read-only analysis agent. Gather branch state and
+    validate the journal for a work-end close operation. Do NOT write
+    any files or make any changes.
+
+    Parameters:
+    - WORKSPACE: {WORKSPACE}
+    - PROJECT: {PROJECT}
+    - BRANCH_NAME: {BRANCH_NAME}
+    - BASE_BRANCH: {PROJECT_BASE_BRANCH}
+    - ISSUE_N: {ISSUE_N}
+    - COVERS: {COVERS}
+    - ISSUE_REPO: {ISSUE_REPO}
+    - PROJECT_SHA: {PROJECT_SHA}
+    - DESIGN_REPO: {DESIGN_REPO}
+    - META_SECTION_HASHES: {META_SECTION_HASHES}
+    - SECTION_HASHES_SCRIPT: ~/.claude/skills/project/section_hashes.py
+    - SINGLE_REPO_MODE: {yes|no}
+
+    Tasks:
+    1. For each issue number in COVERS (comma-separated), fetch its title
+       and state from GitHub:
+       gh issue view <N> --repo {ISSUE_REPO} --json title,state
+    2. Run: git -C {PROJECT} log --oneline {BASE_BRANCH}..{BRANCH_NAME}
+       Collect each commit sha and message.
+    3. Run: git -C {PROJECT} diff --shortstat {PROJECT_SHA}..HEAD
+    4. Read {WORKSPACE}/design/JOURNAL.md. Count lines matching ^### as
+       journal entries. Count entries matching ^### .*·.*§ as anchored.
+       Entries without §Section anchors are unanchored — list their
+       heading text.
+    5. If DESIGN_REPO is non-empty, check whether
+       {DESIGN_REPO}/ARC42STORIES.MD exists.
+    6. If it exists, run:
+       python3 {SECTION_HASHES_SCRIPT} {DESIGN_REPO}/ARC42STORIES.MD
+       Compare each hash against the corresponding entry in
+       META_SECTION_HASHES (pipe-separated, format hash:heading).
+       Report any sections where hashes differ.
+
+    Return your results as a single JSON object with this exact
+    structure (all fields required, arrays may be empty):
+    {
+      \"issues\": [{\"number\": N, \"title\": \"...\", \"state\": \"OPEN|CLOSED\"}],
+      \"commits\": [{\"sha\": \"abc1234\", \"message\": \"feat: ...\"}],
+      \"commit_count\": N,
+      \"diff_stats\": \"N files changed, N insertions, N deletions\",
+      \"journal_entry_count\": N,
+      \"journal_validation\": {
+        \"arc42_exists\": true|false,
+        \"section_drift\": [{\"section\": \"## S5\", \"stored_hash\": \"abc\", \"current_hash\": \"def\"}],
+        \"anchored_entries\": N,
+        \"unanchored_entries\": N,
+        \"entries_without_anchors\": [\"### Entry heading\"],
+        \"empty_journal\": true|false
+      }
+    }
+    Return ONLY the JSON object, no other text."
+)
 ```
 
-Output format:
+Substitute all `{PLACEHOLDER}` values with concrete strings from ctx.py
+and Step 3 before dispatching.
+
+**On return:**
+
+1. Validate JSON shape — all required keys must be present. If malformed
+   or empty: warn the user and fall back to running the branch summary
+   and journal validation inline (same commands as the pre-delegation
+   skill version).
+
+2. Print the branch summary from JSON fields:
 
 ```
 ╔══ Branch Summary ═══════════════════════════════════╗
-║  Branch: <branch-name>
-║  Issue:  #<N> — <title>   (primary)
-║  Covers: #<N>, #<M>, #<P>  ← omit if COVERS == ISSUE_N (single issue)
+║  Branch: <BRANCH_NAME>
+║  Issue:  #<issues[0].number> — <issues[0].title>   (primary)
+║  Covers: #<N>, #<M>  ← omit if single issue
 ║  Started: <date from .meta>
 ║
-║  Commits (<N>):
-║    <git log --oneline output, one per line>
+║  Commits (<commit_count>):
+║    <commits[].sha commits[].message, one per line>
 ║
-║  Changed: <N files, N insertions, N deletions>
-║  Journal: <N entries> (or: no journal)
+║  Changed: <diff_stats>
+║  Journal: <journal_entry_count> entries (or: no journal)
 ╚═════════════════════════════════════════════════════╝
 ```
 
-If the issue title cannot be fetched (no network, no tracking), omit that line.
-If `$COVERS` contains more than one issue, fetch and display each title.
-If no commits are found on the branch (work landed directly on base), note that.
-
-This summary is informational only — it does not block the close and requires no user input.
+3. Store the full JSON for use by Step 5 (journal validation decisions)
+   and Step 7 (close plan construction).
 
 ---
 
@@ -263,7 +332,12 @@ After all checked items complete, proceed to Step 3c.
 
 ## Step 3c — Code review (mandatory — HARD GATE)
 
-**This step cannot be skipped.** Classify the branch diff and invoke the appropriate review.
+**This step cannot be skipped.** A prior spec review does NOT replace implementation
+review — specs validate design, implementation review validates the code actually
+delivered. Resource leaks, concurrency bugs, missing validation, and subtle
+misinterpretations only surface in code. Scale the depth, not skip the review.
+
+Classify the branch diff and invoke the appropriate review.
 
 Classify the branch diff:
 
@@ -325,33 +399,19 @@ BLOG_HAS_ENTRIES=$(ls "$WORKSPACE/blog/" 2>/dev/null | grep -v INDEX.md | grep -
 
 ---
 
-## Step 5 — Journal validation
+## Step 5 — Journal validation decisions
 
-**5a — ARC42STORIES.MD existence**
-If `$DESIGN_REPO/ARC42STORIES.MD` is missing:
-- `[C]` Create from journal entries — journal becomes the initial ARC42STORIES.MD content
-- `[S]` Skip merge entirely
+Journal validation data comes from the Branch Reconnaissance subagent
+(Step 1). Use the `journal_validation` field from its return to drive
+decisions:
 
-**5b — Section heading drift**
-Re-hash H2 headings in `$DESIGN_REPO/ARC42STORIES.MD`. Compare against `design-section-hashes`
-in `.meta`. For each `§Section` anchor in JOURNAL.md, verify its heading still exists
-unchanged in ARC42STORIES.MD.
-```bash
-grep "^design-section-hashes:" <WORKSPACE>/design/.meta
-python3 ~/.claude/skills/project/section_hashes.py <DESIGN_REPO>/ARC42STORIES.MD
-```
-Use the first command's output as STORED, the second as CURRENT.
-If drift: `[U]` update journal anchors, `[S]` skip drifted sections, `[A]` abort.
+- **`arc42_exists == false`:** `[C]` Create from journal entries — journal becomes the initial ARC42STORIES.MD content. `[S]` Skip merge entirely.
+- **`section_drift` non-empty:** `[U]` update journal anchors, `[S]` skip drifted sections, `[A]` abort
+- **`unanchored_entries > 0`:** `[F]` fix via update-design, `[S]` skip merge, `[C]` continue accepting loss
+- **`empty_journal == true`:** `[W]` write retrospective via update-design, `[S]` skip and accept permanent loss
 
-**5c — Anchor validation**
-Count `^### .*·.*§` lines vs total `^### ` lines in JOURNAL.md.
-If any entries lack anchors: `[F]` fix via update-design, `[S]` skip merge,
-`[C]` continue accepting loss.
-
-**5d — Empty journal**
-If no entries at all:
-- `[W]` Write retrospective via update-design
-- `[S]` Skip and accept permanent loss
+If multiple conditions are true, present them in the order above — existence
+before drift before anchors before empty.
 
 ---
 
@@ -525,70 +585,92 @@ language to find what this unblocks. Omit **What this enables** entirely if noth
 follows directly — do not pad. Omit **What this delivered** if the issue title already
 says it clearly and there is nothing to add.
 
-### 8i — Hygiene scan
+### 8i — Hygiene scan (delegated to subagent)
 
-Always run — not an offer. Checks:
+Always run — not an offer. Dispatch a read-only Sonnet subagent to scan
+for hygiene issues across workspace branches. The subagent's execution
+stays in its own context — only the JSON findings enter the parent window.
 
-**1. Blog published** — verify every workspace blog entry exists at the destination:
+**Dispatch:**
 
-```bash
-UNPUBLISHED=$(comm -23 <(ls "$WORKSPACE/blog/" | grep "\.md$" | grep -v INDEX | sort) \
-  <(ls "$BLOG_DEST/" | sort))
+```
+Agent(
+  description: "Hygiene scan for work-end",
+  model: "sonnet",
+  prompt: "You are a read-only analysis agent. Scan for hygiene issues
+    across workspace branches for a work-end close operation. Do NOT
+    write any files or make any changes.
 
-if [ -n "$UNPUBLISHED" ]; then
-  echo "⚠️ Unpublished blog entries:"
-  echo "$UNPUBLISHED"
-  echo "→ Return to 8g and publish before proceeding."
-fi
+    Parameters:
+    - WORKSPACE: {WORKSPACE}
+    - PROJECT: {PROJECT}
+    - BRANCH_NAME: {BRANCH_NAME} (skip this branch in all scans)
+    - BLOG_DEST: {blog destination path from Step 3 routing}
+    - FLYWAY_USED: {yes|no — from .meta flyway-next-v field}
+    - SINGLE_REPO_MODE: {yes|no}
+
+    Tasks:
+    1. Blog verification: list .md files (excluding INDEX.md) in
+       {WORKSPACE}/blog/ and compare against {BLOG_DEST}/. Report any
+       files present in workspace but missing from destination.
+    2. Flyway conflicts: if FLYWAY_USED=yes, check for V-number
+       collisions with other branches. Skip if FLYWAY_USED=no.
+    3. Stale branches: list workspace branches (git -C {WORKSPACE}
+       branch) excluding main and {BRANCH_NAME}. For each, check
+       whether design/EPIC-CLOSED.md exists on that branch. For
+       branches WITHOUT EPIC-CLOSED.md, check last commit date —
+       report any with no commits in the last 7 days.
+    4. Unrecovered artifacts: for branches WITH EPIC-CLOSED.md, check
+       whether blog/ and specs/ files on that branch also exist on
+       workspace main. Report any that don't.
+    5. Unstamped branches: for branches WITH EPIC-CLOSED.md, check
+       whether the corresponding project branch (same name, in
+       {PROJECT}) has a last commit starting with 'chore: branch
+       closed'. Both 'chore: branch closed' and 'chore: branch
+       closed — landed as' formats are valid. In SINGLE_REPO_MODE,
+       workspace and project branches are the same repo.
+
+    Return your results as a single JSON object with this exact
+    structure (all fields required, arrays may be empty):
+    {
+      \"unpublished_blogs\": [\"filename.md\"],
+      \"flyway_conflicts\": [],
+      \"stale_branches\": [{\"branch\": \"issue-71-old\", \"last_commit_age\": \"12 days\"}],
+      \"unrecovered_artifacts\": [{\"branch\": \"issue-50-closed\", \"type\": \"blog\", \"file\": \"2026-06-01-entry.md\"}],
+      \"unstamped_branches\": [{\"branch\": \"issue-50-closed\", \"has_epic_closed\": true, \"project_branch_exists\": true}]
+    }
+    Return ONLY the JSON object, no other text."
+)
 ```
 
-If any unpublished entries are found, stop and return to 8g. Do not proceed to 8j.
+**On return:**
 
-**2. Flyway conflicts** — check for V-number collisions with other branches (if Flyway
-was involved on this branch).
+1. Validate JSON shape. If malformed or empty: warn and skip. Hygiene is
+   advisory — it catches drift but doesn't block the close. Exception: if
+   blog verification cannot run, warn explicitly since unpublished blogs
+   DO block.
 
-**3. Stale workspace branches** — list open branches (no `design/EPIC-CLOSED.md` in
-`design/`) with no commits in the last 7 days. Report only; do not act.
+2. **`unpublished_blogs` non-empty** → block and return to 8g. Max 2 attempts;
+   after second failure, present options: `[F]` fix routing manually,
+   `[S]` skip with warning, `[A]` abort close. Do not loop indefinitely.
 
-**4. Unrecovered artifacts on closed branches** — for every workspace branch that HAS
-`design/EPIC-CLOSED.md` (i.e. was properly closed via work-end), verify that artifacts
-reached workspace main:
+3. **`unrecovered_artifacts`** → for each item, offer cherry-pick:
+   > ⚠️ <type> `<file>` on closed branch `<branch>` never reached workspace main.
+   > Cherry-pick to main? (y/n)
+   Apply confirmed recoveries immediately. Run publish-blog for recovered blogs.
 
-```bash
-# For each branch with EPIC-CLOSED.md:
-# a) Check blogs — any .md in blog/ on the branch that isn't on main?
-# b) Check specs — any .md in specs/ on the branch that isn't on main?
-```
+4. **`unstamped_branches`** → for each item where `project_branch_exists`, offer stamp:
+   > ⚠️ Branch `<branch>` has EPIC-CLOSED.md but project branch is not stamped.
+   > Stamp now? (y/n)
+   If confirmed, stamp with the landing SHA format:
+   ```bash
+   git -C "$PROJECT" checkout <branch>
+   git -C "$PROJECT" commit --allow-empty -m "chore: branch closed — landed as <LANDED_SHA> on $PROJECT_BASE_BRANCH"
+   git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
+   ```
 
-For each blog found on a closed branch but not on workspace main:
-> ⚠️ Blog `<filename>` on closed branch `<branch>` never reached workspace main.
-> Cherry-pick to main and publish? (y/n)
-
-For each spec found on a closed branch but not on workspace main:
-> ⚠️ Spec `<filename>` on closed branch `<branch>` never promoted to workspace main.
-> Cherry-pick to main? (y/n)
-
-Apply confirmed recoveries immediately — cherry-pick to workspace main, commit, push.
-Then run publish-blog for any recovered blogs.
-
-**5. Unstamped closed branches** — the current branch was stamped in 8j. This check
-catches OLDER closed branches that predate the mandatory stamp. For every workspace
-branch (other than `$BRANCH_NAME`) that HAS `design/EPIC-CLOSED.md` but whose last
-commit on the **project** branch does not start with `chore: branch closed`, flag it:
-> ⚠️ Branch `<branch>` has EPIC-CLOSED.md but project branch is not stamped.
-> Stamp now? (y/n)
-
-Both old (`chore: branch closed`) and new (`chore: branch closed — landed as <SHA> on <branch>`)
-formats are valid stamps. Match with a prefix check, not exact string equality.
-
-If confirmed, stamp the project branch with the new format (resolve the landing SHA
-from the base branch's log if possible; use `unknown` if the squashed commit cannot
-be identified):
-```bash
-git -C "$PROJECT" checkout <branch>
-git -C "$PROJECT" commit --allow-empty -m "chore: branch closed — landed as <LANDED_SHA> on $PROJECT_BASE_BRANCH"
-git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
-```
+5. **`stale_branches`** → report informational only.
+6. **`flyway_conflicts`** → warn informational.
 
 ### 8j — Rebase project branch onto project base branch, push to fork, prompt for blessed repo
 
@@ -620,43 +702,127 @@ git -C "$PROJECT" rebase "$BRANCH_NAME"
 - **Stop. Do not proceed to Step 9.**
 - Instruct the user: resolve conflicts on `$PROJECT_BASE_BRANCH`, then re-run `work-end` to complete the close.
 
-**Collect sub-issue references before squash:**
+**Squash analysis (delegated to subagent) — mandatory before fork push:**
 
-Before squashing, scan all branch commits for `Closes #N`, `Fixes #N`, or `Resolves #N`
-references that are NOT already in `$COVERS`. These are sub-issues closed by individual
-commits that will be lost when the commits are squashed into a single message.
+Squash runs BEFORE the fork push so both fork and blessed repo receive
+identical history. This is not optional and must not be bypassed with
+`--no-verify`.
 
-```bash
-git -C "$PROJECT" log --format="%B" "$BLESSED_REMOTE/$PROJECT_BASE_BRANCH"..HEAD \
-  | grep -oiE '(closes|fixes|resolves) #[0-9]+' | grep -oE '#[0-9]+' | sort -u
+Dispatch an Opus subagent to classify commits and propose a squash plan.
+The subagent reads squash-policy.md and git-squash SKILL.md Steps 3a–3i
+for classification rules. Sub-issue reference collection is also handled
+by the subagent — no inline collection needed.
+
+**Single-repo filter-repo preprocessing:** In single-repo mode, the rebase
+brings scaffold commits (`.meta`, `JOURNAL.md`, `design/`) onto the base
+branch. Before dispatching the subagent:
+1. Create a temporary working branch from the base branch
+2. Run `filter-repo` to strip scaffold paths with `--prune-empty always`
+3. Dispatch the subagent on the post-filter-repo branch
+4. Execute the squash on the working branch
+5. Swap the working branch with the base branch via `branch_swap.py`
+
+Skip the filter-repo preprocessing in two-repo mode.
+
+**Dispatch:**
+
+```
+Agent(
+  description: "Squash analysis for work-end",
+  model: "opus",
+  prompt: "You are a commit classification agent. Analyse commits and
+    propose a squash plan. Do NOT execute any git rebase or destructive
+    operations — analysis only.
+
+    Parameters:
+    - PROJECT: {PROJECT}
+    - BASE_BRANCH: {PROJECT_BASE_BRANCH}
+    - BRANCH_NAME: {BRANCH_NAME}
+    - COVERS: {COVERS} (comma-separated issue numbers this branch closes)
+    - BLESSED_REMOTE: {upstream or origin}
+    - SQUASH_POLICY: ~/.claude/skills/git-squash/squash-policy.md
+    - GIT_SQUASH_SKILL: ~/.claude/skills/git-squash/SKILL.md
+    - COMMIT_GATHER: ~/.claude/skills/git-squash/commit_gather.py
+    - SINGLE_REPO_MODE: {yes|no}
+
+    Steps:
+    1. Read SQUASH_POLICY for classification rules (KEEP/SQUASH/MERGE/DROP).
+    2. Read GIT_SQUASH_SKILL — ONLY Step 3 and sub-steps 3a through 3i
+       (the classification procedure). Ignore Steps 0-2 (working branch,
+       filter-repo, range resolution) and Steps 4-9 (plan display,
+       execution, review gate, swap). The SKILL.md has clear ### headers.
+    3. Run: python3 {COMMIT_GATHER} {PROJECT}
+       base={BLESSED_REMOTE}/{BASE_BRANCH}
+       This returns structured per-commit data (sha, subject, body,
+       author, date, files, insertions, deletions, issue_refs, patch_id).
+    4. Run strategy detection: check for merge-commit PRs in the range.
+       If found → reconstruction mode. Else → scope clustering or flat.
+    5. Apply the full classification procedure from Steps 3a-3i:
+       same-issue clustering, CI arc detection, proximity-grouped
+       resolution, temporal scrutiny, file-overlap MERGE, cross-author
+       check, cherry-pick detection.
+    6. Propose groups with draft squash messages. Add per-commit flags
+       (proximity-grouped, temporal:Nmin, cross-author, cherry-pick:branch,
+       file-overlap:group-N) and per-group annotations.
+    7. Collect sub-issue references (Closes/Fixes/Resolves #N) from all
+       commit bodies. Cross-reference against COVERS — report refs not
+       in COVERS that would be lost in squash.
+
+    Return your results as a single JSON object with this exact
+    structure (all fields required, arrays may be empty):
+    {
+      \"total_commits\": N,
+      \"strategy\": \"B|D|E\",
+      \"groups\": [
+        {
+          \"label\": \"feat(#82): description\",
+          \"action\": \"KEEP|SQUASH|MERGE|DROP\",
+          \"commits\": [
+            {\"sha\": \"abc1234\", \"message\": \"feat: ...\", \"classification\": \"KEEP\", \"flags\": []}
+          ],
+          \"proposed_message\": \"feat(#82): ...\",
+          \"annotations\": []
+        }
+      ],
+      \"sub_issue_refs\": [\"#83\"],
+      \"refs_not_in_covers\": [\"#83\"],
+      \"warnings\": [],
+      \"blocking_flags\": []
+    }
+    Return ONLY the JSON object, no other text."
+)
 ```
 
-Compare with `$COVERS`. Any issue numbers found in branch commits but not in `$COVERS`
-must be appended to the squash commit message as trailer lines (e.g. `Closes #27`).
-After git-squash produces its message, append any missing `Closes #N` lines before
-the commit is finalised. If git-squash has already run, amend the message to include them.
+**On return:**
 
-**Squash before fork push (fork model only — mandatory):**
+1. Validate JSON shape. If malformed or empty: warn and offer
+   `[G]` invoke `/git-squash` manually, `[S]` skip squash (user takes
+   responsibility for noisy history).
 
-Squash runs BEFORE the fork push so both fork and blessed repo receive identical history.
-Run git-squash on the range `$BLESSED_REMOTE/$PROJECT_BASE_BRANCH..HEAD`. This is not optional
-and must not be bypassed with `--no-verify`. The pre-push hook firing is the signal to run
-git-squash, not to skip it. Noise commits (chore, docs follow-ons, journal applies, CI fixups)
-must be compacted before the range is shared anywhere.
+2. If `blocking_flags` non-empty: present each flag and resolve before
+   allowing approval.
 
-```bash
-# Show the commit range that will reach the blessed repo (and therefore the fork too)
-git -C "$PROJECT" log --oneline "$BLESSED_REMOTE/$PROJECT_BASE_BRANCH"..HEAD
-```
+3. Format groups into plan display with per-commit flags and group
+   annotations. Present for user approval:
+   > Squash plan: <total_commits> commits → <N groups> groups (strategy: <strategy>)
+   > [A] Accept  [E] Edit  [R] Reject  [G] Run /git-squash instead
 
-Invoke `/git-squash` with the range `$BLESSED_REMOTE/$PROJECT_BASE_BRANCH..HEAD`.
-Wait for the squash plan, user approval, and execution before proceeding.
+4. On approval, execute the squash:
+   - Build a rebase todo from the approved groups. For each group:
+     one `pick` line for the first commit, `fixup` lines for the rest.
+   - For groups with a non-null `proposed_message`: append an
+     `exec git commit --amend -m "<message>"` line after the group's
+     last `fixup`. Use multiple `-m` flags for trailers (git separates
+     each `-m` with a blank line). Do NOT use `\n` inside double quotes —
+     POSIX sh interprets it as literal backslash-n.
+   - For the last group: if `refs_not_in_covers` is non-empty, add
+     `Closes #N` trailers via a separate `-m` flag.
+   - Call `rebase_exec.py multi <PROJECT> base=<base-sha> todo-file=<path>`
+     — on failure, the script auto-aborts and restores pre-squash state.
+   - Run post-squash interval tree verification (5 evenly-spaced samples).
 
-After squash completes, verify the squash commit message includes all sub-issue
-references collected above. If any are missing, amend the message to append them.
-
-If the user explicitly says "skip squash" or "no squash needed": accept and note it,
-then proceed. Never silently skip.
+5. If user explicitly says "skip squash" or "no squash needed": accept
+   and note it, then proceed. Never silently skip.
 
 **Push to fork remote (mandatory — no skip option):**
 
@@ -888,7 +1054,7 @@ Show every item — both ticked and skipped with reason.
 - `adr` — Step 3b pre-close sweep
 - `write-content` — Step 3b pre-close sweep (last, after other artifacts)
 - `publish-blog` — Step 8g
-- `git-squash` — Step 8j (mandatory before fork push)
+- `git-squash` — Step 8j subagent reads squash-policy.md and SKILL.md Steps 3a–3i for classification; parent calls rebase_exec.py directly for execution
 
 **Complements:**
 - `work` — routing entry point
@@ -900,5 +1066,8 @@ Show every item — both ticked and skipped with reason.
 - `verification-before-completion` — verification is implicit in work-end's
   pre-merge checks
 
-**Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, `ARC42STORIES.MD`,
-GitHub issues API, workspace artifact directories, `JOURNAL.md`
+**Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, workspace artifact
+directories. Branch state, journal validation, and issue titles come from the
+Branch Reconnaissance subagent (Step 1). Hygiene findings come from the Hygiene
+Scan subagent (Step 8i). Squash classification comes from the Squash Analysis
+subagent (Step 8j).
