@@ -454,6 +454,103 @@ blog against the destination and publishes only what's missing — it handles th
 
 ---
 
+## Slot Mode Detection
+
+After path resolution, check if `$PROJECT` path contains `/worktrees/`:
+
+- **If yes → slot mode.** Phase A/B split applies. See below.
+- **If no → normal mode.** Existing step ordering unchanged.
+
+### Phase A — "Ready to land" (slot mode only)
+
+Runs when the human says "work end" in a slot. Executes review,
+verification, and squash — but defers merge and all post-merge actions.
+
+**What runs in Phase A:**
+- Steps 3b–3c (pre-close sweep, code review) — as normal
+- Steps 4–7 (inventory, journal validation, spec selection, close plan)
+- Step 8d–8e (journal merge, spec posting) — safe before merge
+- Step 8h (final report — partial, covering what Phase A completed)
+- Step 8i (hygiene scan)
+- Step 8j modified: squash commits, push branch to origin. **Stop before
+  rebase onto main.** Do not merge, do not push main.
+
+**What is deferred to Phase B:**
+- Steps 8a–8c (artifact promotion, spec cleanup) — 8c depends on 8b
+- Step 8f (issue close) — depends on successful merge
+- Step 8g (blog publish) — depends on successful merge
+- Steps 8k–12 (build verification, mark closed, ARC42 scan, handover)
+
+**After Phase A completes:**
+- Write `.phase-a-complete` marker in the slot root (one level up from
+  the repo worktree):
+  ```
+  branch=<BRANCH_NAME>
+  repos=<comma-separated repo names>
+  timestamp=<ISO-8601>
+  ```
+- Desktop notification via `terminal-notifier`:
+  "Slot N ready to land: <branch> on <primary-repo>"
+- Stop. Do not proceed to Phase B automatically.
+
+### Phase B — "Land it" (slot mode only)
+
+Runs when the human returns to the slot and says "merge" or "work end"
+again. work-end detects `.phase-a-complete` in the slot root and enters
+Phase B directly.
+
+**Corrected ordering — merge first, then post-land actions:**
+
+**B1. Rebase branches onto current main.** Git worktrees enforce that no
+two worktrees can have the same branch checked out. The original repo has
+main; the slot worktree has the branch. Rebase the branch in the **slot
+worktree**:
+
+```bash
+git -C <slot>/<repo> fetch origin main
+git -C <slot>/<repo> rebase origin/main
+```
+
+If any branch rebase conflicts: hard stop. No main has been modified.
+Human resolves the conflict on the branch in the slot worktree, then
+re-triggers Phase B.
+
+**B2. Fast-forward and push.** Only after all rebases succeed. For each
+repo — in the **original repo** (where main is checked out):
+
+```bash
+git -C <original>/<repo> fetch origin main
+git -C <original>/<repo> rebase origin/main
+git -C <original>/<repo> merge --ff-only <branch>
+git -C <original>/<repo> push origin main
+```
+
+Git worktrees share refs, so the rebased branch tip is visible from the
+original. If `--ff-only` fails or push fails, retry from B1 — max 3
+attempts. After 3 failures, hard stop with manual instructions.
+
+**B3. Close issues.** All issues in `$COVERS`.
+
+**B4. Promote artifacts and clean up specs.** Runs deferred 8a–8c.
+Operations needing `main` checked out use the **original workspace**.
+Operations reading from the branch use the **slot workspace worktree**.
+
+**B5. Publish blog entries (8g).** Run against the **original workspace**.
+
+**B6. Stamp branches as closed.** Both project and workspace branches.
+Run in the **slot worktrees** (where the branches are checked out):
+```bash
+git -C <slot>/<repo> commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
+git -C <slot>/work commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
+```
+
+**B7. Cleanup.** `git worktree remove` for each repo + workspace
+worktree in the slot. Remove the slot directory.
+
+**B8. Post-merge steps.** Steps 8k–12 from normal work-end.
+
+---
+
 ## Step 8 — Execute
 
 Failures are reported but do not stop remaining steps, **except**: journal merge
@@ -1062,6 +1159,7 @@ Show every item — both ticked and skipped with reason.
 - `handover` — work-end includes the full wrap (Step 12); handover is for
   mid-work sessions only
 - `work-start` — opens branches; work-end closes them
+- `work-slot` — slot detection triggers Phase A/B split
 - `using-git-worktrees` — worktree cleanup happens during branch closure
 - `verification-before-completion` — verification is implicit in work-end's
   pre-merge checks

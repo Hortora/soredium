@@ -300,6 +300,33 @@ Non-fatal — if activation fails (missing `project` scope, project not found,
 network error), warn and continue. Project board status is informational; it
 must not block branch creation.
 
+### Step 4d — Sync main before branch creation
+
+Ensure local main is current with upstream before branching. This
+minimises rebase conflicts at work-end time.
+
+```bash
+git -C "$PROJECT" fetch origin
+git -C "$PROJECT" rebase origin/$PROJECT_BASE_BRANCH
+```
+
+If upstream remote exists (fork model):
+```bash
+git -C "$PROJECT" fetch upstream
+git -C "$PROJECT" rebase upstream/$PROJECT_BASE_BRANCH
+git -C "$PROJECT" push origin $PROJECT_BASE_BRANCH
+```
+
+Same for workspace repo:
+```bash
+git -C "$WORKSPACE" fetch origin
+git -C "$WORKSPACE" rebase origin/main
+```
+
+If fetch or rebase fails (network error, conflicts on main): warn and
+continue. Stale main is suboptimal but not a gate — the branch can
+still be created and rebased later at merge time.
+
 ---
 
 ### Step 5 — Branch name
