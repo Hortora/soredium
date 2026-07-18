@@ -187,6 +187,32 @@ def _build_implementor_events(
     return events
 
 
+def _build_chunk_start_event(round_num: int, priority: str,
+                              chunk_index: int, total_chunks: int,
+                              item_count: int) -> dict:
+    return {
+        "event": "chunk_start",
+        "round": round_num,
+        "priority": priority,
+        "chunkIndex": chunk_index,
+        "totalChunks": total_chunks,
+        "itemCount": item_count,
+    }
+
+
+def _build_chunk_end_event(round_num: int, priority: str,
+                            chunk_index: int,
+                            addressed: int, skipped: int) -> dict:
+    return {
+        "event": "chunk_end",
+        "round": round_num,
+        "priority": priority,
+        "chunkIndex": chunk_index,
+        "addressed": addressed,
+        "skipped": skipped,
+    }
+
+
 def _verify_evidence(evidence: list, spec_path: str | None) -> EvidenceResult:
     if not evidence:
         return EvidenceResult(verified=False, note="no evidence provided")
@@ -219,6 +245,134 @@ def _get_commit_diff(commit: str, spec_path_str: str) -> str | None:
             return f"@@ -0,0 +1,{len(lines)} @@\n" + "\n".join(f"+{line}" for line in lines)
         return None
     return result.stdout
+
+
+def _run_implementor_chunked(
+    ws: Path,
+    tracker: Tracker,
+    round_num: int,
+    source_dirs: list[str],
+    spec_path: str,
+    model: str,
+    budget: float,
+    effort: str,
+    mode: str,
+    depth: str | None,
+) -> tuple[float, list[dict]]:
+    from adversarial_design_review.tracker import PRIORITY_ORDER
+
+    grouped = tracker.get_focus_items_by_priority()
+    priorities = [p for p in PRIORITY_ORDER if p in grouped]
+    total_chunks = len(priorities)
+    chunk_cost = 0.0
+    all_events: list[dict] = []
+
+    for chunk_idx, priority in enumerate(priorities):
+        chunk_items = grouped[priority]
+        _log(f"  Chunk {chunk_idx + 1}/{total_chunks}: {priority} ({len(chunk_items)} items)")
+
+        all_events.append(_build_chunk_start_event(
+            round_num, priority, chunk_idx, total_chunks, len(chunk_items)))
+
+        chunk_prompt = build_implementor_prompt(
+            round_num=round_num, focus_items=chunk_items,
+            source_dirs=source_dirs, workspace_root=str(ws),
+            spec_path=spec_path, mode=mode, depth=depth,
+        )
+
+        chunk_file_name = f"responses/implementor-{round_num}-chunk-{chunk_idx}.md"
+        chunk_file = ws / chunk_file_name
+
+        result = _invoke_claude(
+            ws, "implementor", chunk_prompt, source_dirs,
+            model, budget, effort,
+            expected_file=chunk_file_name,
+            focus_count=len(chunk_items),
+        )
+        if result is None:
+            _log(f"  Chunk {priority} failed \u2014 aborting chunked run")
+            break
+
+        chunk_cost += result.get("cost", 0.0)
+        _log(f"  Chunk {priority} done (${result.get('cost', 0.0):.2f})")
+
+        addressed = 0
+        if chunk_file.exists():
+            chunk_content = chunk_file.read_text()
+            responses = extract_issue_responses(chunk_content)
+            for resp in responses:
+                if not tracker.has_issue(resp.issue_id):
+                    continue
+                try:
+                    if resp.status == "FIXED":
+                        tracker.mark_addressed(
+                            resp.issue_id, section_ref=resp.section_ref or "",
+                            commit_hash="", rationale=resp.body[:200])
+                        addressed += 1
+                    elif resp.status == "REJECTED":
+                        tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
+                        addressed += 1
+                    elif resp.status == "ESCALATED":
+                        tracker.mark_deferred(resp.issue_id, note="DECISION_NEEDED")
+                        addressed += 1
+                except ValueError:
+                    pass
+
+            impl_signal = extract_signal(chunk_content)
+            impl_responses = extract_issue_responses(chunk_content)
+            chunk_events = _build_implementor_events(
+                round_num, impl_responses,
+                (impl_signal.signal_type, impl_signal.description),
+                extract_assumptions(chunk_content),
+                extract_settled_decisions(chunk_content),
+            )
+            all_events.extend(chunk_events)
+
+        skipped = len(chunk_items) - addressed
+        all_events.append(_build_chunk_end_event(
+            round_num, priority, chunk_idx, addressed, skipped))
+
+        _git_commit(ws, [chunk_file_name], f"round {round_num}: implementor chunk {priority}")
+        if mode in ("final-review", "code-review"):
+            for sd in source_dirs:
+                subprocess.run(["git", "add", "-A"], cwd=sd, capture_output=True)
+                subprocess.run(["git", "commit", "-m",
+                    f"review: code fixes \u2014 {mode} round {round_num} chunk {priority}",
+                    "--allow-empty"], cwd=sd, capture_output=True)
+        elif spec_path:
+            spec_dir = Path(spec_path).parent
+            spec_name = Path(spec_path).name
+            subprocess.run(["git", "add", spec_name], cwd=spec_dir, capture_output=True)
+            subprocess.run(["git", "commit", "-m",
+                f"docs: spec revised \u2014 round {round_num} chunk {priority}",
+                "--allow-empty"], cwd=spec_dir, capture_output=True)
+
+        if chunk_idx < total_chunks - 1:
+            remaining_priorities = priorities[chunk_idx + 1:]
+            remaining_count = sum(len(grouped[p]) for p in remaining_priorities)
+            remaining_str = ", ".join(remaining_priorities)
+            _log(f"  Next: {remaining_str} ({remaining_count} items)")
+
+            action = _prompt_hil(
+                f"[c]ontinue to {remaining_priorities[0]} / [s]kip remaining / [a]bort? ",
+                default="c",
+            )
+            if action == "s":
+                _log(f"  Skipping remaining chunks \u2014 marking {remaining_count} items DEFERRED")
+                for p in remaining_priorities:
+                    for iid in grouped[p]:
+                        try:
+                            tracker.mark_deferred(iid, note=f"skipped at chunk checkpoint (priority {p})")
+                        except ValueError:
+                            issue = tracker.get_issue(iid)
+                            issue.status = IssueStatus.DEFERRED
+                            issue.notes = f"skipped at chunk checkpoint (priority {p})"
+                break
+            elif action == "a":
+                _log("  Chunked run aborted by user")
+                break
+
+    return chunk_cost, all_events
 
 
 def main() -> int:
@@ -607,188 +761,203 @@ def main() -> int:
                              f"tracker: round {round_num} human decision")
 
         # --- Step 3: Implementor ---
-        focus = tracker.get_focus_items()
-        implementor_prompt = build_implementor_prompt(
-            round_num=round_num, focus_items=focus, source_dirs=args.source_dirs,
-            workspace_root=str(ws), spec_path=spec_path, mode=args.mode,
-            depth=resolved_depth,
-        )
-
-        if is_window_end:
-            implementor_prompt += "\n\n" + build_sweep_prompt("implementor", round_num, workspace_root=str(ws))
-
-        use_impl_sid = implementor_session_id if not args.fresh_sessions else None
-        implementor_file = ws / "responses" / f"implementor-{round_num}.md"
-        missing_retries = 0
-        while True:
-            _log(f"  Implementor {'(continued — cached context)' if use_impl_sid else '(fresh session)'}... (this may take 1-2 minutes)")
-            result = _invoke_claude(
-                ws, "implementor", implementor_prompt, args.source_dirs,
-                model, budget, effort,
-                session_id=use_impl_sid,
-                expected_file=f"responses/implementor-{round_num}.md",
-                focus_count=len(focus),
+        if args.chunked:
+            chunk_cost, impl_events = _run_implementor_chunked(
+                ws, tracker, round_num, args.source_dirs, spec_path,
+                model, budget, effort, args.mode, resolved_depth,
             )
-            if result is None:
-                return 1
-
-            cumulative_cost += result.get("cost", 0.0)
-            new_sid = result.get("session_id")
-            if implementor_session_id is None and new_sid:
-                implementor_session_id = new_sid
-            elif implementor_session_id and not new_sid and result.get("timed_out"):
-                _log(f"  WARNING: implementor session ID lost to timeout — next round will be fresh")
-                implementor_session_id = None
-            _log(f"  Implementor done (${result.get('cost', 0.0):.2f})")
-
-            # Timeout with partial output — find what's missing and retry
-            if implementor_file.exists() and result.get("timed_out"):
-                partial_content = implementor_file.read_text()
-                partial_responses = extract_issue_responses(partial_content)
-                addressed_ids = {r.issue_id for r in partial_responses}
-                missing = [f for f in focus if f not in addressed_ids]
-                if missing:
-                    # Pre-apply partial responses so they survive if retry overwrites
-                    for resp in partial_responses:
-                        if not tracker.has_issue(resp.issue_id):
-                            continue
-                        try:
-                            if resp.status == "FIXED":
-                                tracker.mark_addressed(resp.issue_id, section_ref=resp.section_ref or "",
-                                                       commit_hash="", rationale=resp.body[:200])
-                            elif resp.status == "REJECTED":
-                                tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
-                            elif resp.status == "ESCALATED":
-                                tracker.mark_deferred(resp.issue_id, note="DECISION_NEEDED")
-                        except ValueError:
-                            pass
-                    _log(f"  {len(missing)} items unaddressed after timeout: {', '.join(missing)} — retrying")
-                    retry_prompt = build_implementor_prompt(
-                        round_num=round_num, focus_items=missing,
-                        source_dirs=args.source_dirs, workspace_root=str(ws),
-                        spec_path=spec_path, mode=args.mode,
-                        depth=resolved_depth,
-                    )
-                    retry_prompt += f"\n\nYour previous response is at responses/implementor-{round_num}.md — read it. Address only the items listed above that are not yet covered. Do not duplicate items already addressed."
-                    retry_result = _invoke_claude(
-                        ws, "implementor", retry_prompt, args.source_dirs,
-                        model, budget, effort,
-                        expected_file=f"responses/implementor-{round_num}.md",
-                        focus_count=len(missing),
-                    )
-                    if retry_result:
-                        cumulative_cost += retry_result.get("cost", 0.0)
-
-            if implementor_file.exists():
-                break
-            missing_retries += 1
-            _log(f"  WARNING: implementor-{round_num}.md not created (attempt {missing_retries}/{MAX_MISSING_FILE_RETRIES})")
-            if missing_retries >= MAX_MISSING_FILE_RETRIES:
-                raise ReviewPaused(f"Implementor failed to produce output after {MAX_MISSING_FILE_RETRIES} attempts — resume with --workspace to retry")
-            action = _prompt_hil("Response file missing. [r]etry / [a]bort? ", default="r")
-            if action == "a":
-                return 1
-
-        # Build and write implementor JSONL
-        if implementor_file.exists():
-            _impl_content = implementor_file.read_text()
-            _impl_sig = extract_signal(_impl_content)
-            _impl_responses = extract_issue_responses(_impl_content)
-            impl_events = _build_implementor_events(
-                round_num, _impl_responses,
-                (_impl_sig.signal_type, _impl_sig.description),
-                extract_assumptions(_impl_content),
-                extract_settled_decisions(_impl_content),
-            )
+            cumulative_cost += chunk_cost
             _write_jsonl(ws, "implementor", round_num, impl_events)
-
-        # Commit implementor response to review folder
-        _git_commit(ws, [f"responses/implementor-{round_num}.md",
-                          f"responses/implementor-{round_num}.jsonl"],
-                     f"round {round_num}: implementor response")
-        # Mode-conditional commit: code changes for final-review/code-review, spec for others
-        if args.mode in ("final-review", "code-review"):
-            for sd in args.source_dirs:
-                subprocess.run(["git", "add", "-A"], cwd=sd, capture_output=True)
-                subprocess.run(["git", "commit", "-m",
-                    f"review: code fixes — {args.mode} round {round_num}",
-                    "--allow-empty"], cwd=sd, capture_output=True)
+            _check_unstaged(ws)
+            tracker.current_round = round_num
+            tracker.record_round(round_num)
+            tracker.write(ws / "tracker.md")
+            _git_commit(ws, ["tracker.md"], f"tracker: round {round_num} chunked verification")
+            _check_unstaged(ws)
+            # Fall through to termination checks (skip batch implementor + verify)
         else:
-            if spec_path:
-                spec_dir = Path(spec_path).parent
-                spec_name = Path(spec_path).name
-                subprocess.run(["git", "add", spec_name], cwd=spec_dir, capture_output=True)
-                subprocess.run(["git", "commit", "-m", f"docs: spec revised — review round {round_num}",
-                                "--allow-empty"], cwd=spec_dir, capture_output=True)
-        _check_unstaged(ws)
+            focus = tracker.get_focus_items()
+            implementor_prompt = build_implementor_prompt(
+                round_num=round_num, focus_items=focus, source_dirs=args.source_dirs,
+                workspace_root=str(ws), spec_path=spec_path, mode=args.mode,
+                depth=resolved_depth,
+            )
 
-        # --- Step 4: Script verify ---
-        if implementor_file.exists():
-            impl_content = implementor_file.read_text()
+            if is_window_end:
+                implementor_prompt += "\n\n" + build_sweep_prompt("implementor", round_num, workspace_root=str(ws))
 
-            impl_signal = extract_signal(impl_content)
-            responses = extract_issue_responses(impl_content)
+            use_impl_sid = implementor_session_id if not args.fresh_sessions else None
+            implementor_file = ws / "responses" / f"implementor-{round_num}.md"
+            missing_retries = 0
+            while True:
+                _log(f"  Implementor {'(continued — cached context)' if use_impl_sid else '(fresh session)'}... (this may take 1-2 minutes)")
+                result = _invoke_claude(
+                    ws, "implementor", implementor_prompt, args.source_dirs,
+                    model, budget, effort,
+                    session_id=use_impl_sid,
+                    expected_file=f"responses/implementor-{round_num}.md",
+                    focus_count=len(focus),
+                )
+                if result is None:
+                    return 1
 
-            # Mode-conditional verification
+                cumulative_cost += result.get("cost", 0.0)
+                new_sid = result.get("session_id")
+                if implementor_session_id is None and new_sid:
+                    implementor_session_id = new_sid
+                elif implementor_session_id and not new_sid and result.get("timed_out"):
+                    _log(f"  WARNING: implementor session ID lost to timeout — next round will be fresh")
+                    implementor_session_id = None
+                _log(f"  Implementor done (${result.get('cost', 0.0):.2f})")
+
+                # Timeout with partial output — find what's missing and retry
+                if implementor_file.exists() and result.get("timed_out"):
+                    partial_content = implementor_file.read_text()
+                    partial_responses = extract_issue_responses(partial_content)
+                    addressed_ids = {r.issue_id for r in partial_responses}
+                    missing = [f for f in focus if f not in addressed_ids]
+                    if missing:
+                        # Pre-apply partial responses so they survive if retry overwrites
+                        for resp in partial_responses:
+                            if not tracker.has_issue(resp.issue_id):
+                                continue
+                            try:
+                                if resp.status == "FIXED":
+                                    tracker.mark_addressed(resp.issue_id, section_ref=resp.section_ref or "",
+                                                           commit_hash="", rationale=resp.body[:200])
+                                elif resp.status == "REJECTED":
+                                    tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
+                                elif resp.status == "ESCALATED":
+                                    tracker.mark_deferred(resp.issue_id, note="DECISION_NEEDED")
+                            except ValueError:
+                                pass
+                        _log(f"  {len(missing)} items unaddressed after timeout: {', '.join(missing)} — retrying")
+                        retry_prompt = build_implementor_prompt(
+                            round_num=round_num, focus_items=missing,
+                            source_dirs=args.source_dirs, workspace_root=str(ws),
+                            spec_path=spec_path, mode=args.mode,
+                            depth=resolved_depth,
+                        )
+                        retry_prompt += f"\n\nYour previous response is at responses/implementor-{round_num}.md — read it. Address only the items listed above that are not yet covered. Do not duplicate items already addressed."
+                        retry_result = _invoke_claude(
+                            ws, "implementor", retry_prompt, args.source_dirs,
+                            model, budget, effort,
+                            expected_file=f"responses/implementor-{round_num}.md",
+                            focus_count=len(missing),
+                        )
+                        if retry_result:
+                            cumulative_cost += retry_result.get("cost", 0.0)
+
+                if implementor_file.exists():
+                    break
+                missing_retries += 1
+                _log(f"  WARNING: implementor-{round_num}.md not created (attempt {missing_retries}/{MAX_MISSING_FILE_RETRIES})")
+                if missing_retries >= MAX_MISSING_FILE_RETRIES:
+                    raise ReviewPaused(f"Implementor failed to produce output after {MAX_MISSING_FILE_RETRIES} attempts — resume with --workspace to retry")
+                action = _prompt_hil("Response file missing. [r]etry / [a]bort? ", default="r")
+                if action == "a":
+                    return 1
+
+            # Build and write implementor JSONL
+            if implementor_file.exists():
+                _impl_content = implementor_file.read_text()
+                _impl_sig = extract_signal(_impl_content)
+                _impl_responses = extract_issue_responses(_impl_content)
+                impl_events = _build_implementor_events(
+                    round_num, _impl_responses,
+                    (_impl_sig.signal_type, _impl_sig.description),
+                    extract_assumptions(_impl_content),
+                    extract_settled_decisions(_impl_content),
+                )
+                _write_jsonl(ws, "implementor", round_num, impl_events)
+
+            # Commit implementor response to review folder
+            _git_commit(ws, [f"responses/implementor-{round_num}.md",
+                              f"responses/implementor-{round_num}.jsonl"],
+                         f"round {round_num}: implementor response")
+            # Mode-conditional commit: code changes for final-review/code-review, spec for others
             if args.mode in ("final-review", "code-review"):
-                diff = _get_source_diff(args.source_dirs)
-                vr = verify_code_changed(diff)
+                for sd in args.source_dirs:
+                    subprocess.run(["git", "add", "-A"], cwd=sd, capture_output=True)
+                    subprocess.run(["git", "commit", "-m",
+                        f"review: code fixes — {args.mode} round {round_num}",
+                        "--allow-empty"], cwd=sd, capture_output=True)
             else:
                 if spec_path:
-                    diff = _get_git_diff(spec_path)
+                    spec_dir = Path(spec_path).parent
+                    spec_name = Path(spec_path).name
+                    subprocess.run(["git", "add", spec_name], cwd=spec_dir, capture_output=True)
+                    subprocess.run(["git", "commit", "-m", f"docs: spec revised — review round {round_num}",
+                                    "--allow-empty"], cwd=spec_dir, capture_output=True)
+            _check_unstaged(ws)
+
+            # --- Step 4: Script verify ---
+            if implementor_file.exists():
+                impl_content = implementor_file.read_text()
+
+                impl_signal = extract_signal(impl_content)
+                responses = extract_issue_responses(impl_content)
+
+                # Mode-conditional verification
+                if args.mode in ("final-review", "code-review"):
+                    diff = _get_source_diff(args.source_dirs)
+                    vr = verify_code_changed(diff)
                 else:
-                    diff = ""
+                    if spec_path:
+                        diff = _get_git_diff(spec_path)
+                    else:
+                        diff = ""
 
-            for resp in responses:
-                if not tracker.has_issue(resp.issue_id):
-                    continue
-                try:
-                    if resp.status == "FIXED":
-                        if args.mode in ("final-review", "code-review"):
-                            # For code modes, just track that code changed
-                            tracker.mark_addressed(
-                                resp.issue_id,
-                                section_ref=resp.section_ref or "",
-                                commit_hash="",
-                                rationale=resp.body[:200] if resp.body else "",
-                            )
-                        else:
-                            # For spec modes, verify evidence
-                            tracker.mark_addressed(
-                                resp.issue_id,
-                                section_ref=resp.section_ref or "",
-                                commit_hash=_get_head_hash(spec_path) if spec_path else "",
-                                rationale=resp.body[:200] if resp.body else "",
-                            )
-                            if spec_path:
-                                ev_result = _verify_evidence(resp.evidence, spec_path)
-                                if not ev_result.verified:
-                                    issue = tracker.get_issue(resp.issue_id)
-                                    issue.notes = ev_result.note
-                                    _log(f"  WARNING: {resp.issue_id} {ev_result.note}")
-                    elif resp.status == "REJECTED":
-                        tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
-                    elif resp.status == "ESCALATED":
-                        tracker.mark_deferred(resp.issue_id, note="DECISION_NEEDED")
-                except ValueError:
-                    pass  # already in target state — skip
+                for resp in responses:
+                    if not tracker.has_issue(resp.issue_id):
+                        continue
+                    try:
+                        if resp.status == "FIXED":
+                            if args.mode in ("final-review", "code-review"):
+                                # For code modes, just track that code changed
+                                tracker.mark_addressed(
+                                    resp.issue_id,
+                                    section_ref=resp.section_ref or "",
+                                    commit_hash="",
+                                    rationale=resp.body[:200] if resp.body else "",
+                                )
+                            else:
+                                # For spec modes, verify evidence
+                                tracker.mark_addressed(
+                                    resp.issue_id,
+                                    section_ref=resp.section_ref or "",
+                                    commit_hash=_get_head_hash(spec_path) if spec_path else "",
+                                    rationale=resp.body[:200] if resp.body else "",
+                                )
+                                if spec_path:
+                                    ev_result = _verify_evidence(resp.evidence, spec_path)
+                                    if not ev_result.verified:
+                                        issue = tracker.get_issue(resp.issue_id)
+                                        issue.notes = ev_result.note
+                                        _log(f"  WARNING: {resp.issue_id} {ev_result.note}")
+                        elif resp.status == "REJECTED":
+                            tracker.mark_rejected(resp.issue_id, rationale=resp.rationale[:200])
+                        elif resp.status == "ESCALATED":
+                            tracker.mark_deferred(resp.issue_id, note="DECISION_NEEDED")
+                    except ValueError:
+                        pass  # already in target state — skip
 
-            for assumption in extract_assumptions(impl_content):
-                tracker.add_assumption(assumption, round_surfaced=round_num, source=f"implementor-{round_num}.md")
+                for assumption in extract_assumptions(impl_content):
+                    tracker.add_assumption(assumption, round_surfaced=round_num, source=f"implementor-{round_num}.md")
 
-            for decision in extract_settled_decisions(impl_content):
-                tracker.add_settled_decision(
-                    decision.text, from_issue=decision.from_issue, rationale="",
-                )
+                for decision in extract_settled_decisions(impl_content):
+                    tracker.add_settled_decision(
+                        decision.text, from_issue=decision.from_issue, rationale="",
+                    )
 
-            if impl_signal.signal_type == "DECISION_NEEDED":
-                _handle_decision_needed(ws, tracker, round_num, impl_signal.description or "", role="implementor")
+                if impl_signal.signal_type == "DECISION_NEEDED":
+                    _handle_decision_needed(ws, tracker, round_num, impl_signal.description or "", role="implementor")
 
-        tracker.current_round = round_num
-        tracker.record_round(round_num)
-        tracker.write(ws / "tracker.md")
-        _git_commit(ws, ["tracker.md"], f"tracker: round {round_num} verification")
-        _check_unstaged(ws)
+            tracker.current_round = round_num
+            tracker.record_round(round_num)
+            tracker.write(ws / "tracker.md")
+            _git_commit(ws, ["tracker.md"], f"tracker: round {round_num} verification")
+            _check_unstaged(ws)
 
         # --- Termination checks ---
         all_resolved = tracker.all_resolved()
@@ -1423,6 +1592,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth", choices=("light", "standard", "deep"),
                         default=None,
                         help="Review depth for final-review mode (default: auto-detect)")
+    parser.add_argument("--chunked", action="store_true",
+                        help="Run implementor in priority-ordered chunks")
     parser.add_argument("--stage", choices=("pre-release", "released"),
                         default="pre-release",
                         help="Project maturity stage — released adds backward-compat checks")

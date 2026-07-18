@@ -8,7 +8,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from parser import Confirmation, Evidence, Issue, IssueResponse, SettledDecision
-from review import _build_reviewer_events, _build_implementor_events, _write_jsonl
+from review import (
+    _build_reviewer_events,
+    _build_implementor_events,
+    _build_chunk_start_event,
+    _build_chunk_end_event,
+    _write_jsonl,
+)
 
 
 class TestBuildReviewerEvents:
@@ -179,3 +185,26 @@ class TestWriteJsonl:
             assert len(lines) == 1
             header = json.loads(lines[0])
             assert header["event"] == "schema_version"
+
+
+class TestChunkEvents:
+
+    def test_chunk_start_event(self):
+        event = _build_chunk_start_event(round_num=1, priority="HIGH",
+                                          chunk_index=0, total_chunks=3,
+                                          item_count=4)
+        assert event["event"] == "chunk_start"
+        assert event["round"] == 1
+        assert event["priority"] == "HIGH"
+        assert event["chunkIndex"] == 0
+        assert event["totalChunks"] == 3
+        assert event["itemCount"] == 4
+
+    def test_chunk_end_event(self):
+        event = _build_chunk_end_event(round_num=1, priority="HIGH",
+                                        chunk_index=0, addressed=3, skipped=1)
+        assert event["event"] == "chunk_end"
+        assert event["round"] == 1
+        assert event["priority"] == "HIGH"
+        assert event["addressed"] == 3
+        assert event["skipped"] == 1
