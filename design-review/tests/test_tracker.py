@@ -133,6 +133,54 @@ class TestVerifyEvidenceAgainstDiff:
         assert result.verified
 
 
+class TestPriorityGrouping:
+
+    def test_groups_focus_items_by_priority(self):
+        t = Tracker(project_name="test")
+        t.add_issue("R1-01", "High issue", round_raised=1, priority="HIGH")
+        t.add_issue("R1-02", "Medium issue", round_raised=1, priority="MEDIUM")
+        t.add_issue("R1-03", "Low issue", round_raised=1, priority="LOW")
+        t.add_issue("R1-04", "Another high", round_raised=1, priority="HIGH")
+
+        grouped = t.get_focus_items_by_priority()
+
+        assert grouped == {
+            "HIGH": ["R1-01", "R1-04"],
+            "MEDIUM": ["R1-02"],
+            "LOW": ["R1-03"],
+        }
+
+    def test_excludes_terminal_items(self):
+        t = Tracker(project_name="test")
+        t.add_issue("R1-01", "Verified", round_raised=1, priority="HIGH")
+        t.add_issue("R1-02", "Open", round_raised=1, priority="HIGH")
+        t.mark_addressed("R1-01", section_ref="4.1", commit_hash="abc", rationale="fixed")
+        t.mark_verified("R1-01")
+
+        grouped = t.get_focus_items_by_priority()
+
+        assert grouped == {"HIGH": ["R1-02"]}
+
+    def test_empty_tiers_omitted(self):
+        t = Tracker(project_name="test")
+        t.add_issue("R1-01", "High only", round_raised=1, priority="HIGH")
+
+        grouped = t.get_focus_items_by_priority()
+
+        assert grouped == {"HIGH": ["R1-01"]}
+        assert "MEDIUM" not in grouped
+        assert "LOW" not in grouped
+
+    def test_preserves_insertion_order_within_tier(self):
+        t = Tracker(project_name="test")
+        t.add_issue("R1-03", "Third", round_raised=1, priority="HIGH")
+        t.add_issue("R1-01", "First", round_raised=1, priority="HIGH")
+
+        grouped = t.get_focus_items_by_priority()
+
+        assert grouped["HIGH"] == ["R1-03", "R1-01"]
+
+
 class TestVerifyAgainstDiffDeleted:
 
     def test_verify_against_diff_no_longer_exists(self):

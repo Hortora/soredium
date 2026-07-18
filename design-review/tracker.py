@@ -26,6 +26,8 @@ class IssueStatus(Enum):
 
 _TERMINAL: Final = frozenset({IssueStatus.VERIFIED, IssueStatus.ACCEPTED, IssueStatus.DEFERRED})
 
+PRIORITY_ORDER: Final = ("HIGH", "MEDIUM", "LOW")
+
 
 def _heading_slug(text: str) -> str:
     slug = text.lower().strip()
@@ -220,6 +222,14 @@ class Tracker:
                 IssueStatus.ADDRESSED, IssueStatus.REJECTED,
             )
         ]
+
+    def get_focus_items_by_priority(self) -> dict[str, list[str]]:
+        focus = self.get_focus_items()
+        grouped: dict[str, list[str]] = {}
+        for iid in focus:
+            priority = self._issues[iid].priority
+            grouped.setdefault(priority, []).append(iid)
+        return {p: grouped[p] for p in PRIORITY_ORDER if p in grouped}
 
     def add_assumption(self, text: str, round_surfaced: int, source: str) -> None:
         self._assumptions.append(Assumption(text=text, round_surfaced=round_surfaced, source=source))
