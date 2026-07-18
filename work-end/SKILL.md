@@ -337,33 +337,40 @@ review — specs validate design, implementation review validates the code actua
 delivered. Resource leaks, concurrency bugs, missing validation, and subtle
 misinterpretations only surface in code. Scale the depth, not skip the review.
 
-Classify the branch diff and invoke the appropriate review.
+**Choose the review type.** Two options:
+
+- **Code review** (`code-review`) — checklist pass over the diff. Fast, cheap.
+  Catches style issues, missing tests, obvious bugs. This is a pre-commit
+  sanity check.
+- **Final review** (`design-review --mode final-review`) — full adversarial
+  review with two independent sessions debating the implementation. Multiple
+  rounds, $5-25. Catches architectural mismatches, missing failure modes,
+  spec deviations.
+
+**When to use which:**
+
+| Situation | Default |
+|-----------|---------|
+| Spec was adversarially reviewed (this session or recent) | **code-review** — the adversarial pass already happened on the design; code review checks the implementation |
+| No spec review, structural diff (new files, renames, config changes) | **final-review** — no prior adversarial pass, structural changes warrant one |
+| No spec review, body-only diff (method implementations, imports) | **code-review** — low-risk changes, checklist is sufficient |
+| Implementation diverged significantly from reviewed spec | **final-review** — new architectural decisions the spec didn't cover |
 
 Classify the branch diff:
 
 1. Get diff stats: `git -C "$PROJECT" diff "$PROJECT_BASE_BRANCH"..HEAD --stat`
-2. Check for structural changes:
-   - New files added → structural
-   - Files deleted → structural
-   - Files renamed → structural
-   - New classes/interfaces → structural
-   - Method signature changes → structural
-   - Config files changed (pom.xml, application.properties) → structural
-   - Only method body / import changes → body-only
+2. Check for structural changes (new files, deletions, renames, new
+   classes, signature changes, config changes) vs body-only
+3. Check whether a design-review ran this session (check for a review
+   workspace under `~/adr/` matching the branch name or spec)
 
-**If structural:**
-> "Branch diff is structural (N files, M lines, K new files).
->  Recommended: final-review --depth {auto} (~$cost).
->  Run final-review? [y]es / [c]ode-review instead / [s]kip review"
-- y → invoke `design-review --mode final-review`
-- c → invoke `code-review` (checklist)
+Present:
+> "Branch diff: N files, M lines ({structural|body-only}).
+>  Spec review: {yes — adversarially reviewed | no prior review}.
+>  Recommended: {code-review | final-review}. Run? [y]es / [o]ther / [s]kip"
+- y → invoke the recommended review
+- o → invoke the alternative (code-review ↔ final-review)
 - s → skip (user takes responsibility)
-
-**If body-only:**
-> "Branch diff is body-only (N files, M lines). Running code-review checklist.
->  Override with final-review? (y/n)"
-- y → invoke `design-review --mode final-review --depth light`
-- n → invoke `code-review` (checklist, as today)
 
 If the review surfaces issues:
 - **Critical/Important issues** → fix before proceeding. Re-run review after fixes.
