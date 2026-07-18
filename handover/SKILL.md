@@ -114,10 +114,12 @@ Then read the file and present the resume output using this structure:
 Single specific action right now — procedural or unblocking (e.g. "run /work", "delete branches", "fix X in Y").
 
 **## Cross-Module**
-Only include if HANDOFF.md contains cross-module dependencies. Omit the section entirely if there are none.
+Only include if there are **active** cross-module blockers — work that cannot proceed until another repo ships something, or another repo waiting on us to ship something. Each item must reference a tracked issue.
+
+Do NOT include static architectural dependencies (e.g., "module X uses SPI Y from repo Z"). Those belong in CLAUDE.md's module documentation, not in a handover. The test: "Is there an action someone in another repo needs to take before we can proceed?" If no — omit. If the answer is "yes, but there's no issue tracking it" — file the issue first, then list it here with the reference.
 
 **We're blocking** (other modules waiting on us — treat as high priority):
-- `<module>` — what they need from us · Scale · Complexity
+- `<module>` — what they need from us (gates repo#N) · Scale · Complexity
 
 **Blocked by** (can't proceed until):
 - `<module>` — what we need from them (gates #N) · Scale · Complexity
@@ -311,7 +313,7 @@ the diff, not from loading the full previous file.
 From the current session, recall:
 - What changed from the last handover? (only write these)
 - What decisions were made? What was tried and didn't work?
-- What cross-module dependencies exist? Are we blocking any other module? Is anything blocking us?
+- Are there active cross-module blockers? (Not static dependencies — only work gated on another repo shipping something, or vice versa. Each must have a tracked issue.)
 - What's trailing from this session that feels owed (What's Left)?
 - What new discrete work could be picked up next (What's Next)?
 - What's the single most important next action (Immediate Next Step)?
@@ -627,7 +629,7 @@ Handover is complete when:
 - ✅ Readable in under 500 tokens
 - ✅ Unchanged sections reference git history, not repeated content
 - ✅ Immediate next step is specific enough to act on without asking
-- ✅ Cross-Module section present if deps exist; omitted entirely if none
+- ✅ Cross-Module section present only for active blockers with tracked issues; omitted if none or if items are just static dependencies
 - ✅ What's Left items carry Scale · Complexity tags
 - ✅ What's Next table carries Scale / Complexity / Notes columns
 - ✅ References table uses paths only — no file content inline
