@@ -302,28 +302,48 @@ must not block branch creation.
 
 ### Step 4d — Sync main before branch creation
 
-Ensure local main is current with upstream before branching. This
-minimises rebase conflicts at work-end time.
+Ensure local main tracks the blessed repo before branching. Also sync the
+personal fork so work-end can push without force. Two fork-naming conventions
+exist — detect which is in use.
 
+**Detect fork model:**
+```bash
+git -C "$PROJECT" remote get-url upstream 2>/dev/null && echo "has-upstream"
+git -C "$PROJECT" remote get-url fork 2>/dev/null && echo "has-fork"
+```
+
+**If `upstream` remote exists** (origin=personal fork, upstream=blessed):
+```bash
+git -C "$PROJECT" fetch upstream
+git -C "$PROJECT" rebase upstream/$PROJECT_BASE_BRANCH
+git -C "$PROJECT" push origin $PROJECT_BASE_BRANCH --force-with-lease
+```
+
+**Else if `fork` remote exists** (origin=blessed, fork=personal):
+```bash
+git -C "$PROJECT" fetch origin
+git -C "$PROJECT" rebase origin/$PROJECT_BASE_BRANCH
+git -C "$PROJECT" push fork origin/$PROJECT_BASE_BRANCH:$PROJECT_BASE_BRANCH --force-with-lease
+```
+
+**Else** (single remote — no fork):
 ```bash
 git -C "$PROJECT" fetch origin
 git -C "$PROJECT" rebase origin/$PROJECT_BASE_BRANCH
 ```
 
-If upstream remote exists (fork model):
-```bash
-git -C "$PROJECT" fetch upstream
-git -C "$PROJECT" rebase upstream/$PROJECT_BASE_BRANCH
-git -C "$PROJECT" push origin $PROJECT_BASE_BRANCH
-```
+`--force-with-lease` is required because squash-merged PRs create different
+SHAs on the blessed repo, causing the fork to diverge even though content is
+identical. Without it, the push is rejected and divergence accumulates until
+work-end requires a force push.
 
-Same for workspace repo:
+Same for workspace repo (always single remote):
 ```bash
 git -C "$WORKSPACE" fetch origin
 git -C "$WORKSPACE" rebase origin/main
 ```
 
-If fetch or rebase fails (network error, conflicts on main): warn and
+If fetch, rebase, or push fails (network error, conflicts on main): warn and
 continue. Stale main is suboptimal but not a gate — the branch can
 still be created and rebased later at merge time.
 
