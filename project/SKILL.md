@@ -127,8 +127,8 @@ Read `WORKSPACE_OK` and `WORKSPACE_DECLINED` from the ctx.py output (already run
 > entries) separate from the project repo. Set one up now? **(YES / n)**
 
 - **YES** → invoke `workspace-init`. It handles git hooks, ARC42STORIES.MD stub,
-  work tracking, and superpowers as part of its own flow. Once complete,
-  skip Checks 3 and 4 — workspace-init already offered them.
+  work tracking as part of its own flow. Once complete,
+  skip Check 3 — workspace-init already offered it.
 - **n** → write `workspace: declined` to CLAUDE.md (see below), continue.
 
 **Writing the decline flag:**
@@ -184,30 +184,6 @@ Issue tracking: declined
 
 ---
 
-### Check 4 — Superpowers
-
-Skip if: workspace was just set up this session (workspace-init offered it).
-
-```bash
-python3 -c 'import json,os; s=json.load(open(os.path.expanduser("~/.claude/settings.json"))); print("installed" if any(k.startswith("superpowers@") for k in s.get("enabledPlugins",{})) else "missing")' 2>/dev/null || echo "missing"
-```
-
-| State | Action |
-|-------|--------|
-| Installed | ✅ Continue |
-| Missing | Notify once, do not block |
-
-**If missing:**
-
-> **Superpowers not installed.** Install with: `/plugin install superpowers`
->
-> Adds structured TDD, debugging, brainstorming, and code review workflows.
-
-Do not write a decline flag for superpowers — it is advisory only and does
-not affect workflow correctness. Show once per session, never block.
-
----
-
 ## Return states
 
 | Outcome | What happens next |
@@ -253,7 +229,6 @@ project returns. If workspace was declined, proceed in single-repo mode.
 |---------|----------------|-----|
 | Skipping fast-path check | Runs prompts on every session even when set up | Always check all three conditions first |
 | Not writing decline flag | User gets asked every session forever | Write to CLAUDE.md on every decline |
-| Blocking on superpowers | User must manually install it | Notify only, always continue |
 | Running Checks 3+4 after workspace-init | workspace-init already offered them | Skip if workspace-init ran this session |
 
 ---
