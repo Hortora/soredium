@@ -46,6 +46,25 @@ class TestAllocateSlotNumber:
         wt = tmp_path / "worktrees"
         assert slot_manager.allocate_slot_number(wt) == 1
 
+    def test_considers_attic(self, tmp_path):
+        wt = tmp_path / "worktrees"
+        wt.mkdir()
+        (wt / "1").mkdir()
+        (wt / "2").mkdir()
+        attic = wt / "attic"
+        attic.mkdir()
+        (attic / "3").mkdir()
+        (attic / "5").mkdir()
+        assert slot_manager.allocate_slot_number(wt) == 6
+
+    def test_only_attic(self, tmp_path):
+        wt = tmp_path / "worktrees"
+        wt.mkdir()
+        attic = wt / "attic"
+        attic.mkdir()
+        (attic / "4").mkdir()
+        assert slot_manager.allocate_slot_number(wt) == 5
+
 
 class TestResolveWorkspaceSource:
     def test_shared_workspace(self, tmp_path):
@@ -295,7 +314,7 @@ class TestListSlots:
 
 
 class TestRemoveSlot:
-    def test_removes_slot_dir(self, tmp_path):
+    def test_archives_to_attic_by_default(self, tmp_path):
         family = tmp_path / "casehub"
         slot = family / "worktrees" / "1"
         slot.mkdir(parents=True)
@@ -307,6 +326,22 @@ class TestRemoveSlot:
             slot_manager.remove_slot(family, 1)
 
         assert not slot.exists()
+        attic = family / "worktrees" / "attic" / "1"
+        assert attic.exists()
+        assert (attic / "SLOT.md").exists()
+
+    def test_force_delete_permanently_removes(self, tmp_path):
+        family = tmp_path / "casehub"
+        slot = family / "worktrees" / "1"
+        slot.mkdir(parents=True)
+        (slot / "SLOT.md").write_text("test")
+
+        with patch("slot_manager.run_cmd") as mock_cmd:
+            mock_cmd.return_value = (0, "", "")
+            slot_manager.remove_slot(family, 1, force_delete=True)
+
+        assert not slot.exists()
+        assert not (family / "worktrees" / "attic" / "1").exists()
 
     def test_nonexistent_slot_errors(self, tmp_path, capsys):
         family = tmp_path / "casehub"
@@ -316,6 +351,232 @@ class TestRemoveSlot:
             slot_manager.remove_slot(family, 99)
         captured = capsys.readouterr()
         assert "ERROR=slot_not_found" in captured.out
+
+
+class TestParseSlotMd:
+    def test_parses_full_slot_md(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text(
+            "# Slot 1 — issue-42-spi\n\n## Issue\ncasehubio/engine#42\n"
+            "Covers: 42\n\n## What to do\nImplement SPI\n\n## Repos\n- engine (primary)\n- iot\n"
+        )
+        md = slot_manager.parse_slot_md(tmp_path)
+        assert md["branch"] == "issue-42-spi"
+        assert md["issue"] == "42"
+        assert md["issue_repo"] == "casehubio/engine"
+        assert md["covers"] == "42"
+        assert md["context"] == "Implement SPI"
+        assert md["repos"] == ["engine", "iot"]
+
+    def test_missing_slot_md(self, tmp_path):
+        assert slot_manager.parse_slot_md(tmp_path) == {}
+
+
+class TestScanReady:
+    def test_finds_phase_a_complete_slots(self, tmp_path):
+        worktrees = tmp_path / "worktrees"
+        worktrees.mkdir()
+        slot1 = worktrees / "1"
+        slot1.mkdir()
+        (slot1 / ".phase-a-complete").write_text(
+            "branch=issue-42-spi\nrepos=engine\ntimestamp=2026-07-18T14:32:00\n"
+        )
+        (slot1 / "SLOT.md").write_text(
+            "# Slot 1 — issue-42-spi\n\n## Issue\ncasehubio/engine#42\n"
+            "Covers: 42\n\n## What to do\nImplement SPI\n\n## Repos\n- engine (primary)\n"
+        )
+        engine = slot1 / "engine"
+        engine.mkdir()
+
+        # Slot 2: active (no marker)
+        (worktrees / "2").mkdir()
+
+        # Slot 3: landed (should NOT appear)
+        slot3 = worktrees / "3"
+        slot3.mkdir()
+        (slot3 / ".phase-a-complete").write_text("branch=issue-99\n")
+        (slot3 / ".landed").write_text("landed\n")
+
+        result = slot_manager.scan_ready(tmp_path)
+        assert len(result) == 1
+        assert result[0]["number"] == 1
+        assert result[0]["branch"] == "issue-42-spi"
+        assert result[0]["context"] == "Implement SPI"
+
+    def test_empty_when_no_ready_slots(self, tmp_path):
+        worktrees = tmp_path / "worktrees"
+        worktrees.mkdir()
+        (worktrees / "1").mkdir()
+        assert slot_manager.scan_ready(tmp_path) == []
+
+    def test_no_worktrees_dir(self, tmp_path):
+        assert slot_manager.scan_ready(tmp_path) == []
+
+
+def _init_repo_with_remote(path: Path) -> Path:
+    bare = path.parent / f".{path.name}-bare.git"
+    bare.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "--bare", str(bare)], capture_output=True, check=True)
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "clone", str(bare), str(path)], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test.com"], capture_output=True)
+    subprocess.run(["git", "-C", str(path), "checkout", "-b", "main"], capture_output=True)
+    (path / "README.md").write_text(f"# {path.name}\n")
+    subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(path), "commit", "-m", "initial"], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(path), "push", "-u", "origin", "main"], capture_output=True, check=True)
+    return path
+
+
+def _create_merge_test_repos(tmp_path, repo_names):
+    family = tmp_path / "family"
+    family.mkdir()
+    worktrees = family / "worktrees"
+    worktrees.mkdir()
+
+    originals = {}
+    for name in repo_names:
+        originals[name] = _init_repo_with_remote(family / name)
+
+    slot = worktrees / "1"
+    slot.mkdir()
+    branch = "issue-42-test"
+
+    for name in repo_names:
+        subprocess.run([
+            "git", "-C", str(originals[name]),
+            "worktree", "add", str(slot / name), "-b", branch,
+        ], capture_output=True, check=True)
+        (slot / name / "feature.py").write_text(f"# {name} feature\n")
+        subprocess.run(["git", "-C", str(slot / name), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(slot / name), "commit", "-m", f"feat: {name} feature"], capture_output=True, check=True)
+
+    (slot / ".phase-a-complete").write_text(
+        f"branch={branch}\nrepos={','.join(repo_names)}\ntimestamp=2026-07-18T14:32:00\n"
+    )
+    (slot / "SLOT.md").write_text(
+        f"# Slot 1 — {branch}\n\n## Issue\ntest/repo#42\nCovers: 42\n\n"
+        f"## What to do\nTest\n\n## Repos\n" +
+        "\n".join(f"- {n}" for n in repo_names) + "\n"
+    )
+    return family, originals, slot, branch
+
+
+class TestResolveOriginalRepo:
+    def test_resolves_worktree_to_original(self, tmp_path):
+        family, originals, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        resolved = slot_manager.resolve_original_repo(slot / "engine")
+        assert resolved == originals["engine"]
+
+
+class TestMergeSlot:
+    def test_clean_rebase_and_push(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+        assert (originals["engine"] / "feature.py").exists()
+        assert (slot / ".landed").exists()
+        landed = (slot / ".landed").read_text()
+        assert "branch=issue-42-test" in landed
+        assert "engine:" in landed
+
+    def test_conflict_returns_error(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        (originals["engine"] / "feature.py").write_text("# conflict\n")
+        subprocess.run(["git", "-C", str(originals["engine"]), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(originals["engine"]), "commit", "-m", "conflict"], capture_output=True)
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code != 0
+        assert not (slot / ".landed").exists()
+
+    def test_not_found(self, tmp_path):
+        family = tmp_path / "family"
+        (family / "worktrees").mkdir(parents=True)
+        assert slot_manager.merge_slot(family, 99) == 1
+
+    def test_not_ready(self, tmp_path):
+        family = tmp_path / "family"
+        slot = family / "worktrees" / "1"
+        slot.mkdir(parents=True)
+        assert slot_manager.merge_slot(family, 1) == 1
+
+    def test_already_landed(self, tmp_path):
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        (slot / ".landed").write_text("already\n")
+        assert slot_manager.merge_slot(family, 1) == 1
+
+
+class TestArchiveSlot:
+    def test_moves_to_attic(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        (slot / ".phase-a-complete").write_text("branch=issue-42-test\n")
+        (slot / ".landed").write_text("landed\n")
+
+        slot_manager.archive_slot(family, 1)
+
+        assert not (family / "worktrees" / "1").exists()
+        attic_slot = family / "worktrees" / "attic" / "1"
+        assert attic_slot.exists()
+        assert (attic_slot / "SLOT.md").exists()
+        assert (attic_slot / ".phase-a-complete").exists()
+        assert (attic_slot / ".landed").exists()
+
+    def test_not_found_exits(self, tmp_path, capsys):
+        family = tmp_path / "family"
+        (family / "worktrees").mkdir(parents=True)
+        with pytest.raises(SystemExit):
+            slot_manager.archive_slot(family, 99)
+        captured = capsys.readouterr()
+        assert "ERROR=slot_not_found" in captured.out
+
+
+class TestListSlotsExtended:
+    def test_shows_landed_state(self, tmp_path):
+        worktrees = tmp_path / "worktrees"
+        worktrees.mkdir()
+        slot = worktrees / "1"
+        slot.mkdir()
+        (slot / ".phase-a-complete").write_text("branch=issue-42\n")
+        (slot / ".landed").write_text("landed\n")
+        (slot / "SLOT.md").write_text("# Slot 1 — issue-42\n")
+
+        result = slot_manager.list_slots(tmp_path, include_archived=False)
+        assert len(result) == 1
+        assert result[0]["state"] == "landed"
+
+    def test_includes_archived(self, tmp_path):
+        worktrees = tmp_path / "worktrees"
+        worktrees.mkdir()
+        attic = worktrees / "attic"
+        attic.mkdir()
+        archived = attic / "3"
+        archived.mkdir()
+        (archived / "SLOT.md").write_text(
+            "# Slot 3 — issue-99-old\n\n## Repos\n- engine\n- iot\n"
+        )
+
+        result_no_all = slot_manager.list_slots(tmp_path, include_archived=False)
+        assert len(result_no_all) == 0
+
+        result_all = slot_manager.list_slots(tmp_path, include_archived=True)
+        assert len(result_all) == 1
+        assert result_all[0]["number"] == 3
+        assert result_all[0]["state"] == "archived"
+        assert result_all[0]["branch"] == "issue-99-old"
+        assert "engine" in result_all[0]["repos"]
+        assert "iot" in result_all[0]["repos"]
+
+    def test_backward_compat_no_arg(self, tmp_path):
+        worktrees = tmp_path / "worktrees"
+        worktrees.mkdir()
+        slot = worktrees / "1"
+        slot.mkdir()
+        (slot / "SLOT.md").write_text("# Slot 1 — issue-42\n")
+        (slot / "engine").mkdir()
+        (slot / "engine" / ".git").write_text("gitdir: /fake")
+        result = slot_manager.list_slots(tmp_path)
+        assert len(result) == 1
+        assert result[0]["state"] == "active"
 
 
 class TestCLI:

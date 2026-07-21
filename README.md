@@ -12,7 +12,7 @@ Development workflow and knowledge garden skills for Claude Code.
 
 ## What's Included
 
-47 skills across nine categories.
+45 skills across nine categories.
 
 ### Lifecycle
 
@@ -23,8 +23,7 @@ Development workflow and knowledge garden skills for Claude Code.
 | `work-end` | Closes branch, promotes artifacts, merges to main |
 | `work-pause` | Commits WIP, pushes to pause stack, switches to main |
 | `work-resume` | Restores a paused branch, rebases onto current main |
-| `workspace-init` | One-time companion workspace setup (prompted by project hook) |
-| `using-git-worktrees` | Feature branch isolation via worktrees or native tools |
+| `work-slot` | Parallel worktree slots for multi-repo work — create, list, merge, archive |
 
 ### Design & Planning
 
@@ -52,7 +51,6 @@ Development workflow and knowledge garden skills for Claude Code.
 | Skill | What it does |
 |-------|-------------|
 | `code-review` | Routes to Java/TS/Python review with OWASP-aware escalation |
-| `requesting-code-review` | *(Deprecated — use `design-review --mode final-review`)* |
 | `receiving-code-review` | Technical rigor when receiving review feedback |
 | `verification-before-completion` | Evidence gate — run verification before claiming done |
 | `security-audit` | OWASP Top 10 audit, triggered by code-review or on demand |

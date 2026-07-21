@@ -4,13 +4,19 @@ slot_manager.py — Worktree slot operations for multi-repo families
 
 Subcommands:
   create-slot <family-root> repos=<csv> branch=<name> issue=<N> issue-repo=<o/r> [covers=<csv>] [context=<text>]
-  list-slots <family-root>
-  remove-slot <family-root> slot=<N>
+  list-slots <family-root> [--all]
+  remove-slot <family-root> slot=<N> [--force-delete]
+  scan-ready <family-root>
+  merge-slot <family-root> slot=<N>
+  archive-slot <family-root> slot=<N>
+
+Note: remove-slot archives to worktrees/attic/ by default. Only --force-delete permanently removes.
 
 All commands output KEY=VALUE pairs on stdout for easy parsing.
 """
 
 import datetime
+import json
 import os
 import shutil
 import subprocess
@@ -30,6 +36,12 @@ def allocate_slot_number(worktrees_dir: Path) -> int:
         int(d.name) for d in worktrees_dir.iterdir()
         if d.is_dir() and d.name.isdigit()
     ]
+    attic_dir = worktrees_dir / "attic"
+    if attic_dir.exists():
+        existing.extend(
+            int(d.name) for d in attic_dir.iterdir()
+            if d.is_dir() and d.name.isdigit()
+        )
     return max(existing, default=0) + 1
 
 
@@ -225,7 +237,254 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
     }
 
 
-def list_slots(family_root: Path) -> list[dict]:
+def is_project_repo(name: str) -> bool:
+    return not name.startswith("work") and name != ".m2" and name != "attic"
+
+
+def get_slot_repos(slot_dir: Path) -> list[str]:
+    return [
+        d.name for d in sorted(slot_dir.iterdir())
+        if d.is_dir() and (d / ".git").exists() and is_project_repo(d.name)
+    ]
+
+
+def parse_slot_md(slot_dir: Path) -> dict:
+    slot_md = slot_dir / "SLOT.md"
+    if not slot_md.exists():
+        return {}
+    content = slot_md.read_text()
+    result: dict = {"repos": [], "context": "", "issue": "", "issue_repo": "", "covers": ""}
+
+    in_issue = False
+    in_what = False
+    in_repos = False
+    context_lines: list[str] = []
+    for line in content.splitlines():
+        if line.startswith("# Slot") and "—" in line:
+            result["branch"] = line.split("—", 1)[1].strip()
+        if line.startswith("Covers:"):
+            result["covers"] = line.split(":", 1)[1].strip()
+        if line.startswith("## Issue"):
+            in_issue, in_what, in_repos = True, False, False
+            continue
+        if line.startswith("## What to do"):
+            in_issue, in_what, in_repos = False, True, False
+            continue
+        if line.startswith("## Repos"):
+            in_issue, in_what, in_repos = False, False, True
+            continue
+        if line.startswith("## "):
+            in_issue, in_what, in_repos = False, False, False
+            continue
+        if in_issue and "#" in line and not line.startswith("Covers:"):
+            parts = line.strip().split("#")
+            if len(parts) == 2:
+                result["issue_repo"] = parts[0]
+                result["issue"] = parts[1]
+        if in_what:
+            context_lines.append(line.strip())
+        if in_repos and line.strip().startswith("- "):
+            repo_name = line.strip().lstrip("- ").split(" ")[0].strip()
+            if repo_name:
+                result["repos"].append(repo_name)
+
+    result["context"] = " ".join(l for l in context_lines if l).strip()
+    return result
+
+
+def get_repo_stats(repo_path: Path) -> dict:
+    rc, log_out, _ = run_cmd(
+        ["git", "-C", str(repo_path), "log", "--oneline", "origin/main..HEAD"]
+    )
+    commits = len(log_out.strip().splitlines()) if rc == 0 and log_out.strip() else 0
+    rc, stat_out, _ = run_cmd(
+        ["git", "-C", str(repo_path), "diff", "--shortstat", "origin/main..HEAD"]
+    )
+    diff = stat_out.strip() if rc == 0 else ""
+    return {"commits": commits, "diff": diff}
+
+
+def scan_ready(family_root: Path) -> list[dict]:
+    worktrees_dir = family_root / "worktrees"
+    if not worktrees_dir.exists():
+        return []
+    slots = []
+    for d in sorted(worktrees_dir.iterdir()):
+        if not d.is_dir() or not d.name.isdigit():
+            continue
+        if not (d / ".phase-a-complete").exists():
+            continue
+        if (d / ".landed").exists():
+            continue
+        timestamp = ""
+        for line in (d / ".phase-a-complete").read_text().splitlines():
+            if line.startswith("timestamp="):
+                timestamp = line.split("=", 1)[1]
+        md = parse_slot_md(d)
+        repo_names = md.get("repos", [])
+        repo_data = []
+        for repo_name in repo_names:
+            repo_path = d / repo_name
+            if repo_path.is_dir() and (repo_path / ".git").exists():
+                stats = get_repo_stats(repo_path)
+                repo_data.append({"name": repo_name, **stats})
+            else:
+                repo_data.append({"name": repo_name, "commits": 0, "diff": ""})
+        slots.append({
+            "number": int(d.name),
+            "branch": md.get("branch", ""),
+            "repos": repo_data,
+            "issue": md.get("issue", ""),
+            "issue_repo": md.get("issue_repo", ""),
+            "covers": md.get("covers", ""),
+            "context": md.get("context", ""),
+            "phase_a_timestamp": timestamp,
+        })
+    return slots
+
+
+def resolve_original_repo(worktree_path: Path) -> Path:
+    rc, common_dir, _ = run_cmd(
+        ["git", "-C", str(worktree_path), "rev-parse", "--git-common-dir"]
+    )
+    if rc != 0:
+        return worktree_path
+    common = Path(common_dir.strip())
+    if not common.is_absolute():
+        common = (worktree_path / common).resolve()
+    return common.parent
+
+
+def merge_slot(family_root: Path, slot_num: int) -> int:
+    slot_dir = family_root / "worktrees" / str(slot_num)
+    if not slot_dir.exists():
+        print(f"ERROR=slot_not_found slot={slot_num}")
+        return 1
+    if not (slot_dir / ".phase-a-complete").exists():
+        print(f"ERROR=not_ready slot={slot_num}")
+        return 1
+    if (slot_dir / ".landed").exists():
+        print(f"ERROR=already_landed slot={slot_num}")
+        return 1
+
+    branch = ""
+    for line in (slot_dir / ".phase-a-complete").read_text().splitlines():
+        if line.startswith("branch="):
+            branch = line.split("=", 1)[1]
+    if not branch:
+        print("ERROR=no_branch_in_marker")
+        return 1
+
+    repos = get_slot_repos(slot_dir)
+    if not repos:
+        print("ERROR=no_repos_in_slot")
+        return 1
+
+    progress_file = slot_dir / ".merge-progress"
+    pushed_repos: set[str] = set()
+    if progress_file.exists():
+        for line in progress_file.read_text().splitlines():
+            if "=pushed:" in line:
+                pushed_repos.add(line.split("=")[0])
+
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        print(f"STAGE=rebase ATTEMPT={attempt}")
+        for repo_name in repos:
+            slot_repo = slot_dir / repo_name
+            run_cmd(["git", "-C", str(slot_repo), "fetch", "origin", "main"])
+            rc, _, _ = run_cmd(["git", "-C", str(slot_repo), "rebase", "origin/main"])
+            if rc != 0:
+                run_cmd(["git", "-C", str(slot_repo), "rebase", "--abort"])
+                print("STAGE=rebase STATUS=fail")
+                print(f"ERROR=conflict repo={repo_name}")
+                return 1
+        print("STAGE=rebase STATUS=pass")
+
+        print(f"STAGE=push ATTEMPT={attempt}")
+        push_failed = False
+        landed_shas: dict[str, str] = {}
+
+        for repo_name in repos:
+            if repo_name in pushed_repos:
+                for line in progress_file.read_text().splitlines():
+                    if line.startswith(f"{repo_name}=pushed:"):
+                        parts = line.split(":", 1)
+                        if len(parts) == 2:
+                            landed_shas[repo_name] = parts[1]
+                continue
+
+            slot_repo = slot_dir / repo_name
+            original = resolve_original_repo(slot_repo)
+            rc, _, _ = run_cmd(["git", "-C", str(original), "fetch", "origin", "main"])
+            if rc != 0:
+                push_failed = True
+                print(f"WARN=fetch_failed repo={repo_name} attempt={attempt}")
+                break
+            rc, _, _ = run_cmd(["git", "-C", str(original), "rebase", "origin/main"])
+            if rc != 0:
+                push_failed = True
+                print(f"WARN=rebase_failed repo={repo_name} attempt={attempt}")
+                break
+            rc, _, _ = run_cmd(["git", "-C", str(original), "merge", "--ff-only", branch])
+            if rc != 0:
+                push_failed = True
+                print(f"WARN=ff_only_failed repo={repo_name} attempt={attempt}")
+                break
+            rc, _, _ = run_cmd(["git", "-C", str(original), "push", "origin", "main"])
+            if rc != 0:
+                push_failed = True
+                print(f"WARN=push_failed repo={repo_name} attempt={attempt}")
+                break
+
+            rc, sha, _ = run_cmd(["git", "-C", str(original), "rev-parse", "HEAD"])
+            sha = sha.strip() if rc == 0 else "unknown"
+            landed_shas[repo_name] = sha
+            with open(progress_file, "a") as f:
+                f.write(f"{repo_name}=pushed:{sha}\n")
+            pushed_repos.add(repo_name)
+
+        if push_failed:
+            if attempt < max_attempts:
+                continue
+            print("STAGE=push STATUS=fail")
+            print("ERROR=retry_exhausted")
+            return 1
+
+        if progress_file.exists():
+            progress_file.unlink()
+        shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
+        (slot_dir / ".landed").write_text(
+            f"branch={branch}\n"
+            f"repos={','.join(repos)}\n"
+            f"landed_shas={shas_str}\n"
+            f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+        )
+        print("STAGE=push STATUS=pass")
+        print(f"LANDED_SHAS={shas_str}")
+        return 0
+
+    return 1
+
+
+def archive_slot(family_root: Path, slot_num: int) -> None:
+    slot_dir = family_root / "worktrees" / str(slot_num)
+    if not slot_dir.exists():
+        print(f"ERROR=slot_not_found slot={slot_num}")
+        sys.exit(1)
+    for sub in slot_dir.iterdir():
+        if sub.is_dir() and (sub / ".git").exists():
+            rc, _, stderr = run_cmd(["git", "worktree", "remove", "--force", str(sub)])
+            if rc != 0:
+                print(f"WARN=worktree_remove_failed dir={sub.name} stderr={stderr.strip()}")
+    attic_dir = family_root / "worktrees" / "attic"
+    attic_dir.mkdir(exist_ok=True)
+    dest = attic_dir / str(slot_num)
+    shutil.move(str(slot_dir), str(dest))
+    print(f"ARCHIVED={slot_num}")
+
+
+def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
     worktrees_dir = family_root / "worktrees"
     if not worktrees_dir.exists():
         return []
@@ -235,9 +494,7 @@ def list_slots(family_root: Path) -> list[dict]:
             continue
         repos = [
             sub.name for sub in sorted(d.iterdir())
-            if sub.is_dir() and (sub / ".git").exists()
-            and sub.name != ".m2"
-            and not sub.name.startswith("work")
+            if sub.is_dir() and (sub / ".git").exists() and is_project_repo(sub.name)
         ]
         branch = ""
         slot_md = d / "SLOT.md"
@@ -247,7 +504,9 @@ def list_slots(family_root: Path) -> list[dict]:
                     branch = line.split("—", 1)[1].strip()
                     break
 
-        if (d / ".phase-a-complete").exists():
+        if (d / ".landed").exists():
+            state = "landed"
+        elif (d / ".phase-a-complete").exists():
             state = "ready to land"
         else:
             state = "active"
@@ -258,10 +517,25 @@ def list_slots(family_root: Path) -> list[dict]:
             "repos": repos,
             "state": state,
         })
+
+    if include_archived:
+        attic_dir = worktrees_dir / "attic"
+        if attic_dir.exists():
+            for d in sorted(attic_dir.iterdir()):
+                if not d.is_dir() or not d.name.isdigit():
+                    continue
+                md = parse_slot_md(d)
+                slots.append({
+                    "number": int(d.name),
+                    "branch": md.get("branch", ""),
+                    "repos": md.get("repos", []),
+                    "state": "archived",
+                })
+
     return slots
 
 
-def remove_slot(family_root: Path, slot_num: int) -> None:
+def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) -> None:
     slot_dir = family_root / "worktrees" / str(slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
@@ -271,8 +545,15 @@ def remove_slot(family_root: Path, slot_num: int) -> None:
         if sub.is_dir() and (sub / ".git").exists():
             run_cmd(["git", "worktree", "remove", "--force", str(sub)])
 
-    shutil.rmtree(slot_dir, ignore_errors=True)
-    print(f"REMOVED={slot_num}")
+    if force_delete:
+        shutil.rmtree(slot_dir, ignore_errors=True)
+        print(f"DELETED={slot_num}")
+    else:
+        attic_dir = family_root / "worktrees" / "attic"
+        attic_dir.mkdir(exist_ok=True)
+        dest = attic_dir / str(slot_num)
+        shutil.move(str(slot_dir), str(dest))
+        print(f"ARCHIVED={slot_num}")
 
 
 def parse_args() -> dict[str, str]:
@@ -322,9 +603,11 @@ def main() -> None:
 
     elif subcommand == "list-slots":
         family_root = Path(args.get("target", "."))
-        slots = list_slots(family_root)
+        include_archived = "--all" in sys.argv
+        slots = list_slots(family_root, include_archived=include_archived)
         for s in slots:
-            print(f"SLOT={s['number']} BRANCH={s['branch']} REPOS={','.join(s['repos'])} STATE={s['state']}")
+            repos_str = ",".join(s["repos"]) if isinstance(s["repos"], list) else s["repos"]
+            print(f"SLOT={s['number']} BRANCH={s['branch']} REPOS={repos_str} STATE={s['state']}")
         print(f"COUNT={len(slots)}")
 
     elif subcommand == "remove-slot":
@@ -333,7 +616,29 @@ def main() -> None:
         if slot_num == 0:
             print("ERROR=missing_slot_number")
             sys.exit(1)
-        remove_slot(family_root, slot_num)
+        force_delete = "--force-delete" in sys.argv
+        remove_slot(family_root, slot_num, force_delete=force_delete)
+
+    elif subcommand == "scan-ready":
+        family_root = Path(args.get("target", "."))
+        slots = scan_ready(family_root)
+        print(json.dumps({"slots": slots}, indent=2))
+
+    elif subcommand == "merge-slot":
+        family_root = Path(args.get("target", "."))
+        slot_num = int(args.get("slot", "0"))
+        if slot_num == 0:
+            print("ERROR=missing_slot_number")
+            sys.exit(1)
+        sys.exit(merge_slot(family_root, slot_num))
+
+    elif subcommand == "archive-slot":
+        family_root = Path(args.get("target", "."))
+        slot_num = int(args.get("slot", "0"))
+        if slot_num == 0:
+            print("ERROR=missing_slot_number")
+            sys.exit(1)
+        archive_slot(family_root, slot_num)
 
     else:
         print(f"ERROR=unknown_subcommand subcommand={subcommand}", file=sys.stderr)

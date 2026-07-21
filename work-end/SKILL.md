@@ -551,8 +551,10 @@ git -C <slot>/<repo> commit --allow-empty -m "chore: branch closed — landed as
 git -C <slot>/work commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
 ```
 
-**B7. Cleanup.** `git worktree remove` for each repo + workspace
-worktree in the slot. Remove the slot directory.
+**B7. Archive.** `git worktree remove` for each repo + workspace
+worktree in the slot. Move the slot directory to `worktrees/attic/<N>/`
+(preserves SLOT.md and marker files for auditing). Use `archive-slot`
+from `slot_manager.py` — do not delete the slot directory.
 
 **B8. Post-merge steps.** Steps 8k–12 from normal work-end.
 

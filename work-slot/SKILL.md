@@ -4,7 +4,8 @@ description: >
   Use when creating parallel worktree slots for multi-repo family work —
   user says "create a slot", "spin up a worktree for issue #N", "parallel
   work on engine and iot", or invokes /work-slot. Also use "work-slot list"
-  to see slot status and "work-slot remove" to clean up abandoned slots.
+  to see slot status, "work-slot remove" to archive abandoned slots, and
+  "work-slot merge" to land ready slots from the main repo.
   NOT for single-repo worktree isolation (use using-git-worktrees for that).
 slash-command: true
 ---
@@ -15,6 +16,15 @@ Create and manage numbered worktree slots for parallel development across
 a multi-repo family. Each slot is a self-contained work environment with
 isolated `.m2`, re-pointed symlinks, and a context file for the session
 that works there.
+
+## Slot Lifecycle
+
+| State | Marker | Meaning |
+|-------|--------|---------|
+| `active` | slot dir exists, no markers | Work in progress |
+| `ready to land` | `.phase-a-complete` | Phase A done, awaiting merge |
+| `landed` | `.landed` | Merged to main, awaiting archive |
+| `archived` | in `worktrees/attic/<N>/` | Worktrees removed, metadata kept |
 
 ---
 
@@ -121,13 +131,142 @@ Format output as a table:
 
 ## `work-slot remove <N>`
 
-> "Remove slot <N>? This will delete the worktrees and all local changes. (y/n)"
+> "Archive slot <N>? Git worktrees will be removed but SLOT.md and
+> markers are preserved in `worktrees/attic/<N>/`. (y/n)"
 
 Wait for confirmation. Then:
 
 ```bash
 python3 ~/.claude/skills/work-slot/slot_manager.py remove-slot <family-root> slot=<N>
 ```
+
+**Default behaviour is archive to attic, not delete.** The slot directory
+moves to `worktrees/attic/<N>/` preserving SLOT.md, `.phase-a-complete`,
+`.landed`, and any other metadata for auditing and branch hygiene.
+
+**Never pass `--force-delete`** unless the user explicitly says "permanently
+delete" or "destroy". Archived slots cost nothing and enable branch hygiene
+scans, blog recovery, and stamp verification.
+
+---
+
+## `work-slot merge`
+
+Merge ready-to-land slots from the main repo. Runs the full Phase B
+sequence: rebase, push, close issues, promote artifacts, stamp, archive.
+
+### Step 1 — Find family root
+
+Walk up from CWD looking for a directory that is not itself a git repo
+and contains child directories with `wksp` symlinks. For each candidate,
+verify its child repos have `.git` directories (not files) — worktree
+checkouts have `.git` files and must be skipped.
+
+If the walk-up fails, ask:
+> "Which directory is the family root? (e.g., ~/claude/casehub)"
+
+### Step 2 — Scan and present
+
+```bash
+python3 ~/.claude/skills/work-slot/slot_manager.py scan-ready <family-root>
+```
+
+Parse the JSON output. For each slot, fetch the issue title:
+```bash
+gh issue view <issue-number> --repo <issue-repo> --json title --jq '.title'
+```
+
+Present the rich listing:
+```
+Slots ready to merge:
+
+  [1] issue-42-spi
+      Repos: engine (3 commits, +142/-38)
+      Issue: casehubio/engine#42 — "Add expression SPI"
+      Context: Implement SPI for pluggable expression evaluation
+      Phase A completed: 2026-07-18 14:32
+
+Merge which slot? (number, or "all")
+```
+
+If no slots are ready: "No slots ready to merge." Stop.
+
+### Step 3 — Pre-check
+
+For every original repo across all selected slots, verify:
+1. Main checked out
+2. Clean working tree (`git -C <repo> status --short` is empty)
+3. No unpushed commits (`git -C <repo> log origin/main..main --oneline`
+   is empty)
+4. Fetch origin — warn if remote is ahead (non-blocking)
+
+If any check fails, stop and report which repo failed and why.
+
+### Step 4 — Merge each slot
+
+For each selected slot, in order:
+
+**4a. Rebase and push:**
+```bash
+python3 ~/.claude/skills/work-slot/slot_manager.py merge-slot <family-root> slot=<N>
+```
+
+Read output. If `ERROR=conflict`: stop, report which repo conflicted.
+If `ERROR=retry_exhausted`: stop, provide manual instructions.
+If `STAGE=push STATUS=pass`: continue to 4b.
+
+**4b. Post-merge actions** (skill handles these):
+- Close issues:
+  ```bash
+  python3 ~/.claude/skills/work-end/artifact_promote.py close-issues <issue-repo> covers=<covers>
+  ```
+- Promote artifacts from slot workspace to original workspace:
+  ```bash
+  python3 ~/.claude/skills/work-end/artifact_promote.py to-workspace-main <original-workspace> branch=<branch> artifacts=<paths>
+  ```
+- Clean up specs in slot workspace:
+  ```bash
+  python3 ~/.claude/skills/work-end/artifact_promote.py cleanup-specs <slot-workspace> branch=<branch>
+  ```
+- Publish blog:
+  ```bash
+  python3 ~/.claude/skills/work-end/blog_dest.py <original-workspace>/blog <branch>
+  ```
+
+**4c. Stamp branches** — empty commits in slot worktrees:
+```bash
+git -C <slot>/<repo> commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
+```
+Stamp ALL workspace worktrees too (discover dynamically: scan slot dir
+for directories starting with `work` that contain `.git`).
+
+**4d. Mark closed:**
+```bash
+python3 ~/.claude/skills/work-end/branch_cleanup.py create-epic-closed \
+  <slot>/<primary-workspace> branch=<branch> date=$(date +%Y-%m-%d) \
+  issues=<covers> single-repo=no
+```
+
+**4e. Archive:**
+```bash
+python3 ~/.claude/skills/work-slot/slot_manager.py archive-slot <family-root> slot=<N>
+```
+
+If archive fails: report error but do NOT roll back — code is on main.
+Report manual cleanup commands.
+
+### Step 5 — Report
+
+```
+✅ Slot <N> merged and archived
+   Branch: <branch>
+   Repos: <list>
+   Issues closed: #<covers>
+   Artifacts promoted: <count>
+```
+
+If "all" was selected, repeat Step 4 for next slot. If any slot fails at
+4a, stop — report which slot failed and that prior slots landed.
 
 ---
 
@@ -157,6 +296,10 @@ python3 ~/.claude/skills/work-slot/slot_manager.py remove-slot <family-root> slo
 - Does not run work-start — the human does that in the new session
 - Does not merge to main — work-end Phase B handles that
 - Does not coordinate between slots — the human sequences merges
+- **Does not delete slots** — all cleanup paths archive to
+  `worktrees/attic/<N>/`. Deletion requires explicit `--force-delete`
+  from the user. An archived slot costs nothing; a deleted slot loses
+  branch hygiene data, blog entries, and audit trail permanently.
 
 ---
 
@@ -169,9 +312,12 @@ python3 ~/.claude/skills/work-slot/slot_manager.py remove-slot <family-root> slo
 
 **Complements:**
 - `work-start` — runs inside the slot after creation (resume path)
-- `work-end` — handles Phase A/B in slot context
+- `work-end` — Phase A writes `.phase-a-complete`; work-slot merge reads
+  it and runs Phase B externally. Phase B from inside the slot still works.
 - `using-git-worktrees` — same git primitive, different use case
   (single-repo ephemeral isolation for subagent dispatch)
 - `handover` — HANDOFF.md for session handoffs (SLOT.md is slot context,
   distinct from session handoff)
 - `issue-workflow` — activate-issues called during slot creation
+- `artifact_promote.py` / `blog_dest.py` / `branch_cleanup.py` — shared
+  scripts used by both work-end Phase B and work-slot merge
