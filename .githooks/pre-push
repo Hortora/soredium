@@ -34,6 +34,16 @@ while read local_ref local_sha remote_ref remote_sha; do
   # approximated by looking for fixup-style prefixes not caught above
   small=$(git log --oneline "$range" 2>/dev/null | grep -cE "^[a-f0-9]+ (fix|chore|style|docs)\([^)]+\): .{1,30}$" | grep -v "#" || true)
 
+  # Block AI attribution that survived commit-msg stripping
+  ai_lines=$(git log --format="%B" "$range" 2>/dev/null | grep -ciE "^[[:space:]]*(Co-Authored-By|Generated-by|AI-assisted):" || true)
+  if [ "$ai_lines" -gt 0 ]; then
+    echo ""
+    echo "  Push blocked — $ai_lines commit(s) contain AI attribution lines."
+    echo "  Run: git rebase -i and amend the affected commits to remove them."
+    echo ""
+    exit 1
+  fi
+
   if [ "$candidates" -gt 0 ]; then
     echo ""
     echo "╔══════════════════════════════════════════════════════════╗"

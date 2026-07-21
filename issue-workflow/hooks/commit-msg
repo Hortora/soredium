@@ -1,6 +1,11 @@
 #!/bin/bash
-# commit-msg hook: require issue reference or explicit no-issue bypass
+# commit-msg hook: strip AI attribution and require issue reference.
 # Installed by issue-workflow when Work Tracking is enabled.
+
+# Strip Co-Authored-By, Generated-by, AI-assisted lines (case-insensitive)
+sed -i '' -E '/^[[:space:]]*(Co-Authored-By|Generated-by|AI-assisted):/Id' "$1"
+# Remove trailing blank lines left by stripping
+sed -i '' -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$1"
 
 MSG=$(cat "$1")
 
