@@ -545,7 +545,23 @@ Operations reading from the branch use the **slot workspace worktree**.
 **B5. Publish blog entries (8g).** Run against the **original workspace**.
 
 **B6. Stamp branches as closed.** Both project and workspace branches.
-Run in the **slot worktrees** (where the branches are checked out):
+
+**Content verification before stamping (mandatory):**
+
+Before writing any stamp, verify the branch content actually landed on main.
+Compare source files between the branch and main — if there's a diff, content
+was lost during squash and the stamp would be a lie.
+
+```bash
+python3 ~/.claude/skills/work-end/verify_stamp.py <slot>/<repo> <branch> main
+```
+
+Read `VERIFIED=yes` from output. If `VERIFIED=no`, the script prints the
+missing files. **Hard stop — do not stamp.** Report the content gap and
+instruct the user to investigate before proceeding.
+
+Only after verification passes, stamp in the **slot worktrees** (where the
+branches are checked out):
 ```bash
 git -C <slot>/<repo> commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
 git -C <slot>/work commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
@@ -968,6 +984,30 @@ After all pushes complete (fork and optionally blessed), stamp the project branc
 The stamp includes the SHA that landed on the base branch so branch auditing tools
 can verify content landed without tree diffs — `git log -1 --format="%s" <branch>`
 immediately tells you the branch is archived AND where the content went.
+
+**Content verification before stamping (mandatory):**
+
+Before writing the stamp, verify the branch content actually landed on the base
+branch. This catches two failure modes: (a) squash plans that dropped commit
+groups, losing content silently, and (b) stacked branches where the rebase target
+was another feature branch, not the base branch.
+
+```bash
+python3 ~/.claude/skills/work-end/verify_stamp.py "$PROJECT" "$BRANCH_NAME" "$PROJECT_BASE_BRANCH"
+```
+
+Read `VERIFIED=yes` from output. If `VERIFIED=no`, the script prints the files
+that differ between the branch and the base branch. **Hard stop — do not stamp.**
+Report the content gap:
+
+> "⚠️ Content verification failed — the following source files on `$BRANCH_NAME`
+> are not reflected on `$PROJECT_BASE_BRANCH`. The squash may have dropped commits.
+> Investigate before stamping."
+
+Do not offer to stamp anyway. A false stamp is worse than no stamp — it marks the
+branch as archived when its content never landed, and the work becomes invisible.
+
+Only after `VERIFIED=yes`:
 
 ```bash
 LANDED_SHA=$(git -C "$PROJECT" rev-parse HEAD)

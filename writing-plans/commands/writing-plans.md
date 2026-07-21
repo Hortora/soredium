@@ -1,5 +1,5 @@
 ---
-description: "Use when you have a spec or requirements for a multi-step task, before touching code"
+description: "Use when you have a spec or requirements for a multi-step task, before touching code. Writes a st..."
 ---
 
 Invoke the `writing-plans` skill.

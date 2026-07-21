@@ -1,5 +1,5 @@
 ---
-description: "Use when writing any piece of content — project diary entry, blog post, article, note, brief, REA..."
+description: "Use when writing a diary entry, note, article, brief, README, technical documentation section, or..."
 ---
 
 Invoke the `write-content` skill.

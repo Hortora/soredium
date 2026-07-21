@@ -114,14 +114,17 @@ Then read the file and present the resume output using this structure:
 Single specific action right now — procedural or unblocking (e.g. "run /work", "delete branches", "fix X in Y").
 
 **## Cross-Module**
-Only include if there are **active** cross-module blockers — work that cannot proceed until another repo ships something, or another repo waiting on us to ship something. Each item must reference a tracked issue.
+Only include if there are **active** cross-module relationships — blocking, enabled, or blocked-by. Each item must reference a tracked issue. Omit the section entirely if none apply.
 
-Do NOT include static architectural dependencies (e.g., "module X uses SPI Y from repo Z"). Those belong in CLAUDE.md's module documentation, not in a handover. The test: "Is there an action someone in another repo needs to take before we can proceed?" If no — omit. If the answer is "yes, but there's no issue tracking it" — file the issue first, then list it here with the reference.
+Do NOT include static architectural dependencies (e.g., "module X uses SPI Y from repo Z"). Those belong in CLAUDE.md's module documentation, not in a handover. The test: "Is there an action that needs to happen — by us, by them, or in a downstream repo — before something can proceed?" If no — omit. If the answer is "yes, but there's no issue tracking it" — file the issue first, then list it here with the reference.
 
-**We're blocking** (other modules waiting on us — treat as high priority):
-- `<module>` — what they need from us (gates repo#N) · Scale · Complexity
+**Blocking** (we owe something another repo needs — we are the bottleneck, treat as high priority):
+- `<module>` — what we owe (gates repo#N) · Scale · Complexity
 
-**Blocked by** (can't proceed until):
+**Enabled** (we delivered our part, downstream work is now unblocked but not yet done — track so we pick it up or chase it):
+- `<module>` — what's now ready (repo#N) · Scale · Complexity
+
+**Blocked by** (work in this repo can't proceed because another repo hasn't shipped something — wait or escalate):
 - `<module>` — what we need from them (gates #N) · Scale · Complexity
 
 **## What's Left**

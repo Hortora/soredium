@@ -1,5 +1,5 @@
 ---
-description: ""You MUST use this before any creative work - creating features, building components, adding func..."
+description: "Use when starting any creative work — creating features, building components, adding functionalit..."
 ---
 
 Invoke the `brainstorming` skill.
