@@ -75,6 +75,32 @@ def create_proj_symlink(ws_subdir: Path, repo_worktree: Path) -> None:
     proj.symlink_to(rel)
 
 
+def replicate_claude_md(repo_path: Path, ws_subdir: Path, repo_worktree: Path) -> None:
+    orig_wksp = repo_path / "wksp"
+    if not orig_wksp.is_symlink():
+        return
+    orig_ws_target = orig_wksp.resolve()
+    orig_claude = orig_ws_target / "CLAUDE.md"
+    if not orig_claude.exists():
+        return
+
+    ws_claude = ws_subdir / "CLAUDE.md"
+    proj_claude = repo_worktree / "CLAUDE.md"
+
+    if orig_claude.is_symlink():
+        # Workspace symlink → project real file (most repos).
+        # Project worktree already has the file (git-tracked).
+        if not ws_claude.exists():
+            ws_claude.symlink_to("proj/CLAUDE.md")
+    else:
+        # Workspace real file → project symlink (e.g. pages).
+        # Copy to workspace subdir, symlink from project worktree.
+        if not ws_claude.exists():
+            shutil.copy2(str(orig_claude), str(ws_claude))
+        if not proj_claude.exists():
+            proj_claude.symlink_to("wksp/CLAUDE.md")
+
+
 def sync_main(repo_path: str) -> None:
     rc, _, _ = run_cmd(["git", "-C", repo_path, "fetch", "origin"])
     if rc != 0:
@@ -170,6 +196,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 ws_subdir.mkdir(parents=True, exist_ok=True)
                 repoint_wksp(slot_dir / repo_name, ws_subdir)
                 create_proj_symlink(ws_subdir, slot_dir / repo_name)
+                replicate_claude_md(repo_path, ws_subdir, slot_dir / repo_name)
 
     primary_repo = repos[0]
     primary_wksp = slot_dir / primary_repo / "wksp"
