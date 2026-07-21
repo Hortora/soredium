@@ -155,6 +155,23 @@ python scripts/validate_document.py <file>
 **If no .md files found:**
 - Continue to Step 2
 
+### Step 1d — Lockfile sync (Yarn workspaces)
+
+If any `package.json` is staged and a `yarn.lock` exists in the project root,
+run `yarn install` to regenerate the lockfile. If `yarn.lock` changed, stage it
+automatically. This ensures workspace package additions, dependency changes, and
+version bumps always land with a current lockfile.
+
+```bash
+python3 ~/.claude/skills/git-commit/commit_exec.py sync-lockfile <project>
+```
+
+Read `LOCKFILE_SYNC` from output:
+- `skip` — no package.json staged or no yarn.lock present, continue
+- `staged` — yarn.lock updated and staged, continue
+- `unchanged` — yarn.lock was already current, continue
+- `error` — yarn install failed, warn user and ask whether to proceed
+
 ### Step 2 — Issue linking and commit split check (if Work Tracking enabled)
 
 Read `ISSUES_STATUS` from the ctx.py output (already run in Step 0).

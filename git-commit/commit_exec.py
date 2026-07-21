@@ -107,6 +107,44 @@ def stage_docs(project: str, files: list[str]) -> int:
     return 0
 
 
+def sync_lockfile(project: str) -> int:
+    """Check for staged package.json and sync yarn.lock if needed."""
+    ok, staged = run_git(project, "diff", "--cached", "--name-only")
+    if not ok:
+        print("LOCKFILE_SYNC=skip")
+        return 0
+
+    has_package_json = any("package.json" in f for f in staged.splitlines())
+    if not has_package_json:
+        print("LOCKFILE_SYNC=skip")
+        return 0
+
+    import os
+    yarn_lock = os.path.join(project, "yarn.lock")
+    if not os.path.exists(yarn_lock):
+        print("LOCKFILE_SYNC=skip")
+        return 0
+
+    result = subprocess.run(
+        ["yarn", "install"],
+        capture_output=True,
+        text=True,
+        cwd=project,
+    )
+    if result.returncode != 0:
+        print(f"LOCKFILE_SYNC=error")
+        print(f"YARN_STDERR={result.stderr.strip()[:200]}")
+        return 1
+
+    ok, diff = run_git(project, "diff", "--name-only", "--", "yarn.lock")
+    if ok and diff.strip():
+        run_git(project, "add", "yarn.lock")
+        print("LOCKFILE_SYNC=staged")
+    else:
+        print("LOCKFILE_SYNC=unchanged")
+    return 0
+
+
 def parse_kv_args(args: list[str]) -> dict[str, str]:
     """Parse key=value arguments into dict."""
     result: dict[str, str] = {}
@@ -154,6 +192,13 @@ def main() -> int:
         files_csv = kv.get("files", "")
         files = [f.strip() for f in files_csv.split(",") if f.strip()]
         return stage_docs(project, files)
+
+    elif cmd == "sync-lockfile":
+        if len(sys.argv) < 3:
+            print("ERROR=missing_args")
+            return 1
+        project = sys.argv[2]
+        return sync_lockfile(project)
 
     else:
         print("ERROR=unknown_subcommand")
