@@ -312,6 +312,18 @@ Defaults: all six on. The user may deselect any that clearly don't apply (e.g. "
 immediately if the branch was a one-line typo fix). Do not auto-skip — the point is
 to make the decision explicit.
 
+<SESSION-BOUND-ITEMS>
+**Items 1, 3, 4 (write-content, protocol sweep, forage sweep) are session-bound.**
+They depend on conversation context that does not survive to the next session.
+They cannot be deferred — "defer to next session" means "lose forever." If the
+session is wrapping mid-work (handover, not work-end), these three must still run
+before the session ends. The user may skip them explicitly, but the skill must
+never offer "defer" as an option for these items.
+
+Items 2, 5, 6 (adr, update-claude-md, implementation-doc-sync) work from file
+state and git history — they can be deferred to a continuation session if needed.
+</SESSION-BOUND-ITEMS>
+
 Run checked items in this order:
 1. **Forage sweep** — while context is full; findings may feed the blog entry
 2. **Protocol sweep** — while context is full (invoke `protocol` skill with `SWEEP` operation)

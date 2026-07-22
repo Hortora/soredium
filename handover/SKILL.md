@@ -266,6 +266,18 @@ Type numbers to toggle (e.g. "2 6"), "all" to toggle all on/off, or "go" to proc
 ```
 
 - **Default:** write-content (diary), update-claude-md, forage sweep, protocol sweep ticked; journal-entry depends on epic state (see below).
+
+<SESSION-BOUND-ITEMS>
+**Items 1, 3, 4 (write-content, forage sweep, protocol sweep) are session-bound.**
+They depend on conversation context that does not survive to the next session.
+They cannot be deferred — "defer to next session" means "lose forever." The user
+may skip them explicitly, but the skill must never offer "defer" as an option.
+Write-content can write a partial diary draft (the next session can append to it).
+
+Items 2, 5, 6, 7 (update-claude-md, journal-entry, epic hygiene, arc42 stale scan)
+work from file state and git history — they can be deferred if needed.
+</SESSION-BOUND-ITEMS>
+
 - **protocol sweep is on by default** — scans the session for project-specific rules worth formalising. Skip it for sessions that worked purely in universal tools with no project-specific rules established or re-enforced. The protocol skill creates `docs/protocols/` if it does not exist — never skip the sweep because the directory is absent.
 - **journal-entry is ON by default when on an epic branch** — check `ls design/.meta 2>/dev/null` before showing the checklist. If `.meta` exists the session is mid-epic and design reasoning is about to be lost; default journal-entry to ON. If not on an epic branch, default to OFF.
 - **epic hygiene is ON by default when a workspace is configured** — check `**Workspace:**` in CLAUDE.md. Runs these checks and surfaces any issues before the session ends:

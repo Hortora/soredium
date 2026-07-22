@@ -53,6 +53,14 @@ What are you writing?
 
 **Diary taxonomy note:** Diary is promoted to a top-level form for UX convenience, but is implemented as a Note subtype internally (`entry_type: note, subtype: diary`). This affects frontmatter generation, not the writing workflow.
 
+**Cross-session diary entries:** A diary entry can span multiple sessions.
+Write what you have now — the entry does not need to be complete to be
+written to disk. The next session can read the unpublished draft and
+append to it. Publish only when the entry covers the full arc. This is
+important because session context is lost at session end — writing
+nothing means the session's narrative is gone. Writing a partial draft
+preserves it for the continuation session to build on.
+
 ### Q2 — Sub-type or section
 
 Show only when Q1 result has sub-types. Omit for Diary, Brief, README, News (fixed mode — go to Q3).
