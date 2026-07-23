@@ -616,8 +616,8 @@ branch AND present it to the user before asking for approval. Never skip this st
 Never execute Step 6 without having shown the plan and received YES.
 
 ```bash
-# Determine plan path — check ## Artifact Locations in CLAUDE.md first
-PLAN_FILE="docs/superpowers/specs/squash-plan-$(date +%Y-%m-%d).md"
+# Squash plan — ephemeral working doc, stays on the branch
+PLAN_FILE="squash-plan-$(date +%Y-%m-%d).md"
 ```
 
 Write the complete plan (all groups, three-column tables, curated results, AFTER block)

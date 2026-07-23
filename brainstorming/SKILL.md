@@ -47,8 +47,8 @@ You MUST create a task for each of these items and complete them in order:
 3. **Propose 2-3 approaches** — with trade-offs and your recommendation
 4. **Present design** — in sections scaled to complexity, get user approval
    after each section
-5. **Write design doc** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md`
-   and commit
+5. **Write design doc** — save to `$WORKSPACE/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
+   and commit (if no workspace, fall back to `docs/specs/` in the project)
 6. **Spec self-review** — quick inline check for placeholders,
    contradictions, ambiguity, scope (see below)
 7. **User reviews written spec** — ask user to review before proceeding
@@ -160,8 +160,8 @@ writing-plans.
 
 ### Documentation
 
-- Write the validated design (spec) to `docs/specs/YYYY-MM-DD-<topic>-design.md`
-  (user preferences for spec location override this default)
+- Write the validated design (spec) to `$WORKSPACE/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
+  (if no workspace or branch, fall back to `docs/specs/` in the project)
 - Commit the design document to git
 
 ### Spec Self-Review
