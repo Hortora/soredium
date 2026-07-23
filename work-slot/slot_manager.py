@@ -467,6 +467,28 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     return 1
 
 
+def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
+    """Move .claude/projects/ directories to match the slot's new attic path."""
+    claude_projects = Path.home() / ".claude" / "projects"
+    if not claude_projects.is_dir():
+        return 0
+
+    slot_path_encoded = str(slot_dir).replace("/", "-")
+    dest_path_encoded = str(dest_dir).replace("/", "-")
+    moved = 0
+
+    for proj_dir in claude_projects.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        if slot_path_encoded in proj_dir.name:
+            new_name = proj_dir.name.replace(slot_path_encoded, dest_path_encoded)
+            new_path = claude_projects / new_name
+            if not new_path.exists():
+                shutil.move(str(proj_dir), str(new_path))
+                moved += 1
+    return moved
+
+
 def archive_slot(family_root: Path, slot_num: int) -> None:
     slot_dir = family_root / "worktrees" / str(slot_num)
     if not slot_dir.exists():
@@ -480,7 +502,10 @@ def archive_slot(family_root: Path, slot_num: int) -> None:
     attic_dir = family_root / "worktrees" / "attic"
     attic_dir.mkdir(exist_ok=True)
     dest = attic_dir / str(slot_num)
+    moved = relocate_claude_projects(slot_dir, dest)
     shutil.move(str(slot_dir), str(dest))
+    if moved:
+        print(f"CLAUDE_PROJECTS_MOVED={moved}")
     print(f"ARCHIVED={slot_num}")
 
 
@@ -552,7 +577,10 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
         attic_dir = family_root / "worktrees" / "attic"
         attic_dir.mkdir(exist_ok=True)
         dest = attic_dir / str(slot_num)
+        moved = relocate_claude_projects(slot_dir, dest)
         shutil.move(str(slot_dir), str(dest))
+        if moved:
+            print(f"CLAUDE_PROJECTS_MOVED={moved}")
         print(f"ARCHIVED={slot_num}")
 
 

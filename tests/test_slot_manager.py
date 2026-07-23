@@ -521,6 +521,28 @@ class TestArchiveSlot:
         assert (attic_slot / ".phase-a-complete").exists()
         assert (attic_slot / ".landed").exists()
 
+    def test_relocates_claude_projects(self, tmp_path, monkeypatch):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+
+        fake_home = tmp_path / "home"
+        claude_projects = fake_home / ".claude" / "projects"
+        claude_projects.mkdir(parents=True)
+        slot_path_encoded = str(slot / "engine").replace("/", "-")
+        proj_dir = claude_projects / slot_path_encoded
+        proj_dir.mkdir()
+        (proj_dir / "memory.md").write_text("session memory")
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        slot_manager.archive_slot(family, 1)
+
+        assert not proj_dir.exists()
+        attic_path = family / "worktrees" / "attic" / "1"
+        dest_encoded = str(attic_path / "engine").replace("/", "-")
+        moved_dir = claude_projects / dest_encoded
+        assert moved_dir.exists()
+        assert (moved_dir / "memory.md").read_text() == "session memory"
+
     def test_not_found_exits(self, tmp_path, capsys):
         family = tmp_path / "family"
         (family / "worktrees").mkdir(parents=True)
