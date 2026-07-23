@@ -593,35 +593,41 @@ from `slot_manager.py` — do not delete the slot directory.
 Failures are reported but do not stop remaining steps, **except**: journal merge
 failure prompts the user before continuing to issue close.
 
-### 8a — Batch workspace-main operations (single main-visit)
+### 8a — Close artifacts (single script call)
 
-Build a comma-separated list of all workspace-routed artifact paths from the Step 4
-inventory (blog entries, snapshots, plan files to archive, etc.). Include plan files
-that need archiving — the script handles `mkdir -p` and `mv` to `plans/attic/` internally.
+Run the unified artifact promotion script:
 
-Run: `python3 ~/.claude/skills/work-end/artifact_promote.py to-workspace-main <WORKSPACE> branch=<BRANCH_NAME> artifacts=<comma-sep-paths>`
-Read `PROMOTED=<count>` and `PUSHED=yes|no` from output.
+```bash
+python3 ~/.claude/skills/work-end/close_artifacts.py \
+  <WORKSPACE> <PROJECT> <BRANCH_NAME> \
+  issue-repo=<ISSUE_REPO> covers=<COVERS>
+```
 
-**WORKSPACE DESIGN REPO CASE:** If `$DESIGN_REPO_KEY = workspace`, the journal merge
-must also happen during this main-visit. After the script returns, cherry-pick
-JOURNAL.md from the epic branch and run the 8d merge steps on workspace main
-(baseline=$PROJECT_SHA, target=$WORKSPACE/ARC42STORIES.MD). Commit the merged ARC42STORIES.MD
-and push. Then 8d is complete for the workspace case — skip the 8d block below.
+Read output KEY=value lines:
+- `WORKSPACE_PROMOTED=N` — artifacts promoted to workspace main
+- `PROJECT_PROMOTED=N` — artifacts promoted to project repo
+- `SPECS_CLEANED=N` — spec files cleaned from workspace branch
+- `ISSUES_CLOSED=N` — GitHub issues closed
+- `BLOG_PUBLISHED=N` — blog entries published to destination
+- `BLOG_DEST=<path>` — resolved blog destination
+- `PLANS_ARCHIVED=N` — plans moved to `plans/attic/<branch>/`
+- `STAMP=<path>` — `.artifacts-promoted` stamp (only on full success)
 
-### 8b — Project-routed artifact promotion (ADRs, specs)
+If exit code is 0: all operations succeeded, stamp written. Continue.
+If exit code is 1 (fatal): stop. Report the error.
+If exit code is 2 (partial): report `FAILURES=` output. Ask user whether
+to retry or proceed without the stamp. The stamp is NOT written on partial
+failure — Step 8j will block the push.
 
-Build a comma-separated list of all project-routed artifact paths from the Step 4
-inventory (ADRs, specs, etc.) — paths relative to the workspace root.
+**This replaces the previous Steps 8a-8c, 8f, and 8g.** The script
+internally resolves routing from CLAUDE.md, scans the workspace for
+artifacts, calls `artifact_promote.py` and `blog_dest.py` with the
+correct arguments, and writes the completion stamp.
 
-Run: `python3 ~/.claude/skills/work-end/artifact_promote.py to-project <PROJECT> <WORKSPACE> artifacts=<comma-sep-paths>`
-Read `PROMOTED=<count>` and `PUSHED=yes|no` from output. If `PUSHED=no`, report the push failure but continue.
-
-### 8c — Spec cleanup (only if 8b push exit code was 0)
-
-If 8b push failed, skip entirely — workspace copy is the only remaining copy.
-
-Run: `python3 ~/.claude/skills/work-end/artifact_promote.py cleanup-specs <WORKSPACE> branch=<BRANCH_NAME>`
-Read `CLEANED=<count>` and `PUSHED=yes|no` from output.
+**WORKSPACE DESIGN REPO CASE:** If `$DESIGN_REPO_KEY = workspace`, the
+journal merge must happen separately — `close_artifacts.py` does not
+handle journal merges (they require interactive user approval). Run
+8d after 8a completes.
 
 ### 8d — Journal merge
 
@@ -653,46 +659,26 @@ Post selected specs (from Step 6) as collapsible comments on the GitHub issue.
 
 ### 8f — Issue close
 
-Only if tracking enabled and `$COVERS` is non-empty. Close every issue in `$COVERS`
-(comma-separated). `COVERS` always includes the primary `ISSUE_N` so no separate
-call for the primary is needed.
-
-Run: `python3 ~/.claude/skills/work-end/artifact_promote.py close-issues <ISSUE_REPO> covers=<COVERS>`
-Read `CLOSED=<count>` from output. If `ERRORS=` is present, report which issues failed.
+**Handled by 8a** (`close_artifacts.py` closes all issues in COVERS).
+Read `ISSUES_CLOSED=N` from 8a output.
 
 ### 8g — Publish blog
 
-**Run on workspace main** (switch if needed — workspace must be on main when this runs).
-
-Resolve the blog destination from `~/.claude/blog-routing.yaml`. For each workspace blog
-entry not yet present at the destination, copy and commit:
-
-```bash
-python3 ~/.claude/skills/work-end/blog_dest.py <WORKSPACE>/blog <BRANCH_NAME>
-```
-
-The script outputs `BLOG_DEST`, `BLOG_REPO`, `BLOG_SUBDIR`, and `UNPUBLISHED` (comma-separated filenames).
-It also copies unpublished entries to the destination. Then commit and push:
-```bash
-git -C <BLOG_REPO> add <BLOG_SUBDIR>/
-git -C <BLOG_REPO> commit -m "chore: publish blog entries from <BRANCH_NAME>"
-git -C <BLOG_REPO> push
-```
-Skip the commit if UNPUBLISHED is empty.
-
-**Hard stop if blog directory has entries and publish fails.** Do not proceed to 8h until
-every workspace blog entry exists at the destination. Verify with the same `comm` check.
+**Handled by 8a** (`close_artifacts.py` publishes blog entries via `blog_dest.py`).
+Read `BLOG_PUBLISHED=N` and `BLOG_DEST=<path>` from 8a output.
 
 ### 8h — Final report
 
+Build from `close_artifacts.py` output (Step 8a):
+
 ```
-✅ ADRs → project
-✅ Specs → project
-✅ Blog → workspace
-✅ Plans → attic
-✅ Journal merged → ARC42STORIES.MD (N sections)
-✅ Specs posted to #N, issue closed
-✅ Blog published → <destination path> (N new entries)   ← "0 new (all current)" if nothing to publish
+✅ Artifacts promoted: PROJECT_PROMOTED to project, WORKSPACE_PROMOTED to workspace
+✅ Specs cleaned: SPECS_CLEANED
+✅ Plans archived: PLANS_ARCHIVED
+✅ Issues closed: ISSUES_CLOSED
+✅ Blog published → BLOG_DEST (BLOG_PUBLISHED new entries)
+✅ Journal merged → ARC42STORIES.MD (N sections)  ← from 8d
+✅ Specs posted to #N  ← from 8e
 ❌ Push failed — <path>. Run: git -C <path> push
 ```
 
@@ -957,6 +943,21 @@ Agent(
 
 5. If user explicitly says "skip squash" or "no squash needed": accept
    and note it, then proceed. Never silently skip.
+
+**Artifact promotion stamp check (mandatory before push):**
+
+Before pushing, verify the `.artifacts-promoted` stamp exists on the
+workspace branch:
+
+```bash
+[ -f "$WORKSPACE/design/.artifacts-promoted" ] || echo "MISSING"
+```
+
+If missing: **hard stop.** Do not push. Return to Step 8a.
+If present: verify `branch=` field matches `$BRANCH_NAME`.
+
+The stamp proves `close_artifacts.py` ran and completed — not that it was
+skipped. Even branches with no artifacts get a stamp (with zero counts).
 
 **Push to fork remote (mandatory — no skip option):**
 

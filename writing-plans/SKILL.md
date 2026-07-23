@@ -2,7 +2,7 @@
 name: writing-plans
 description: >
   Use when you have a spec or requirements for a multi-step task, before
-  touching code. Writes a structured plan file to docs/plans/ with TDD steps
+  touching code. Writes a structured plan file with TDD steps
   and task decomposition. This is NOT the built-in EnterPlanMode — use this
   skill instead of plan mode for implementation planning.
 ---
@@ -24,8 +24,8 @@ very well.
 **Announce at start:** "I'm using the writing-plans skill to create the
 implementation plan."
 
-**Save plans to:** `docs/plans/YYYY-MM-DD-<feature-name>.md`
-(user preferences for plan location override this default)
+**Save plans to:** `$WORKSPACE/plans/YYYY-MM-DD-<feature-name>.md`
+(if no workspace, fall back to `docs/plans/` in the project)
 
 ## Scope Check
 
@@ -239,7 +239,7 @@ for an independent review.
 
 After saving the plan, offer execution choice:
 
-**"Plan complete and saved to `docs/plans/<filename>.md`."**
+**"Plan complete and saved to `$WORKSPACE/plans/<filename>.md`."**
 
 **Default: invoke `executing-plans`** — inline execution with full access
 to skills, IntelliJ MCP, and project context. Review the diff after each
