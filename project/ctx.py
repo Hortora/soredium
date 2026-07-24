@@ -67,6 +67,12 @@ issue_repo = meta.get("issue-repo", owner_repo)
 covers = meta.get("covers", issue_n)
 current_branch = run("git", "-C", workspace, "branch", "--show-current")
 
+inferred_issue = ""
+if not issue_n and current_branch:
+    m_issue = re.search(r'issue-(\d+)', current_branch)
+    if m_issue:
+        inferred_issue = m_issue.group(1)
+
 print(f"WORKSPACE={workspace}")
 print(f"PROJECT={project}")
 print(f"SINGLE_REPO={'yes' if single_repo else 'no'}")
@@ -78,6 +84,7 @@ print(f"PROJECT_SHA={project_sha}")
 print(f"ISSUE_N={issue_n}")
 print(f"ISSUE_REPO={issue_repo}")
 print(f"COVERS={covers}")
+print(f"INFERRED_ISSUE={inferred_issue}")
 
 # project fast-path checks
 cwd = Path.cwd()

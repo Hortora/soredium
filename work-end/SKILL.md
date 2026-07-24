@@ -73,7 +73,38 @@ Run `python3 ~/.claude/skills/project/ctx.py` first. Use `CURRENT_BRANCH` from i
      the stack has N other paused branches. Continue — this is normal when ending
      the active branch while others are paused.
 
-2. **`$WORKSPACE/design/.meta` must exist on the current branch** → proceed.
+2. **`$WORKSPACE/design/.meta` exists?** (check `HAS_META` from ctx.py)
+   - **YES** → proceed (read values from ctx.py output as normal).
+   - **NO** → check branch:
+     - **On main or `$PROJECT_BASE_BRANCH`** → "Nothing to close — you're on
+       `$CURRENT_BRANCH`." Exit cleanly.
+     - **On a feature branch** → graceful degradation:
+       1. **Resolve issue:**
+          - `INFERRED_ISSUE` populated (from ctx.py) →
+            `gh issue view $INFERRED_ISSUE --repo $OWNER_REPO`,
+            extract title and confirm with user
+          - `INFERRED_ISSUE` populated but `gh issue view` fails
+            (network error, issue not found, `OWNER_REPO` empty) →
+            present inferred number for manual confirmation:
+            "Branch references issue #N but verification failed —
+            confirm, enter a different number, or skip."
+          - `INFERRED_ISSUE` empty →
+            ask user for one-line work description,
+            offer to invoke issue-workflow Phase 2 to create an issue
+          - User declines issue creation →
+            set `ISSUE_N=""` and `COVERS=""`.
+            Steps depending on `ISSUE_N` (8e spec posting, 8a issue close)
+            are skipped.
+       2. **Set context values** (from ctx.py output + defaults):
+          - `BRANCH_NAME` = `CURRENT_BRANCH` (from ctx.py — the git branch name)
+          - `ISSUE_N` = confirmed issue number (or empty if declined)
+          - `ISSUE_REPO` = `OWNER_REPO` (from ctx.py)
+          - `COVERS` = `ISSUE_N` (single issue only without `.meta`)
+          - `DESIGN_REPO_KEY` = `""` (from ctx.py; Step 3 defaults to "project")
+          - `PROJECT_SHA` = `""` (no baseline)
+          - `META_SECTION_HASHES` = `""` (no section hashes)
+          - `FLYWAY_NEXT_V` = `""` (from ctx.py, already empty without `.meta`)
+       3. Proceed with normal close flow using these values.
 
 3. **If `$WORKSPACE/design/.meta` exists but `$CURRENT_WORKSPACE == main`** (orphaned)
    → hard stop. Offer to switch to the surviving branch and close from there, or discard.
@@ -261,9 +292,12 @@ Unlike earlier skill versions, specs routing IS configurable — projects that k
 methodology artifacts in the workspace should declare `specs → workspace` in their
 CLAUDE.md Routing table and specs will be promoted there instead.
 
-**`$DESIGN_REPO` — read from `.meta`, do NOT re-derive from routing config:**
+**`$DESIGN_REPO` — use `DESIGN_REPO_KEY` from ctx.py output (do NOT re-derive from routing config):**
+
+`DESIGN_REPO_KEY` comes from ctx.py (which reads `.meta` at parse time).
+When `.meta` is absent, `DESIGN_REPO_KEY` is empty — the default case applies.
+
 ```bash
-DESIGN_REPO_KEY=$(grep "^design-repo:" "$WORKSPACE/design/.meta" | sed 's/design-repo: //')
 case "$DESIGN_REPO_KEY" in
   workspace)
     DESIGN_REPO="$WORKSPACE" ;;
@@ -423,6 +457,11 @@ BLOG_HAS_ENTRIES=$(ls "$WORKSPACE/blog/" 2>/dev/null | grep -v INDEX.md | grep -
 Journal validation data comes from the Branch Reconnaissance subagent
 (Step 1). Use the `journal_validation` field from its return to drive
 decisions:
+
+**When `PROJECT_SHA` is empty (`HAS_META=no`):** `section_drift` will be
+empty (no baseline hashes to compare). The remaining checks
+(`arc42_exists`, `empty_journal`) still apply — a branch without `.meta`
+can still have a journal.
 
 - **`arc42_exists == false`:** `[C]` Create from journal entries — journal becomes the initial ARC42STORIES.MD content. `[S]` Skip merge entirely.
 - **`section_drift` non-empty:** `[U]` update journal anchors, `[S]` skip drifted sections, `[A]` abort
@@ -632,6 +671,12 @@ handle journal merges (they require interactive user approval). Run
 ### 8d — Journal merge
 
 Uses `$DESIGN_REPO` (set in Step 3) and `$PROJECT_SHA` (set in Step 1).
+
+**When `PROJECT_SHA` is empty** (no `.meta`), skip journal merge entirely.
+The baseline read (`git show "$PROJECT_SHA":ARC42STORIES.MD`) requires a
+valid SHA. Journal entries on the branch are preserved but not merged into
+ARC42STORIES.MD — this is the expected degradation (no baseline = no
+three-way merge possible).
 
 **⚠️ Branch context matters:** When `$DESIGN_REPO_KEY = workspace`, the merge MUST
 happen during the 8a main-visit (see 8a above) — not here. For `$DESIGN_REPO_KEY = project`,

@@ -161,6 +161,16 @@ def main() -> int:
     params = parse_args(sys.argv[4:])
     issue_repo = params.get("issue-repo", "")
     covers = params.get("covers", "")
+    scan_workspace_path = params.get("scan-workspace", "")
+
+    if scan_workspace_path:
+        scan_source = Path(scan_workspace_path)
+        if not scan_source.is_dir():
+            print("ERROR=scan_workspace_not_found")
+            print(f"ERROR_DETAIL={scan_workspace_path}")
+            return 1
+    else:
+        scan_source = workspace
 
     if not workspace.is_dir():
         print(f"ERROR=workspace_not_found")
@@ -171,8 +181,8 @@ def main() -> int:
         print(f"ERROR_DETAIL={project}")
         return 1
 
-    artifacts = scan_artifacts(workspace, branch)
-    routing = resolve_routing(workspace)
+    artifacts = scan_artifacts(scan_source, branch)
+    routing = resolve_routing(scan_source)
 
     results: dict[str, str] = {}
     failures: list[str] = []

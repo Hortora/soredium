@@ -126,6 +126,92 @@ class TestWriteStamp:
         assert "202" in content  # year prefix
 
 
+class TestScanWorkspaceParameter:
+    """Test scan-workspace parameter for slot-mode artifact promotion."""
+
+    SCRIPT = Path(__file__).parent.parent / "work-end" / "close_artifacts.py"
+
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_scan_workspace_reads_from_alternate_path(self, tmp_path):
+        """When scan-workspace provided, artifacts scanned from that path."""
+        workspace = tmp_path / "original-workspace"
+        slot_workspace = tmp_path / "slot-workspace"
+        project = tmp_path / "project"
+        self._init_git(workspace)
+        self._init_git(slot_workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+
+        branch = "issue-99-test"
+        (slot_workspace / "specs" / branch).mkdir(parents=True)
+        (slot_workspace / "specs" / branch / "spec.md").write_text("# Spec\n")
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), branch,
+             f"scan-workspace={slot_workspace}"],
+            capture_output=True, text=True,
+        )
+        # Should not be fatal — scan from slot workspace succeeds
+        assert result.returncode != 1
+
+    def test_scan_workspace_missing_path_is_fatal(self, tmp_path):
+        """scan-workspace pointing to non-existent path is fatal."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "test-branch",
+             "scan-workspace=/nonexistent/path"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+        assert "scan_workspace_not_found" in result.stdout
+
+    def test_scan_workspace_omitted_scans_workspace(self, tmp_path):
+        """Without scan-workspace, scan_artifacts uses workspace (current behaviour)."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+
+        branch = "issue-99-test"
+        (workspace / "specs" / branch).mkdir(parents=True)
+        (workspace / "specs" / branch / "spec.md").write_text("# Spec\n")
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), branch],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 1
+
+    def test_scan_workspace_unit_scan_artifacts(self, tmp_path):
+        """scan_artifacts uses the scan source path, not workspace."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        branch = "issue-50-feat"
+        (slot / "specs" / branch).mkdir(parents=True)
+        (slot / "specs" / branch / "design.md").write_text("spec")
+        (slot / "blog").mkdir()
+        (slot / "blog" / "entry.md").write_text("blog")
+
+        result = scan_artifacts(slot, branch)
+        assert len(result["specs"]) == 1
+        assert len(result["blog"]) == 1
+
+
 class TestArchivePlans:
     def test_archive_plans_via_script(self, tmp_path):
         """Integration test: archive-plans subcommand moves plans to attic."""

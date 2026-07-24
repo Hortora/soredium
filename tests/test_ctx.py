@@ -796,6 +796,50 @@ class TestClaudeMdFields:
         assert data["PROJECT_NAME"] == ""
 
 
+class TestInferredIssue:
+    """Test INFERRED_ISSUE field — infers issue number from branch name."""
+
+    def test_inferred_issue_from_branch_name(self, tmp_path):
+        """INFERRED_ISSUE populated when no .meta and branch matches issue-NNN."""
+        repo = init_repo(tmp_path / "repo")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-42-fix-bug"],
+                        capture_output=True)
+        data = parse(run_ctx(repo))
+        assert data["INFERRED_ISSUE"] == "42"
+
+    def test_inferred_issue_empty_when_meta_present(self, tmp_path):
+        """INFERRED_ISSUE empty when .meta provides ISSUE_N."""
+        repo = init_repo(tmp_path / "repo")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-42-fix-bug"],
+                        capture_output=True)
+        (repo / "design").mkdir()
+        (repo / "design" / ".meta").write_text("branch: issue-42-fix-bug\nissue: 42\n")
+        data = parse(run_ctx(repo))
+        assert data["INFERRED_ISSUE"] == ""
+
+    def test_inferred_issue_empty_when_no_match(self, tmp_path):
+        """INFERRED_ISSUE empty when branch doesn't match issue-NNN."""
+        repo = init_repo(tmp_path / "repo")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "fix-typo"],
+                        capture_output=True)
+        data = parse(run_ctx(repo))
+        assert data["INFERRED_ISSUE"] == ""
+
+    def test_inferred_issue_empty_on_main(self, tmp_path):
+        """INFERRED_ISSUE empty on main branch."""
+        repo = init_repo(tmp_path / "repo")
+        data = parse(run_ctx(repo))
+        assert data["INFERRED_ISSUE"] == ""
+
+    def test_inferred_issue_multi_digit(self, tmp_path):
+        """INFERRED_ISSUE handles multi-digit issue numbers."""
+        repo = init_repo(tmp_path / "repo")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-1234-big-feature"],
+                        capture_output=True)
+        data = parse(run_ctx(repo))
+        assert data["INFERRED_ISSUE"] == "1234"
+
+
 class TestMetaNewFields:
     """Test new .meta field extraction."""
 
