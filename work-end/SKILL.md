@@ -374,6 +374,46 @@ accurately reflect what the branch leaves behind.
 
 After all checked items complete, proceed to Step 3c.
 
+### Step 3b-slot — Per-repo sweep (slot mode only)
+
+When `/worktrees/` is detected in `$PROJECT` path (slot mode), replace the
+single-repo sweep above with a per-repo loop:
+
+**1. Discover repos in the slot:**
+
+Priority: `SLOT.md` is authoritative (read via `parse_slot_md()` from
+`slot_manager.py`). Fallback: if `SLOT.md` is absent, scan the slot
+directory for git repos (via `get_slot_repos()`). `SLOT.md` is preferred
+because it records the intended repo set at slot creation; directory scan
+may find repos added ad-hoc after creation.
+
+- Primary repo = `$PROJECT` (the repo work-slot was invoked from)
+- Secondary repos = other repos in the slot
+
+**2. Per-repo loop** (primary + secondaries), in this order:
+
+For each repo R:
+  a. **protocol sweep** against R's `docs/protocols/` — captures rules first
+  b. **update-claude-md** against R's CLAUDE.md — syncs conventions
+     (including newly captured protocols)
+  c. **implementation-doc-sync** against R's `docs/` — syncs documentation
+     (using up-to-date CLAUDE.md)
+
+Retargeting: the LLM sets repo R's path as context for each skill
+invocation, reading/writing R's files using absolute paths. Skills that
+invoke scripts with CWD assumptions may need explicit path parameters —
+discovered and addressed during implementation.
+
+Each skill commits its own changes independently (per-skill commits, same
+as current non-slot behaviour). The squash step (8j) consolidates commit
+granularity before landing.
+
+**3. Session-bound** (run once, not per-repo), in this order:
+  a. **forage SWEEP** — global (no change)
+  b. **adr** — primary workspace `adr/` (shared across repos, not per-repo)
+  c. **write-content** (diary) — primary workspace `blog/` only
+     (last, so it can synthesise the full branch narrative)
+
 ---
 
 ## Step 3c — Code review (mandatory — HARD GATE)
@@ -592,6 +632,20 @@ attempts. After 3 failures, hard stop with manual instructions.
 **B4. Promote artifacts and clean up specs.** Runs deferred 8a–8c.
 Operations needing `main` checked out use the **original workspace**.
 Operations reading from the branch use the **slot workspace worktree**.
+
+Pass `scan-workspace` to `close_artifacts.py` so artifacts are scanned
+from the slot workspace (where they live on the branch), not the original
+workspace (which is on main after B2 merge):
+
+```bash
+python3 ~/.claude/skills/work-end/close_artifacts.py \
+  <ORIGINAL_WORKSPACE> <PROJECT> <BRANCH_NAME> \
+  issue-repo=<ISSUE_REPO> covers=<COVERS> \
+  scan-workspace=<SLOT_WORKSPACE>
+```
+
+Without `scan-workspace`, Phase B would scan the original workspace
+(now on main) and find no branch artifacts to promote.
 
 **B5. Publish blog entries (8g).** Run against the **original workspace**.
 
