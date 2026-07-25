@@ -151,86 +151,56 @@ When the branch was started for a single issue, `COVERS` equals `ISSUE_N`. When 
 
 ---
 
-## Step 1 — Branch Reconnaissance (delegated to subagent)
+## Step 1 — Branch Reconnaissance (mechanical script)
 
-Dispatch a read-only Sonnet subagent to gather branch state and validate
+Run the bundled reconnaissance script to gather branch state and validate
 the journal. Runs AFTER Step 3 (routing resolution) which provides
-`DESIGN_REPO`. The subagent's execution stays in its own context — only
-the JSON return enters the parent window.
+`DESIGN_REPO`. All operations are deterministic — no LLM subagent needed.
 
-**Dispatch:**
+**Run:**
 
-```
-Agent(
-  description: "Branch reconnaissance for work-end",
-  model: "sonnet",
-  prompt: "You are a read-only analysis agent. Gather branch state and
-    validate the journal for a work-end close operation. Do NOT write
-    any files or make any changes.
-
-    Parameters:
-    - WORKSPACE: {WORKSPACE}
-    - PROJECT: {PROJECT}
-    - BRANCH_NAME: {BRANCH_NAME}
-    - BASE_BRANCH: {PROJECT_BASE_BRANCH}
-    - ISSUE_N: {ISSUE_N}
-    - COVERS: {COVERS}
-    - ISSUE_REPO: {ISSUE_REPO}
-    - PROJECT_SHA: {PROJECT_SHA}
-    - DESIGN_REPO: {DESIGN_REPO}
-    - META_SECTION_HASHES: {META_SECTION_HASHES}
-    - SECTION_HASHES_SCRIPT: ~/.claude/skills/project/section_hashes.py
-    - SINGLE_REPO_MODE: {yes|no}
-
-    Tasks:
-    1. For each issue number in COVERS (comma-separated), fetch its title
-       and state from GitHub:
-       gh issue view <N> --repo {ISSUE_REPO} --json title,state
-    2. Run: git -C {PROJECT} log --oneline {BASE_BRANCH}..{BRANCH_NAME}
-       Collect each commit sha and message.
-    3. Run: git -C {PROJECT} diff --shortstat {PROJECT_SHA}..HEAD
-    4. Read {WORKSPACE}/design/JOURNAL.md. Count lines matching ^### as
-       journal entries. Count entries matching ^### .*·.*§ as anchored.
-       Entries without §Section anchors are unanchored — list their
-       heading text.
-    5. If DESIGN_REPO is non-empty, check whether
-       {DESIGN_REPO}/ARC42STORIES.MD exists.
-    6. If it exists, run:
-       python3 {SECTION_HASHES_SCRIPT} {DESIGN_REPO}/ARC42STORIES.MD
-       Compare each hash against the corresponding entry in
-       META_SECTION_HASHES (pipe-separated, format hash:heading).
-       Report any sections where hashes differ.
-
-    Return your results as a single JSON object with this exact
-    structure (all fields required, arrays may be empty):
-    {
-      \"issues\": [{\"number\": N, \"title\": \"...\", \"state\": \"OPEN|CLOSED\"}],
-      \"commits\": [{\"sha\": \"abc1234\", \"message\": \"feat: ...\"}],
-      \"commit_count\": N,
-      \"diff_stats\": \"N files changed, N insertions, N deletions\",
-      \"journal_entry_count\": N,
-      \"journal_validation\": {
-        \"arc42_exists\": true|false,
-        \"section_drift\": [{\"section\": \"## S5\", \"stored_hash\": \"abc\", \"current_hash\": \"def\"}],
-        \"anchored_entries\": N,
-        \"unanchored_entries\": N,
-        \"entries_without_anchors\": [\"### Entry heading\"],
-        \"empty_journal\": true|false
-      }
-    }
-    Return ONLY the JSON object, no other text."
-)
+```bash
+python3 ~/.claude/skills/work-end/branch_recon.py <WORKSPACE> <PROJECT> \
+  branch=<BRANCH_NAME> base_branch=<PROJECT_BASE_BRANCH> \
+  issue_repo=<ISSUE_REPO> covers=<COVERS> project_sha=<PROJECT_SHA> \
+  design_repo=<DESIGN_REPO> meta_section_hashes=<META_SECTION_HASHES> \
+  single_repo=<yes|no>
 ```
 
-Substitute all `{PLACEHOLDER}` values with concrete strings from ctx.py
-and Step 3 before dispatching.
+Substitute all `<PLACEHOLDER>` values with concrete strings from ctx.py
+and Step 3.
+
+**Output:** JSON object on stdout with this structure (all fields required,
+arrays may be empty):
+
+```json
+{
+  "issues": [{"number": N, "title": "...", "state": "OPEN|CLOSED"}],
+  "commits": [{"sha": "abc1234", "message": "feat: ..."}],
+  "commit_count": N,
+  "diff_stats": "N files changed, N insertions, N deletions",
+  "journal_entry_count": N,
+  "journal_validation": {
+    "arc42_exists": true|false,
+    "section_drift": [{"section": "## S5", "stored_hash": "abc", "current_hash": "def"}],
+    "anchored_entries": N,
+    "unanchored_entries": N,
+    "entries_without_anchors": ["### Entry heading"],
+    "empty_journal": true|false
+  },
+  "warnings": ["..."]
+}
+```
 
 **On return:**
 
-1. Validate JSON shape — all required keys must be present. If malformed
-   or empty: warn the user and fall back to running the branch summary
-   and journal validation inline (same commands as the pre-delegation
-   skill version).
+1. Parse the JSON from stdout. If exit code is non-zero or JSON is malformed:
+   warn the user and fall back to running the individual commands inline.
+
+1b. If `warnings` is non-empty: the script hit something ambiguous (malformed
+   journal entries, missing `section_hashes.py`, etc). Investigate each warning
+   inline — run the relevant git/file commands yourself to resolve what the
+   script flagged. The script handles the fast path; you handle edge cases.
 
 2. Print the branch summary from JSON fields:
 
@@ -804,70 +774,39 @@ language to find what this unblocks. Omit **What this enables** entirely if noth
 follows directly — do not pad. Omit **What this delivered** if the issue title already
 says it clearly and there is nothing to add.
 
-### 8i — Hygiene scan (delegated to subagent)
+### 8i — Hygiene scan (mechanical script)
 
-Always run — not an offer. Dispatch a read-only Sonnet subagent to scan
-for hygiene issues across workspace branches. The subagent's execution
-stays in its own context — only the JSON findings enter the parent window.
+Always run — not an offer. Run the bundled hygiene scan script to check
+workspace branches for drift. All checks are deterministic — no LLM needed.
 
-**Dispatch:**
+**Run:**
 
+```bash
+python3 ~/.claude/skills/work-end/hygiene_scan.py <WORKSPACE> <PROJECT> \
+  branch=<BRANCH_NAME> blog_dest=<BLOG_DEST> \
+  flyway_used=<yes|no> single_repo=<yes|no>
 ```
-Agent(
-  description: "Hygiene scan for work-end",
-  model: "sonnet",
-  prompt: "You are a read-only analysis agent. Scan for hygiene issues
-    across workspace branches for a work-end close operation. Do NOT
-    write any files or make any changes.
 
-    Parameters:
-    - WORKSPACE: {WORKSPACE}
-    - PROJECT: {PROJECT}
-    - BRANCH_NAME: {BRANCH_NAME} (skip this branch in all scans)
-    - BLOG_DEST: {blog destination path from Step 3 routing}
-    - FLYWAY_USED: {yes|no — from .meta flyway-next-v field}
-    - SINGLE_REPO_MODE: {yes|no}
+**Output:** JSON object on stdout with this structure (all fields required,
+arrays may be empty):
 
-    Tasks:
-    1. Blog verification: list .md files (excluding INDEX.md) in
-       {WORKSPACE}/blog/ and compare against {BLOG_DEST}/. Report any
-       files present in workspace but missing from destination.
-    2. Flyway conflicts: if FLYWAY_USED=yes, check for V-number
-       collisions with other branches. Skip if FLYWAY_USED=no.
-    3. Stale branches: list workspace branches (git -C {WORKSPACE}
-       branch) excluding main and {BRANCH_NAME}. For each, check
-       whether design/EPIC-CLOSED.md exists on that branch. For
-       branches WITHOUT EPIC-CLOSED.md, check last commit date —
-       report any with no commits in the last 7 days.
-    4. Unrecovered artifacts: for branches WITH EPIC-CLOSED.md, check
-       whether blog/ and specs/ files on that branch also exist on
-       workspace main. Report any that don't.
-    5. Unstamped branches: for branches WITH EPIC-CLOSED.md, check
-       whether the corresponding project branch (same name, in
-       {PROJECT}) has a last commit starting with 'chore: branch
-       closed'. Both 'chore: branch closed' and 'chore: branch
-       closed — landed as' formats are valid. In SINGLE_REPO_MODE,
-       workspace and project branches are the same repo.
-
-    Return your results as a single JSON object with this exact
-    structure (all fields required, arrays may be empty):
-    {
-      \"unpublished_blogs\": [\"filename.md\"],
-      \"flyway_conflicts\": [],
-      \"stale_branches\": [{\"branch\": \"issue-71-old\", \"last_commit_age\": \"12 days\"}],
-      \"unrecovered_artifacts\": [{\"branch\": \"issue-50-closed\", \"type\": \"blog\", \"file\": \"2026-06-01-entry.md\"}],
-      \"unstamped_branches\": [{\"branch\": \"issue-50-closed\", \"has_epic_closed\": true, \"project_branch_exists\": true}]
-    }
-    Return ONLY the JSON object, no other text."
-)
+```json
+{
+  "unpublished_blogs": ["filename.md"],
+  "flyway_conflicts": [],
+  "stale_branches": [{"branch": "issue-71-old", "last_commit_age": "12 days"}],
+  "unrecovered_artifacts": [{"branch": "issue-50-closed", "type": "blog", "file": "2026-06-01-entry.md"}],
+  "unstamped_branches": [{"branch": "issue-50-closed", "has_epic_closed": true, "project_branch_exists": true}]
+}
 ```
 
 **On return:**
 
-1. Validate JSON shape. If malformed or empty: warn and skip. Hygiene is
-   advisory — it catches drift but doesn't block the close. Exception: if
-   blog verification cannot run, warn explicitly since unpublished blogs
-   DO block.
+1. Parse JSON from stdout. If exit code is non-zero or JSON is malformed:
+   fall back to running the hygiene checks inline (list branches, check
+   files, compare dates yourself). Hygiene is advisory — it catches drift
+   but doesn't block the close. Exception: if blog verification cannot
+   run, warn explicitly since unpublished blogs DO block.
 
 2. **`unpublished_blogs` non-empty** → block and return to 8g. Max 2 attempts;
    after second failure, present options: `[F]` fix routing manually,
@@ -895,29 +834,26 @@ Agent(
 
 **This step is mandatory.** Implementation commits on the project branch must land on `$PROJECT_BASE_BRANCH` before the branch is marked closed.
 
-**Detect remote topology first:**
+**Rebase (mechanical script):**
 
 ```bash
-FORK_REMOTE=$(git -C "$PROJECT" remote get-url origin 2>/dev/null && echo "origin" || echo "")
-BLESSED_REMOTE=$(git -C "$PROJECT" remote get-url upstream 2>/dev/null && echo "upstream" || echo "")
-# If no upstream remote exists, origin is the blessed repo — no fork in play
+python3 ~/.claude/skills/work-end/land_branch.py rebase <PROJECT> \
+  branch=<BRANCH_NAME> base_branch=<PROJECT_BASE_BRANCH>
 ```
+
+Outputs `FORK_REMOTE=`, `BLESSED_REMOTE=`, and `REBASE=ok` on success.
 
 | Topology | Meaning |
 |----------|---------|
-| `upstream` remote exists | Fork model — `origin` is the fork, `upstream` is the blessed repo |
-| No `upstream` remote | Single-remote model — `origin` is the blessed repo |
+| `BLESSED_REMOTE` non-empty | Fork model — `FORK_REMOTE` is the fork, `BLESSED_REMOTE` is the blessed repo |
+| `BLESSED_REMOTE` empty | Single-remote model — `FORK_REMOTE` is the blessed repo |
 
-**Rebase:**
-
-```bash
-git -C "$PROJECT" fetch "$FORK_REMOTE" "$PROJECT_BASE_BRANCH" 2>/dev/null || echo "⚠️  No network — using local $PROJECT_BASE_BRANCH"
-git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
-git -C "$PROJECT" rebase "$BRANCH_NAME"
-```
-
-**If rebase fails (conflict):**
-- Report the conflicting files verbatim.
+**If rebase fails** (`ERROR=REBASE_CONFLICT`):
+- `ERROR_DETAIL` contains the git stderr from the failed rebase.
+  If `FALLBACK=yes`: the script could not cleanly determine the conflict
+  state. Run `git -C <PROJECT> rebase <BRANCH_NAME>` inline to see the
+  full conflict output, then `git rebase --abort` after reading it.
+- Report the conflicting files to the user.
 - **Stop. Do not proceed to Step 9.**
 - Instruct the user: resolve conflicts on `$PROJECT_BASE_BRANCH`, then re-run `work-end` to complete the close.
 
@@ -1043,36 +979,28 @@ Agent(
 5. If user explicitly says "skip squash" or "no squash needed": accept
    and note it, then proceed. Never silently skip.
 
-**Artifact promotion stamp check (mandatory before push):**
+**Push to fork (mechanical script — mandatory, no skip):**
 
-Before pushing, verify the `.artifacts-promoted` stamp exists on the
-workspace branch:
+The push subcommand checks the `.artifacts-promoted` stamp, then pushes
+to the fork remote. Both checks are mandatory — the script fails if the
+stamp is missing or the push fails.
 
 ```bash
-[ -f "$WORKSPACE/design/.artifacts-promoted" ] || echo "MISSING"
+python3 ~/.claude/skills/work-end/land_branch.py push <PROJECT> \
+  base_branch=<PROJECT_BASE_BRANCH> workspace=<WORKSPACE> \
+  branch=<BRANCH_NAME>
 ```
 
-If missing: **hard stop.** Do not push. Return to Step 8a.
-If present: verify `branch=` field matches `$BRANCH_NAME`.
+If `ERROR=MISSING_STAMP`: **hard stop.** Return to Step 8a.
+If `ERROR=PUSH_FAILED`: stop. Do not proceed to blessed repo delivery.
 
-The stamp proves `close_artifacts.py` ran and completed — not that it was
-skipped. Even branches with no artifacts get a stamp (with zero counts).
-
-**Push to fork remote (mandatory — no skip option):**
-
-The fork push is always required. There is no [N]skip. The blessed repo can never receive
+The fork push is always required. The blessed repo can never receive
 commits that the fork has not already received.
 
-```bash
-git -C "$PROJECT" push "$FORK_REMOTE" "$PROJECT_BASE_BRANCH"
-```
+**Blessed repo delivery (fork model only — interactive prompt):**
 
-If the fork push fails: stop. Do not proceed to blessed repo delivery. The fork must be
-updated first — the blessed repo can never be ahead of the fork.
-
-**Blessed repo delivery (fork model only):**
-
-If `$BLESSED_REMOTE` is non-empty, always prompt — three choices:
+If `$BLESSED_REMOTE` is non-empty (from the `rebase` subcommand output),
+always prompt — three choices:
 
 > "Deliver to `$BLESSED_REMOTE/$PROJECT_BASE_BRANCH`?
 >   [P] Push directly   [R] Open PR   [N] Skip"
@@ -1090,43 +1018,21 @@ If `$BLESSED_REMOTE` is non-empty, always prompt — three choices:
 
 If no `$BLESSED_REMOTE`: no prompt — fork push is the final delivery.
 
-**Stamp the project branch as closed:**
+**Stamp the project branch as closed (mechanical script):**
 
-After all pushes complete (fork and optionally blessed), stamp the project branch.
-The stamp includes the SHA that landed on the base branch so branch auditing tools
-can verify content landed without tree diffs — `git log -1 --format="%s" <branch>`
-immediately tells you the branch is archived AND where the content went.
-
-**Content verification before stamping (mandatory):**
-
-Before writing the stamp, verify the branch content actually landed on the base
-branch. This catches two failure modes: (a) squash plans that dropped commit
-groups, losing content silently, and (b) stacked branches where the rebase target
-was another feature branch, not the base branch.
+After all pushes complete, stamp the branch. The script verifies content
+landed on the base branch (via `verify_stamp.py`), then writes the stamp.
 
 ```bash
-python3 ~/.claude/skills/work-end/verify_stamp.py "$PROJECT" "$BRANCH_NAME" "$PROJECT_BASE_BRANCH"
+python3 ~/.claude/skills/work-end/land_branch.py stamp <PROJECT> \
+  branch=<BRANCH_NAME> base_branch=<PROJECT_BASE_BRANCH>
 ```
 
-Read `VERIFIED=yes` from output. If `VERIFIED=no`, the script prints the files
-that differ between the branch and the base branch. **Hard stop — do not stamp.**
-Report the content gap:
+If `ERROR=VERIFICATION_FAILED`: **hard stop — do not stamp.** Report the
+content gap from stderr. A false stamp is worse than no stamp — it marks
+the branch as archived when its content never landed.
 
-> "⚠️ Content verification failed — the following source files on `$BRANCH_NAME`
-> are not reflected on `$PROJECT_BASE_BRANCH`. The squash may have dropped commits.
-> Investigate before stamping."
-
-Do not offer to stamp anyway. A false stamp is worse than no stamp — it marks the
-branch as archived when its content never landed, and the work becomes invisible.
-
-Only after `VERIFIED=yes`:
-
-```bash
-LANDED_SHA=$(git -C "$PROJECT" rev-parse HEAD)
-git -C "$PROJECT" checkout "$BRANCH_NAME"
-git -C "$PROJECT" commit --allow-empty -m "chore: branch closed — landed as $LANDED_SHA on $PROJECT_BASE_BRANCH"
-git -C "$PROJECT" checkout "$PROJECT_BASE_BRANCH"
-```
+On success: outputs `STAMP=ok` and `LANDED_SHA=<sha>`.
 
 This is mandatory, not an offer. An unstamped branch looks live to the next session.
 
