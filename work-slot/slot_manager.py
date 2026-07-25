@@ -8,7 +8,7 @@ Subcommands:
   remove-slot <family-root> slot=<N> [--force-delete]
   scan-ready <family-root>
   merge-slot <family-root> slot=<N>
-  archive-slot <family-root> slot=<N>
+  archive-slot <family-root> slot=<N> [--force]
 
 Note: remove-slot archives to worktrees/attic/ by default. Only --force-delete permanently removes.
 
@@ -489,10 +489,27 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
     return moved
 
 
-def archive_slot(family_root: Path, slot_num: int) -> None:
+def is_slot_landed(slot_dir: Path) -> bool:
+    if (slot_dir / ".landed").exists():
+        return True
+    for sub in slot_dir.iterdir():
+        if not sub.is_dir() or not (sub / ".git").exists():
+            continue
+        rc, stdout, _ = run_cmd(["git", "-C", str(sub), "log", "-1", "--format=%s"])
+        if rc == 0 and stdout.strip().startswith("chore: branch closed"):
+            return True
+    return False
+
+
+def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
     slot_dir = family_root / "worktrees" / str(slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
+        sys.exit(1)
+    if not force and not is_slot_landed(slot_dir):
+        print(f"ERROR=slot_not_landed slot={slot_num}")
+        print("ERROR_DETAIL=slot has no .landed marker and no branch-closed stamp — work may be in progress")
+        print("HINT=pass --force to override, or run work-end first")
         sys.exit(1)
     for sub in slot_dir.iterdir():
         if sub.is_dir() and (sub / ".git").exists():
@@ -564,6 +581,11 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
     slot_dir = family_root / "worktrees" / str(slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
+        sys.exit(1)
+    if not force_delete and not is_slot_landed(slot_dir):
+        print(f"ERROR=slot_not_landed slot={slot_num}")
+        print("ERROR_DETAIL=slot has no .landed marker and no branch-closed stamp — work may be in progress")
+        print("HINT=pass --force-delete to override, or run work-end first")
         sys.exit(1)
 
     for sub in slot_dir.iterdir():
@@ -666,7 +688,8 @@ def main() -> None:
         if slot_num == 0:
             print("ERROR=missing_slot_number")
             sys.exit(1)
-        archive_slot(family_root, slot_num)
+        force = "--force" in sys.argv
+        archive_slot(family_root, slot_num, force=force)
 
     else:
         print(f"ERROR=unknown_subcommand subcommand={subcommand}", file=sys.stderr)
