@@ -165,19 +165,21 @@ git push
 
 ---
 
-## Step 7 — Verify CI
+## Step 7 — Poll CI until green (or new failures)
 
-Schedule a wakeup to poll CI status. Default wait: 5 minutes (300s).
-Override by setting `ci-build-time-minutes` in CLAUDE.md `## Build and Test`.
+After pushing, poll CI in a loop until it completes. Do NOT return to
+the user and wait — stay in the loop.
 
+**Initial wait:** check CLAUDE.md for `ci-build-time-minutes` under
+`## Build and Test`. Default: 5 minutes. Wait that long before the
+first poll, then poll every 60 seconds.
+
+```bash
+# Wait for initial build time
+sleep <ci-build-time-seconds or 300>
 ```
-ScheduleWakeup:
-  delaySeconds: 300   # or ci-build-time-minutes × 60 from CLAUDE.md
-  reason: "waiting for CI run to complete after push"
-  prompt: "/fix-ci"
-```
 
-On wakeup, check CI:
+Then poll in a loop:
 
 ```bash
 gh run list --repo <OWNER_REPO> --limit 1 \
@@ -185,11 +187,29 @@ gh run list --repo <OWNER_REPO> --limit 1 \
   --jq '.[0] | "\(.status) | \(.conclusion // "—") | \(.headSha[:7])"'
 ```
 
-- **completed + success** → done. Report green.
-- **completed + failure** → go back to Step 1 with the new failures. The failure
-  is environment-specific (Docker, OS, test ordering on a different JVM).
-  Reproduce locally or on the remote machine and repeat the full cycle.
-- **in_progress / queued** → schedule another wakeup (270s).
+| Result | Action |
+|--------|--------|
+| `completed + success` | Done. Report green. Exit the skill. |
+| `completed + failure` | New failures. Go back to Step 1 with the new failure list. Full cycle repeats. |
+| `in_progress` or `queued` | Wait 60 seconds, poll again. |
+
+**This is a loop.** Do not exit the skill until CI is green or the user
+interrupts. The full cycle is: gather → reproduce → root-cause → fix →
+verify locally → push → poll CI → if red, repeat from Step 1.
+
+```mermaid
+flowchart TD
+    PUSH["Step 6: Push"] --> WAIT["Wait for CI build time"]
+    WAIT --> POLL["Poll CI status"]
+    POLL -->|in_progress| WAIT60["Wait 60s"] --> POLL
+    POLL -->|success| DONE["Report green ✅"]
+    POLL -->|failure| GATHER["Step 1: Gather new failures"]
+    GATHER --> REPRODUCE["Step 2: Reproduce"]
+    REPRODUCE --> ROOT["Step 3: Root cause"]
+    ROOT --> FIX["Step 4: Fix + verify isolated"]
+    FIX --> FULL["Step 5: Full local build"]
+    FULL --> PUSH
+```
 
 ---
 
