@@ -233,12 +233,9 @@ If `STAGE=push STATUS=pass`: continue to 4b.
   python3 ~/.claude/skills/work-end/blog_dest.py <original-workspace>/blog <branch>
   ```
 
-**4c. Stamp branches** — empty commits in slot worktrees:
-```bash
-git -C <slot>/<repo> commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
-```
-Stamp ALL workspace worktrees too (discover dynamically: scan slot dir
-for directories starting with `work` that contain `.git`).
+**4c. Stamp branches** — handled programmatically by `merge_slot()`.
+`merge_slot()` writes stamp commits on all repo and workspace worktrees
+after confirming all pushes succeeded. Do NOT write stamps manually.
 
 **4d. Mark closed:**
 ```bash

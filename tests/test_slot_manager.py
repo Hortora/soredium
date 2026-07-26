@@ -320,6 +320,7 @@ class TestRemoveSlot:
         slot.mkdir(parents=True)
         (slot / "SLOT.md").write_text("test")
         (slot / ".m2").mkdir()
+        (slot / ".landed").write_text("branch=test\n")
 
         with patch("slot_manager.run_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "", "")
@@ -506,11 +507,121 @@ class TestMergeSlot:
         assert slot_manager.merge_slot(family, 1) == 1
 
 
-class TestArchiveSlot:
-    def test_moves_to_attic(self, tmp_path):
+class TestIsSlotLanded:
+    def test_true_with_landed_marker(self, tmp_path):
+        (tmp_path / ".landed").write_text("branch=test\n")
+        assert slot_manager.is_slot_landed(tmp_path) is True
+
+    def test_false_without_landed_marker(self, tmp_path):
+        assert slot_manager.is_slot_landed(tmp_path) is False
+
+    def test_stamp_commit_alone_is_not_sufficient(self, tmp_path):
+        repo = tmp_path / "engine"
+        repo.mkdir()
+        (repo / ".git").write_text("gitdir: /fake")
+        assert slot_manager.is_slot_landed(tmp_path) is False
+
+
+class TestMergeSlotStamping:
+    def test_writes_stamp_commits_on_merge(self, tmp_path):
         family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        (slot / ".phase-a-complete").write_text("branch=issue-42-test\n")
-        (slot / ".landed").write_text("landed\n")
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+
+        rc, log, _ = slot_manager.run_cmd(
+            ["git", "-C", str(slot / "engine"), "log", "-1", "--format=%s"]
+        )
+        assert rc == 0
+        assert log.strip().startswith("chore: branch closed — landed as")
+        assert "on main" in log.strip()
+
+    def test_stamp_sha_matches_landed_shas(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        landed = (slot / ".landed").read_text()
+        sha_from_landed = ""
+        for line in landed.splitlines():
+            if line.startswith("landed_shas="):
+                for entry in line.split("=", 1)[1].split(","):
+                    if entry.startswith("engine:"):
+                        sha_from_landed = entry.split(":", 1)[1]
+
+        rc, log, _ = slot_manager.run_cmd(
+            ["git", "-C", str(slot / "engine"), "log", "-1", "--format=%s"]
+        )
+        assert sha_from_landed in log.strip()
+
+    def test_multi_repo_all_stamped(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(
+            tmp_path, ["engine", "iot"]
+        )
+        slot_manager.merge_slot(family, 1)
+
+        for repo_name in ["engine", "iot"]:
+            rc, log, _ = slot_manager.run_cmd(
+                ["git", "-C", str(slot / repo_name), "log", "-1", "--format=%s"]
+            )
+            assert rc == 0
+            assert log.strip().startswith("chore: branch closed")
+
+    def test_no_stamp_on_merge_failure(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        (originals["engine"] / "feature.py").write_text("# conflict\n")
+        subprocess.run(["git", "-C", str(originals["engine"]), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(originals["engine"]), "commit", "-m", "conflict"], capture_output=True)
+
+        slot_manager.merge_slot(family, 1)
+
+        rc, log, _ = slot_manager.run_cmd(
+            ["git", "-C", str(slot / "engine"), "log", "-1", "--format=%s"]
+        )
+        assert "chore: branch closed" not in log.strip()
+
+
+class TestVerifyLandedShas:
+    def test_passes_when_sha_on_main(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        ok, failures = slot_manager.verify_landed_shas(slot, family)
+        assert ok is True
+        assert failures == []
+
+    def test_fails_when_sha_not_on_main(self, tmp_path):
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        rc, sha, _ = slot_manager.run_cmd(
+            ["git", "-C", str(slot / "engine"), "rev-parse", "HEAD"]
+        )
+        (slot / ".landed").write_text(
+            f"branch=issue-42-test\nrepos=engine\nlanded_shas=engine:{sha.strip()}\n"
+        )
+
+        ok, failures = slot_manager.verify_landed_shas(slot, family)
+        assert ok is False
+        assert len(failures) == 1
+        assert "not reachable from main" in failures[0]
+
+    def test_fails_with_no_landed_marker(self, tmp_path):
+        ok, failures = slot_manager.verify_landed_shas(tmp_path, tmp_path)
+        assert ok is False
+        assert "no .landed marker" in failures[0]
+
+    def test_fails_with_unknown_sha(self, tmp_path):
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        (slot / ".landed").write_text(
+            "branch=issue-42-test\nrepos=engine\nlanded_shas=engine:unknown\n"
+        )
+
+        ok, failures = slot_manager.verify_landed_shas(slot, family)
+        assert ok is False
+        assert "unknown" in failures[0]
+
+
+class TestArchiveSlot:
+    def test_moves_to_attic_after_verified_merge(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
 
         slot_manager.archive_slot(family, 1)
 
@@ -518,11 +629,41 @@ class TestArchiveSlot:
         attic_slot = family / "worktrees" / "attic" / "1"
         assert attic_slot.exists()
         assert (attic_slot / "SLOT.md").exists()
-        assert (attic_slot / ".phase-a-complete").exists()
         assert (attic_slot / ".landed").exists()
+
+    def test_blocks_archive_without_landed_marker(self, tmp_path, capsys):
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+
+        with pytest.raises(SystemExit):
+            slot_manager.archive_slot(family, 1)
+        captured = capsys.readouterr()
+        assert "ERROR=slot_not_landed" in captured.out
+
+    def test_blocks_archive_when_sha_not_on_main(self, tmp_path, capsys):
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        rc, sha, _ = slot_manager.run_cmd(
+            ["git", "-C", str(slot / "engine"), "rev-parse", "HEAD"]
+        )
+        (slot / ".landed").write_text(
+            f"branch=issue-42-test\nrepos=engine\nlanded_shas=engine:{sha.strip()}\n"
+        )
+
+        with pytest.raises(SystemExit):
+            slot_manager.archive_slot(family, 1)
+        captured = capsys.readouterr()
+        assert "ERROR=sha_not_on_main" in captured.out
+
+    def test_force_bypasses_all_checks(self, tmp_path):
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+
+        slot_manager.archive_slot(family, 1, force=True)
+
+        assert not (family / "worktrees" / "1").exists()
+        assert (family / "worktrees" / "attic" / "1").exists()
 
     def test_relocates_claude_projects(self, tmp_path, monkeypatch):
         family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
 
         fake_home = tmp_path / "home"
         claude_projects = fake_home / ".claude" / "projects"

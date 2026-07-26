@@ -460,6 +460,26 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
             f"landed_shas={shas_str}\n"
             f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
         )
+
+        for repo_name in repos:
+            sha = landed_shas.get(repo_name, "unknown")
+            slot_repo = slot_dir / repo_name
+            if not slot_repo.is_dir() or not (slot_repo / ".git").exists():
+                continue
+            run_cmd([
+                "git", "-C", str(slot_repo), "commit", "--allow-empty",
+                "-m", f"chore: branch closed — landed as {sha} on main",
+            ])
+
+        for sub in slot_dir.iterdir():
+            if not sub.is_dir() or not (sub / ".git").exists():
+                continue
+            if sub.name.startswith("work") or sub.name.startswith("work-"):
+                run_cmd([
+                    "git", "-C", str(sub), "commit", "--allow-empty",
+                    "-m", f"chore: branch closed — landed on main",
+                ])
+
         print("STAGE=push STATUS=pass")
         print(f"LANDED_SHAS={shas_str}")
         return 0
@@ -490,15 +510,38 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
 
 
 def is_slot_landed(slot_dir: Path) -> bool:
-    if (slot_dir / ".landed").exists():
-        return True
-    for sub in slot_dir.iterdir():
-        if not sub.is_dir() or not (sub / ".git").exists():
+    return (slot_dir / ".landed").exists()
+
+
+def verify_landed_shas(slot_dir: Path, family_root: Path) -> tuple[bool, list[str]]:
+    landed_file = slot_dir / ".landed"
+    if not landed_file.exists():
+        return False, ["no .landed marker"]
+    shas_line = ""
+    for line in landed_file.read_text().splitlines():
+        if line.startswith("landed_shas="):
+            shas_line = line.split("=", 1)[1]
+    if not shas_line:
+        return False, ["no landed_shas in .landed marker"]
+    failures = []
+    for entry in shas_line.split(","):
+        if ":" not in entry:
             continue
-        rc, stdout, _ = run_cmd(["git", "-C", str(sub), "log", "-1", "--format=%s"])
-        if rc == 0 and stdout.strip().startswith("chore: branch closed"):
-            return True
-    return False
+        repo_name, sha = entry.split(":", 1)
+        if sha == "unknown":
+            failures.append(f"{repo_name}: SHA is 'unknown'")
+            continue
+        original = family_root / repo_name
+        if not original.is_dir():
+            failures.append(f"{repo_name}: original repo not found at {original}")
+            continue
+        run_cmd(["git", "-C", str(original), "fetch", "origin", "main"])
+        rc, _, _ = run_cmd([
+            "git", "-C", str(original), "merge-base", "--is-ancestor", sha, "origin/main",
+        ])
+        if rc != 0:
+            failures.append(f"{repo_name}: SHA {sha[:12]} not reachable from main")
+    return len(failures) == 0, failures
 
 
 def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
@@ -508,9 +551,17 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
         sys.exit(1)
     if not force and not is_slot_landed(slot_dir):
         print(f"ERROR=slot_not_landed slot={slot_num}")
-        print("ERROR_DETAIL=slot has no .landed marker and no branch-closed stamp — work may be in progress")
-        print("HINT=pass --force to override, or run work-end first")
+        print("ERROR_DETAIL=slot has no .landed marker — work may be in progress")
+        print("HINT=pass --force to override, or run merge-slot first")
         sys.exit(1)
+    if not force:
+        verified, failures = verify_landed_shas(slot_dir, family_root)
+        if not verified:
+            print(f"ERROR=sha_not_on_main slot={slot_num}")
+            for f in failures:
+                print(f"ERROR_DETAIL={f}")
+            print("HINT=pass --force to override, or investigate the failed merge")
+            sys.exit(1)
     for sub in slot_dir.iterdir():
         if sub.is_dir() and (sub / ".git").exists():
             rc, _, stderr = run_cmd(["git", "worktree", "remove", "--force", str(sub)])
