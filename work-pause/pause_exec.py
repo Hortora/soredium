@@ -17,6 +17,14 @@ import sys
 import subprocess
 from pathlib import Path
 
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
+
 
 def run_git(repo: str, *args: str) -> tuple[bool, str]:
     """Run git command. Returns (success, stdout)."""
@@ -159,6 +167,15 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
                 return 1
 
         print("STACKED=yes")
+
+        if _wl:
+            try:
+                _conn = _wl.connect()
+                _wl.record_work_pause(_conn, branch, project)
+                _conn.close()
+            except Exception:
+                pass
+
         return 0
 
     except subprocess.CalledProcessError:

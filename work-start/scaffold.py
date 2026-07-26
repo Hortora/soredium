@@ -32,6 +32,14 @@ import sys
 from datetime import date
 from pathlib import Path
 
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
+
 
 REQUIRED = {"branch", "project-sha"}
 
@@ -100,6 +108,20 @@ def main() -> int:
     print(f"META_PATH={meta_path}")
     print(f"JOURNAL_PATH={journal_path}")
     print("CREATED=yes")
+
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            _wl.record_work_start(
+                _conn, branch, str(workspace),
+                issue_number=int(params.get("issue", "0") or "0"),
+                issue_repo=params.get("issue-repo", ""),
+                covers=params.get("covers", ""),
+            )
+            _conn.close()
+        except Exception:
+            pass
+
     return 0
 
 

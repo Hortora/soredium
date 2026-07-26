@@ -12,6 +12,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
+
 
 def run(
     cmd: list[str],
@@ -73,6 +81,15 @@ def checkout_branches(project: str, workspace: str, branch: str) -> int:
         return 1
 
     print("CHECKED_OUT=yes")
+
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            _wl.record_work_resume(_conn, branch, project)
+            _conn.close()
+        except Exception:
+            pass
+
     return 0
 
 

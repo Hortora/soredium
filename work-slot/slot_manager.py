@@ -23,6 +23,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
+
 
 def run_cmd(args: list[str], cwd: str | None = None) -> tuple[int, str, str]:
     result = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
@@ -228,6 +236,20 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
 
     write_slot_md(slot_dir, slot_num, repos, branch, issue,
                   issue_repo, covers, context)
+
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            repo_paths = [str(family_root / r) for r in repos]
+            _wl.record_slot_create(
+                _conn, slot_num, str(family_root),
+                repos=repo_paths, branch=branch,
+                issue_number=int(issue) if issue else 0,
+                issue_repo=issue_repo, covers=covers,
+            )
+            _conn.close()
+        except Exception:
+            pass
 
     return {
         "slot_number": slot_num,
@@ -480,6 +502,17 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
                     "-m", f"chore: branch closed — landed on main",
                 ])
 
+        if _wl:
+            try:
+                _conn = _wl.connect()
+                _wl.record_slot_merge(
+                    _conn, slot_num, str(family_root),
+                    landed_shas=landed_shas,
+                )
+                _conn.close()
+            except Exception:
+                pass
+
         print("STAGE=push STATUS=pass")
         print(f"LANDED_SHAS={shas_str}")
         return 0
@@ -574,6 +607,15 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
     shutil.move(str(slot_dir), str(dest))
     if moved:
         print(f"CLAUDE_PROJECTS_MOVED={moved}")
+
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            _wl.record_slot_archive(_conn, slot_num, str(family_root))
+            _conn.close()
+        except Exception:
+            pass
+
     print(f"ARCHIVED={slot_num}")
 
 

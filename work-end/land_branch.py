@@ -26,6 +26,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from common import parse_args
 
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
+
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -177,6 +185,15 @@ def cmd_stamp(project: str, opts: dict[str, str]) -> int:
 
     print("STAMP=ok")
     print(f"LANDED_SHA={landed_sha}")
+
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            _wl.record_work_end(_conn, branch, project, landed_sha=landed_sha)
+            _conn.close()
+        except Exception:
+            pass
+
     return 0
 
 

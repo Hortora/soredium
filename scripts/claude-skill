@@ -389,6 +389,13 @@ def cmd_sync_local(args: argparse.Namespace) -> None:
 
     print(f"\n{synced}/{len(to_sync)} skills synced.")
 
+    lib_dir = Path.home() / ".claude" / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    worklog_src = repo_root / "scripts" / "worklog.py"
+    if worklog_src.exists():
+        shutil.copy2(str(worklog_src), str(lib_dir / "worklog.py"))
+        print("  ✅ worklog.py → ~/.claude/lib/")
+
     hook_status = sync_hook()
     hook_messages = {
         'installed':  '🔗 Session-start hook installed and registered',
