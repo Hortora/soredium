@@ -341,6 +341,106 @@ class TestQueries:
         conn.close()
 
 
+class TestFullWorkItemLifecycle:
+    def test_start_pause_resume_end_timeline(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/repo/engine", github_repo="org/engine")
+
+        wid = worklog.record_work_start(
+            conn, "issue-42-spi", "/repo/engine",
+            issue_number=42, issue_repo="org/engine", covers="42,43",
+        )
+        wi = conn.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
+        assert wi["state"] == "active"
+        assert wi["location"] == "primary"
+        assert worklog.active_work(conn)[0]["branch"] == "issue-42-spi"
+
+        worklog.record_work_pause(conn, "issue-42-spi", "/repo/engine")
+        wi = conn.execute("SELECT state FROM work_items WHERE id=?", (wid,)).fetchone()
+        assert wi["state"] == "paused"
+        assert len(worklog.active_work(conn)) == 1
+
+        worklog.record_work_resume(conn, "issue-42-spi", "/repo/engine")
+        wi = conn.execute("SELECT state FROM work_items WHERE id=?", (wid,)).fetchone()
+        assert wi["state"] == "active"
+
+        worklog.record_work_end(conn, "issue-42-spi", "/repo/engine", landed_sha="abc123")
+        wi = conn.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
+        assert wi["state"] == "ended"
+        assert wi["ended_at"] is not None
+        assert len(worklog.active_work(conn)) == 0
+
+        timeline = worklog.work_item_timeline(conn, "issue-42-spi", "/repo/engine")
+        types = [e["event_type"] for e in timeline]
+        assert types == ["work-start", "work-pause", "work-resume", "work-end"]
+
+        issues = conn.execute(
+            "SELECT * FROM work_item_issues WHERE work_item_id=? ORDER BY issue_number",
+            (wid,)
+        ).fetchall()
+        assert len(issues) == 2
+        assert issues[0]["issue_number"] == 42
+        assert issues[0]["is_primary"] == 1
+        assert issues[1]["issue_number"] == 43
+        assert issues[1]["is_primary"] == 0
+        conn.close()
+
+
+class TestFullSlotLifecycle:
+    def test_create_phase_a_merge_archive_timeline(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/family/engine")
+        worklog.ensure_repo(conn, "/family/iot")
+
+        sid = worklog.record_slot_create(
+            conn, 5, "/family",
+            repos=["/family/engine", "/family/iot"],
+            branch="issue-42-spi",
+            issue_number=42, issue_repo="org/repo", covers="42,43",
+        )
+        slot = conn.execute("SELECT * FROM slots WHERE id=?", (sid,)).fetchone()
+        assert slot["state"] == "active"
+        wis = conn.execute("SELECT * FROM work_items WHERE slot_id=?", (sid,)).fetchall()
+        assert len(wis) == 2
+        assert all(w["state"] == "active" for w in wis)
+        assert all(w["location"] == "slot" for w in wis)
+        assert len(worklog.active_work(conn)) == 2
+        assert worklog.slot_status(conn)[0]["state"] == "active"
+
+        worklog.record_slot_phase_a(conn, 5, "/family")
+        slot = conn.execute("SELECT state FROM slots WHERE id=?", (sid,)).fetchone()
+        assert slot["state"] == "ready"
+        assert worklog.slot_status(conn)[0]["state"] == "ready"
+
+        worklog.record_slot_merge(conn, 5, "/family",
+                                  landed_shas={"engine": "sha1", "iot": "sha2"})
+        slot = conn.execute("SELECT state FROM slots WHERE id=?", (sid,)).fetchone()
+        assert slot["state"] == "landed"
+        wis = conn.execute("SELECT state FROM work_items WHERE slot_id=?", (sid,)).fetchall()
+        assert all(w["state"] == "ended" for w in wis)
+        assert len(worklog.active_work(conn)) == 0
+
+        worklog.record_slot_archive(conn, 5, "/family")
+        slot = conn.execute("SELECT * FROM slots WHERE id=?", (sid,)).fetchone()
+        assert slot["state"] == "archived"
+        assert slot["archived_at"] is not None
+
+        events = conn.execute(
+            "SELECT event_type FROM events WHERE slot_id=? ORDER BY id", (sid,)
+        ).fetchall()
+        types = [e["event_type"] for e in events]
+        assert types == ["slot-create", "slot-phase-a", "slot-merge", "slot-archive"]
+
+        merge_evt = conn.execute(
+            "SELECT metadata FROM events WHERE slot_id=? AND event_type='slot-merge'",
+            (sid,)
+        ).fetchone()
+        meta = json.loads(merge_evt["metadata"])
+        assert meta["landed_shas"]["engine"] == "sha1"
+        assert meta["landed_shas"]["iot"] == "sha2"
+        conn.close()
+
+
 class TestFailureIsolation:
     def test_safe_decorator_catches_exceptions(self, tmp_path):
         conn = worklog.connect(str(tmp_path / "wl.db"))
