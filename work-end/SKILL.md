@@ -64,6 +64,20 @@ with the actual value from the script output.
 
 Run `python3 ~/.claude/skills/project/ctx.py` first. Use `CURRENT_BRANCH` from its output. Check in order:
 
+0. **Branch divergence check** — read `BRANCH_MISMATCH` from ctx.py output.
+   If `BRANCH_MISMATCH=yes`: **hard stop.**
+   > "⚠️ Workspace and project branches have diverged ($MISMATCH_DETAIL).
+   > This can cause work-end to close the wrong issue or stamp the wrong branch.
+   >
+   > Options:
+   > 1. Switch workspace to match project: `git -C $WORKSPACE checkout $PROJECT_BRANCH`
+   > 2. Switch project to match workspace: `git -C $PROJECT checkout $CURRENT_BRANCH`
+   > 3. Abort — investigate the mismatch first"
+   >
+   Do NOT proceed until the branches are aligned. This check prevents the
+   class of bugs where `.meta` from a stale workspace branch provides wrong
+   issue/covers/SHA context for the close operation.
+
 1. **If `$WORKSPACE/design/.pause-stack` exists and has entries** — check whether
    the target branch is in the stack:
    - **Current branch is in the stack** (ending a paused branch without resuming it):

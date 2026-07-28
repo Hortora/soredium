@@ -65,7 +65,19 @@ project_sha = meta.get("project-sha", "")
 issue_n = meta.get("issue", "")
 issue_repo = meta.get("issue-repo", owner_repo)
 covers = meta.get("covers", issue_n)
-current_branch = run("git", "-C", workspace, "branch", "--show-current")
+workspace_branch = run("git", "-C", workspace, "branch", "--show-current")
+project_branch = run("git", "-C", project, "branch", "--show-current") if not single_repo else workspace_branch
+current_branch = workspace_branch
+
+branch_mismatch = "no"
+mismatch_detail = ""
+if not single_repo and workspace_branch != project_branch:
+    branch_mismatch = "yes"
+    mismatch_detail = f"workspace={workspace_branch} project={project_branch}"
+if branch_name and workspace_branch != branch_name and workspace_branch != base_branch:
+    if branch_mismatch == "no":
+        branch_mismatch = "yes"
+        mismatch_detail = f"meta={branch_name} actual={workspace_branch}"
 
 inferred_issue = ""
 if not issue_n and current_branch:
@@ -79,7 +91,10 @@ print(f"SINGLE_REPO={'yes' if single_repo else 'no'}")
 print(f"OWNER_REPO={owner_repo}")
 print(f"BASE_BRANCH={base_branch}")
 print(f"CURRENT_BRANCH={current_branch}")
+print(f"PROJECT_BRANCH={project_branch}")
 print(f"BRANCH_NAME={branch_name}")
+print(f"BRANCH_MISMATCH={branch_mismatch}")
+print(f"MISMATCH_DETAIL={mismatch_detail}")
 print(f"PROJECT_SHA={project_sha}")
 print(f"ISSUE_N={issue_n}")
 print(f"ISSUE_REPO={issue_repo}")

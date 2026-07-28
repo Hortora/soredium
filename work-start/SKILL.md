@@ -386,6 +386,15 @@ python3 ~/.claude/skills/work-start/branch_create.py create-branches "$PROJECT" 
 Read `CREATED=yes` from output. If `ERROR=project_branch_failed` → abort (nothing to clean up).
 If `ERROR=workspace_branch_failed` → project branch was already rolled back; abort and report error.
 
+**Post-creation alignment check:** Verify both repos are on the same branch:
+```bash
+PROJECT_BR=$(git -C "$PROJECT" branch --show-current)
+WORKSPACE_BR=$(git -C "$WORKSPACE" branch --show-current)
+```
+If they differ → hard stop. Report which repo failed to switch and offer
+to clean up. This catches edge cases where `create-branches` partially
+succeeded but the script reported success.
+
 ### Step 8 — Resolve design routing and SHA baseline
 
 **Layer 0 (cross-repo issue override — checked first):**
