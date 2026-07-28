@@ -365,9 +365,9 @@ single-repo sweep above with a per-repo loop:
 
 **1. Discover repos in the slot:**
 
-Priority: `SLOT.md` is authoritative (read via `parse_slot_md()` from
-`slot_manager.py`). Fallback: if `SLOT.md` is absent, scan the slot
-directory for git repos (via `get_slot_repos()`). `SLOT.md` is preferred
+Priority: `.slot` is authoritative (read via `parse_slot_md()` from
+`slot_manager.py`). Fallback: if `.slot` is absent, scan the slot
+directory for git repos (via `get_slot_repos()`). `.slot` is preferred
 because it records the intended repo set at slot creation; directory scan
 may find repos added ad-hoc after creation.
 
@@ -671,7 +671,7 @@ git -C <slot>/work commit --allow-empty -m "chore: branch closed — landed as <
 
 **B7. Archive.** `git worktree remove` for each repo + workspace
 worktree in the slot. Move the slot directory to `worktrees/attic/<N>/`
-(preserves SLOT.md and marker files for auditing). Use `archive-slot`
+(preserves .slot and marker files for auditing). Use `archive-slot`
 from `slot_manager.py` — do not delete the slot directory.
 
 **B8. Post-merge steps.** Steps 8k–12 from normal work-end.

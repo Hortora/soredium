@@ -90,7 +90,7 @@ Always present:
 **On resume (option 1):**
 
 If `HAS_HANDOFF=yes`: read `$HANDOFF_PATH`.
-If `IS_EPIC=yes`: also read SLOT.md at `$SLOT_MD_PATH` for batch
+If `IS_EPIC=yes`: also read .slot at `$SLOT_PATH` for batch
 progress and active issue. Display:
 ```
 Epic — Batch $EPIC_BATCH
@@ -98,7 +98,7 @@ Active issue: #$EPIC_ACTIVE_ISSUE
 ```
 Set active issue for commit linkage (`Refs #$EPIC_ACTIVE_ISSUE`).
 
-If `IN_SLOT=yes` but `IS_EPIC=no`: read SLOT.md for issue context.
+If `IN_SLOT=yes` but `IS_EPIC=no`: read .slot for issue context.
 
 Summarise what the last session accomplished and continue working.
 Do NOT invoke work-start — the branch and scaffold already exist.

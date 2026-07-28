@@ -173,7 +173,7 @@ class TestWriteSlotMd:
             tmp_path, 1, ["engine"], "issue-42-spi",
             "42", "casehubio/engine", "42", "Add SPI layer",
         )
-        content = (tmp_path / "SLOT.md").read_text()
+        content = (tmp_path / ".slot").read_text()
         assert "# Slot 1" in content
         assert "issue-42-spi" in content
         assert "casehubio/engine#42" in content
@@ -185,7 +185,7 @@ class TestWriteSlotMd:
             tmp_path, 2, ["engine", "iot"], "issue-55-cross",
             "55", "casehubio/engine", "55,56", "Cross-repo work",
         )
-        content = (tmp_path / "SLOT.md").read_text()
+        content = (tmp_path / ".slot").read_text()
         assert "engine (primary)" in content
         assert "- iot" in content
         assert "55,56" in content
@@ -217,8 +217,8 @@ class TestCreateSlot:
         slot_dir = family / "worktrees" / "1"
         assert slot_dir.is_dir()
         assert (slot_dir / ".m2").is_dir()
-        assert (slot_dir / "SLOT.md").exists()
-        assert "issue-42-spi" in (slot_dir / "SLOT.md").read_text()
+        assert (slot_dir / ".slot").exists()
+        assert "issue-42-spi" in (slot_dir / ".slot").read_text()
 
     @patch("slot_manager.run_cmd")
     def test_slot_numbering_increments(self, mock_cmd, tmp_path):
@@ -284,7 +284,7 @@ class TestListSlots:
         family = tmp_path / "casehub"
         slot = family / "worktrees" / "1"
         slot.mkdir(parents=True)
-        (slot / "SLOT.md").write_text("# Slot 1 — issue-42-spi\n")
+        (slot / ".slot").write_text("# Slot 1 — issue-42-spi\n")
         (slot / "engine").mkdir()
         (slot / "engine" / ".git").write_text("gitdir: /fake/.git/worktrees/engine")
 
@@ -298,7 +298,7 @@ class TestListSlots:
         family = tmp_path / "casehub"
         slot = family / "worktrees" / "1"
         slot.mkdir(parents=True)
-        (slot / "SLOT.md").write_text("# Slot 1 — issue-42-spi\n")
+        (slot / ".slot").write_text("# Slot 1 — issue-42-spi\n")
         (slot / ".phase-a-complete").write_text("branch=issue-42\n")
         (slot / "engine").mkdir()
         (slot / "engine" / ".git").write_text("gitdir: /fake")
@@ -318,7 +318,7 @@ class TestRemoveSlot:
         family = tmp_path / "casehub"
         slot = family / "worktrees" / "1"
         slot.mkdir(parents=True)
-        (slot / "SLOT.md").write_text("test")
+        (slot / ".slot").write_text("test")
         (slot / ".m2").mkdir()
         (slot / ".landed").write_text("branch=test\n")
 
@@ -329,13 +329,13 @@ class TestRemoveSlot:
         assert not slot.exists()
         attic = family / "worktrees" / "attic" / "1"
         assert attic.exists()
-        assert (attic / "SLOT.md").exists()
+        assert (attic / ".slot").exists()
 
     def test_force_delete_permanently_removes(self, tmp_path):
         family = tmp_path / "casehub"
         slot = family / "worktrees" / "1"
         slot.mkdir(parents=True)
-        (slot / "SLOT.md").write_text("test")
+        (slot / ".slot").write_text("test")
 
         with patch("slot_manager.run_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "", "")
@@ -356,7 +356,7 @@ class TestRemoveSlot:
 
 class TestParseSlotMd:
     def test_parses_full_slot_md(self, tmp_path):
-        (tmp_path / "SLOT.md").write_text(
+        (tmp_path / ".slot").write_text(
             "# Slot 1 — issue-42-spi\n\n## Issue\ncasehubio/engine#42\n"
             "Covers: 42\n\n## What to do\nImplement SPI\n\n## Repos\n- engine (primary)\n- iot\n"
         )
@@ -369,7 +369,7 @@ class TestParseSlotMd:
         assert md["repos"] == ["engine", "iot"]
 
     def test_detects_epic_type(self, tmp_path):
-        (tmp_path / "SLOT.md").write_text(
+        (tmp_path / ".slot").write_text(
             "# Slot 1 — issue-50-profiles\n\n## Issue\n"
             "casehubio/engine#50\nCovers: 108\nType: epic\n"
             "Safe exit: after any completed batch\n\n"
@@ -381,7 +381,7 @@ class TestParseSlotMd:
         assert md["issue_repo"] == "casehubio/engine"
 
     def test_non_epic_defaults_false(self, tmp_path):
-        (tmp_path / "SLOT.md").write_text(
+        (tmp_path / ".slot").write_text(
             "# Slot 1 — issue-42-spi\n\n## Issue\n"
             "casehubio/engine#42\nCovers: 42\n\n"
             "## What to do\nSPI work\n\n## Repos\n- engine\n"
@@ -402,7 +402,7 @@ class TestScanReady:
         (slot1 / ".phase-a-complete").write_text(
             "branch=issue-42-spi\nrepos=engine\ntimestamp=2026-07-18T14:32:00\n"
         )
-        (slot1 / "SLOT.md").write_text(
+        (slot1 / ".slot").write_text(
             "# Slot 1 — issue-42-spi\n\n## Issue\ncasehubio/engine#42\n"
             "Covers: 42\n\n## What to do\nImplement SPI\n\n## Repos\n- engine (primary)\n"
         )
@@ -476,7 +476,7 @@ def _create_merge_test_repos(tmp_path, repo_names):
     (slot / ".phase-a-complete").write_text(
         f"branch={branch}\nrepos={','.join(repo_names)}\ntimestamp=2026-07-18T14:32:00\n"
     )
-    (slot / "SLOT.md").write_text(
+    (slot / ".slot").write_text(
         f"# Slot 1 — {branch}\n\n## Issue\ntest/repo#42\nCovers: 42\n\n"
         f"## What to do\nTest\n\n## Repos\n" +
         "\n".join(f"- {n}" for n in repo_names) + "\n"
@@ -649,7 +649,7 @@ class TestArchiveSlot:
         assert not (family / "worktrees" / "1").exists()
         attic_slot = family / "worktrees" / "attic" / "1"
         assert attic_slot.exists()
-        assert (attic_slot / "SLOT.md").exists()
+        assert (attic_slot / ".slot").exists()
         assert (attic_slot / ".landed").exists()
 
     def test_blocks_archive_without_landed_marker(self, tmp_path, capsys):
@@ -722,7 +722,7 @@ class TestListSlotsExtended:
         slot.mkdir()
         (slot / ".phase-a-complete").write_text("branch=issue-42\n")
         (slot / ".landed").write_text("landed\n")
-        (slot / "SLOT.md").write_text("# Slot 1 — issue-42\n")
+        (slot / ".slot").write_text("# Slot 1 — issue-42\n")
 
         result = slot_manager.list_slots(tmp_path, include_archived=False)
         assert len(result) == 1
@@ -735,7 +735,7 @@ class TestListSlotsExtended:
         attic.mkdir()
         archived = attic / "3"
         archived.mkdir()
-        (archived / "SLOT.md").write_text(
+        (archived / ".slot").write_text(
             "# Slot 3 — issue-99-old\n\n## Repos\n- engine\n- iot\n"
         )
 
@@ -755,7 +755,7 @@ class TestListSlotsExtended:
         worktrees.mkdir()
         slot = worktrees / "1"
         slot.mkdir()
-        (slot / "SLOT.md").write_text("# Slot 1 — issue-42\n")
+        (slot / ".slot").write_text("# Slot 1 — issue-42\n")
         (slot / "engine").mkdir()
         (slot / "engine" / ".git").write_text("gitdir: /fake")
         result = slot_manager.list_slots(tmp_path)

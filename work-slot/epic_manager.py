@@ -3,11 +3,11 @@
 epic_manager.py — Epic batch plan operations for work-slot
 
 Subcommands:
-  plan <slot-dir>       Parse SLOT.md, return batch plan as JSON
-  advance <slot-dir>    Advance to next issue, update SLOT.md + .meta
+  plan <slot-dir>       Parse .slot, return batch plan as JSON
+  advance <slot-dir>    Advance to next issue, update .slot + .meta
   status <slot-dir>     Return progress summary as JSON
 
-Operates on SLOT.md's ## Batch Plan section. Separated from
+Operates on .slot's ## Batch Plan section. Separated from
 slot_manager.py to enable future single-repo epic support.
 """
 
@@ -19,8 +19,8 @@ from pathlib import Path
 
 
 def parse_batch_plan(slot_dir: Path) -> dict:
-    """Parse SLOT.md and extract epic batch plan state."""
-    slot_md = slot_dir / "SLOT.md"
+    """Parse .slot and extract epic batch plan state."""
+    slot_md = slot_dir / ".slot"
     if not slot_md.exists():
         return {"is_epic": False}
 
@@ -114,7 +114,7 @@ def _parse_batches(content: str) -> list[dict]:
 
 
 def advance(slot_dir: Path, meta_path: Path | None = None) -> dict:
-    """Advance to the next issue. Updates SLOT.md and .meta COVERS."""
+    """Advance to the next issue. Updates .slot and .meta COVERS."""
     plan = parse_batch_plan(slot_dir)
     if not plan["is_epic"]:
         return {"error": "not an epic slot"}
@@ -166,8 +166,8 @@ def advance(slot_dir: Path, meta_path: Path | None = None) -> dict:
 def _rewrite_slot_md(slot_dir: Path, completed: int,
                      next_issue: int | None, next_title: str,
                      next_batch_num: int, batches: list[dict]) -> None:
-    """Rewrite SLOT.md with updated checkboxes, markers, and state."""
-    slot_md = slot_dir / "SLOT.md"
+    """Rewrite .slot with updated checkboxes, markers, and state."""
+    slot_md = slot_dir / ".slot"
     content = slot_md.read_text()
     lines = content.splitlines()
     out = []
@@ -278,7 +278,7 @@ def status(slot_dir: Path) -> dict:
 def write_epic_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
                        branch: str, issue: str, issue_repo: str,
                        batches: list[dict], context: str) -> None:
-    """Write SLOT.md with epic batch plan structure."""
+    """Write .slot with epic batch plan structure."""
     lines = [f"# Slot {slot_number} — {branch}", ""]
     lines.append("## Issue")
     lines.append(f"{issue_repo}#{issue}")
@@ -321,7 +321,7 @@ def write_epic_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
     lines.append("## Created")
     lines.append(f"{date.today().isoformat()}, branch: {branch}")
     lines.append("")
-    (slot_dir / "SLOT.md").write_text("\n".join(lines))
+    (slot_dir / ".slot").write_text("\n".join(lines))
 
 
 def main() -> None:

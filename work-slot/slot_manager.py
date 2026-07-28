@@ -153,7 +153,7 @@ Covers: {covers}
         primary = " (primary)" if i == 0 else ""
         content += f"- {repo}{primary}\n"
     content += f"\n## Created\n{datetime.date.today().isoformat()}, branch: {branch}\n"
-    (slot_dir / "SLOT.md").write_text(content)
+    (slot_dir / ".slot").write_text(content)
 
 
 def create_slot(family_root: Path, repos: list[str], branch: str,
@@ -271,7 +271,7 @@ def get_slot_repos(slot_dir: Path) -> list[str]:
 
 
 def parse_slot_md(slot_dir: Path) -> dict:
-    slot_md = slot_dir / "SLOT.md"
+    slot_md = slot_dir / ".slot"
     if not slot_md.exists():
         return {}
     content = slot_md.read_text()
@@ -634,7 +634,7 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
             if sub.is_dir() and (sub / ".git").exists() and is_project_repo(sub.name)
         ]
         branch = ""
-        slot_md = d / "SLOT.md"
+        slot_md = d / ".slot"
         if slot_md.exists():
             for line in slot_md.read_text().splitlines():
                 if line.startswith("# Slot") and "—" in line:

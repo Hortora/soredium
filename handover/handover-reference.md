@@ -29,8 +29,8 @@ when resuming work. Contains the template, routing table, and git read patterns.
 
 ## Epic Progress
 
-<Include ONLY when in an epic slot (SLOT.md contains Type: epic).
- Omit entirely otherwise. Read from SLOT.md ## Batch Plan and ## Session State.>
+<Include ONLY when in an epic slot (.slot contains Type: epic).
+ Omit entirely otherwise. Read from .slot ## Batch Plan and ## Session State.>
 
 Epic #<N> — Batch <current> of <total>
 Done: #<list of completed issues> (Batch 1, partial Batch 2)

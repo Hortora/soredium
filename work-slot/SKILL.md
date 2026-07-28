@@ -106,7 +106,7 @@ Slot <N> created: <branch-name>
   Repos: engine, iot
   Workspace: work (shared) / work-iot (external)
   .m2: worktrees/<N>/.m2
-  Slot context: worktrees/<N>/SLOT.md
+  Slot context: worktrees/<N>/.slot
   iTerm2: tab opened / skipped
 
 Open a CLI in <slot-dir>/<primary-repo> and run work-start.
@@ -138,7 +138,7 @@ sessions.
 
 ### Step 0 — Guard: check for existing epic slot
 
-Scan active slots via `list_slots()` and check each SLOT.md for
+Scan active slots via `list_slots()` and check each .slot for
 `Type: epic` with the same epic issue number. If found, refuse:
 
 > "Slot N already tracks epic #M (branch: `<branch>`).
@@ -200,7 +200,7 @@ checklist.
 
 **Safeguards:**
 - Locate `## Scope` by heading match (case-insensitive). If not found,
-  warn and skip — SLOT.md still has the plan.
+  warn and skip — .slot still has the plan.
 - Show a diff preview before writing. User confirms explicitly.
 - Preserve all content outside the Scope section.
 
@@ -217,7 +217,7 @@ python3 ~/.claude/skills/work-slot/slot_manager.py create-slot <family-root> \
   covers= context=<text>
 ```
 
-Then overwrite SLOT.md with the epic format:
+Then overwrite .slot with the epic format:
 
 ```bash
 python3 -c "
@@ -249,7 +249,7 @@ Open a CLI in <slot-dir>/<primary-repo> and run work-start.
 
 Advance to the next issue in the epic. Run from inside an epic slot.
 
-**Precondition:** SLOT.md must contain `Type: epic`.
+**Precondition:** .slot must contain `Type: epic`.
 
 ### Step 1 — Run advance
 
@@ -258,7 +258,7 @@ python3 ~/.claude/skills/work-slot/epic_manager.py advance <slot-dir>
 ```
 
 Parse the JSON output. The script atomically:
-1. Checks off the current issue in SLOT.md
+1. Checks off the current issue in .slot
 2. Appends it to `COVERS` in `.meta`
 3. Moves the `← active` marker to the next issue
 4. Updates Session State
@@ -336,9 +336,9 @@ Branch: issue-50-weighted-profiles (Slot 38)
 
 ### Step 3 — Divergence detection (optional)
 
-Cross-check SLOT.md against the GitHub epic body. Report if:
+Cross-check .slot against the GitHub epic body. Report if:
 - Issues added to the epic on GitHub after batching
-- Issues closed on GitHub but not checked in SLOT.md
+- Issues closed on GitHub but not checked in .slot
 
 ```
 ⚠️ Divergence detected:
@@ -350,7 +350,7 @@ Cross-check SLOT.md against the GitHub epic body. Report if:
 
 ## `work-slot remove <N>`
 
-> "Archive slot <N>? Git worktrees will be removed but SLOT.md and
+> "Archive slot <N>? Git worktrees will be removed but .slot and
 > markers are preserved in `worktrees/attic/<N>/`. (y/n)"
 
 Wait for confirmation. Then:
@@ -360,7 +360,7 @@ python3 ~/.claude/skills/work-slot/slot_manager.py remove-slot <family-root> slo
 ```
 
 **Default behaviour is archive to attic, not delete.** The slot directory
-moves to `worktrees/attic/<N>/` preserving SLOT.md, `.phase-a-complete`,
+moves to `worktrees/attic/<N>/` preserving .slot, `.phase-a-complete`,
 `.landed`, and any other metadata for auditing and branch hygiene.
 
 **Never pass `--force-delete`** unless the user explicitly says "permanently
@@ -489,7 +489,7 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 ## How slots work
 
 - **Self-contained.** Everything under `worktrees/<N>/` — repo worktrees,
-  workspace worktree, isolated `.m2`, SLOT.md context file.
+  workspace worktree, isolated `.m2`, .slot context file.
 - **Isolated .m2.** Every slot gets its own Maven local repo via
   `.mvn/maven.config`. No cross-contamination with the originals.
 - **Symlinks re-pointed.** `wksp`/`proj` symlinks point to the slot's
@@ -529,13 +529,13 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 
 **Complements:**
 - `work-start` — runs inside the slot after creation (resume path).
-  For epic slots, work-start detects `Type: epic` in SLOT.md and
+  For epic slots, work-start detects `Type: epic` in .slot and
   displays batch context on resume.
 - `work-end` — Phase A writes `.phase-a-complete`; work-slot merge reads
   it and runs Phase B externally. After Phase A in a slot, work-end
   offers to stamp/close/archive. Phase B from inside the slot still works.
 - `handover` — HANDOFF.md for session handoffs. For epic slots,
-  handover auto-includes an Epic Progress section from SLOT.md.
+  handover auto-includes an Epic Progress section from .slot.
 - `using-git-worktrees` — same git primitive, different use case
   (single-repo ephemeral isolation for subagent dispatch)
 - `issue-workflow` — activate-issues called during slot creation

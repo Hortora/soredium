@@ -61,7 +61,7 @@ class TestDetectState:
         slot = family / "worktrees" / "1"
         project = slot / "engine"
         project.mkdir(parents=True)
-        (slot / "SLOT.md").write_text(
+        (slot / ".slot").write_text(
             "# Slot 1 — issue-42-spi\n\n## Issue\n"
             "repo#42\nCovers: 42\n\n## What to do\nTest\n"
         )
@@ -73,7 +73,7 @@ class TestDetectState:
         assert result["IN_SLOT"] == "yes"
         assert result["IS_EPIC"] == "no"
         assert result["ROUTE"] == "resume_branch"
-        assert result["SLOT_MD_PATH"] == str(slot / "SLOT.md")
+        assert result["SLOT_PATH"] == str(slot / ".slot")
 
     def test_on_branch_in_epic_slot(self, tmp_path):
         workspace = tmp_path / "workspace"
@@ -82,7 +82,7 @@ class TestDetectState:
         slot = family / "worktrees" / "1"
         project = slot / "engine"
         project.mkdir(parents=True)
-        (slot / "SLOT.md").write_text(
+        (slot / ".slot").write_text(
             "# Slot 1 — issue-50-profiles\n\n## Issue\n"
             "casehubio/engine#50\nCovers: 108\nType: epic\n\n"
             "## What to do\nEpic work\n\n"
@@ -152,12 +152,12 @@ class TestDetectState:
         assert "HANDOFF_PATH" not in result
 
     def test_slot_without_worktrees_in_path(self, tmp_path):
-        """A SLOT.md one level up doesn't count if /worktrees/ isn't in the path."""
+        """A .slot one level up doesn't count if /worktrees/ isn't in the path."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         project = tmp_path / "family" / "engine"
         project.mkdir(parents=True)
-        (tmp_path / "family" / "SLOT.md").write_text(
+        (tmp_path / "family" / ".slot").write_text(
             "# Slot 1\n\n## Issue\nrepo#42\nType: epic\n"
         )
         result = work_router.detect_state(

@@ -16,7 +16,7 @@ Output (KEY=VALUE lines):
     STACK_DEPTH=<N>
     HAS_HANDOFF=yes|no
     HANDOFF_PATH=<path>       (only if HAS_HANDOFF=yes)
-    SLOT_MD_PATH=<path>       (only if IN_SLOT=yes)
+    SLOT_PATH=<path>          (only if IN_SLOT=yes)
 """
 
 import re
@@ -41,15 +41,15 @@ def detect_state(current_branch: str, project_path: str,
 
     in_slot = False
     is_epic = False
-    slot_md_path = ""
+    slot_path = ""
     epic_batch = ""
     epic_active_issue = ""
 
     if "/worktrees/" in str(project):
-        candidate = project.parent / "SLOT.md"
+        candidate = project.parent / ".slot"
         if candidate.exists():
             in_slot = True
-            slot_md_path = str(candidate)
+            slot_path = str(candidate)
             content = candidate.read_text()
 
             in_issue_section = False
@@ -106,8 +106,8 @@ def detect_state(current_branch: str, project_path: str,
         result["EPIC_ACTIVE_ISSUE"] = epic_active_issue
     if handoff_path:
         result["HANDOFF_PATH"] = handoff_path
-    if slot_md_path:
-        result["SLOT_MD_PATH"] = slot_md_path
+    if slot_path:
+        result["SLOT_PATH"] = slot_path
 
     return result
 
