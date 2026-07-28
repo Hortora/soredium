@@ -137,6 +137,13 @@ if "## Project Type" in cwd_claude_text:
     if m:
         maturity_stage = m.group(1).lower()
 
+epic_path = Path(workspace) / "design" / ".epic"
+is_epic = False
+if epic_path.exists():
+    epic_content = epic_path.read_text()
+    if "Type: epic" in epic_content:
+        is_epic = True
+
 has_meta = "yes" if meta_path.exists() else "no"
 
 design_repo_key = meta.get("design-repo", "")
@@ -197,5 +204,7 @@ print(f"BLOG_DIR={blog_dir}")
 print(f"HAS_BLOG_ROUTING={has_blog_routing}")
 print(f"PROJECT_NAME={project_name}")
 print(f"HAS_WRITING_STYLE_REF={has_writing_style_ref}")
+print(f"IS_EPIC={'yes' if is_epic else 'no'}")
+print(f"EPIC_PATH={str(epic_path) if is_epic else ''}")
 print(f"FLYWAY_NEXT_V={flyway_next_v}")
 print(f"META_SECTION_HASHES={meta_section_hashes}")

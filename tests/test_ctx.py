@@ -840,6 +840,53 @@ class TestInferredIssue:
         assert data["INFERRED_ISSUE"] == "1234"
 
 
+class TestEpicDetection:
+    """Test IS_EPIC and EPIC_PATH fields."""
+
+    def test_epic_file_detected(self, tmp_path):
+        """IS_EPIC=yes when workspace/design/.epic exists with Type: epic."""
+        repo = init_repo(tmp_path / "repo")
+        design = repo / "design"
+        design.mkdir(parents=True)
+        (design / ".epic").write_text(
+            "## Issue\nHortora/soredium#100\nType: epic\n"
+        )
+        data = parse(run_ctx(repo))
+        assert data["IS_EPIC"] == "yes"
+        assert data["EPIC_PATH"] == str(design / ".epic")
+
+    def test_no_epic_file(self, tmp_path):
+        """IS_EPIC=no when no .epic file."""
+        repo = init_repo(tmp_path / "repo")
+        data = parse(run_ctx(repo))
+        assert data["IS_EPIC"] == "no"
+        assert data["EPIC_PATH"] == ""
+
+    def test_epic_file_without_type_epic(self, tmp_path):
+        """IS_EPIC=no when .epic exists but has no Type: epic."""
+        repo = init_repo(tmp_path / "repo")
+        design = repo / "design"
+        design.mkdir(parents=True)
+        (design / ".epic").write_text("## Issue\nrepo#100\n")
+        data = parse(run_ctx(repo))
+        assert data["IS_EPIC"] == "no"
+        assert data["EPIC_PATH"] == ""
+
+    def test_epic_in_workspace_not_project(self, tmp_path):
+        """IS_EPIC detects .epic in workspace, not project."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (workspace / "proj").symlink_to(project)
+        design = workspace / "design"
+        design.mkdir(parents=True)
+        (design / ".epic").write_text(
+            "## Issue\nrepo#100\nType: epic\n"
+        )
+        data = parse(run_ctx(workspace))
+        assert data["IS_EPIC"] == "yes"
+        assert data["EPIC_PATH"] == str(design / ".epic")
+
+
 class TestMetaNewFields:
     """Test new .meta field extraction."""
 
