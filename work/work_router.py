@@ -42,6 +42,7 @@ def detect_state(current_branch: str, project_path: str,
     in_slot = False
     is_epic = False
     slot_path = ""
+    epic_file_path = ""
     epic_batch = ""
     epic_active_issue = ""
 
@@ -79,6 +80,41 @@ def detect_state(current_branch: str, project_path: str,
                 )
                 epic_active_issue = m.group(1) if m else ""
 
+    if not in_slot:
+        epic_candidate = workspace / "design" / ".epic"
+        if epic_candidate.exists():
+            epic_content = epic_candidate.read_text()
+            epic_in_issue = False
+            for line in epic_content.splitlines():
+                if line.startswith("## Issue"):
+                    epic_in_issue = True
+                    continue
+                if line.startswith("## ") and epic_in_issue:
+                    break
+                if epic_in_issue and line.strip() == "Type: epic":
+                    is_epic = True
+
+            if is_epic:
+                epic_file_path = str(epic_candidate)
+
+                batch_numbers = re.findall(
+                    r"^### Batch (\d+)", epic_content, re.MULTILINE
+                )
+                total_batches = len(batch_numbers)
+
+                m = re.search(
+                    r"^Current batch:\s*(\d+)", epic_content,
+                    re.MULTILINE
+                )
+                current_batch = m.group(1) if m else "0"
+                epic_batch = f"{current_batch} of {total_batches}"
+
+                m = re.search(
+                    r"^Current issue:\s*#(\d+)", epic_content,
+                    re.MULTILINE
+                )
+                epic_active_issue = m.group(1) if m else ""
+
     has_handoff = False
     handoff_path = ""
     handoff_candidate = workspace / "HANDOFF.md"
@@ -108,6 +144,8 @@ def detect_state(current_branch: str, project_path: str,
         result["HANDOFF_PATH"] = handoff_path
     if slot_path:
         result["SLOT_PATH"] = slot_path
+    if epic_file_path:
+        result["EPIC_PATH"] = epic_file_path
 
     return result
 

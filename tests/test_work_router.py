@@ -168,6 +168,92 @@ class TestDetectState:
         assert result["IN_SLOT"] == "no"
 
 
+class TestEpicFileDetection:
+    def test_detects_epic_file_in_workspace(self, tmp_path):
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        project.mkdir()
+        workspace.mkdir()
+        design = workspace / "design"
+        design.mkdir(parents=True)
+        (design / ".epic").write_text(
+            "## Issue\nHortora/soredium#100\nType: epic\n\n"
+            "## Batch Plan\n### Batch 1 — Core\n"
+            "- [ ] #102 — First ← active\n\n"
+            "## Session State\nCurrent batch: 1\n"
+            "Current issue: #102 — First\n"
+        )
+        result = work_router.detect_state(
+            "issue-100-epic", str(project), str(workspace))
+        assert result["IS_EPIC"] == "yes"
+        assert result["EPIC_PATH"] == str(design / ".epic")
+        assert result["EPIC_BATCH"] == "1 of 1"
+        assert result["EPIC_ACTIVE_ISSUE"] == "102"
+        assert result["IN_SLOT"] == "no"
+
+    def test_epic_file_not_present(self, tmp_path):
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        project.mkdir()
+        workspace.mkdir()
+        result = work_router.detect_state(
+            "main", str(project), str(workspace))
+        assert result["IS_EPIC"] == "no"
+        assert "EPIC_PATH" not in result
+
+    def test_slot_takes_precedence_over_epic(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        family = tmp_path / "family"
+        slot = family / "worktrees" / "1"
+        project = slot / "repo"
+        slot.mkdir(parents=True)
+        project.mkdir()
+        (slot / ".slot").write_text(
+            "## Issue\nrepo#42\nType: epic\n\n"
+            "## Batch Plan\n### Batch 1 — X\n"
+            "- [ ] #10 — Y ← active\n\n"
+            "## Session State\nCurrent batch: 1\n"
+            "Current issue: #10 — Y\n"
+        )
+        design = workspace / "design"
+        design.mkdir(parents=True)
+        (design / ".epic").write_text(
+            "## Issue\nother#99\nType: epic\n\n"
+            "## Batch Plan\n### Batch 1 — Z\n"
+            "- [ ] #20 — W ← active\n\n"
+            "## Session State\nCurrent batch: 1\n"
+            "Current issue: #20 — W\n"
+        )
+        result = work_router.detect_state(
+            "issue-42-spi", str(project), str(workspace))
+        assert result["IN_SLOT"] == "yes"
+        assert result["SLOT_PATH"] == str(slot / ".slot")
+        assert "EPIC_PATH" not in result
+
+    def test_epic_multi_batch(self, tmp_path):
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        project.mkdir()
+        workspace.mkdir()
+        design = workspace / "design"
+        design.mkdir(parents=True)
+        (design / ".epic").write_text(
+            "## Issue\nrepo#100\nType: epic\n\n"
+            "## Batch Plan\n"
+            "### Batch 1 — A\n- [x] #10 — Done\n\n"
+            "### Batch 2 — B ← current\n"
+            "- [ ] #11 — Active ← active\n\n"
+            "### Batch 3 — C\n- [ ] #12 — Later\n\n"
+            "## Session State\nCurrent batch: 2\n"
+            "Current issue: #11 — Active\n"
+        )
+        result = work_router.detect_state(
+            "issue-100-epic", str(project), str(workspace))
+        assert result["EPIC_BATCH"] == "2 of 3"
+        assert result["EPIC_ACTIVE_ISSUE"] == "11"
+
+
 class TestCLI:
     def test_outputs_key_value(self, tmp_path, capsys):
         workspace = tmp_path / "workspace"
