@@ -590,6 +590,15 @@ If a commit being squashed has a matching patch-id on another branch, warn:
 
 ### Step 4 — Show summary
 
+**Ordering principle:** When presenting the squash plan, order by
+recommendation — the option that best preserves semantic intent is
+presented first. Prefer keeping separate commits when they represent
+genuinely different concerns (feat vs fix vs docs for different
+subsystems, different issue refs). Aggressive single-commit squash
+is available but never the default recommendation. The user
+typically picks option 1, so option 1 must be the best balance of
+clean history and meaningful commit boundaries.
+
 ```
 Commit squash analysis — <N> commits in range
 

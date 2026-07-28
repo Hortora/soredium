@@ -971,7 +971,11 @@ Agent(
    allowing approval.
 
 3. Format groups into plan display with per-commit flags and group
-   annotations. Present for user approval:
+   annotations. **Order by recommendation — the option that best preserves
+   semantic intent is option 1.** Prefer keeping separate commits when they
+   represent genuinely different concerns (feat vs fix vs docs for different
+   subsystems, different issue refs). Aggressive single-commit squash is a
+   later option, not the default. Present for user approval:
    > Squash plan: <total_commits> commits → <N groups> groups (strategy: <strategy>)
    > [A] Accept  [E] Edit  [R] Reject  [G] Run /git-squash instead
 
