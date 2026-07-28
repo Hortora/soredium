@@ -529,14 +529,16 @@ Surface `.meta`:
 
 Run Steps 0, 2, 3, 3b, 11 only. Skip all branch creation steps.
 
-### Epic Slot Overlay
+### Epic Overlay
 
-After the standard resume steps complete, check for epic slot context:
+After the standard resume steps complete, check for epic context:
 
-1. **Guard:** `$PROJECT` path must contain `/worktrees/`. If not in a
-   slot, skip this overlay entirely.
-2. **Detect:** Read `$PROJECT/../.slot`. If it does not exist or does
-   not contain `Type: epic` in the `## Issue` section, skip.
+1. **Guard — detect epic file:**
+   - If `/worktrees/` in `$PROJECT`: `epic_file = $PROJECT/../.slot`
+   - Elif `workspace/design/.epic` exists: `epic_file = workspace/design/.epic`
+   - Else: skip overlay entirely.
+2. **Detect:** Read `epic_file`. If it does not exist or does not contain
+   `Type: epic` in the `## Issue` section, skip.
 3. **Display epic context:**
    - Read `## Session State` for current batch and issue
    - Read `## Batch Plan` for batch structure and progress
@@ -548,9 +550,9 @@ After the standard resume steps complete, check for epic slot context:
      ```
 4. **Set active issue** for commit linkage: `Refs #<active-issue>`
 
-This overlay reads .slot but does NOT modify it. It provides context
-for the session — .slot updates happen via `work-slot next` and
-handover wraps.
+This overlay reads the epic file but does NOT modify it. It provides
+context for the session — updates happen via `work next` (single-repo)
+or `work-slot next` (slot) and handover wraps.
 
 ---
 

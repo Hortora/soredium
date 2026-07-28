@@ -254,7 +254,7 @@ Advance to the next issue in the epic. Run from inside an epic slot.
 ### Step 1 — Run advance
 
 ```bash
-python3 ~/.claude/skills/work-slot/epic_manager.py advance <slot-dir>
+python3 ~/.claude/skills/work-slot/epic_manager.py advance <slot-dir>/.slot
 ```
 
 Parse the JSON output. The script atomically:
@@ -311,7 +311,7 @@ Show epic progress for the current or specified slot.
 ### Step 1 — Get status
 
 ```bash
-python3 ~/.claude/skills/work-slot/epic_manager.py status <slot-dir>
+python3 ~/.claude/skills/work-slot/epic_manager.py status <slot-dir>/.slot
 ```
 
 ### Step 2 — Format output

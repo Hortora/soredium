@@ -581,12 +581,14 @@ verification, and squash — but defers merge and all post-merge actions.
   > If **no** → stop. Slot stays as "ready to land" for later merge
   > via `work-slot merge` from the main repo.
 
-**Epic slot note:** When closing an epic slot where all batches are
-complete (the last `work-slot next` set `epic_complete=true`), the
-epic issue itself is included in COVERS via `epic_manager.py advance`.
-work-end closes it alongside the child issues. If the epic still has
-open batches (safe exit mid-epic), only the completed child issues are
-in COVERS — the epic issue stays open.
+**Epic note (slot and single-repo):** When closing an epic where all
+batches are complete (the last `work next` or `work-slot next` set
+`epic_complete=true`), the epic issue itself is included in COVERS
+(added by `work next` step 4). work-end closes it alongside the child
+issues. If the epic still has open batches (safe exit mid-epic), only
+the completed child issues are in COVERS — the epic issue stays open.
+To resume remaining children: run `work epic #N` again — it detects
+already-closed children and plans only the open remainder.
 
 ### Phase B — "Land it" (slot mode only)
 
@@ -1083,8 +1085,8 @@ After 8j completes (workspace/project is now on main):
 If `$SINGLE_REPO_MODE = yes`:
 
 Run: `python3 ~/.claude/skills/work-end/branch_cleanup.py cleanup-scaffold <WORKSPACE> single-repo=yes`
-Read `CLEANED=yes` from output. The script removes `.meta` and `JOURNAL.md`, removes the
-`design/` directory if empty, commits, and pushes.
+Read `CLEANED=yes` from output. The script removes `.meta`, `JOURNAL.md`, and `.epic` (if
+present), removes the `design/` directory if empty, commits, and pushes.
 
 **Why this step exists:** In two-repo mode, `.meta` and `JOURNAL.md` live on the workspace
 epic branch only — they never reach workspace main. In single-repo mode, the workspace IS

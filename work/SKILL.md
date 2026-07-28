@@ -25,6 +25,8 @@ correct skill — developer says `work` to begin, `work-end` to close,
 |------------|---------|
 | `work end` | → **work-end** immediately (no router needed) |
 | `work pause` | → **work-pause** immediately (no router needed) |
+| `work epic #N` | → epic setup (Step 5) |
+| `work next` | → advance epic issue (Step 6) |
 | `work` / `work start` / `work resume` / `resume handover` / `resume` / `continue` | → run the router (Step 1b) |
 
 For `work end` and `work pause`, route immediately — no state
@@ -76,22 +78,28 @@ Present options based on the router output. The router has already
 determined slot context, epic state, pause stack depth, and handoff
 existence — do NOT re-derive these.
 
-Always present:
+If `HAS_HANDOFF=yes`:
 > 1. **resume** — read the last handover and continue where I left off
+
+If `HAS_HANDOFF=no`:
+> 1. **start** — invoke work-start (first session on this branch)
 
 If `STACK_DEPTH > 0`:
 > 2. **switch** — you have <N> paused branch(es) — resume one instead
 
+If `IS_EPIC=yes`:
+> N. **next** — mark current child issue done, advance to next
+
 Always present:
-> 3. **end** — close this branch, merge, push, return to main
-> 4. **pause** — commit WIP, push to stack, switch to main
-> 5. **wrap** — end session but keep branch open (write handover)
+> N+1. **end** — close this branch, merge, push, return to main
+> N+2. **pause** — commit WIP, push to stack, switch to main
+> N+3. **wrap** — end session but keep branch open (write handover)
 
 **On resume (option 1):**
 
 If `HAS_HANDOFF=yes`: read `$HANDOFF_PATH`.
-If `IS_EPIC=yes`: also read .slot at `$SLOT_PATH` for batch
-progress and active issue. Display:
+If `IS_EPIC=yes`: read the epic file at `$EPIC_PATH` (single-repo) or
+`$SLOT_PATH` (slot) for batch progress and active issue. Display:
 ```
 Epic — Batch $EPIC_BATCH
 Active issue: #$EPIC_ACTIVE_ISSUE
@@ -109,6 +117,56 @@ Route to **work-pause** (saves current branch), then **work-resume**
 
 **On end/pause/wrap:**
 Route to work-end, work-pause, or handover respectively.
+
+**Step 5 — `work epic #N` (epic setup)**
+
+Sets up single-repo epic iteration. Must be on main.
+
+1. Resolve paths via `ctx.py`. Use `$OWNER_REPO` for the repo.
+2. Fetch the epic issue: `gh issue view <N> --repo $OWNER_REPO --json title,body`
+3. Parse child issues from `## Scope` checklist (`- [ ] #N` entries).
+   For each child, check state via `gh issue view <child> --repo $OWNER_REPO
+   --json state` — skip CLOSED children (handles mid-epic resume after
+   prior work-end).
+4. Fetch title/labels for each open child.
+5. If 5+ open children → batch planning (LLM-driven grouping: domain
+   affinity, shared API surface, scale fit, dependency ordering — same
+   criteria as `work-slot epic` Step 4). Otherwise flat ordered list as
+   a single batch.
+6. Sync main before branch creation (equivalent to work-start Step 4d):
+   `git fetch origin main && git rebase origin/main`
+7. Create or reset branch (target: `issue-N-<slug>`):
+   - Branch does not exist → `git checkout -b issue-N-<slug>`
+   - Branch exists with closure stamp (`chore: branch closed` as latest
+     commit subject) → mid-epic resume. Reset: `git checkout -B issue-N-<slug>`
+   - Branch exists without stamp → error: "Epic branch already exists
+     and is active. Use `work` to resume."
+8. Scaffold `.meta` and `JOURNAL.md` via `scaffold.py`.
+9. Write `workspace/design/.epic` via `epic_manager.write_epic()`.
+10. If `$GITHUB_PROJECT` configured, activate all child issues (non-fatal).
+11. Report: "Epic #N — M children, K batches. Active: #<first>. Run
+    work-start to begin."
+
+**Step 6 — `work next` (advance epic issue)**
+
+Advances to the next child issue in the current epic. Detects context:
+- `/worktrees/` in `$PROJECT` → slot context, epic file at
+  `$PROJECT/../.slot`
+- `workspace/design/.epic` exists → single-repo context
+
+Steps:
+
+1. Run `ctx.py` to resolve paths. Determine epic file location.
+2. Call `epic_manager.py advance <epic-path>`. The script atomically
+   checks off the current issue, appends to COVERS in `.meta`, moves
+   `← active` to next, updates Session State.
+3. Check off the completed issue's checkbox on the GitHub epic body
+   (progress signaling, not issue closure — consistent with work-slot).
+4. If `epic_complete` in the result → add the epic issue number to
+   `Covers:` in `.meta`. Report: "All children done. Run work-end."
+5. If `batch_complete` and not `epic_complete` → log: "Batch N complete.
+   Safe exit point — run work-end to merge, or continue."
+6. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
 
 ---
 

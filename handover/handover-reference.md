@@ -29,8 +29,8 @@ when resuming work. Contains the template, routing table, and git read patterns.
 
 ## Epic Progress
 
-<Include ONLY when in an epic slot (.slot contains Type: epic).
- Omit entirely otherwise. Read from .slot ## Batch Plan and ## Session State.>
+<Include ONLY when IS_EPIC=yes (from ctx.py output).
+ Omit entirely otherwise. Read from .epic or .slot depending on context.>
 
 Epic #<N> — Batch <current> of <total>
 Done: #<list of completed issues> (Batch 1, partial Batch 2)
