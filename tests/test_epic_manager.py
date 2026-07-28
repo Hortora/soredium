@@ -50,7 +50,7 @@ Last wrap: 2026-07-28, session started batch 1
 class TestParseBatchPlan:
     def test_parses_epic_slot(self, tmp_path):
         (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
-        result = epic_manager.parse_batch_plan(tmp_path)
+        result = epic_manager.parse_batch_plan(tmp_path / ".slot")
         assert result["is_epic"] is True
         assert result["epic_number"] == "50"
         assert result["epic_repo"] == "casehubio/engine"
@@ -61,7 +61,7 @@ class TestParseBatchPlan:
 
     def test_batch_structure(self, tmp_path):
         (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
-        result = epic_manager.parse_batch_plan(tmp_path)
+        result = epic_manager.parse_batch_plan(tmp_path / ".slot")
         b1 = result["batches"][0]
         assert b1["name"] == "Vocabulary and docs (S+S)"
         assert b1["number"] == 1
@@ -73,11 +73,11 @@ class TestParseBatchPlan:
         (tmp_path / ".slot").write_text(
             "# Slot 1 — issue-42-spi\n\n## Issue\nrepo#42\nCovers: 42\n"
         )
-        result = epic_manager.parse_batch_plan(tmp_path)
+        result = epic_manager.parse_batch_plan(tmp_path / ".slot")
         assert result["is_epic"] is False
 
-    def test_missing_slot_md(self, tmp_path):
-        result = epic_manager.parse_batch_plan(tmp_path)
+    def test_missing_file(self, tmp_path):
+        result = epic_manager.parse_batch_plan(tmp_path / ".slot")
         assert result["is_epic"] is False
 
     def test_all_done_in_batch(self, tmp_path):
@@ -98,7 +98,7 @@ class TestParseBatchPlan:
             "Current issue: #111 — Add weight parameter",
         )
         (tmp_path / ".slot").write_text(md)
-        result = epic_manager.parse_batch_plan(tmp_path)
+        result = epic_manager.parse_batch_plan(tmp_path / ".slot")
         assert result["current_batch"] == 2
         assert result["current_issue"] == 111
         assert set(result["completed"]) == {108, 109}
@@ -121,7 +121,7 @@ Test
 - engine
 """
         (tmp_path / ".slot").write_text(md)
-        result = epic_manager.parse_batch_plan(tmp_path)
+        result = epic_manager.parse_batch_plan(tmp_path / ".slot")
         assert result["is_epic"] is True
         assert result["batches"] == []
         assert result["current_issue"] == 0
@@ -142,7 +142,7 @@ class TestAdvance:
 
     def test_advances_to_next_issue_in_batch(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
-        result = epic_manager.advance(tmp_path, meta_path=meta)
+        result = epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         assert result["completed"] == 109
         assert result["next_issue"] == 111
         assert result["batch_complete"] is True
@@ -158,7 +158,7 @@ class TestAdvance:
             "Current batch: 1\nCurrent issue: #108 — Rename disposition",
         )
         meta = self._setup_slot(tmp_path, md)
-        result = epic_manager.advance(tmp_path, meta_path=meta)
+        result = epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         assert result["completed"] == 108
         assert result["next_issue"] == 109
         assert result["batch_complete"] is False
@@ -166,14 +166,14 @@ class TestAdvance:
 
     def test_updates_slot_md_checkboxes(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
-        epic_manager.advance(tmp_path, meta_path=meta)
+        epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         updated = (tmp_path / ".slot").read_text()
         assert "- [x] #109 — Update terminology" in updated
         assert "- [ ] #111 — Add weight parameter ← active" in updated
 
     def test_updates_slot_md_current_markers(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
-        epic_manager.advance(tmp_path, meta_path=meta)
+        epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         updated = (tmp_path / ".slot").read_text()
         assert "### Batch 2 — Weighted profiles API (M+M) ← current" in updated
         # Batch 1 should no longer have ← current
@@ -183,19 +183,19 @@ class TestAdvance:
 
     def test_updates_meta_covers(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
-        epic_manager.advance(tmp_path, meta_path=meta)
+        epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         content = meta.read_text()
         assert "covers: 108,109" in content
 
     def test_updates_slot_md_covers(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
-        epic_manager.advance(tmp_path, meta_path=meta)
+        epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         updated = (tmp_path / ".slot").read_text()
         assert "Covers: 108,109" in updated
 
     def test_updates_session_state(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
-        epic_manager.advance(tmp_path, meta_path=meta)
+        epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         updated = (tmp_path / ".slot").read_text()
         assert "Current batch: 2" in updated
         assert "Current issue: #111 — Add weight parameter" in updated
@@ -230,35 +230,35 @@ Current issue: #109 — Last
 2026-07-28, branch: issue-50-test
 """
         meta = self._setup_slot(tmp_path, md, covers="108")
-        result = epic_manager.advance(tmp_path, meta_path=meta)
+        result = epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         assert result["epic_complete"] is True
         assert result["batch_complete"] is True
         assert result["next_issue"] is None
 
     def test_meta_covers_deduplicates(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108,109")
-        epic_manager.advance(tmp_path, meta_path=meta)
+        epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         content = meta.read_text()
         assert content.count("109") == 1
 
     def test_idempotent_slot_md_update(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
-        epic_manager.advance(tmp_path, meta_path=meta)
+        epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         first_state = (tmp_path / ".slot").read_text()
         # Advancing again should not break — current is now #111
-        result2 = epic_manager.advance(tmp_path, meta_path=meta)
+        result2 = epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         assert result2["completed"] == 111
 
     def test_no_meta_path_still_updates_slot(self, tmp_path):
         (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
-        result = epic_manager.advance(tmp_path, meta_path=None)
+        result = epic_manager.advance(tmp_path / ".slot", meta_path=None)
         assert result["completed"] == 109
         updated = (tmp_path / ".slot").read_text()
         assert "- [x] #109 — Update terminology" in updated
 
     def test_what_to_do_section_updated(self, tmp_path):
         meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
-        epic_manager.advance(tmp_path, meta_path=meta)
+        epic_manager.advance(tmp_path / ".slot", meta_path=meta)
         updated = (tmp_path / ".slot").read_text()
         assert "Batch 2" in updated.split("## What to do")[1].split("##")[0]
 
@@ -266,7 +266,7 @@ Current issue: #109 — Last
 class TestStatus:
     def test_returns_progress(self, tmp_path):
         (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
-        result = epic_manager.status(tmp_path)
+        result = epic_manager.status(tmp_path / ".slot")
         assert result["total_issues"] == 4
         assert result["completed_count"] == 1
         assert result["total_batches"] == 2
@@ -290,13 +290,13 @@ class TestStatus:
             "Current batch: 2\nCurrent issue: #111 — Add weight parameter",
         )
         (tmp_path / ".slot").write_text(md)
-        result = epic_manager.status(tmp_path)
+        result = epic_manager.status(tmp_path / ".slot")
         assert result["completed_batches"] == 1
         assert result["safe_exit"] is True
 
     def test_non_epic(self, tmp_path):
         (tmp_path / ".slot").write_text("# Slot 1\n\n## Issue\nrepo#42\n")
-        result = epic_manager.status(tmp_path)
+        result = epic_manager.status(tmp_path / ".slot")
         assert result.get("is_epic") is False
 
     def test_all_complete(self, tmp_path):
@@ -325,7 +325,7 @@ Current issue:
 - engine
 """
         (tmp_path / ".slot").write_text(md)
-        result = epic_manager.status(tmp_path)
+        result = epic_manager.status(tmp_path / ".slot")
         assert result["completed_count"] == 2
         assert result["completed_batches"] == 1
         assert result["current_issue"] == 0
@@ -347,7 +347,7 @@ class TestWriteEpicSlotMd:
             "50", "casehubio/engine", batches, "Weighted profiles",
         )
         assert (tmp_path / ".slot").exists()
-        plan = epic_manager.parse_batch_plan(tmp_path)
+        plan = epic_manager.parse_batch_plan(tmp_path / ".slot")
         assert plan["is_epic"] is True
         assert plan["epic_number"] == "50"
         assert plan["epic_repo"] == "casehubio/engine"
@@ -400,22 +400,123 @@ class TestWriteEpicSlotMd:
         assert "- iot" in content
 
 
+class TestAdvanceReturnsEpicInfo:
+    def _setup_slot(self, tmp_path, slot_md, covers=""):
+        (tmp_path / ".slot").write_text(slot_md)
+        design = tmp_path / "work" / "engine" / "design"
+        design.mkdir(parents=True)
+        (design / ".meta").write_text(
+            "branch: issue-50-weighted-profiles\n"
+            "issue: 50\n"
+            "issue-repo: casehubio/engine\n"
+            f"covers: {covers}\n"
+        )
+        return design / ".meta"
+
+    def test_advance_returns_epic_number(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        result = epic_manager.advance(tmp_path / ".slot", meta_path=meta)
+        assert result["epic_number"] == "50"
+        assert result["epic_repo"] == "casehubio/engine"
+
+    def test_advance_returns_epic_info_on_completion(self, tmp_path):
+        md = """\
+# Slot 1 — issue-50-test
+
+## Issue
+Hortora/soredium#100
+Covers: 108
+Type: epic
+Safe exit: after any completed batch
+
+## Batch Plan
+
+### Batch 1 — Final (S) ← current
+- [x] #108 — First
+- [ ] #109 — Last ← active
+
+## Session State
+Current batch: 1
+Current issue: #109 — Last
+"""
+        meta = self._setup_slot(tmp_path, md, covers="108")
+        result = epic_manager.advance(tmp_path / ".slot", meta_path=meta)
+        assert result["epic_complete"] is True
+        assert result["epic_number"] == "100"
+        assert result["epic_repo"] == "Hortora/soredium"
+
+
+class TestWriteEpic:
+    def test_write_epic_creates_file(self, tmp_path):
+        batches = [{"number": 1, "name": "Core",
+                    "issues": [{"number": 10, "title": "First"}]}]
+        epic_manager.write_epic(tmp_path, issue="100", slug="my-epic",
+                                issue_repo="Hortora/soredium",
+                                batches=batches, context="Test epic")
+        epic_path = tmp_path / "design" / ".epic"
+        assert epic_path.exists()
+        content = epic_path.read_text()
+        assert "# Epic #100 — my-epic" in content
+        assert "## Repos" not in content
+        assert "Type: epic" in content
+        assert "← active" in content
+
+    def test_write_epic_roundtrip(self, tmp_path):
+        batches = [{"number": 1, "name": "Core",
+                    "issues": [{"number": 10, "title": "First"},
+                               {"number": 11, "title": "Second"}]},
+                   {"number": 2, "name": "Polish",
+                    "issues": [{"number": 12, "title": "Third"}]}]
+        epic_manager.write_epic(tmp_path, issue="100", slug="my-epic",
+                                issue_repo="Hortora/soredium",
+                                batches=batches, context="Test")
+        plan = epic_manager.parse_batch_plan(tmp_path / "design" / ".epic")
+        assert plan["is_epic"] is True
+        assert plan["epic_number"] == "100"
+        assert len(plan["batches"]) == 2
+        assert plan["current_issue"] == 10
+
+    def test_write_epic_file_with_repos(self, tmp_path):
+        epic_path = tmp_path / ".slot"
+        batches = [{"number": 1, "name": "Core",
+                    "issues": [{"number": 10, "title": "First"}]}]
+        epic_manager.write_epic_file(
+            epic_path, "# Slot 1 — branch", repos=["engine", "iot"],
+            issue="50", issue_repo="casehubio/engine",
+            batches=batches, context="Test")
+        content = epic_path.read_text()
+        assert "## Repos" in content
+        assert "engine (primary)" in content
+
+    def test_write_epic_file_no_repos(self, tmp_path):
+        epic_path = tmp_path / ".epic"
+        batches = [{"number": 1, "name": "Core",
+                    "issues": [{"number": 10, "title": "First"}]}]
+        epic_manager.write_epic_file(
+            epic_path, "# Epic #100 — test", repos=None,
+            issue="100", issue_repo="Hortora/soredium",
+            batches=batches, context="Test")
+        content = epic_path.read_text()
+        assert "## Repos" not in content
+        assert "## Created" not in content
+
+
 class TestCLI:
     def test_plan_subcommand(self, tmp_path, capsys):
         (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
-        sys.argv = ["epic_manager.py", "plan", str(tmp_path)]
+        sys.argv = ["epic_manager.py", "plan", str(tmp_path / ".slot")]
         epic_manager.main()
         out = capsys.readouterr().out
         assert '"is_epic": true' in out
 
     def test_status_subcommand(self, tmp_path, capsys):
         (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
-        sys.argv = ["epic_manager.py", "status", str(tmp_path)]
+        sys.argv = ["epic_manager.py", "status", str(tmp_path / ".slot")]
         epic_manager.main()
         out = capsys.readouterr().out
         assert '"total_issues": 4' in out
 
     def test_unknown_command(self, tmp_path, capsys):
-        sys.argv = ["epic_manager.py", "bogus", str(tmp_path)]
+        sys.argv = ["epic_manager.py", "bogus", str(tmp_path / ".slot")]
         with pytest.raises(SystemExit):
             epic_manager.main()

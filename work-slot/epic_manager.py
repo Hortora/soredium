@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-epic_manager.py — Epic batch plan operations for work-slot
+epic_manager.py — Epic batch plan operations
 
 Subcommands:
-  plan <slot-dir>       Parse .slot, return batch plan as JSON
-  advance <slot-dir>    Advance to next issue, update .slot + .meta
-  status <slot-dir>     Return progress summary as JSON
+  plan <epic-path>      Parse epic file, return batch plan as JSON
+  advance <epic-path>   Advance to next issue, update file + .meta
+  status <epic-path>    Return progress summary as JSON
 
-Operates on .slot's ## Batch Plan section. Separated from
-slot_manager.py to enable future single-repo epic support.
+Operates on the ## Batch Plan section of .slot or .epic files.
 """
 
 import json
@@ -18,13 +17,12 @@ from datetime import date
 from pathlib import Path
 
 
-def parse_batch_plan(slot_dir: Path) -> dict:
-    """Parse .slot and extract epic batch plan state."""
-    slot_md = slot_dir / ".slot"
-    if not slot_md.exists():
+def parse_batch_plan(epic_path: Path) -> dict:
+    """Parse an epic file (.slot or .epic) and extract batch plan state."""
+    if not epic_path.exists():
         return {"is_epic": False}
 
-    content = slot_md.read_text()
+    content = epic_path.read_text()
 
     is_epic = False
     epic_number = ""
@@ -113,9 +111,9 @@ def _parse_batches(content: str) -> list[dict]:
     return batches
 
 
-def advance(slot_dir: Path, meta_path: Path | None = None) -> dict:
-    """Advance to the next issue. Updates .slot and .meta COVERS."""
-    plan = parse_batch_plan(slot_dir)
+def advance(epic_path: Path, meta_path: Path | None = None) -> dict:
+    """Advance to the next issue. Updates epic file and .meta COVERS."""
+    plan = parse_batch_plan(epic_path)
     if not plan["is_epic"]:
         return {"error": "not an epic slot"}
 
@@ -147,8 +145,8 @@ def advance(slot_dir: Path, meta_path: Path | None = None) -> dict:
 
     safe_exit = batch_complete
 
-    _rewrite_slot_md(slot_dir, current, next_issue, next_title,
-                     next_batch_num, plan["batches"])
+    _rewrite_epic_file(epic_path, current, next_issue, next_title,
+                       next_batch_num, plan["batches"])
 
     if meta_path and meta_path.exists():
         _update_meta_covers(meta_path, current)
@@ -160,15 +158,16 @@ def advance(slot_dir: Path, meta_path: Path | None = None) -> dict:
         "batch_complete": batch_complete,
         "epic_complete": epic_complete,
         "safe_exit": safe_exit,
+        "epic_number": plan["epic_number"],
+        "epic_repo": plan["epic_repo"],
     }
 
 
-def _rewrite_slot_md(slot_dir: Path, completed: int,
-                     next_issue: int | None, next_title: str,
-                     next_batch_num: int, batches: list[dict]) -> None:
-    """Rewrite .slot with updated checkboxes, markers, and state."""
-    slot_md = slot_dir / ".slot"
-    content = slot_md.read_text()
+def _rewrite_epic_file(epic_path: Path, completed: int,
+                       next_issue: int | None, next_title: str,
+                       next_batch_num: int, batches: list[dict]) -> None:
+    """Rewrite epic file with updated checkboxes, markers, and state."""
+    content = epic_path.read_text()
     lines = content.splitlines()
     out = []
 
@@ -225,7 +224,7 @@ def _rewrite_slot_md(slot_dir: Path, completed: int,
             line = f"Covers: {','.join(nums)}"
         result.append(line)
 
-    slot_md.write_text("\n".join(result))
+    epic_path.write_text("\n".join(result))
 
 
 def _update_meta_covers(meta_path: Path, issue_number: int) -> None:
@@ -245,9 +244,9 @@ def _update_meta_covers(meta_path: Path, issue_number: int) -> None:
     meta_path.write_text("\n".join(new_lines) + "\n")
 
 
-def status(slot_dir: Path) -> dict:
+def status(epic_path: Path) -> dict:
     """Return epic progress summary."""
-    plan = parse_batch_plan(slot_dir)
+    plan = parse_batch_plan(epic_path)
     if not plan["is_epic"]:
         return {"is_epic": False}
 
@@ -275,11 +274,12 @@ def status(slot_dir: Path) -> dict:
     }
 
 
-def write_epic_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
-                       branch: str, issue: str, issue_repo: str,
-                       batches: list[dict], context: str) -> None:
-    """Write .slot with epic batch plan structure."""
-    lines = [f"# Slot {slot_number} — {branch}", ""]
+def write_epic_file(epic_path: Path, heading: str,
+                    repos: list[str] | None, issue: str,
+                    issue_repo: str, batches: list[dict],
+                    context: str) -> None:
+    """Write an epic file (.slot or .epic) with batch plan structure."""
+    lines = [heading, ""]
     lines.append("## Issue")
     lines.append(f"{issue_repo}#{issue}")
     lines.append("Covers:")
@@ -311,17 +311,41 @@ def write_epic_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
     lines.append("Current batch: 1")
     if first_issue_info:
         lines.append(f"Current issue: #{first_issue_info['number']} — {first_issue_info['title']}")
-    lines.append("Last wrap: slot created")
+    lines.append("Last wrap: epic created")
     lines.append("")
-    lines.append("## Repos")
-    for i, repo in enumerate(repos):
-        primary = " (primary)" if i == 0 else ""
-        lines.append(f"- {repo}{primary}")
-    lines.append("")
-    lines.append("## Created")
-    lines.append(f"{date.today().isoformat()}, branch: {branch}")
-    lines.append("")
-    (slot_dir / ".slot").write_text("\n".join(lines))
+
+    if repos is not None:
+        lines.append("## Repos")
+        for i, repo in enumerate(repos):
+            primary = " (primary)" if i == 0 else ""
+            lines.append(f"- {repo}{primary}")
+        lines.append("")
+        lines.append("## Created")
+        lines.append(f"{date.today().isoformat()}")
+        lines.append("")
+
+    epic_path.write_text("\n".join(lines))
+
+
+def write_epic_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
+                       branch: str, issue: str, issue_repo: str,
+                       batches: list[dict], context: str) -> None:
+    """Write .slot with epic batch plan structure (slot convenience)."""
+    heading = f"# Slot {slot_number} — {branch}"
+    write_epic_file(slot_dir / ".slot", heading, repos, issue,
+                    issue_repo, batches, context)
+
+
+def write_epic(workspace: Path, issue: str, slug: str,
+               issue_repo: str, batches: list[dict],
+               context: str) -> None:
+    """Write .epic for single-repo epic (no Repos section)."""
+    epic_path = workspace / "design" / ".epic"
+    epic_path.parent.mkdir(parents=True, exist_ok=True)
+    heading = f"# Epic #{issue} — {slug}"
+    write_epic_file(epic_path, heading, repos=None, issue=issue,
+                    issue_repo=issue_repo, batches=batches,
+                    context=context)
 
 
 def main() -> None:
@@ -330,35 +354,39 @@ def main() -> None:
         sys.exit(1)
 
     command = sys.argv[1]
-    slot_dir = Path(sys.argv[2])
+    epic_path = Path(sys.argv[2])
 
     if command == "plan":
-        result = parse_batch_plan(slot_dir)
+        result = parse_batch_plan(epic_path)
         print(json.dumps(result, indent=2))
     elif command == "advance":
         meta_path = None
-        if not slot_dir.is_dir():
-            print(f"ERROR=slot_dir_not_found path={slot_dir}", file=sys.stderr)
-            sys.exit(1)
-        for sub in slot_dir.iterdir():
-            if not sub.is_dir():
-                continue
-            candidate = sub / "design" / ".meta"
-            if candidate.exists():
-                meta_path = candidate
-                break
-            for ws_sub in sub.iterdir():
-                if ws_sub.is_dir():
-                    candidate = ws_sub / "design" / ".meta"
-                    if candidate.exists():
-                        meta_path = candidate
-                        break
-            if meta_path:
-                break
-        result = advance(slot_dir, meta_path=meta_path)
+        epic_dir = epic_path.parent
+        # Single-repo: .meta is sibling of .epic in workspace/design/
+        sibling_meta = epic_dir / ".meta"
+        if sibling_meta.exists():
+            meta_path = sibling_meta
+        elif epic_dir.is_dir():
+            # Slot: search subdirectories for .meta
+            for sub in epic_dir.iterdir():
+                if not sub.is_dir():
+                    continue
+                candidate = sub / "design" / ".meta"
+                if candidate.exists():
+                    meta_path = candidate
+                    break
+                for ws_sub in sub.iterdir():
+                    if ws_sub.is_dir():
+                        candidate = ws_sub / "design" / ".meta"
+                        if candidate.exists():
+                            meta_path = candidate
+                            break
+                if meta_path:
+                    break
+        result = advance(epic_path, meta_path=meta_path)
         print(json.dumps(result, indent=2))
     elif command == "status":
-        result = status(slot_dir)
+        result = status(epic_path)
         print(json.dumps(result, indent=2))
     else:
         print(f"ERROR=unknown_command command={command}", file=sys.stderr)
