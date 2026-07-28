@@ -23,7 +23,7 @@ Development workflow and knowledge garden skills for Claude Code.
 | `work-end` | Closes branch, promotes artifacts, merges to main |
 | `work-pause` | Commits WIP, pushes to pause stack, switches to main |
 | `work-resume` | Restores a paused branch, rebases onto current main |
-| `work-slot` | Parallel worktree slots for multi-repo work — create, list, merge, archive |
+| `work-slot` | Parallel worktree slots for multi-repo work — create, epic iteration, list, merge, archive |
 
 ### Design & Planning
 

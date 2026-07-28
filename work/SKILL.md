@@ -19,34 +19,38 @@ correct skill — developer says `work` to begin, `work-end` to close,
 
 ## Routing
 
-**Step 1 — Parse the invocation**
+**Step 1 — Parse the invocation and detect state**
 
 | Invocation | Route to |
 |------------|---------|
-| `work` or `work start` | → detect state (Step 2) |
-| `work end` | → **work-end** immediately |
-| `work pause` | → **work-pause** immediately |
-| `work resume` | → **work-resume** immediately |
+| `work end` | → **work-end** immediately (no router needed) |
+| `work pause` | → **work-pause** immediately (no router needed) |
+| `work` / `work start` / `work resume` / `resume handover` / `resume` / `continue` | → run the router (Step 1b) |
 
-**Step 2 — Detect state (for `work` alone)**
+For `work end` and `work pause`, route immediately — no state
+detection needed.
+
+**Step 1b — Run the router**
 
 ```bash
 python3 ~/.claude/skills/project/ctx.py
+# Read PROJECT, WORKSPACE, CURRENT_BRANCH from output
+
+python3 ~/.claude/skills/work/work_router.py \
+  $CURRENT_BRANCH $PROJECT $WORKSPACE
 ```
 
-Read `WORKSPACE` and `CURRENT_BRANCH` from the output, then check pause stack state:
+The router outputs KEY=VALUE lines. Read them all — they determine
+the route AND provide context for the options menu. Do NOT re-derive
+this state with additional tool calls.
 
-```bash
-STACK_FILE="$WORKSPACE/design/.pause-stack"
-STACK_DEPTH=$(grep -c "^- branch:" "$STACK_FILE" 2>/dev/null || echo 0)
-IS_MAIN=$([ "$CURRENT_BRANCH" = "main" ] && echo "yes" || echo "no")
-```
+**Step 2 — Route based on output**
 
-| Detected state | Action |
-|---------------|--------|
-| On main, stack empty | → **work-start** — begin new work |
-| On main, stack has 1+ entries | → show stack picker (Step 3) |
-| On a feature branch | → ask: end or pause? (Step 4) |
+| `ROUTE` | Action |
+|---------|--------|
+| `start` | → **work-start** — begin new work |
+| `resume_stack` | → show stack picker (Step 3), then **work-resume** |
+| `resume_branch` | → contextual options (Step 4) |
 
 **Step 3 — Stack picker (on main, 1+ paused branches)**
 
@@ -66,14 +70,45 @@ Resume one, or start something new? (1 / 2 / ... / new)
 
 If stack depth > 3, prefix with: `⚠️  Stack has <N> paused branches — consider closing some before adding more.`
 
-**Step 4 — On feature branch: ask once**
+**Step 4 — On feature branch: contextual options**
 
-> "You're on `<branch-name>`. What do you want to do?
-> 1. **end** — close this branch, merge, push, write handover, return to main
-> 2. **pause** — commit WIP, push to stack, switch to main (resume later)
-> 3. **wrap** — end session but keep branch open (write handover for next session)"
+Present options based on the router output. The router has already
+determined slot context, epic state, pause stack depth, and handoff
+existence — do NOT re-derive these.
 
-Route to work-end, work-pause, or handover based on answer.
+Always present:
+> 1. **resume** — read the last handover and continue where I left off
+
+If `STACK_DEPTH > 0`:
+> 2. **switch** — you have <N> paused branch(es) — resume one instead
+
+Always present:
+> 3. **end** — close this branch, merge, push, return to main
+> 4. **pause** — commit WIP, push to stack, switch to main
+> 5. **wrap** — end session but keep branch open (write handover)
+
+**On resume (option 1):**
+
+If `HAS_HANDOFF=yes`: read `$HANDOFF_PATH`.
+If `IS_EPIC=yes`: also read SLOT.md at `$SLOT_MD_PATH` for batch
+progress and active issue. Display:
+```
+Epic — Batch $EPIC_BATCH
+Active issue: #$EPIC_ACTIVE_ISSUE
+```
+Set active issue for commit linkage (`Refs #$EPIC_ACTIVE_ISSUE`).
+
+If `IN_SLOT=yes` but `IS_EPIC=no`: read SLOT.md for issue context.
+
+Summarise what the last session accomplished and continue working.
+Do NOT invoke work-start — the branch and scaffold already exist.
+
+**On switch (option 2):**
+Route to **work-pause** (saves current branch), then **work-resume**
+(shows pause stack picker).
+
+**On end/pause/wrap:**
+Route to work-end, work-pause, or handover respectively.
 
 ---
 

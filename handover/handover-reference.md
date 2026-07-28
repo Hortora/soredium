@@ -27,6 +27,16 @@ when resuming work. Contains the template, routing table, and git read patterns.
 <Always write this explicitly — it changes every session.>
 <Be specific: not "continue work" but "run X and update section Y".>
 
+## Epic Progress
+
+<Include ONLY when in an epic slot (SLOT.md contains Type: epic).
+ Omit entirely otherwise. Read from SLOT.md ## Batch Plan and ## Session State.>
+
+Epic #<N> — Batch <current> of <total>
+Done: #<list of completed issues> (Batch 1, partial Batch 2)
+Active: #<issue> — <title>
+Next: #<next-issue> → then Batch <N> (#<first-issue-in-next-batch>)
+
 ## Open Questions / Blockers
 
 <Write only if changed. If unchanged: *Unchanged — see previous handover.*>

@@ -559,7 +559,20 @@ verification, and squash — but defers merge and all post-merge actions.
   ```
 - Desktop notification via `terminal-notifier`:
   "Slot N ready to land: <branch> on <primary-repo>"
-- Stop. Do not proceed to Phase B automatically.
+- **Offer slot closure:**
+  > "Phase A complete. Would you like to merge, stamp, and archive
+  > this slot now? (y/n)"
+  >
+  > If **yes** → proceed to Phase B immediately (same session).
+  > If **no** → stop. Slot stays as "ready to land" for later merge
+  > via `work-slot merge` from the main repo.
+
+**Epic slot note:** When closing an epic slot where all batches are
+complete (the last `work-slot next` set `epic_complete=true`), the
+epic issue itself is included in COVERS via `epic_manager.py advance`.
+work-end closes it alongside the child issues. If the epic still has
+open batches (safe exit mid-epic), only the completed child issues are
+in COVERS — the epic issue stays open.
 
 ### Phase B — "Land it" (slot mode only)
 

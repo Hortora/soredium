@@ -368,6 +368,27 @@ class TestParseSlotMd:
         assert md["context"] == "Implement SPI"
         assert md["repos"] == ["engine", "iot"]
 
+    def test_detects_epic_type(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text(
+            "# Slot 1 — issue-50-profiles\n\n## Issue\n"
+            "casehubio/engine#50\nCovers: 108\nType: epic\n"
+            "Safe exit: after any completed batch\n\n"
+            "## What to do\nEpic work\n\n## Repos\n- engine\n"
+        )
+        md = slot_manager.parse_slot_md(tmp_path)
+        assert md["is_epic"] is True
+        assert md["issue"] == "50"
+        assert md["issue_repo"] == "casehubio/engine"
+
+    def test_non_epic_defaults_false(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text(
+            "# Slot 1 — issue-42-spi\n\n## Issue\n"
+            "casehubio/engine#42\nCovers: 42\n\n"
+            "## What to do\nSPI work\n\n## Repos\n- engine\n"
+        )
+        md = slot_manager.parse_slot_md(tmp_path)
+        assert md.get("is_epic") is False
+
     def test_missing_slot_md(self, tmp_path):
         assert slot_manager.parse_slot_md(tmp_path) == {}
 

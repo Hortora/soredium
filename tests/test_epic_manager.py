@@ -1,0 +1,421 @@
+"""Tests for work-slot/epic_manager.py"""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+skill_dir = Path(__file__).parent.parent / "work-slot"
+sys.path.insert(0, str(skill_dir))
+
+import epic_manager
+
+
+SAMPLE_EPIC_SLOT_MD = """\
+# Slot 38 — issue-50-weighted-profiles
+
+## Issue
+casehubio/engine#50
+Covers: 108
+Type: epic
+Safe exit: after any completed batch
+
+## What to do
+Epic #50 — Weighted Profiles. Working through batched child issues.
+Current: Batch 1 — Vocabulary and docs (S+S)
+
+## Batch Plan
+
+### Batch 1 — Vocabulary and docs (S+S)
+- [x] #108 — Rename disposition
+- [ ] #109 — Update terminology ← active
+
+### Batch 2 — Weighted profiles API (M+M)
+- [ ] #111 — Add weight parameter
+- [ ] #112 — Dominant-auxiliary scoring
+
+## Session State
+Current batch: 1
+Current issue: #109 — Update terminology
+Last wrap: 2026-07-28, session started batch 1
+
+## Repos
+- engine (primary)
+
+## Created
+2026-07-28, branch: issue-50-weighted-profiles
+"""
+
+
+class TestParseBatchPlan:
+    def test_parses_epic_slot(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text(SAMPLE_EPIC_SLOT_MD)
+        result = epic_manager.parse_batch_plan(tmp_path)
+        assert result["is_epic"] is True
+        assert result["epic_number"] == "50"
+        assert result["epic_repo"] == "casehubio/engine"
+        assert len(result["batches"]) == 2
+        assert result["current_batch"] == 1
+        assert result["current_issue"] == 109
+        assert result["completed"] == [108]
+
+    def test_batch_structure(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text(SAMPLE_EPIC_SLOT_MD)
+        result = epic_manager.parse_batch_plan(tmp_path)
+        b1 = result["batches"][0]
+        assert b1["name"] == "Vocabulary and docs (S+S)"
+        assert b1["number"] == 1
+        assert len(b1["issues"]) == 2
+        assert b1["issues"][0] == {"number": 108, "title": "Rename disposition", "done": True}
+        assert b1["issues"][1] == {"number": 109, "title": "Update terminology", "done": False}
+
+    def test_non_epic_slot(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text(
+            "# Slot 1 — issue-42-spi\n\n## Issue\nrepo#42\nCovers: 42\n"
+        )
+        result = epic_manager.parse_batch_plan(tmp_path)
+        assert result["is_epic"] is False
+
+    def test_missing_slot_md(self, tmp_path):
+        result = epic_manager.parse_batch_plan(tmp_path)
+        assert result["is_epic"] is False
+
+    def test_all_done_in_batch(self, tmp_path):
+        md = SAMPLE_EPIC_SLOT_MD.replace(
+            "- [ ] #109 — Update terminology ← active",
+            "- [x] #109 — Update terminology",
+        ).replace(
+            "### Batch 2 — Weighted profiles API (M+M)",
+            "### Batch 2 — Weighted profiles API (M+M) ← current",
+        ).replace(
+            "- [ ] #111 — Add weight parameter",
+            "- [ ] #111 — Add weight parameter ← active",
+        ).replace(
+            "Current batch: 1",
+            "Current batch: 2",
+        ).replace(
+            "Current issue: #109 — Update terminology",
+            "Current issue: #111 — Add weight parameter",
+        )
+        (tmp_path / "SLOT.md").write_text(md)
+        result = epic_manager.parse_batch_plan(tmp_path)
+        assert result["current_batch"] == 2
+        assert result["current_issue"] == 111
+        assert set(result["completed"]) == {108, 109}
+
+    def test_empty_batch_plan(self, tmp_path):
+        md = """\
+# Slot 1 — issue-50-test
+
+## Issue
+repo#50
+Covers:
+Type: epic
+
+## What to do
+Test
+
+## Batch Plan
+
+## Repos
+- engine
+"""
+        (tmp_path / "SLOT.md").write_text(md)
+        result = epic_manager.parse_batch_plan(tmp_path)
+        assert result["is_epic"] is True
+        assert result["batches"] == []
+        assert result["current_issue"] == 0
+
+
+class TestAdvance:
+    def _setup_slot(self, tmp_path, slot_md, covers=""):
+        (tmp_path / "SLOT.md").write_text(slot_md)
+        design = tmp_path / "work" / "engine" / "design"
+        design.mkdir(parents=True)
+        (design / ".meta").write_text(
+            "branch: issue-50-weighted-profiles\n"
+            "issue: 50\n"
+            "issue-repo: casehubio/engine\n"
+            f"covers: {covers}\n"
+        )
+        return design / ".meta"
+
+    def test_advances_to_next_issue_in_batch(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        result = epic_manager.advance(tmp_path, meta_path=meta)
+        assert result["completed"] == 109
+        assert result["next_issue"] == 111
+        assert result["batch_complete"] is True
+        assert result["epic_complete"] is False
+        assert result["safe_exit"] is True
+
+    def test_advances_within_batch(self, tmp_path):
+        md = SAMPLE_EPIC_SLOT_MD.replace(
+            "- [x] #108 — Rename disposition\n- [ ] #109 — Update terminology ← active",
+            "- [ ] #108 — Rename disposition ← active\n- [ ] #109 — Update terminology",
+        ).replace("Covers: 108", "Covers:").replace(
+            "Current batch: 1\nCurrent issue: #109 — Update terminology",
+            "Current batch: 1\nCurrent issue: #108 — Rename disposition",
+        )
+        meta = self._setup_slot(tmp_path, md)
+        result = epic_manager.advance(tmp_path, meta_path=meta)
+        assert result["completed"] == 108
+        assert result["next_issue"] == 109
+        assert result["batch_complete"] is False
+        assert result["safe_exit"] is False
+
+    def test_updates_slot_md_checkboxes(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        epic_manager.advance(tmp_path, meta_path=meta)
+        updated = (tmp_path / "SLOT.md").read_text()
+        assert "- [x] #109 — Update terminology" in updated
+        assert "- [ ] #111 — Add weight parameter ← active" in updated
+
+    def test_updates_slot_md_current_markers(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        epic_manager.advance(tmp_path, meta_path=meta)
+        updated = (tmp_path / "SLOT.md").read_text()
+        assert "### Batch 2 — Weighted profiles API (M+M) ← current" in updated
+        # Batch 1 should no longer have ← current
+        for line in updated.splitlines():
+            if "Batch 1" in line and "###" in line:
+                assert "← current" not in line
+
+    def test_updates_meta_covers(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        epic_manager.advance(tmp_path, meta_path=meta)
+        content = meta.read_text()
+        assert "covers: 108,109" in content
+
+    def test_updates_slot_md_covers(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        epic_manager.advance(tmp_path, meta_path=meta)
+        updated = (tmp_path / "SLOT.md").read_text()
+        assert "Covers: 108,109" in updated
+
+    def test_updates_session_state(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        epic_manager.advance(tmp_path, meta_path=meta)
+        updated = (tmp_path / "SLOT.md").read_text()
+        assert "Current batch: 2" in updated
+        assert "Current issue: #111 — Add weight parameter" in updated
+
+    def test_epic_complete_on_last_issue(self, tmp_path):
+        md = """\
+# Slot 1 — issue-50-test
+
+## Issue
+repo#50
+Covers: 108
+Type: epic
+Safe exit: after any completed batch
+
+## What to do
+Test
+
+## Batch Plan
+
+### Batch 1 — Final (S) ← current
+- [x] #108 — First
+- [ ] #109 — Last ← active
+
+## Session State
+Current batch: 1
+Current issue: #109 — Last
+
+## Repos
+- engine (primary)
+
+## Created
+2026-07-28, branch: issue-50-test
+"""
+        meta = self._setup_slot(tmp_path, md, covers="108")
+        result = epic_manager.advance(tmp_path, meta_path=meta)
+        assert result["epic_complete"] is True
+        assert result["batch_complete"] is True
+        assert result["next_issue"] is None
+
+    def test_meta_covers_deduplicates(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108,109")
+        epic_manager.advance(tmp_path, meta_path=meta)
+        content = meta.read_text()
+        assert content.count("109") == 1
+
+    def test_idempotent_slot_md_update(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        epic_manager.advance(tmp_path, meta_path=meta)
+        first_state = (tmp_path / "SLOT.md").read_text()
+        # Advancing again should not break — current is now #111
+        result2 = epic_manager.advance(tmp_path, meta_path=meta)
+        assert result2["completed"] == 111
+
+    def test_no_meta_path_still_updates_slot(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text(SAMPLE_EPIC_SLOT_MD)
+        result = epic_manager.advance(tmp_path, meta_path=None)
+        assert result["completed"] == 109
+        updated = (tmp_path / "SLOT.md").read_text()
+        assert "- [x] #109 — Update terminology" in updated
+
+    def test_what_to_do_section_updated(self, tmp_path):
+        meta = self._setup_slot(tmp_path, SAMPLE_EPIC_SLOT_MD, covers="108")
+        epic_manager.advance(tmp_path, meta_path=meta)
+        updated = (tmp_path / "SLOT.md").read_text()
+        assert "Batch 2" in updated.split("## What to do")[1].split("##")[0]
+
+
+class TestStatus:
+    def test_returns_progress(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text(SAMPLE_EPIC_SLOT_MD)
+        result = epic_manager.status(tmp_path)
+        assert result["total_issues"] == 4
+        assert result["completed_count"] == 1
+        assert result["total_batches"] == 2
+        assert result["completed_batches"] == 0
+        assert result["current_batch"] == 1
+        assert result["current_issue"] == 109
+        assert result["safe_exit"] is False
+
+    def test_safe_exit_after_batch_complete(self, tmp_path):
+        md = SAMPLE_EPIC_SLOT_MD.replace(
+            "- [ ] #109 — Update terminology ← active",
+            "- [x] #109 — Update terminology",
+        ).replace(
+            "### Batch 2 — Weighted profiles API (M+M)",
+            "### Batch 2 — Weighted profiles API (M+M) ← current",
+        ).replace(
+            "- [ ] #111 — Add weight parameter",
+            "- [ ] #111 — Add weight parameter ← active",
+        ).replace(
+            "Current batch: 1\nCurrent issue: #109 — Update terminology",
+            "Current batch: 2\nCurrent issue: #111 — Add weight parameter",
+        )
+        (tmp_path / "SLOT.md").write_text(md)
+        result = epic_manager.status(tmp_path)
+        assert result["completed_batches"] == 1
+        assert result["safe_exit"] is True
+
+    def test_non_epic(self, tmp_path):
+        (tmp_path / "SLOT.md").write_text("# Slot 1\n\n## Issue\nrepo#42\n")
+        result = epic_manager.status(tmp_path)
+        assert result.get("is_epic") is False
+
+    def test_all_complete(self, tmp_path):
+        md = """\
+# Slot 1 — issue-50-test
+
+## Issue
+repo#50
+Covers: 108,109
+Type: epic
+
+## What to do
+All done
+
+## Batch Plan
+
+### Batch 1 — Done (S)
+- [x] #108 — First
+- [x] #109 — Second
+
+## Session State
+Current batch: 0
+Current issue:
+
+## Repos
+- engine
+"""
+        (tmp_path / "SLOT.md").write_text(md)
+        result = epic_manager.status(tmp_path)
+        assert result["completed_count"] == 2
+        assert result["completed_batches"] == 1
+        assert result["current_issue"] == 0
+
+
+class TestWriteEpicSlotMd:
+    def test_writes_and_parses_roundtrip(self, tmp_path):
+        batches = [
+            {"number": 1, "name": "Vocabulary (S+S)", "issues": [
+                {"number": 108, "title": "Rename X"},
+                {"number": 109, "title": "Update docs"},
+            ]},
+            {"number": 2, "name": "API change (M)", "issues": [
+                {"number": 111, "title": "Add weights"},
+            ]},
+        ]
+        epic_manager.write_epic_slot_md(
+            tmp_path, 1, ["engine"], "issue-50-profiles",
+            "50", "casehubio/engine", batches, "Weighted profiles",
+        )
+        assert (tmp_path / "SLOT.md").exists()
+        plan = epic_manager.parse_batch_plan(tmp_path)
+        assert plan["is_epic"] is True
+        assert plan["epic_number"] == "50"
+        assert plan["epic_repo"] == "casehubio/engine"
+        assert len(plan["batches"]) == 2
+        assert plan["current_issue"] == 108
+        assert plan["completed"] == []
+
+    def test_first_issue_marked_active(self, tmp_path):
+        batches = [
+            {"number": 1, "name": "Batch (S)", "issues": [
+                {"number": 42, "title": "First issue"},
+            ]},
+        ]
+        epic_manager.write_epic_slot_md(
+            tmp_path, 1, ["engine"], "issue-50-test",
+            "50", "repo", batches, "Test",
+        )
+        content = (tmp_path / "SLOT.md").read_text()
+        assert "#42 — First issue ← active" in content
+        assert "Batch 1 — Batch (S) ← current" in content
+
+    def test_backward_compat_with_parse_slot_md(self, tmp_path):
+        """Verify the output can be parsed by slot_manager.parse_slot_md."""
+        import slot_manager
+        batches = [
+            {"number": 1, "name": "Work (M)", "issues": [
+                {"number": 42, "title": "Do stuff"},
+            ]},
+        ]
+        epic_manager.write_epic_slot_md(
+            tmp_path, 5, ["engine", "iot"], "issue-50-profiles",
+            "50", "casehubio/engine", batches, "Weighted profiles",
+        )
+        md = slot_manager.parse_slot_md(tmp_path)
+        assert md["issue"] == "50"
+        assert md["issue_repo"] == "casehubio/engine"
+        assert md["repos"] == ["engine", "iot"]
+        assert "issue-50-profiles" in md["branch"]
+
+    def test_multi_repo(self, tmp_path):
+        batches = [{"number": 1, "name": "Work (S)", "issues": [
+            {"number": 42, "title": "Test"},
+        ]}]
+        epic_manager.write_epic_slot_md(
+            tmp_path, 1, ["engine", "iot"], "issue-50-test",
+            "50", "repo", batches, "Test",
+        )
+        content = (tmp_path / "SLOT.md").read_text()
+        assert "engine (primary)" in content
+        assert "- iot" in content
+
+
+class TestCLI:
+    def test_plan_subcommand(self, tmp_path, capsys):
+        (tmp_path / "SLOT.md").write_text(SAMPLE_EPIC_SLOT_MD)
+        sys.argv = ["epic_manager.py", "plan", str(tmp_path)]
+        epic_manager.main()
+        out = capsys.readouterr().out
+        assert '"is_epic": true' in out
+
+    def test_status_subcommand(self, tmp_path, capsys):
+        (tmp_path / "SLOT.md").write_text(SAMPLE_EPIC_SLOT_MD)
+        sys.argv = ["epic_manager.py", "status", str(tmp_path)]
+        epic_manager.main()
+        out = capsys.readouterr().out
+        assert '"total_issues": 4' in out
+
+    def test_unknown_command(self, tmp_path, capsys):
+        sys.argv = ["epic_manager.py", "bogus", str(tmp_path)]
+        with pytest.raises(SystemExit):
+            epic_manager.main()

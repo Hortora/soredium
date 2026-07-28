@@ -275,7 +275,7 @@ def parse_slot_md(slot_dir: Path) -> dict:
     if not slot_md.exists():
         return {}
     content = slot_md.read_text()
-    result: dict = {"repos": [], "context": "", "issue": "", "issue_repo": "", "covers": ""}
+    result: dict = {"repos": [], "context": "", "issue": "", "issue_repo": "", "covers": "", "is_epic": False}
 
     in_issue = False
     in_what = False
@@ -298,6 +298,8 @@ def parse_slot_md(slot_dir: Path) -> dict:
         if line.startswith("## "):
             in_issue, in_what, in_repos = False, False, False
             continue
+        if in_issue and line.strip().startswith("Type:"):
+            result["is_epic"] = line.strip().split(":", 1)[1].strip() == "epic"
         if in_issue and "#" in line and not line.startswith("Covers:"):
             parts = line.strip().split("#")
             if len(parts) == 2:

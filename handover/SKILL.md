@@ -335,6 +335,16 @@ From the current session, recall:
 
 Do NOT read any project files to answer these. Work from conversation memory.
 
+**Epic slot context:** If `$PROJECT` path contains `/worktrees/` and
+`$PROJECT/../SLOT.md` exists with `Type: epic`, also:
+- Read `## Session State` and `## Batch Plan` from SLOT.md
+- Update `## Session State` with current position and today's date
+  as the last wrap timestamp
+- Include the `## Epic Progress` section in HANDOFF.md (see
+  handover-reference.md template)
+- Update the `## What to do` section's `Current:` line to reflect
+  the current batch
+
 ### Step 2b — Forage sweep (while context is still full)
 
 **The sweep is done by the handover itself from conversation memory** —
