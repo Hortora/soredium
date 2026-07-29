@@ -516,6 +516,23 @@ class TestCLI:
         out = capsys.readouterr().out
         assert '"total_issues": 4' in out
 
+    def test_write_subcommand(self, tmp_path, capsys):
+        import json
+        batches = json.dumps([{"number": 1, "name": "Batch", "issues": [{"number": 10, "title": "First"}, {"number": 20, "title": "Second"}]}])
+        sys.argv = ["epic_manager.py", "write", str(tmp_path / "design" / ".epic"),
+                     f"workspace={tmp_path}", "issue=99", "slug=test",
+                     "issue-repo=Org/repo", "context=Test epic",
+                     f"batches={batches}"]
+        epic_manager.main()
+        out = capsys.readouterr().out
+        assert "WRITTEN=yes" in out
+        epic_file = tmp_path / "design" / ".epic"
+        assert epic_file.exists()
+        content = epic_file.read_text()
+        assert "Org/repo#99" in content
+        assert "#10 — First" in content
+        assert "← active" in content
+
     def test_unknown_command(self, tmp_path, capsys):
         sys.argv = ["epic_manager.py", "bogus", str(tmp_path / ".slot")]
         with pytest.raises(SystemExit):

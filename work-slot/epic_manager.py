@@ -6,6 +6,8 @@ Subcommands:
   plan <epic-path>      Parse epic file, return batch plan as JSON
   advance <epic-path>   Advance to next issue, update file + .meta
   status <epic-path>    Return progress summary as JSON
+  write <epic-path>     Write a new .epic file (workspace=, issue=, slug=,
+                        issue-repo=, context=, batches=<JSON>)
 
 Operates on the ## Batch Plan section of .slot or .epic files.
 """
@@ -348,6 +350,16 @@ def write_epic(workspace: Path, issue: str, slug: str,
                     context=context)
 
 
+def _parse_kv_args(args: list[str]) -> dict:
+    """Parse key=value arguments from CLI."""
+    result = {}
+    for arg in args:
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            result[k] = v
+    return result
+
+
 def main() -> None:
     if len(sys.argv) < 3:
         print(__doc__, file=sys.stderr)
@@ -388,6 +400,20 @@ def main() -> None:
     elif command == "status":
         result = status(epic_path)
         print(json.dumps(result, indent=2))
+    elif command == "write":
+        kv = _parse_kv_args(sys.argv[3:])
+        workspace = Path(kv.get("workspace", ""))
+        issue = kv.get("issue", "")
+        slug = kv.get("slug", "")
+        issue_repo = kv.get("issue-repo", "")
+        context = kv.get("context", "")
+        batches_json = kv.get("batches", "[]")
+        batches = json.loads(batches_json)
+        if not workspace or not issue:
+            print("ERROR=missing_args (workspace and issue required)", file=sys.stderr)
+            sys.exit(1)
+        write_epic(workspace, issue, slug, issue_repo, batches, context)
+        print("WRITTEN=yes")
     else:
         print(f"ERROR=unknown_command command={command}", file=sys.stderr)
         sys.exit(1)
