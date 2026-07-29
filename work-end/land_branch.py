@@ -19,6 +19,7 @@ Usage:
 Output: KEY=value lines (stdout). Errors on stderr, exit code 1.
 """
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -172,8 +173,10 @@ def cmd_stamp(project: str, opts: dict[str, str]) -> int:
         print(f"ERROR_DETAIL=cannot checkout {branch}: {result.stderr.strip()}")
         return 1
 
+    issue_match = re.match(r"issue-(\d+)", branch)
+    issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""
     result = git(project, "commit", "--allow-empty",
-                 "-m", f"chore: branch closed — landed as {landed_sha} on {base_branch}")
+                 "-m", f"chore: branch closed — landed as {landed_sha} on {base_branch}{issue_ref}")
     if result.returncode != 0:
         print("ERROR=STAMP_FAILED")
         print(f"ERROR_DETAIL={result.stderr.strip()}")
