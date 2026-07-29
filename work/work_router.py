@@ -14,14 +14,35 @@ Output (KEY=VALUE lines):
     EPIC_BATCH=<N of M>       (only if IS_EPIC=yes)
     EPIC_ACTIVE_ISSUE=<N>     (only if IS_EPIC=yes)
     STACK_DEPTH=<N>
-    HAS_HANDOFF=yes|no
-    HANDOFF_PATH=<path>       (only if HAS_HANDOFF=yes)
+    HAS_HANDOFF=yes|no        (branch-aware: on a feature branch, yes only
+                               when HANDOFF.md references this branch's issue)
+    HANDOFF_PATH=<path>       (when HANDOFF.md exists, regardless of HAS_HANDOFF)
     SLOT_PATH=<path>          (only if IN_SLOT=yes)
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
+
+
+def _handoff_references_branch(
+    workspace: Path, branch_name: str
+) -> bool:
+    """Check if HANDOFF.md on workspace main references the current branch's issue."""
+    issue_match = re.match(r"issue-(\d+)", branch_name)
+    if not issue_match:
+        return True  # non-standard branch — can't determine, assume resume
+
+    issue_num = issue_match.group(1)
+    result = subprocess.run(
+        ["git", "-C", str(workspace), "show", "main:HANDOFF.md"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return False  # can't read — treat as first session
+
+    return f"#{issue_num}" in result.stdout
 
 
 def detect_state(current_branch: str, project_path: str,
@@ -119,8 +140,13 @@ def detect_state(current_branch: str, project_path: str,
     handoff_path = ""
     handoff_candidate = workspace / "HANDOFF.md"
     if handoff_candidate.exists():
-        has_handoff = True
         handoff_path = str(handoff_candidate)
+        if on_main:
+            has_handoff = True
+        else:
+            has_handoff = _handoff_references_branch(
+                workspace, current_branch
+            )
 
     if on_main:
         route = "resume_stack" if stack_depth > 0 else "start"

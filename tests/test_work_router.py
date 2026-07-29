@@ -1,5 +1,6 @@
 """Tests for work/work_router.py"""
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -107,10 +108,32 @@ class TestDetectState:
         assert result["EPIC_ACTIVE_ISSUE"] == "109"
         assert result["ROUTE"] == "resume_branch"
 
-    def test_on_branch_with_handoff(self, tmp_path):
+    def test_on_branch_handoff_references_different_issue(self, tmp_path):
+        """HANDOFF.md exists but references a different issue — not a resume."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        (workspace / "HANDOFF.md").write_text("# Handoff\nLast session did X.")
+        self._init_git(workspace)
+        (workspace / "HANDOFF.md").write_text("# Handoff\nFixed #99. All done.")
+        self._commit_handoff_to_main(workspace)
+        project = tmp_path / "project"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="issue-42-spi",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "no"
+        assert result["HANDOFF_PATH"] == str(workspace / "HANDOFF.md")
+
+    def test_on_branch_handoff_references_current_issue(self, tmp_path):
+        """HANDOFF.md references the current branch's issue — genuine resume."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        self._init_git(workspace)
+        (workspace / "HANDOFF.md").write_text(
+            "# Handoff\nWorked on #42 SPI extraction. Midway through."
+        )
+        self._commit_handoff_to_main(workspace)
         project = tmp_path / "project"
         project.mkdir()
         result = work_router.detect_state(
@@ -120,6 +143,37 @@ class TestDetectState:
         )
         assert result["HAS_HANDOFF"] == "yes"
         assert result["HANDOFF_PATH"] == str(workspace / "HANDOFF.md")
+
+    def test_on_main_handoff_always_yes(self, tmp_path):
+        """On main, HAS_HANDOFF is yes whenever the file exists."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "HANDOFF.md").write_text("# Handoff\nLast session did X.")
+        result = work_router.detect_state(
+            current_branch="main",
+            project_path=str(tmp_path / "project"),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "yes"
+
+    @staticmethod
+    def _init_git(path):
+        subprocess.run(["git", "init", "-b", "main", str(path)], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"],
+            capture_output=True,
+        )
+
+    @staticmethod
+    def _commit_handoff_to_main(workspace):
+        subprocess.run(
+            ["git", "-C", str(workspace), "add", "HANDOFF.md"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "handoff"],
+            capture_output=True,
+        )
 
     def test_on_branch_with_stack(self, tmp_path):
         workspace = tmp_path / "workspace"
@@ -150,6 +204,20 @@ class TestDetectState:
         )
         assert result["HAS_HANDOFF"] == "no"
         assert "HANDOFF_PATH" not in result
+
+    def test_non_standard_branch_assumes_resume(self, tmp_path):
+        """Branches without issue-NNN pattern assume resume when handoff exists."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "HANDOFF.md").write_text("# Handoff\nSome work.")
+        project = tmp_path / "project"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="hotfix-typo",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "yes"
 
     def test_slot_without_worktrees_in_path(self, tmp_path):
         """A .slot one level up doesn't count if /worktrees/ isn't in the path."""

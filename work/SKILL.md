@@ -82,7 +82,7 @@ If `HAS_HANDOFF=yes`:
 > 1. **resume** — read the last handover and continue where I left off
 
 If `HAS_HANDOFF=no`:
-> 1. **start** — invoke work-start (first session on this branch)
+> 1. **continue** — begin working on this branch (first session, or no prior handover for this work)
 
 If `STACK_DEPTH > 0`:
 > 2. **switch** — you have <N> paused branch(es) — resume one instead
@@ -95,9 +95,9 @@ Always present:
 > N+2. **pause** — commit WIP, push to stack, switch to main
 > N+3. **wrap** — end session but keep branch open (write handover)
 
-**On resume (option 1):**
+**On resume (option 1 when `HAS_HANDOFF=yes`):**
 
-If `HAS_HANDOFF=yes`: read `$HANDOFF_PATH`.
+Read `$HANDOFF_PATH`.
 If `IS_EPIC=yes`: read the epic file at `$EPIC_PATH` (single-repo) or
 `$SLOT_PATH` (slot) for batch progress and active issue. Display:
 ```
@@ -110,6 +110,13 @@ If `IN_SLOT=yes` but `IS_EPIC=no`: read .slot for issue context.
 
 Summarise what the last session accomplished and continue working.
 Do NOT invoke work-start — the branch and scaffold already exist.
+
+**On continue (option 1 when `HAS_HANDOFF=no`):**
+
+No handover to read. Run work-start resume path (Steps 0, 2, 3, 3b, 11)
+for platform coherence, protocols, and IntelliJ pre-checks.
+If `IS_EPIC=yes` or `IN_SLOT=yes`: read epic/slot context as above.
+Then begin working — the branch and scaffold already exist.
 
 **On switch (option 2):**
 Route to **work-pause** (saves current branch), then **work-resume**
