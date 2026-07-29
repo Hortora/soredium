@@ -18,7 +18,7 @@ Development workflow and knowledge garden skills for Claude Code.
 
 | Skill | What it does |
 |-------|-------------|
-| `work` | Unified entry point — detects branch state and routes to start/end/pause/resume |
+| `work` | Unified entry point — detects branch state, routes to start/end/pause/resume, supports `work epic` / `work next` for single-repo epic iteration |
 | `work-start` | Creates issue branches, scaffolds metadata, runs pre-checks |
 | `work-end` | Closes branch, promotes artifacts, merges to main |
 | `work-pause` | Commits WIP, pushes to pause stack, switches to main |
