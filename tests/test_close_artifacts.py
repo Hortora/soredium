@@ -15,56 +15,40 @@ from close_artifacts import scan_artifacts, resolve_routing, write_stamp
 
 
 class TestScanArtifacts:
-    def test_finds_specs_for_branch(self, tmp_path):
-        specs = tmp_path / "specs" / "issue-42-feat"
-        specs.mkdir(parents=True)
+    """scan_artifacts now delegates to workspace_artifacts.scan()."""
+
+    def test_finds_specs_flat(self, tmp_path):
+        """Specs are flat at workspace/specs/, not workspace/specs/<branch>/."""
+        specs = tmp_path / "specs"
+        specs.mkdir()
         (specs / "design.md").write_text("spec")
         (specs / "notes.md").write_text("notes")
 
-        result = scan_artifacts(tmp_path, "issue-42-feat")
+        result = scan_artifacts(tmp_path)
         assert len(result["specs"]) == 2
-        assert "specs/issue-42-feat/design.md" in result["specs"]
+        assert "specs/design.md" in result["specs"]
 
-    def test_ignores_other_branch_specs(self, tmp_path):
+    def test_does_not_use_branch_subdirectory(self, tmp_path):
+        """The old branch-based spec path is dead."""
         (tmp_path / "specs" / "issue-42-feat").mkdir(parents=True)
         (tmp_path / "specs" / "issue-42-feat" / "spec.md").write_text("x")
-        (tmp_path / "specs" / "issue-99-other").mkdir(parents=True)
-        (tmp_path / "specs" / "issue-99-other" / "spec.md").write_text("y")
+        (tmp_path / "specs").mkdir(exist_ok=True)
+        (tmp_path / "specs" / "top-level.md").write_text("y")
 
-        result = scan_artifacts(tmp_path, "issue-42-feat")
-        assert len(result["specs"]) == 1
+        result = scan_artifacts(tmp_path)
+        assert result["specs"] == ["specs/top-level.md"]
 
-    def test_finds_blog_entries(self, tmp_path):
-        blog = tmp_path / "blog"
-        blog.mkdir()
-        (blog / "2026-07-01-entry.md").write_text("blog")
-        (blog / "INDEX.md").write_text("index")
-
-        result = scan_artifacts(tmp_path, "any-branch")
-        assert len(result["blog"]) == 1
-        assert "blog/2026-07-01-entry.md" in result["blog"]
-
-    def test_finds_adr(self, tmp_path):
-        adr = tmp_path / "adr"
-        adr.mkdir()
-        (adr / "0001-decision.md").write_text("adr")
-        (adr / "INDEX.md").write_text("index")
-
-        result = scan_artifacts(tmp_path, "any-branch")
-        assert len(result["adr"]) == 1
-
-    def test_finds_plans(self, tmp_path):
-        plans = tmp_path / "plans"
-        plans.mkdir()
-        (plans / "2026-07-01-plan.md").write_text("plan")
-        (plans / "attic").mkdir()
-        (plans / "INDEX.md").write_text("index")
-
-        result = scan_artifacts(tmp_path, "any-branch")
-        assert len(result["plans"]) == 1
+    def test_finds_all_artifact_types(self, tmp_path):
+        for cat in ("specs", "adr", "blog", "plans", "snapshots"):
+            d = tmp_path / cat
+            d.mkdir()
+            (d / f"test-{cat}.md").write_text(f"# {cat}\n")
+        result = scan_artifacts(tmp_path)
+        for cat in ("specs", "adr", "blog", "plans", "snapshots"):
+            assert len(result[cat]) == 1, f"{cat} should have 1 entry"
 
     def test_empty_workspace(self, tmp_path):
-        result = scan_artifacts(tmp_path, "any-branch")
+        result = scan_artifacts(tmp_path)
         assert all(len(v) == 0 for v in result.values())
 
 
@@ -100,7 +84,6 @@ class TestWriteStamp:
         results = {
             "workspace_promoted": "2",
             "project_promoted": "1",
-            "specs_cleaned": "1",
             "issues_closed": "1",
             "blog_published": "0",
             "plans_archived": "1",
@@ -148,17 +131,15 @@ class TestScanWorkspaceParameter:
         self._init_git(project)
         (workspace / "design").mkdir()
 
-        branch = "issue-99-test"
-        (slot_workspace / "specs" / branch).mkdir(parents=True)
-        (slot_workspace / "specs" / branch / "spec.md").write_text("# Spec\n")
+        (slot_workspace / "specs").mkdir()
+        (slot_workspace / "specs" / "spec.md").write_text("# Spec\n")
 
         result = subprocess.run(
             [sys.executable, str(self.SCRIPT),
-             str(workspace), str(project), branch,
+             str(workspace), str(project), "any-branch",
              f"scan-workspace={slot_workspace}"],
             capture_output=True, text=True,
         )
-        # Should not be fatal — scan from slot workspace succeeds
         assert result.returncode != 1
 
     def test_scan_workspace_missing_path_is_fatal(self, tmp_path):
@@ -179,37 +160,47 @@ class TestScanWorkspaceParameter:
         assert "scan_workspace_not_found" in result.stdout
 
     def test_scan_workspace_omitted_scans_workspace(self, tmp_path):
-        """Without scan-workspace, scan_artifacts uses workspace (current behaviour)."""
+        """Without scan-workspace, scan_artifacts uses workspace."""
         workspace = tmp_path / "workspace"
         project = tmp_path / "project"
         self._init_git(workspace)
         self._init_git(project)
         (workspace / "design").mkdir()
 
-        branch = "issue-99-test"
-        (workspace / "specs" / branch).mkdir(parents=True)
-        (workspace / "specs" / branch / "spec.md").write_text("# Spec\n")
+        (workspace / "specs").mkdir()
+        (workspace / "specs" / "spec.md").write_text("# Spec\n")
 
         result = subprocess.run(
             [sys.executable, str(self.SCRIPT),
-             str(workspace), str(project), branch],
+             str(workspace), str(project), "any-branch"],
             capture_output=True, text=True,
         )
         assert result.returncode != 1
+        assert "PROJECT_PROMOTED=" in result.stdout or "WORKSPACE_PROMOTED=" in result.stdout
 
     def test_scan_workspace_unit_scan_artifacts(self, tmp_path):
         """scan_artifacts uses the scan source path, not workspace."""
         slot = tmp_path / "slot"
         slot.mkdir()
-        branch = "issue-50-feat"
-        (slot / "specs" / branch).mkdir(parents=True)
-        (slot / "specs" / branch / "design.md").write_text("spec")
+        (slot / "specs").mkdir()
+        (slot / "specs" / "design.md").write_text("spec")
         (slot / "blog").mkdir()
         (slot / "blog" / "entry.md").write_text("blog")
 
-        result = scan_artifacts(slot, branch)
+        result = scan_artifacts(slot)
         assert len(result["specs"]) == 1
         assert len(result["blog"]) == 1
+
+
+class TestCleanupSpecsRemoved:
+    def test_cleanup_specs_subcommand_removed(self, tmp_path):
+        """cleanup-specs is no longer a valid subcommand."""
+        script = Path(__file__).parent.parent / "work-end" / "artifact_promote.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "cleanup-specs", str(tmp_path), "branch=test"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
 
 
 class TestArchivePlans:

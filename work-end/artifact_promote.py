@@ -184,49 +184,6 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
     return 0
 
 
-def cleanup_specs(workspace: str, params: dict[str, str]) -> int:
-    branch = params.get("branch", "")
-
-    if not branch:
-        print("ERROR=missing_branch")
-        print("ERROR_DETAIL=branch= argument required")
-        return 1
-
-    ws = Path(workspace)
-    if not ws.is_dir():
-        print("ERROR=workspace_not_found")
-        print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
-        return 1
-
-    specs_dir = ws / "specs" / branch
-    if not specs_dir.is_dir():
-        print("CLEANED=0")
-        return 0
-
-    # Count files before removal
-    count = sum(1 for _ in specs_dir.iterdir())
-    shutil.rmtree(specs_dir)
-
-    try:
-        git("add", "-A", cwd=workspace)
-        git("commit", "-m", "chore(work-end): cleanup promoted specs", cwd=workspace)
-    except subprocess.CalledProcessError as e:
-        if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
-            print("ERROR=commit_failed")
-            print(f"ERROR_DETAIL=Failed to commit cleanup: {e.stderr.strip()}")
-            return 1
-
-    try:
-        git("push", cwd=workspace)
-        print("PUSHED=yes")
-    except subprocess.CalledProcessError as e:
-        print("PUSHED=no")
-        print(f"PUSH_ERROR={e.stderr.strip()}")
-
-    print(f"CLEANED={count}")
-    return 0
-
-
 def close_issues(repo: str, params: dict[str, str]) -> int:
     covers_str = params.get("covers", "")
 
@@ -345,7 +302,6 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
 SUBCOMMANDS = {
     "to-workspace-main": lambda args: to_workspace_main(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "to-project": lambda args: to_project(args[0], args[1], parse_args(args[2:])) if len(args) >= 2 else _usage(),
-    "cleanup-specs": lambda args: cleanup_specs(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "close-issues": lambda args: close_issues(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "archive-plans": lambda args: archive_plans(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
 }

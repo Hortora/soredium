@@ -126,7 +126,6 @@ def _format_detail(step: str, data: dict) -> str:
         parts = []
         wp = d.get("workspace_promoted", "0")
         pp = d.get("project_promoted", "0")
-        sc = d.get("specs_cleaned", "0")
         ic = d.get("issues_closed", "0")
         bp = d.get("blog_published", "0")
         pa = d.get("plans_archived", "0")
@@ -137,8 +136,6 @@ def _format_detail(step: str, data: dict) -> str:
         if int(bp) > 0:
             dest = d.get("blog_dest", "")
             parts.append(f"{bp} blog entries → {dest}" if dest else f"{bp} blog entries")
-        if int(sc) > 0:
-            parts.append(f"{sc} specs cleaned")
         if int(pa) > 0:
             parts.append(f"{pa} plans archived")
         return f": {'; '.join(parts)}" if parts else ""

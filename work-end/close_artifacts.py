@@ -13,7 +13,6 @@ Usage:
 Output (KEY=value lines):
     WORKSPACE_PROMOTED=<count>
     PROJECT_PROMOTED=<count>
-    SPECS_CLEANED=<count>
     ISSUES_CLOSED=<count>
     BLOG_PUBLISHED=<count>
     BLOG_DEST=<path>
@@ -44,6 +43,7 @@ from routing import parse_layer2, parse_layer3, resolve  # noqa: E402
 
 sys.path.insert(0, str(SCRIPT_DIR))
 from common import parse_args  # noqa: E402
+from workspace_artifacts import scan as _scan_workspace  # noqa: E402
 
 
 def run_script(script: str, args: list[str]) -> tuple[int, dict[str, str]]:
@@ -61,47 +61,9 @@ def run_script(script: str, args: list[str]) -> tuple[int, dict[str, str]]:
     return result.returncode, output
 
 
-def scan_artifacts(workspace: Path, branch: str) -> dict[str, list[str]]:
-    """Scan workspace for promotable artifacts. Returns category → list of relative paths."""
-    found: dict[str, list[str]] = {
-        "specs": [],
-        "adr": [],
-        "blog": [],
-        "snapshots": [],
-        "plans": [],
-    }
-
-    specs_dir = workspace / "specs" / branch
-    if specs_dir.is_dir():
-        for f in specs_dir.iterdir():
-            if f.suffix == ".md":
-                found["specs"].append(str(f.relative_to(workspace)))
-
-    adr_dir = workspace / "adr"
-    if adr_dir.is_dir():
-        for f in adr_dir.iterdir():
-            if f.suffix == ".md" and f.name != "INDEX.md":
-                found["adr"].append(str(f.relative_to(workspace)))
-
-    blog_dir = workspace / "blog"
-    if blog_dir.is_dir():
-        for f in blog_dir.iterdir():
-            if f.suffix == ".md" and f.name != "INDEX.md":
-                found["blog"].append(str(f.relative_to(workspace)))
-
-    snap_dir = workspace / "snapshots"
-    if snap_dir.is_dir():
-        for f in snap_dir.iterdir():
-            if f.name != "INDEX.md":
-                found["snapshots"].append(str(f.relative_to(workspace)))
-
-    plans_dir = workspace / "plans"
-    if plans_dir.is_dir():
-        for f in plans_dir.iterdir():
-            if f.is_file() and f.suffix == ".md" and f.name != "INDEX.md":
-                found["plans"].append(str(f.relative_to(workspace)))
-
-    return found
+def scan_artifacts(workspace: Path) -> dict[str, list[str]]:
+    """Scan workspace for promotable artifacts. Returns category -> list of relative paths."""
+    return _scan_workspace(workspace)
 
 
 def resolve_routing(workspace: Path) -> dict[str, str]:
@@ -131,7 +93,7 @@ def write_stamp(workspace: Path, branch: str, results: dict[str, str]) -> Path:
         f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}",
         f"branch={branch}",
     ]
-    for key in ("workspace_promoted", "project_promoted", "specs_cleaned",
+    for key in ("workspace_promoted", "project_promoted",
                 "issues_closed", "blog_published", "plans_archived"):
         lines.append(f"{key}={results.get(key, '0')}")
 
@@ -181,7 +143,7 @@ def main() -> int:
         print(f"ERROR_DETAIL={project}")
         return 1
 
-    artifacts = scan_artifacts(scan_source, branch)
+    artifacts = scan_artifacts(scan_source)
     routing = resolve_routing(scan_source)
 
     results: dict[str, str] = {}
@@ -229,17 +191,6 @@ def main() -> int:
         results["project_promoted"] = "0"
         project_pushed = True
 
-    # Cleanup specs (only if project push succeeded and specs were promoted)
-    if artifacts["specs"] and routing.get("specs", "project") == "project" and project_pushed:
-        rc, out = run_script("artifact_promote.py", [
-            "cleanup-specs", str(workspace), f"branch={branch}",
-        ])
-        results["specs_cleaned"] = out.get("CLEANED", "0")
-        if rc != 0:
-            failures.append(f"spec cleanup: {out.get('ERROR', 'unknown')}")
-    else:
-        results["specs_cleaned"] = "0"
-
     # Archive plans
     if artifacts["plans"]:
         rc, out = run_script("artifact_promote.py", [
@@ -263,9 +214,8 @@ def main() -> int:
         results["issues_closed"] = "0"
 
     # Publish blog
-    blog_dir = workspace / "blog"
-    blog_entries = [f for f in blog_dir.glob("*.md") if f.name != "INDEX.md"] if blog_dir.is_dir() else []
-    if blog_entries:
+    if artifacts["blog"]:
+        blog_dir = scan_source / "blog"
         rc, out = run_script("blog_dest.py", [str(blog_dir), branch])
         unpublished = [x for x in out.get("UNPUBLISHED", "").split(",") if x.strip()]
         results["blog_published"] = str(len(unpublished))

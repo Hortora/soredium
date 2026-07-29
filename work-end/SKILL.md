@@ -461,7 +461,7 @@ machinery runs — means fixes are cheap and the close plan reflects reviewed co
 ls "$WORKSPACE/adr/" 2>/dev/null | grep -v INDEX.md
 ls "$WORKSPACE/blog/" 2>/dev/null | grep -v INDEX.md
 ls "$WORKSPACE/snapshots/" 2>/dev/null | grep -v INDEX.md
-ls "$WORKSPACE/specs/$BRANCH_NAME/" 2>/dev/null
+ls "$WORKSPACE/specs/" 2>/dev/null | grep -v INDEX.md
 ls "$WORKSPACE/plans/" 2>/dev/null | grep -v "^attic$"
 cat "$WORKSPACE/design/JOURNAL.md"
 ```
@@ -499,7 +499,7 @@ before drift before anchors before empty.
 
 ## Step 6 — Select specs for GitHub posting
 
-If tracking enabled: list `$WORKSPACE/specs/$BRANCH_NAME/`, ask which to post as
+If tracking enabled: list `$WORKSPACE/specs/`, ask which to post as
 collapsible comments on the GitHub issue. Skip silently if tracking disabled.
 
 ---
@@ -640,7 +640,7 @@ attempts. After 3 failures, hard stop with manual instructions.
 
 **B3. Close issues.** All issues in `$COVERS`.
 
-**B4. Promote artifacts and clean up specs.** Runs deferred 8a–8c.
+**B4. Promote artifacts.** Runs deferred 8a–8c.
 Operations needing `main` checked out use the **original workspace**.
 Operations reading from the branch use the **slot workspace worktree**.
 
@@ -719,7 +719,6 @@ python3 ~/.claude/skills/work-end/close_artifacts.py \
 Read output KEY=value lines:
 - `WORKSPACE_PROMOTED=N` — artifacts promoted to workspace main
 - `PROJECT_PROMOTED=N` — artifacts promoted to project repo
-- `SPECS_CLEANED=N` — spec files cleaned from workspace branch
 - `ISSUES_CLOSED=N` — GitHub issues closed
 - `BLOG_PUBLISHED=N` — blog entries published to destination
 - `BLOG_DEST=<path>` — resolved blog destination
@@ -737,7 +736,7 @@ failure — Step 8j will block the push.
 python3 ~/.claude/skills/work-end/close_report.py record /tmp/work-end-report.json \
   step=artifacts result=ok \
   workspace_promoted=$WORKSPACE_PROMOTED project_promoted=$PROJECT_PROMOTED \
-  specs_cleaned=$SPECS_CLEANED issues_closed=$ISSUES_CLOSED \
+  issues_closed=$ISSUES_CLOSED \
   blog_published=$BLOG_PUBLISHED blog_dest=$BLOG_DEST \
   plans_archived=$PLANS_ARCHIVED
 ```
