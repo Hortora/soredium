@@ -65,7 +65,11 @@ def create_branches(project: str, workspace: str, branch: str, base: str | None)
 
 def commit_scaffold(workspace: str, branch: str) -> int:
     """Commit scaffold files and push."""
-    ok, _ = run_git(workspace, "add", "design/JOURNAL.md", "design/.meta")
+    import os
+    files_to_add = ["design/JOURNAL.md", "design/.meta"]
+    if os.path.exists(os.path.join(workspace, "design", ".epic")):
+        files_to_add.append("design/.epic")
+    ok, _ = run_git(workspace, "add", *files_to_add)
     if not ok:
         print("ERROR=add_failed")
         return 1

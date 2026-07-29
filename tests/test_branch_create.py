@@ -187,6 +187,34 @@ def test_commit_scaffold_missing_branch_arg(workspace_repo):
     assert "ERROR=missing_branch" in result.stdout
 
 
+def test_commit_scaffold_includes_epic_file(workspace_repo):
+    """commit-scaffold includes .epic if present."""
+    ws = workspace_repo
+    subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-99-epic"],
+                    check=True, capture_output=True)
+
+    design = ws / "design"
+    design.mkdir()
+    (design / ".meta").write_text("branch: issue-99-epic\n")
+    (design / "JOURNAL.md").write_text("# Design Journal\n")
+    (design / ".epic").write_text("# Epic #99\n")
+
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "commit-scaffold", str(ws),
+         "branch=issue-99-epic"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "COMMITTED=yes" in result.stdout
+
+    # Verify .epic is in the commit
+    show = subprocess.run(
+        ["git", "-C", str(ws), "show", "--name-only", "--format="],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert "design/.epic" in show
+
+
 def test_commit_scaffold_no_design_dir(workspace_repo):
     """commit-scaffold fails if design/ files don't exist."""
     ws = workspace_repo
