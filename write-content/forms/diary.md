@@ -99,11 +99,60 @@ Full template and heading guidance: **[diary-template.md](diary-template.md)**
 
 ---
 
-## Closing insight — optional, not a section
+## Make the reader care — context for non-obvious work
 
-After the main narrative, if the work surfaces something worth thinking about,
-include 1–3 sentences woven into the closing prose. **Not a headed section.
-Not a task list. Only when there's something genuine.**
+Technical diary entries default to matter-of-fact: "we extracted X, fixed Y,
+added Z." This informs but doesn't engage. For anything non-obvious — an
+architectural choice, a subtle fix, a design constraint — add context
+explaining **why it matters to someone using this project**.
+
+Not every point needs this. Obvious things ("fixed a typo") don't. But when
+the work solves a problem the reader might not know they have, or unlocks
+something that wasn't possible before, say so.
+
+**The test:** Would a reader who doesn't already know this codebase understand
+why this change is interesting, not just what it does? If not, add the "so what."
+
+**Examples:**
+
+> ❌ "We extracted `workspace_artifacts.py` as a central path resolver."
+>
+> ✅ "We extracted `workspace_artifacts.py` as a central path resolver —
+> until now, every skill that promoted specs or blogs was computing paths
+> independently, and three of them were getting it wrong. Specs were silently
+> not being promoted in slot mode, which meant design work was vanishing
+> at branch close."
+
+> ❌ "Added a cross-repo dependency gate to work-slot."
+>
+> ✅ "Added a cross-repo dependency gate — without it, a slot could start
+> work on an issue whose foundation dependency hasn't shipped yet, leading
+> to a build that compiles locally but fails in CI when the snapshot isn't
+> available."
+
+**Every sentence pays for itself.** Routine work needs no justification.
+Novel or complex work needs enough context that a reader who hasn't seen
+it before understands why it matters — the more unfamiliar the territory,
+the more that context earns its place. Don't cap it; don't pad it.
+
+---
+
+## Forward-looking content and closing insight
+
+Every entry should look forward — what does this work open up, what
+directions are being considered, what questions surfaced that need answering.
+This isn't a "Next Steps" footer; it's genuine reflection woven naturally
+into the closing prose or the body itself.
+
+**Forward direction is not optional.** A diary that only records what happened
+feels like a closed loop. Readers follow a project diary because they want to
+see where it's going, not just where it's been. Even a small observation —
+"this pattern probably has further to run" or "the open question now is
+whether X scales to Y" — gives the reader trajectory.
+
+**Closing insight remains optional.** After the forward-looking content, if
+the work also surfaces a deeper non-obvious insight, include 1–3 sentences.
+**Not a headed section. Not a task list. Only when there's something genuine.**
 
 Use these forms as the filter — if what you'd write doesn't fit one, leave it out:
 
@@ -380,6 +429,8 @@ See [diary-retrospective.md](diary-retrospective.md) — loaded when invoked wit
 | Editing an earlier entry when beliefs change | Destroys the historical record | Write a Correction entry instead |
 | Using a "Next:" footer | Sounds like scaffolding | Integrate forward-looking note naturally, or end on the last real point |
 | Forcing a closing insight | Reads as obligation, not thought | Only include if it passes one of the eight forms — otherwise end on the last real point |
+| Matter-of-fact listing without context | Reader knows WHAT but not WHY | Add context explaining why non-obvious work matters — scale to novelty |
+| No forward-looking content | Entry feels like a closed loop | Include what this opens up, what questions remain, where the work is heading |
 
 ---
 
