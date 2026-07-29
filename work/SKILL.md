@@ -82,7 +82,7 @@ If `HAS_HANDOFF=yes`:
 > 1. **resume** — read the last handover and continue where I left off
 
 If `HAS_HANDOFF=no`:
-> 1. **continue** — begin working on this branch (first session, or no prior handover for this work)
+> 1. **start** — begin working (first session on this branch)
 
 If `STACK_DEPTH > 0`:
 > 2. **switch** — you have <N> paused branch(es) — resume one instead
@@ -111,7 +111,7 @@ If `IN_SLOT=yes` but `IS_EPIC=no`: read .slot for issue context.
 Summarise what the last session accomplished and continue working.
 Do NOT invoke work-start — the branch and scaffold already exist.
 
-**On continue (option 1 when `HAS_HANDOFF=no`):**
+**On start (option 1 when `HAS_HANDOFF=no`):**
 
 No handover to read. Run work-start resume path (Steps 0, 2, 3, 3b, 11)
 for platform coherence, protocols, and IntelliJ pre-checks.

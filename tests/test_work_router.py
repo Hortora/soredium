@@ -236,6 +236,137 @@ class TestDetectState:
         assert result["IN_SLOT"] == "no"
 
 
+class TestSlotStates:
+    """Test every possible slot state for correct HAS_HANDOFF detection."""
+
+    @staticmethod
+    def _init_git(path):
+        subprocess.run(["git", "init", "-b", "main", str(path)], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"],
+            capture_output=True,
+        )
+
+    @staticmethod
+    def _commit_handoff_to_main(workspace):
+        subprocess.run(
+            ["git", "-C", str(workspace), "add", "HANDOFF.md"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "handoff"],
+            capture_output=True,
+        )
+
+    def _make_slot(self, tmp_path, issue_num=42, epic=False):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        family = tmp_path / "family"
+        slot = family / "worktrees" / "1"
+        project = slot / "engine"
+        project.mkdir(parents=True)
+        if epic:
+            (slot / ".slot").write_text(
+                f"# Slot 1 — issue-{issue_num}\n\n## Issue\n"
+                f"repo#{issue_num}\nCovers: {issue_num}\nType: epic\n\n"
+                "## Batch Plan\n### Batch 1 — Core\n"
+                f"- [ ] #{issue_num + 1} — Task ← active\n\n"
+                "## Session State\nCurrent batch: 1\n"
+                f"Current issue: #{issue_num + 1} — Task\n"
+            )
+        else:
+            (slot / ".slot").write_text(
+                f"# Slot 1 — issue-{issue_num}\n\n## Issue\n"
+                f"repo#{issue_num}\nCovers: {issue_num}\n\n"
+                "## What to do\nImplement feature\n"
+            )
+        return workspace, project
+
+    def test_slot_first_session_no_handoff(self, tmp_path):
+        """Brand new slot, no HANDOFF.md at all → start."""
+        workspace, project = self._make_slot(tmp_path, issue_num=42)
+        result = work_router.detect_state(
+            "issue-42-feature", str(project), str(workspace))
+        assert result["IN_SLOT"] == "yes"
+        assert result["HAS_HANDOFF"] == "no"
+        assert "HANDOFF_PATH" not in result
+
+    def test_slot_first_session_handoff_from_other_work(self, tmp_path):
+        """New slot, but HANDOFF.md exists from different issue → start."""
+        workspace, project = self._make_slot(tmp_path, issue_num=42)
+        self._init_git(workspace)
+        (workspace / "HANDOFF.md").write_text(
+            "# Handoff\nWorked on #99 — refactored the parser."
+        )
+        self._commit_handoff_to_main(workspace)
+        result = work_router.detect_state(
+            "issue-42-feature", str(project), str(workspace))
+        assert result["IN_SLOT"] == "yes"
+        assert result["HAS_HANDOFF"] == "no"
+        assert result["HANDOFF_PATH"] == str(workspace / "HANDOFF.md")
+
+    def test_slot_returning_handoff_references_issue(self, tmp_path):
+        """Returning to slot, HANDOFF.md references this issue → resume."""
+        workspace, project = self._make_slot(tmp_path, issue_num=42)
+        self._init_git(workspace)
+        (workspace / "HANDOFF.md").write_text(
+            "# Handoff\nWorked on #42 feature. Midway through step 3."
+        )
+        self._commit_handoff_to_main(workspace)
+        result = work_router.detect_state(
+            "issue-42-feature", str(project), str(workspace))
+        assert result["IN_SLOT"] == "yes"
+        assert result["HAS_HANDOFF"] == "yes"
+        assert result["HANDOFF_PATH"] == str(workspace / "HANDOFF.md")
+
+    def test_slot_returning_no_handoff_written(self, tmp_path):
+        """Returning to slot, prior session ended without handover → start."""
+        workspace, project = self._make_slot(tmp_path, issue_num=42)
+        result = work_router.detect_state(
+            "issue-42-feature", str(project), str(workspace))
+        assert result["IN_SLOT"] == "yes"
+        assert result["HAS_HANDOFF"] == "no"
+
+    def test_epic_slot_first_session(self, tmp_path):
+        """Epic slot, first session → start + epic context."""
+        workspace, project = self._make_slot(tmp_path, issue_num=50, epic=True)
+        result = work_router.detect_state(
+            "issue-50-profiles", str(project), str(workspace))
+        assert result["IN_SLOT"] == "yes"
+        assert result["IS_EPIC"] == "yes"
+        assert result["HAS_HANDOFF"] == "no"
+        assert result["EPIC_ACTIVE_ISSUE"] == "51"
+
+    def test_epic_slot_returning_with_handoff(self, tmp_path):
+        """Epic slot, returning with handoff → resume + epic context."""
+        workspace, project = self._make_slot(tmp_path, issue_num=50, epic=True)
+        self._init_git(workspace)
+        (workspace / "HANDOFF.md").write_text(
+            "# Handoff\nEpic #50 — completed batch 1, #51 done."
+        )
+        self._commit_handoff_to_main(workspace)
+        result = work_router.detect_state(
+            "issue-50-profiles", str(project), str(workspace))
+        assert result["IN_SLOT"] == "yes"
+        assert result["IS_EPIC"] == "yes"
+        assert result["HAS_HANDOFF"] == "yes"
+        assert result["EPIC_ACTIVE_ISSUE"] == "51"
+
+    def test_epic_slot_first_session_stale_handoff(self, tmp_path):
+        """Epic slot first session, HANDOFF.md from unrelated work → start."""
+        workspace, project = self._make_slot(tmp_path, issue_num=50, epic=True)
+        self._init_git(workspace)
+        (workspace / "HANDOFF.md").write_text(
+            "# Handoff\nFinished #77 — dependency gate shipped."
+        )
+        self._commit_handoff_to_main(workspace)
+        result = work_router.detect_state(
+            "issue-50-profiles", str(project), str(workspace))
+        assert result["IN_SLOT"] == "yes"
+        assert result["IS_EPIC"] == "yes"
+        assert result["HAS_HANDOFF"] == "no"
+
+
 class TestEpicFileDetection:
     def test_detects_epic_file_in_workspace(self, tmp_path):
         project = tmp_path / "project"
