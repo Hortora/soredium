@@ -612,6 +612,18 @@ If any branch rebase conflicts: hard stop. No main has been modified.
 Human resolves the conflict on the branch in the slot worktree, then
 re-triggers Phase B.
 
+**B1b. Cross-repo dependency check.** Before pushing, verify provider repos
+will land before consumers:
+
+```bash
+python3 ~/.claude/skills/work-slot/slot_manager.py check-cross-deps <family-root> slot=<N>
+```
+
+If `CHECK=fail`: the output lists which provider repos must land first.
+Reorder the push sequence in B2 accordingly (providers before consumers).
+If a provider's changes are still on a feature branch, **hard stop** —
+the consumer cannot be pushed until the provider lands.
+
 **B2. Fast-forward and push.** Only after all rebases succeed. For each
 repo — in the **original repo** (where main is checked out):
 

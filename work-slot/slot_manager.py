@@ -9,6 +9,7 @@ Subcommands:
   scan-ready <family-root>
   merge-slot <family-root> slot=<N>
   archive-slot <family-root> slot=<N> [--force]
+  check-cross-deps <family-root> slot=<N>
 
 Note: remove-slot archives to worktrees/attic/ by default. Only --force-delete permanently removes.
 
@@ -77,6 +78,14 @@ def setup_maven_config(repo_worktree: Path, m2_path: Path) -> None:
             config_file.write_text(content.rstrip() + "\n" + line + "\n")
     else:
         config_file.write_text(line + "\n")
+    gitignore = repo_worktree / ".gitignore"
+    entry = ".mvn/maven.config"
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if entry not in content:
+            gitignore.write_text(content.rstrip() + "\n" + entry + "\n")
+    else:
+        gitignore.write_text(entry + "\n")
 
 
 def repoint_wksp(repo_worktree: Path, ws_subdir: Path) -> None:
@@ -701,6 +710,80 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
         print(f"ARCHIVED={slot_num}")
 
 
+def check_cross_deps(family_root: Path, slot_num: int) -> int:
+    """Check if cross-repo Maven dependencies in a slot have landed on main."""
+    slot_dir = family_root / "worktrees" / str(slot_num)
+    if not slot_dir.exists():
+        print(f"ERROR=slot_not_found slot={slot_num}")
+        return 1
+
+    repos = get_slot_repos(slot_dir)
+    if len(repos) < 2:
+        print("CHECK=skip (single repo, no cross-deps)")
+        return 0
+
+    group_ids: dict[str, set[str]] = {}
+    dep_graph: dict[str, set[str]] = {}
+
+    for repo_name in repos:
+        slot_repo = slot_dir / repo_name
+        group_ids[repo_name] = set()
+        dep_graph[repo_name] = set()
+
+        for pom in slot_repo.rglob("pom.xml"):
+            try:
+                content = pom.read_text()
+            except Exception:
+                continue
+            import re
+            for m in re.finditer(r"<groupId>([^<]+)</groupId>", content):
+                if pom.parent == slot_repo:
+                    group_ids[repo_name].add(m.group(1))
+
+    for repo_name in repos:
+        slot_repo = slot_dir / repo_name
+        for pom in slot_repo.rglob("pom.xml"):
+            try:
+                content = pom.read_text()
+            except Exception:
+                continue
+            import re
+            for m in re.finditer(r"<dependency>[^<]*<groupId>([^<]+)</groupId>", content, re.DOTALL):
+                dep_gid = m.group(1)
+                for other_repo, gids in group_ids.items():
+                    if other_repo != repo_name and dep_gid in gids:
+                        dep_graph[repo_name].add(other_repo)
+
+    if not any(dep_graph.values()):
+        print("CHECK=pass (no cross-repo Maven dependencies detected)")
+        return 0
+
+    issues = []
+    for consumer, providers in dep_graph.items():
+        for provider in providers:
+            original = resolve_original_repo(slot_dir / provider)
+            rc, branch_out, _ = run_cmd(["git", "-C", str(original), "branch", "--show-current"])
+            current = branch_out.strip() if rc == 0 else "unknown"
+            slot_repo = slot_dir / provider
+            rc, slot_branch, _ = run_cmd(["git", "-C", str(slot_repo), "branch", "--show-current"])
+            slot_br = slot_branch.strip() if rc == 0 else "unknown"
+            if current == "main":
+                rc, _, _ = run_cmd(["git", "-C", str(original), "log", f"--grep={slot_br}", "--oneline", "-1"])
+                print(f"DEP={consumer} → {provider} STATUS=on-main")
+            else:
+                issues.append((consumer, provider, slot_br))
+                print(f"DEP={consumer} → {provider} STATUS=not-on-main branch={slot_br}")
+
+    if issues:
+        print(f"CHECK=fail BLOCKING={len(issues)}")
+        for consumer, provider, branch in issues:
+            print(f"BLOCK={provider} must land on main before {consumer} can be pushed (branch={branch})")
+        return 1
+    else:
+        print("CHECK=pass (all provider repos on main)")
+        return 0
+
+
 def parse_args() -> dict[str, str]:
     parsed = {}
     for arg in sys.argv[1:]:
@@ -785,6 +868,14 @@ def main() -> None:
             sys.exit(1)
         force = "--force" in sys.argv
         archive_slot(family_root, slot_num, force=force)
+
+    elif subcommand == "check-cross-deps":
+        family_root = Path(args.get("target", "."))
+        slot_num = int(args.get("slot", "0"))
+        if slot_num == 0:
+            print("ERROR=missing_slot_number")
+            sys.exit(1)
+        sys.exit(check_cross_deps(family_root, slot_num))
 
     else:
         print(f"ERROR=unknown_subcommand subcommand={subcommand}", file=sys.stderr)
