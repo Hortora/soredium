@@ -526,6 +526,7 @@ work-end close plan — <branch-name>
   Squash             <blessed-remote>/main..HEAD (mandatory before any push)
   Fork push          → origin/main (mandatory, no skip — fork is always updated first)
   Blessed repo       → prompt: push / PR / skip  (upstream remote, if present)
+  Slot archive       → worktrees/attic/<N>/  (slot mode only — B7)
 
 Approve all, or step by step? (all / step)
 ```
@@ -689,6 +690,18 @@ worktree in the slot. Move the slot directory to `worktrees/attic/<N>/`
 from `slot_manager.py` — do not delete the slot directory.
 
 **B8. Post-merge steps.** Steps 8k–12 from normal work-end.
+
+**Phase B completion gate (mandatory before declaring complete):**
+
+Before proceeding to B8, verify all prior steps ran:
+- [ ] Branches rebased and pushed (B1–B2)
+- [ ] Issues closed (B3)
+- [ ] Artifacts promoted (B4)
+- [ ] Branches stamped as closed (B6)
+- [ ] **Slot archived — worktrees removed, slot moved to `worktrees/attic/<N>/` (B7)**
+
+B7 is the most commonly skipped step. If the slot directory still contains
+active worktrees, B7 did not run — go back and execute it before continuing.
 
 ---
 
