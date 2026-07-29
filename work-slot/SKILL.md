@@ -471,15 +471,17 @@ python3 ~/.claude/skills/work-slot/slot_manager.py archive-slot <family-root> sl
 If archive fails: report error but do NOT roll back — code is on main.
 Report manual cleanup commands.
 
-### Step 5 — Report
+### Step 5 — Report (mechanical)
 
+Render the close-out report from collected step results:
+
+```bash
+python3 ~/.claude/skills/work-end/close_report.py render /tmp/work-end-report.json
 ```
-✅ Slot <N> merged and archived
-   Branch: <branch>
-   Repos: <list>
-   Issues closed: #<covers>
-   Artifacts promoted: <count>
-```
+
+Record results into the report after each sub-step in Step 4 (rebase, merge,
+push, stamp, worktree-remove, archive) using `close_report.py record`. The
+script produces a deterministic, structured summary identical to work-end.
 
 If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 4a, stop — report which slot failed and that prior slots landed.

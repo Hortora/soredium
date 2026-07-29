@@ -685,6 +685,15 @@ from `slot_manager.py` — do not delete the slot directory.
 Failures are reported but do not stop remaining steps, **except**: journal merge
 failure prompts the user before continuing to issue close.
 
+**Report collector — init before first step:**
+
+```bash
+python3 ~/.claude/skills/work-end/close_report.py init /tmp/work-end-report.json
+```
+
+After each sub-step below, record results into the report (see `record` calls).
+Step 8h renders the final report mechanically from this data.
+
 ### 8a — Close artifacts (single script call)
 
 Run the unified artifact promotion script:
@@ -710,6 +719,16 @@ If exit code is 1 (fatal): stop. Report the error.
 If exit code is 2 (partial): report `FAILURES=` output. Ask user whether
 to retry or proceed without the stamp. The stamp is NOT written on partial
 failure — Step 8j will block the push.
+
+**Record to report:**
+```bash
+python3 ~/.claude/skills/work-end/close_report.py record /tmp/work-end-report.json \
+  step=artifacts result=ok \
+  workspace_promoted=$WORKSPACE_PROMOTED project_promoted=$PROJECT_PROMOTED \
+  specs_cleaned=$SPECS_CLEANED issues_closed=$ISSUES_CLOSED \
+  blog_published=$BLOG_PUBLISHED blog_dest=$BLOG_DEST \
+  plans_archived=$PLANS_ARCHIVED
+```
 
 **This replaces the previous Steps 8a-8c, 8f, and 8g.** The script
 internally resolves routing from CLAUDE.md, scans the workspace for
@@ -765,26 +784,18 @@ Read `ISSUES_CLOSED=N` from 8a output.
 **Handled by 8a** (`close_artifacts.py` publishes blog entries via `blog_dest.py`).
 Read `BLOG_PUBLISHED=N` and `BLOG_DEST=<path>` from 8a output.
 
-### 8h — Final report
+### 8h — Final report (mechanical)
 
-Build from `close_artifacts.py` output (Step 8a):
+Render the close-out report from the collected step results:
 
-```
-✅ Artifacts promoted: PROJECT_PROMOTED to project, WORKSPACE_PROMOTED to workspace
-✅ Specs cleaned: SPECS_CLEANED
-✅ Plans archived: PLANS_ARCHIVED
-✅ Issues closed: ISSUES_CLOSED
-✅ Blog published → BLOG_DEST (BLOG_PUBLISHED new entries)
-✅ Journal merged → ARC42STORIES.MD (N sections)  ← from 8d
-✅ Specs posted to #N  ← from 8e
-❌ Push failed — <path>. Run: git -C <path> push
+```bash
+python3 ~/.claude/skills/work-end/close_report.py render /tmp/work-end-report.json
 ```
 
-**The `Blog published` line is always present** — 0 new entries is a valid outcome,
-not a skip. If the line is absent entirely, 8g was not run — stop and run it before
-proceeding to 8i/8j.
+This produces a deterministic, structured summary of every operation performed.
+The report is generated mechanically — not assembled by the LLM.
 
-**Closing summary — always append after the artifact lines:**
+**Closing summary — always append after the mechanical report:**
 
 ```
 What this delivered:
@@ -871,6 +882,12 @@ python3 ~/.claude/skills/work-end/land_branch.py rebase <PROJECT> \
 ```
 
 Outputs `FORK_REMOTE=`, `BLESSED_REMOTE=`, and `REBASE=ok` on success.
+
+**Record to report:**
+```bash
+python3 ~/.claude/skills/work-end/close_report.py record /tmp/work-end-report.json \
+  step=rebase result=ok branch=$BRANCH_NAME base=$PROJECT_BASE_BRANCH
+```
 
 | Topology | Meaning |
 |----------|---------|
@@ -1027,6 +1044,12 @@ python3 ~/.claude/skills/work-end/land_branch.py push <PROJECT> \
 If `ERROR=MISSING_STAMP`: **hard stop.** Return to Step 8a.
 If `ERROR=PUSH_FAILED`: stop. Do not proceed to blessed repo delivery.
 
+**Record to report:**
+```bash
+python3 ~/.claude/skills/work-end/close_report.py record /tmp/work-end-report.json \
+  step=push-fork result=ok remote=$FORK_REMOTE branch=$PROJECT_BASE_BRANCH
+```
+
 The fork push is always required. The blessed repo can never receive
 commits that the fork has not already received.
 
@@ -1066,6 +1089,12 @@ content gap from stderr. A false stamp is worse than no stamp — it marks
 the branch as archived when its content never landed.
 
 On success: outputs `STAMP=ok` and `LANDED_SHA=<sha>`.
+
+**Record to report:**
+```bash
+python3 ~/.claude/skills/work-end/close_report.py record /tmp/work-end-report.json \
+  step=stamp-project result=ok branch=$BRANCH_NAME landed_sha=$LANDED_SHA
+```
 
 This is mandatory, not an offer. An unstamped branch looks live to the next session.
 
