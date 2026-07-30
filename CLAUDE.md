@@ -622,7 +622,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `design-snapshot` -- immutable dated record of design state; links to ADRs rather than duplicating them
 - `idea-log` -- lightweight living log for undecided possibilities; park ideas before they evaporate, promote to ADR when ready
 - `write-content` -- universal content creation skill; determines content type (Note/log/musing/idea, Article/explanation/commentary/essay/tutorial/how-to, Brief, News), applies structure principles, anti-slop guidance, and form-specific rules; consumed by write-blog and any future content skill
-- `write-blog` -- living project diary; captures decisions, pivots, and discoveries in diary voice as they happen; consumes write-content for content type and writing guidance; never revised in hindsight
+- `write-blog` -- living project diary; captures decisions, pivots, and discoveries in diary voice as they happen; consumes write-content for content type and writing guidance
 - `publish-blog` -- routes blog entries to external git destinations via blog-routing.yaml; Level 2 blog routing (per-entry cross-posting), independent of epic Level 1 routing
 - `handover` -- end-of-session HANDOFF.md generator; lazy references to blog, design-snapshot, and CLAUDE.md rather than loading them; invokes write-blog, design-snapshot, and update-claude-md via user-confirmed wrap checklist
 

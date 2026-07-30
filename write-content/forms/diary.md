@@ -20,7 +20,7 @@ are ready — front matter, platform formatting, final polish.
 - **Not a design snapshot** — Snapshots are formal and capture full design state. The diary is informal, written phase by phase.
 - **Not an ADR** — ADRs record one decision formally. The diary narrates the story including everything considered and rejected.
 - **Not the idea log** — The idea log parks undecided possibilities. The diary records what happened and why.
-- **Not a retrospective** — Never written after the fact. If a belief was wrong, a new entry corrects it — the old entry is never revised.
+- **Not a retrospective** — Written in the moment, not after the fact.
 - **Not a technical spec** — Diary voice only.
 - **Not a finished article** — `publish-blog` restructures entries for publication. Voice and style are consistent; formatting differs.
 - **Not a session log** — a pure sequence of actions (ran X, found Y, fixed Z) with no decision, observation, reflection, or insight attached. If nothing surprised you, changed your understanding, or is worth reading independently of what the commits record, don't write the entry.
@@ -68,7 +68,7 @@ One file per entry. `<initials>` is the author's 2–4 letter identifier, read
 from `~/.claude/settings.json` § `initials`. `NN` is a two-digit per-author
 sequence number starting at `01`. Kebab-case title, ≤30 chars.
 
-Previous entries are never edited — new entries reference them if needed.
+Previous entries can be referenced by new entries if needed.
 
 ---
 
@@ -352,8 +352,7 @@ Present the full draft. **Do NOT write to disk until the user confirms.**
 
 ### Step 5 — Confirm
 
-> Here is the draft entry. Review it carefully — once committed, it is
-> immutable (corrections go in a new entry, not an edit).
+> Here is the draft entry.
 >
 > [draft content]
 >
@@ -426,7 +425,7 @@ See [diary-retrospective.md](diary-retrospective.md) — loaded when invoked wit
 | Writing in past tense throughout | Sounds retrospective, not diary | Mix present-tense thinking: "I believed," "the question is" |
 | Smooth narrative with no failed attempts | Value is in the iteration | Include what was tried first, specifically why it failed |
 | Vague errors: "X didn't work" | Useless to future readers | Include exact error messages, commands, file paths |
-| Editing an earlier entry when beliefs change | Destroys the historical record | Write a Correction entry instead |
+| Editing an earlier entry without noting what changed | Loses context for why the original was written that way | Add a note or update inline marking what changed |
 | Using a "Next:" footer | Sounds like scaffolding | Integrate forward-looking note naturally, or end on the last real point |
 | Forcing a closing insight | Reads as obligation, not thought | Only include if it passes one of the eight forms — otherwise end on the last real point |
 | Matter-of-fact listing without context | Reader knows WHAT but not WHY | Add context explaining why non-obvious work matters — scale to novelty |
