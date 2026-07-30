@@ -44,7 +44,7 @@ STACK_FILE="$WORKSPACE/design/.pause-stack"
 grep -q "^- branch:" "$STACK_FILE" || { echo "Nothing to resume — pause stack is empty."; exit 1; }
 ```
 
-Parse all entries. Each entry has: `branch`, `issue`, `paused`, `wip_project`, `wip_workspace`.
+Parse all entries. Each entry has: `branch`, `issue`, `paused`, `wip_project`, `wip_workspace`, `slot` (optional — present when the branch lives in a slot clone).
 
 ---
 
@@ -61,7 +61,24 @@ Paused branches:
 Resume which? (1 / 2)
 ```
 
-Set `$RESUME_BRANCH`, `$RESUME_WIP_PROJECT`, `$RESUME_WIP_WORKSPACE` from selected entry.
+Set `$RESUME_BRANCH`, `$RESUME_WIP_PROJECT`, `$RESUME_WIP_WORKSPACE`, `$RESUME_SLOT` from selected entry.
+
+---
+
+## Step 2b — Slot redirect (if applicable)
+
+If `$RESUME_SLOT` is non-empty, the branch lives in a slot clone — not in
+the original repos. Do **not** attempt checkout here. Instead:
+
+```
+⚠️  Branch <branch> lives in slot: <slot_path>
+    Open a new session in the slot's primary repo to resume work there.
+    
+    Slot directory: <slot_path>
+```
+
+Pop the stack entry (the slot session will re-pause if needed), then **stop**.
+Do not proceed to Step 3.
 
 ---
 
@@ -191,7 +208,12 @@ Work-resume is complete when:
 - ✅ Stack entry removed
 - ✅ Garden search performed for domain context
 
-**Not complete until** the branch is active and the WIP commit is unwound.
+**Slot redirect path:** If the selected entry has a `slot` field, resume is
+complete after displaying the slot redirect message and popping the stack
+entry. Steps 3-10 do not apply — the slot session handles them.
+
+**Not complete until** the branch is active and the WIP commit is unwound
+(or the slot redirect message has been shown).
 
 ## Skill Chaining
 

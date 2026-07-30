@@ -252,3 +252,48 @@ class TestRoundTrip:
             run("pop", str(stack), f"issue-{i}-branch")
         result = run("depth", str(stack))
         assert result.stdout.strip() == "2"
+
+
+# ---------------------------------------------------------------------------
+# Slot field support
+# ---------------------------------------------------------------------------
+
+class TestSlotField:
+
+    def test_push_with_slot_persists_in_list(self, tmp_path):
+        """Pushing an entry with slot= should persist and appear in list output."""
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=issue-50-feature", "issue=50",
+            "slot=/home/user/family/worktrees/3")
+        result = run("list", str(stack))
+        out = parse_output(result)
+        assert out["ENTRY_1_SLOT"] == "/home/user/family/worktrees/3"
+
+    def test_push_without_slot_lists_empty_slot(self, tmp_path):
+        """Entries without slot= should list SLOT as empty string."""
+        stack = tmp_path / ".pause-stack"
+        push(stack, "issue-42-auth")
+        result = run("list", str(stack))
+        out = parse_output(result)
+        assert out["ENTRY_1_SLOT"] == ""
+
+    def test_slot_survives_pop_of_other_entries(self, tmp_path):
+        """Popping a non-slot entry should not affect the slot entry."""
+        stack = tmp_path / ".pause-stack"
+        push(stack, "issue-10-normal")
+        run("push", str(stack), "branch=issue-20-slot", "issue=20",
+            "slot=/tmp/worktrees/5")
+        run("pop", str(stack), "issue-10-normal")
+        result = run("list", str(stack))
+        out = parse_output(result)
+        assert out["ENTRY_COUNT"] == "1"
+        assert out["ENTRY_1_BRANCH"] == "issue-20-slot"
+        assert out["ENTRY_1_SLOT"] == "/tmp/worktrees/5"
+
+    def test_slot_field_written_to_file(self, tmp_path):
+        """The slot field should appear in the raw file content."""
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=issue-60-slot", "issue=60",
+            "slot=/tmp/worktrees/7")
+        content = stack.read_text()
+        assert "slot: /tmp/worktrees/7" in content

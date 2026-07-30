@@ -71,17 +71,54 @@ def commit_wip(repo: str, message: str) -> int:
     return 0
 
 
+def _resolve_clone_origin(repo: str) -> Path | None:
+    """If repo is a git clone whose origin points to a local directory, return that path."""
+    ok, url = run_git(repo, "remote", "get-url", "origin")
+    if not ok:
+        return None
+    origin_path = Path(url)
+    if origin_path.is_dir() and (origin_path / ".git").exists():
+        return origin_path.resolve()
+    return None
+
+
+def _resolve_slot_dir(clone_path: Path) -> Path | None:
+    """Given a clone inside a slot (family/worktrees/N/repo), return the slot dir."""
+    parts = clone_path.resolve().parts
+    try:
+        wt_idx = parts.index("worktrees")
+        if wt_idx + 1 < len(parts):
+            return Path(*parts[: wt_idx + 2])
+    except ValueError:
+        pass
+    return None
+
+
 def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_branch: str) -> int:
     """
     Push project/workspace branches, checkout base, pull, add stack entry.
 
     Push failures are non-fatal. Stack push MUST succeed.
 
+    When workspace is a slot clone (origin points to a local directory),
+    the stack entry is written to the original workspace's pause stack
+    with a slot= field pointing to the slot directory.
+
     Output:
         STACKED=yes
         PROJECT_PUSHED=yes|no
         WORKSPACE_PUSHED=yes|no
     """
+    # Detect slot context: is workspace a clone of a local repo?
+    original_workspace = _resolve_clone_origin(workspace)
+    slot_dir: Path | None = None
+    stack_workspace: str  # repo where the stack entry gets committed
+    if original_workspace is not None:
+        slot_dir = _resolve_slot_dir(Path(workspace))
+        stack_workspace = str(original_workspace)
+    else:
+        stack_workspace = workspace
+
     # Push project branch (non-fatal)
     project_push_ok, _ = run_git(project, "push", "origin", branch)
     print(f"PROJECT_PUSHED={'yes' if project_push_ok else 'no'}")
@@ -96,7 +133,7 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
         print("ERROR=project_checkout_failed")
         return 1
 
-    # Checkout main in workspace
+    # Checkout main in workspace clone (independent branches — always works)
     ws_checkout_ok, _ = run_git(workspace, "checkout", "main")
     if not ws_checkout_ok:
         print("ERROR=workspace_checkout_failed")
@@ -110,22 +147,36 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
             print("ERROR=project_pull_failed")
             return 1
 
-    # Pull workspace (skip if no remote)
-    has_remote, _ = run_git(workspace, "remote", "get-url", "origin")
-    if has_remote:
-        ws_pull_ok, _ = run_git(workspace, "pull", "--rebase", "origin", "main")
-        if not ws_pull_ok:
-            print("ERROR=workspace_pull_failed")
-            return 1
+    # For stack operations, ensure we're on main in the stack workspace
+    if original_workspace is not None:
+        run_git(stack_workspace, "checkout", "main")
+        has_remote, _ = run_git(stack_workspace, "remote", "get-url", "origin")
+        if has_remote:
+            run_git(stack_workspace, "pull", "--rebase", "origin", "main")
+    else:
+        has_remote, _ = run_git(workspace, "remote", "get-url", "origin")
+        if has_remote:
+            ws_pull_ok, _ = run_git(workspace, "pull", "--rebase", "origin", "main")
+            if not ws_pull_ok:
+                print("ERROR=workspace_pull_failed")
+                return 1
 
-    # Push stack entry
-    stack_file = Path(workspace) / "design" / ".pause-stack"
-    stack_script = Path.home() / ".claude" / "skills" / "project" / "stack.py"
+    # Push stack entry to the stack workspace (original if slot, else workspace)
+    stack_file = Path(stack_workspace) / "design" / ".pause-stack"
+    repo_stack = Path(__file__).resolve().parent.parent / "project" / "stack.py"
+    installed_stack = Path.home() / ".claude" / "skills" / "project" / "stack.py"
+    stack_script = repo_stack if repo_stack.exists() else installed_stack
+
+    push_args = [
+        "python3", str(stack_script), "push", str(stack_file),
+        f"branch={branch}", f"issue={issue}",
+    ]
+    if slot_dir is not None:
+        push_args.append(f"slot={slot_dir}")
 
     try:
         result = subprocess.run(
-            ["python3", str(stack_script), "push", str(stack_file),
-             f"branch={branch}", f"issue={issue}"],
+            push_args,
             capture_output=True,
             text=True,
             check=True
@@ -141,22 +192,22 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
             print("ERROR=stack_depth_missing")
             return 1
 
-        # Add, commit, push stack change
-        add_ok, _ = run_git(workspace, "add", "design/.pause-stack")
+        # Add, commit, push stack change on the stack workspace
+        add_ok, _ = run_git(stack_workspace, "add", "design/.pause-stack")
         if not add_ok:
             print("ERROR=stack_add_failed")
             return 1
 
         commit_msg = f"chore: pause {branch} — stack depth {depth}"
-        commit_ok, _ = run_git(workspace, "commit", "-m", commit_msg)
+        commit_ok, _ = run_git(stack_workspace, "commit", "-m", commit_msg)
         if not commit_ok:
             print("ERROR=stack_commit_failed")
             return 1
 
         # Push stack commit (only if remote is configured)
-        has_ws_remote, _ = run_git(workspace, "remote", "get-url", "origin")
+        has_ws_remote, _ = run_git(stack_workspace, "remote", "get-url", "origin")
         if has_ws_remote:
-            push_stack_ok, _ = run_git(workspace, "push")
+            push_stack_ok, _ = run_git(stack_workspace, "push")
             if not push_stack_ok:
                 # If stack push fails, abort by popping the entry
                 subprocess.run(
