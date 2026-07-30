@@ -21,8 +21,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from common import parse_args
+SCRIPT_DIR = Path(__file__).parent
+SKILL_ROOT = SCRIPT_DIR.parent
+ROUTING_DIR = SKILL_ROOT / "project"
+
+sys.path.insert(0, str(ROUTING_DIR))
+from routing import parse_layer2, parse_layer3, resolve  # noqa: E402
+
+sys.path.insert(0, str(SCRIPT_DIR))
+from common import parse_args  # noqa: E402
 
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -99,19 +106,51 @@ def list_branch_files(workspace: str, branch: str, directory: str) -> list[str]:
     return [f for f in result.stdout.strip().split("\n") if f]
 
 
-def check_unrecovered_artifacts(workspace: str, branches: list[str]) -> list[dict]:
+def list_project_files(project: str, directory: str) -> list[str]:
+    path = Path(project) / directory
+    if not path.is_dir():
+        return []
+    return [f.name for f in path.iterdir() if f.is_file()]
+
+
+def list_branch_files_recursive(workspace: str, branch: str,
+                                directory: str) -> list[str]:
+    result = git(workspace, "ls-tree", "-r", "--name-only",
+                 f"{branch}:{directory}")
+    if result.returncode != 0:
+        return []
+    files = []
+    for line in result.stdout.strip().split("\n"):
+        name = line.strip()
+        if not name:
+            continue
+        files.append(name.rsplit("/", 1)[-1] if "/" in name else name)
+    return files
+
+
+def check_unrecovered_artifacts(workspace: str, project: str,
+                                branches: list[str],
+                                routing: dict[str, str]) -> list[dict]:
     unrecovered = []
     for b in branches:
         if not branch_has_file(workspace, b, "design/EPIC-CLOSED.md"):
             continue
 
-        for artifact_type, directory in [("blog", "blog"), ("specs", "specs")]:
-            branch_files = list_branch_files(workspace, b, directory)
-            main_files = list_branch_files(workspace, "main", directory)
+        for artifact_type, ws_directory in [("blog", "blog"), ("specs", "specs")]:
+            dest = routing.get(artifact_type, "project")
+            if dest == "project":
+                branch_files = list_branch_files_recursive(
+                    workspace, b, ws_directory)
+                promoted_files = list_project_files(
+                    project, f"docs/{ws_directory}")
+            else:
+                branch_files = list_branch_files(workspace, b, ws_directory)
+                promoted_files = list_branch_files(
+                    workspace, "main", ws_directory)
             for f in branch_files:
                 if f == "INDEX.md":
                     continue
-                if f not in main_files:
+                if f not in promoted_files:
                     unrecovered.append({
                         "branch": b,
                         "type": artifact_type,
@@ -168,11 +207,19 @@ def main() -> int:
         print("ERROR: branch= is required", file=sys.stderr)
         return 1
 
+    global_md = Path.home() / ".claude" / "CLAUDE.md"
+    workspace_md = Path(workspace) / "CLAUDE.md"
+    global_text = global_md.read_text() if global_md.exists() else ""
+    workspace_text = workspace_md.read_text() if workspace_md.exists() else ""
+    layer2 = parse_layer2(global_text)
+    layer3 = parse_layer3(workspace_text)
+    routing = {a: resolve(a, layer2, layer3)[0] for a in ("blog", "specs")}
+
     branches = list_workspace_branches(workspace, branch)
 
     unpublished_blogs = check_unpublished_blogs(workspace, blog_dest)
     stale_branches = check_stale_branches(workspace, branches)
-    unrecovered = check_unrecovered_artifacts(workspace, branches)
+    unrecovered = check_unrecovered_artifacts(workspace, project, branches, routing)
     unstamped = check_unstamped_branches(workspace, project, branches, single_repo)
 
     # Flyway conflict detection is a placeholder — the actual V-number
