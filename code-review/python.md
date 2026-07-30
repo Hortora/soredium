@@ -35,8 +35,12 @@ After collecting the diff (Step 1), search the garden for gotchas relevant
 to the technical domains in the changed files. Include domain filter if the
 changed files are domain-specific.
 
-  Call `gardenSearch` with the primary technical domains in the changed files
-  (e.g. "asyncio gather error handling", "pytest fixture scope gotchas").
+  Call `gardenSearch` with:
+  - `query`: the primary technical domains in the changed files
+    (e.g. "asyncio gather error handling", "pytest fixture scope gotchas").
+  - `keywords`: specific function names, decorator names, module names,
+    exception types from the diff. Pipe-separated
+    (e.g. `asyncio.gather|@pytest.fixture|conftest|RuntimeError`).
 
 Surface any relevant gotchas or techniques that bear on the code under review.
 

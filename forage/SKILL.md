@@ -675,8 +675,14 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
 
 **Single-garden search workflow** (no `garden-config.toml`, or single garden configured):
 
-1. Call the `gardenSearch` MCP tool with the user's search query.
-   If searching by a known GE-ID, include the ID in the query.
+1. Call the `gardenSearch` MCP tool with:
+   - `query`: the user's natural language search query.
+     If searching by a known GE-ID, include the ID in the query.
+   - `keywords`: specific technical terms — class names, method names, API
+     names, error messages, config property names. Pipe-separated
+     (e.g. `QuarkusTestProfile|getConfigOverrides|selected-alternatives`).
+     Extract these from the search context. Always populate when the search
+     involves specific APIs, frameworks, or error messages.
 
 2. If `gardenSearch` is unavailable or returns an error, fall back to:
    a. Read the committed index: `${HORTORA_GARDEN:-~/.hortora/garden}/GARDEN.md`

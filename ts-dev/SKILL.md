@@ -452,8 +452,11 @@ If you catch yourself thinking any of these, **STOP** and apply the correct appr
 Search the garden for the domain being implemented before writing code.
 Include domain filter if the work targets a specific domain.
 
-  Call `gardenSearch` with the technical topic (e.g. "TypeScript strict mode
-  migration", "Vitest mock patterns").
+  Call `gardenSearch` with:
+  - `query`: the technical topic (e.g. "TypeScript strict mode migration").
+  - `keywords`: specific type names, function names, module names, config
+    keys relevant to the implementation. Pipe-separated
+    (e.g. `LitElement|customElements.define|@property|shadowRoot`).
 
 If `gardenSearch` is unavailable or returns an error, warn once per session
 (skip if already warned earlier in this conversation):

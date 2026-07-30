@@ -168,8 +168,12 @@ Common signals:
 Search the garden for entries relevant to the domain being worked. Extract 2–4
 keywords from the work description (domain name, library, framework, key concept).
 
-1. Call the `gardenSearch` MCP tool with a natural language query derived from
-   the work description. Include domain filter if the work is domain-specific.
+1. Call the `gardenSearch` MCP tool with:
+   - `query`: natural language query derived from the work description.
+   - `keywords`: specific class names, method names, API terms, config
+     properties, error messages from the work context. Pipe-separated
+     (e.g. `QuarkusTestProfile|getConfigOverrides|selected-alternatives`).
+   - `domain`: set if the work is domain-specific.
 2. If `gardenSearch` is unavailable or returns an error, warn once:
    "⚠️ Garden MCP unavailable — using keyword fallback. Start engine per CLAUDE.md Dev Services."
    Then fall back to:

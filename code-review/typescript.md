@@ -33,8 +33,12 @@ After collecting the diff (Step 1), search the garden for gotchas relevant
 to the technical domains in the changed files. Include domain filter if the
 changed files are domain-specific.
 
-  Call `gardenSearch` with the primary technical domains in the changed files
-  (e.g. "TypeScript strict null checks", "Promise.allSettled error handling").
+  Call `gardenSearch` with:
+  - `query`: the primary technical domains in the changed files
+    (e.g. "TypeScript strict null checks", "Promise.allSettled error handling").
+  - `keywords`: specific type names, function names, module names,
+    interface names from the diff. Pipe-separated
+    (e.g. `LitElement|customElements.define|HTMLTemplateElement|@property`).
 
 Surface any relevant gotchas or techniques that bear on the code under review.
 

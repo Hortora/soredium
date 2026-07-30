@@ -36,8 +36,12 @@ After collecting the diff (Step 1), search the garden for gotchas relevant
 to the technical domains in the changed files. Include domain filter if the
 changed files are domain-specific.
 
-  Call `gardenSearch` with the primary technical domains in the changed files
-  (e.g. "Quarkus CDI bean resolution", "reactive Mutiny chain").
+  Call `gardenSearch` with:
+  - `query`: the primary technical domains in the changed files
+    (e.g. "Quarkus CDI bean resolution", "reactive Mutiny chain").
+  - `keywords`: specific class names, annotations, method names, config
+    properties from the diff. Pipe-separated
+    (e.g. `@Alternative|@DefaultBean|AmbiguousResolutionException|selected-alternatives`).
 
 Surface any relevant gotchas or techniques that bear on the code under review.
 
