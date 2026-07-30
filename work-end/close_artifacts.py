@@ -177,6 +177,8 @@ def main() -> int:
         elif out.get("PROMOTED", "0") == "0":
             skipped = out.get("SKIPPED_PATHS", ",".join(ws_artifacts))
             failures.append(f"workspace promotion: all artifacts skipped ({skipped})")
+        if out.get("PUSHED") == "failed":
+            failures.append(f"workspace push failed: {out.get('PUSH_ERROR', 'unknown')}")
     else:
         results["workspace_promoted"] = "0"
 
@@ -187,15 +189,15 @@ def main() -> int:
             f"artifacts={','.join(proj_artifacts)}",
         ])
         results["project_promoted"] = out.get("PROMOTED", "0")
-        project_pushed = out.get("PUSHED", "no") == "yes"
         if rc != 0:
             failures.append(f"project promotion: {out.get('ERROR', 'unknown')}")
         elif out.get("PROMOTED", "0") == "0":
             skipped = out.get("SKIPPED_PATHS", ",".join(proj_artifacts))
             failures.append(f"project promotion: all artifacts skipped ({skipped})")
+        if out.get("PUSHED") == "failed":
+            failures.append(f"project push failed: {out.get('PUSH_ERROR', 'unknown')}")
     else:
         results["project_promoted"] = "0"
-        project_pushed = True
 
     # Archive plans
     if artifacts["plans"]:

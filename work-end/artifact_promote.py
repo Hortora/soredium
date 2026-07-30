@@ -40,6 +40,26 @@ def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:
     )
 
 
+def _has_remote(cwd: str) -> bool:
+    try:
+        r = git("remote", cwd=cwd)
+        return bool(r.stdout.strip())
+    except subprocess.CalledProcessError:
+        return False
+
+
+def _push_or_report(cwd: str) -> None:
+    if not _has_remote(cwd):
+        print("PUSHED=skipped")
+        return
+    try:
+        git("push", cwd=cwd)
+        print("PUSHED=yes")
+    except subprocess.CalledProcessError as e:
+        print("PUSHED=failed")
+        print(f"PUSH_ERROR={e.stderr.strip()}")
+
+
 def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
     branch = params.get("branch", "")
     artifacts_str = params.get("artifacts", "")
@@ -100,12 +120,7 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
                 print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
                 return 1
 
-        try:
-            git("push", cwd=workspace)
-            print("PUSHED=yes")
-        except subprocess.CalledProcessError as e:
-            print("PUSHED=no")
-            print(f"PUSH_ERROR={e.stderr.strip()}")
+        _push_or_report(workspace)
 
     # Switch back to branch
     try:
@@ -181,12 +196,7 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
                 print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
                 return 1
 
-        try:
-            git("push", cwd=project)
-            print("PUSHED=yes")
-        except subprocess.CalledProcessError as e:
-            print("PUSHED=no")
-            print(f"PUSH_ERROR={e.stderr.strip()}")
+        _push_or_report(project)
 
     print(f"PROMOTED={promoted}")
     if skipped:
@@ -294,12 +304,7 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
                     pass
                 return 1
 
-        try:
-            git("push", cwd=workspace)
-            print("PUSHED=yes")
-        except subprocess.CalledProcessError as e:
-            print("PUSHED=no")
-            print(f"PUSH_ERROR={e.stderr.strip()}")
+        _push_or_report(workspace)
 
     try:
         git("checkout", branch, cwd=workspace)

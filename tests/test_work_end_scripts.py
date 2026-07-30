@@ -6,6 +6,7 @@ Covers: happy path, edge cases, missing args, error conditions.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -244,6 +245,52 @@ class TestToWorkspaceMain:
 
 
 # ===========================================================================
+# artifact_promote.py — push behavior (to-workspace-main)
+# ===========================================================================
+
+class TestToWorkspaceMainPush:
+
+    def test_push_skipped_when_no_remote(self, tmp_path):
+        """No remote configured → PUSHED=skipped, not failure."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        init_git(ws)
+        create_branch_with_file(ws, "issue-1-test", "blog/real.md", "content\n")
+
+        result = run_promote(
+            "to-workspace-main", str(ws),
+            branch="issue-1-test", artifacts="blog/real.md",
+        )
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+        assert out["PUSHED"] == "skipped"
+
+    def test_push_failed_when_remote_unreachable(self, tmp_path):
+        """Remote exists but is unreachable → PUSHED=failed."""
+        ws = tmp_path / "workspace"
+        remote = tmp_path / "remote.git"
+        ws.mkdir()
+        init_git(ws)
+
+        subprocess.run(["git", "init", "--bare", str(remote)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "remote", "add", "origin", str(remote)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "push", "-u", "origin", "main"], capture_output=True, check=True)
+
+        create_branch_with_file(ws, "issue-1-test", "blog/real.md", "content\n")
+
+        shutil.rmtree(remote)
+
+        result = run_promote(
+            "to-workspace-main", str(ws),
+            branch="issue-1-test", artifacts="blog/real.md",
+        )
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+        assert out["PUSHED"] == "failed"
+        assert "PUSH_ERROR" in out
+
+
+# ===========================================================================
 # artifact_promote.py — to-project
 # ===========================================================================
 
@@ -341,59 +388,68 @@ class TestToProject:
 
 
 # ===========================================================================
-# artifact_promote.py — cleanup-specs
+# artifact_promote.py — push behavior (to-project)
+# ===========================================================================
+
+class TestToProjectPush:
+
+    def test_push_skipped_when_no_remote(self, tmp_path):
+        """No remote configured → PUSHED=skipped."""
+        proj = tmp_path / "project"
+        ws = tmp_path / "workspace"
+        proj.mkdir()
+        ws.mkdir()
+        init_git(proj)
+
+        (ws / "specs").mkdir()
+        (ws / "specs" / "design.md").write_text("# Spec\n")
+
+        result = run_promote(
+            "to-project", str(proj), str(ws),
+            artifacts="specs/design.md",
+        )
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+        assert out["PUSHED"] == "skipped"
+
+    def test_push_failed_when_remote_unreachable(self, tmp_path):
+        """Remote exists but is unreachable → PUSHED=failed."""
+        proj = tmp_path / "project"
+        ws = tmp_path / "workspace"
+        remote = tmp_path / "remote.git"
+        proj.mkdir()
+        ws.mkdir()
+        init_git(proj)
+
+        subprocess.run(["git", "init", "--bare", str(remote)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(proj), "remote", "add", "origin", str(remote)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(proj), "push", "-u", "origin", "main"], capture_output=True, check=True)
+
+        (ws / "specs").mkdir()
+        (ws / "specs" / "design.md").write_text("# Spec\n")
+
+        shutil.rmtree(remote)
+
+        result = run_promote(
+            "to-project", str(proj), str(ws),
+            artifacts="specs/design.md",
+        )
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+        assert out["PUSHED"] == "failed"
+        assert "PUSH_ERROR" in out
+
+
+# ===========================================================================
+# artifact_promote.py — cleanup-specs (removed subcommand — keep only the negative test)
 # ===========================================================================
 
 class TestCleanupSpecs:
+    """cleanup-specs was removed — test_close_artifacts.py::TestCleanupSpecsRemoved covers this."""
 
-    def test_removes_spec_directory(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        # Create specs on main
-        (ws / "specs" / "issue-42").mkdir(parents=True)
-        (ws / "specs" / "issue-42" / "design.md").write_text("design\n")
-        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True, check=True)
-        subprocess.run(
-            ["git", "-C", str(ws), "commit", "-m", "add specs"],
-            capture_output=True, check=True,
-        )
-
-        result = run_promote("cleanup-specs", str(ws), branch="issue-42")
-        assert result.returncode == 0
-        out = parse(result)
-        assert out["CLEANED"] == "1"
-        assert not (ws / "specs" / "issue-42").exists()
-
-    def test_no_specs_to_clean(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        result = run_promote("cleanup-specs", str(ws), branch="nonexistent-branch")
-        assert result.returncode == 0
-        out = parse(result)
-        assert out["CLEANED"] == "0"
-
-    def test_missing_branch_arg(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        result = run_promote("cleanup-specs", str(ws))
+    def test_subcommand_rejected(self):
+        result = run_promote("cleanup-specs", "/tmp", branch="x")
         assert result.returncode == 1
-        out = parse(result)
-        assert out["ERROR"] == "missing_branch"
-
-    def test_nonexistent_workspace(self, tmp_path):
-        result = run_promote(
-            "cleanup-specs", str(tmp_path / "nonexistent"),
-            branch="issue-1",
-        )
-        assert result.returncode == 1
-        out = parse(result)
-        assert out["ERROR"] == "workspace_not_found"
 
 
 # ===========================================================================

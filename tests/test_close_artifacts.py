@@ -1,5 +1,6 @@
 """Tests for work-end/close_artifacts.py"""
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -316,9 +317,49 @@ class TestPromotionFailureDetection:
         )
 
         assert result.returncode == 0, (
-            f"Expected exit 0 but got {result.returncode}.\n"
+            f"Expected exit 0 (stamp written) but got {result.returncode}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+    def test_push_failure_blocks_stamp(self, tmp_path):
+        """Promotion succeeds but push fails (remote broken) → exit 2, no stamp."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        remote = tmp_path / "remote.git"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+
+        subprocess.run(["git", "init", "--bare", str(remote)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(workspace), "remote", "add", "origin", str(remote)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(workspace), "push", "-u", "origin", "main"], capture_output=True, check=True)
+
+        subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "issue-42-test"], capture_output=True, check=True)
+        (workspace / "blog").mkdir()
+        (workspace / "blog" / "entry.md").write_text("# Blog\n")
+        subprocess.run(["git", "-C", str(workspace), "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "add blog"], capture_output=True, check=True)
+
+        (workspace / "CLAUDE.md").write_text(
+            "# Workspace\n\n## Routing\n\n"
+            "| Artifact | Destination | Notes |\n"
+            "|----------|-------------|-------|\n"
+            "| blog | workspace | |\n"
+        )
+
+        shutil.rmtree(remote)
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-42-test"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 2, (
+            f"Expected exit 2 (push failure) but got {result.returncode}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert not (workspace / "design" / ".artifacts-promoted").exists()
 
 
 class TestCleanupSpecsRemoved:
