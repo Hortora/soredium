@@ -331,6 +331,25 @@ class TestRemoveSlot:
         assert attic.exists()
         assert (attic / ".slot").exists()
 
+    def test_preserves_repos_in_attic(self, tmp_path):
+        """Default remove archives to attic with repos intact."""
+        family = tmp_path / "casehub"
+        slot = family / "worktrees" / "1"
+        slot.mkdir(parents=True)
+        (slot / ".slot").write_text("test")
+        (slot / ".landed").write_text("branch=test\n")
+        repo = slot / "myrepo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        (repo / "src.java").write_text("class Foo {}")
+
+        with patch("slot_manager.run_cmd") as mock_cmd:
+            mock_cmd.return_value = (0, "", "")
+            slot_manager.remove_slot(family, 1)
+
+        attic = family / "worktrees" / "attic" / "1"
+        assert (attic / "myrepo" / "src.java").exists(), "repo deleted during archive — attic is useless without it"
+
     def test_force_delete_permanently_removes(self, tmp_path):
         family = tmp_path / "casehub"
         slot = family / "worktrees" / "1"
@@ -651,6 +670,17 @@ class TestArchiveSlot:
         assert attic_slot.exists()
         assert (attic_slot / ".slot").exists()
         assert (attic_slot / ".landed").exists()
+
+    def test_preserves_repos_in_attic(self, tmp_path):
+        """Archived slot must retain repo directories — attic is the recovery safety net."""
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        assert (slot / "engine").is_dir()
+        slot_manager.archive_slot(family, 1)
+
+        attic_slot = family / "worktrees" / "attic" / "1"
+        assert (attic_slot / "engine").exists(), "repo deleted during archive — attic is useless without it"
 
     def test_blocks_archive_without_landed_marker(self, tmp_path, capsys):
         family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])

@@ -726,14 +726,6 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
                 print(f"ERROR_DETAIL={f}")
             print("HINT=pass --force to override, or investigate the failed merge")
             sys.exit(1)
-    for sub in slot_dir.iterdir():
-        if sub.is_dir() and (sub / ".git").exists():
-            if is_worktree(sub):
-                rc, _, stderr = run_cmd(["git", "worktree", "remove", "--force", str(sub)])
-                if rc != 0:
-                    print(f"WARN=worktree_remove_failed dir={sub.name} stderr={stderr.strip()}")
-            else:
-                shutil.rmtree(str(sub), ignore_errors=True)
     attic_dir = family_root / "worktrees" / "attic"
     attic_dir.mkdir(exist_ok=True)
     dest = attic_dir / str(slot_num)
@@ -815,14 +807,13 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
         print("HINT=pass --force-delete to override, or run work-end first")
         sys.exit(1)
 
-    for sub in slot_dir.iterdir():
-        if sub.is_dir() and (sub / ".git").exists():
-            if is_worktree(sub):
-                run_cmd(["git", "worktree", "remove", "--force", str(sub)])
-            else:
-                shutil.rmtree(str(sub), ignore_errors=True)
-
     if force_delete:
+        for sub in slot_dir.iterdir():
+            if sub.is_dir() and (sub / ".git").exists():
+                if is_worktree(sub):
+                    run_cmd(["git", "worktree", "remove", "--force", str(sub)])
+                else:
+                    shutil.rmtree(str(sub), ignore_errors=True)
         shutil.rmtree(slot_dir, ignore_errors=True)
         print(f"DELETED={slot_num}")
     else:
