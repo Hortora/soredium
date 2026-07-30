@@ -78,6 +78,10 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def _norm(path: str) -> str:
+    return str(Path(path).resolve())
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     current = conn.execute("PRAGMA user_version").fetchone()[0]
     if current < 1:
@@ -123,17 +127,33 @@ def _log_event(conn: sqlite3.Connection, event_type: str,
 
 def _find_work_item(conn: sqlite3.Connection, branch: str,
                     repo_path: str) -> int | None:
+    normalized = _norm(repo_path)
     row = conn.execute(
         "SELECT wi.id FROM work_items wi "
         "JOIN repos r ON wi.repo_id = r.id "
         "WHERE wi.branch=? AND r.path=?",
-        (branch, repo_path),
+        (branch, normalized),
+    ).fetchone()
+    if row:
+        return row["id"]
+    row = conn.execute(
+        "SELECT wi.id FROM work_items wi "
+        "WHERE wi.branch=? AND wi.state != 'ended' "
+        "ORDER BY wi.created_at DESC LIMIT 1",
+        (branch,),
     ).fetchone()
     return row["id"] if row else None
 
 
 def _find_slot(conn: sqlite3.Connection, slot_number: int,
                family_root: str) -> int | None:
+    normalized = _norm(family_root)
+    row = conn.execute(
+        "SELECT id FROM slots WHERE slot_number=? AND family_root=?",
+        (slot_number, normalized),
+    ).fetchone()
+    if row:
+        return row["id"]
     row = conn.execute(
         "SELECT id FROM slots WHERE slot_number=? AND family_root=?",
         (slot_number, family_root),
@@ -149,6 +169,9 @@ def ensure_repo(conn: sqlite3.Connection, path: str,
                 family_root: str | None = None,
                 github_repo: str | None = None,
                 project_type: str | None = None) -> int | None:
+    path = _norm(path)
+    if family_root:
+        family_root = _norm(family_root)
     row = conn.execute("SELECT id FROM repos WHERE path=?", (path,)).fetchone()
     if row:
         updates = {}
@@ -252,6 +275,7 @@ def record_slot_create(conn: sqlite3.Connection, slot_number: int,
                        branch: str, issue_number: int,
                        issue_repo: str,
                        covers: str | None = None) -> int | None:
+    family_root = _norm(family_root)
     cur = conn.execute(
         "INSERT INTO slots (slot_number, family_root, state, created_at) "
         "VALUES (?, ?, 'active', ?)",
@@ -341,7 +365,7 @@ def slot_status(conn: sqlite3.Connection,
     if family_root:
         rows = conn.execute(
             "SELECT * FROM slots WHERE family_root=? ORDER BY slot_number",
-            (family_root,),
+            (_norm(family_root),),
         ).fetchall()
     else:
         rows = conn.execute(
@@ -382,6 +406,6 @@ def work_item_timeline(conn: sqlite3.Connection, branch: str,
         "JOIN repos r ON wi.repo_id = r.id "
         "WHERE wi.branch=? AND r.path=? "
         "ORDER BY e.id",
-        (branch, repo_path),
+        (branch, _norm(repo_path)),
     ).fetchall()
     return [dict(r) for r in rows]
