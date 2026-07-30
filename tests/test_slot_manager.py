@@ -243,7 +243,7 @@ class TestCreateSlot:
         assert result["slot_number"] == 2
 
     @patch("slot_manager.run_cmd")
-    def test_worktree_add_failure_exits(self, mock_cmd, tmp_path, capsys):
+    def test_clone_failure_exits(self, mock_cmd, tmp_path, capsys):
         family = tmp_path / "casehub"
         engine = init_repo(family / "engine")
         shared_ws = init_repo(tmp_path / "public" / "casehub")
@@ -256,7 +256,7 @@ class TestCreateSlot:
             (0, "", ""),  # fetch upstream
             (0, "", ""),  # rebase upstream
             (0, "", ""),  # push origin
-            (1, "", "fatal: branch already exists"),  # worktree add fails
+            (1, "", "fatal: clone failed"),  # clone fails
         ]
 
         with pytest.raises(SystemExit):
@@ -270,7 +270,7 @@ class TestCreateSlot:
                 context="test",
             )
         captured = capsys.readouterr()
-        assert "ERROR=worktree_add_failed" in captured.out
+        assert "ERROR=clone_failed" in captured.out
 
 
 class TestListSlots:
@@ -791,3 +791,144 @@ class TestCLI:
             slot_manager.main()
         captured = capsys.readouterr()
         assert "ERROR=missing_slot_number" in captured.out
+
+
+def _create_clone_test_repos(tmp_path, repo_names):
+    """Create a test family with clone-based slots (new model)."""
+    family = tmp_path / "family"
+    family.mkdir()
+    worktrees = family / "worktrees"
+    worktrees.mkdir()
+
+    originals = {}
+    for name in repo_names:
+        originals[name] = _init_repo_with_remote(family / name)
+
+    slot = worktrees / "1"
+    slot.mkdir()
+    branch = "issue-42-test"
+
+    for name in repo_names:
+        subprocess.run([
+            "git", "clone", "--shared", "--branch", "main",
+            str(originals[name]), str(slot / name),
+        ], capture_output=True, check=True)
+        subprocess.run([
+            "git", "-C", str(slot / name), "checkout", "-b", branch,
+        ], capture_output=True, check=True)
+        (slot / name / "feature.py").write_text(f"# {name} feature\n")
+        subprocess.run(["git", "-C", str(slot / name), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(slot / name), "commit", "-m", f"feat: {name} feature"], capture_output=True, check=True)
+
+    (slot / ".phase-a-complete").write_text(
+        f"branch={branch}\nrepos={','.join(repo_names)}\ntimestamp=2026-07-18T14:32:00\n"
+    )
+    (slot / ".slot").write_text(
+        f"# Slot 1 — {branch}\n\n## Issue\ntest/repo#42\nCovers: 42\n\n"
+        f"## What to do\nTest\n\n## Repos\n" +
+        "\n".join(f"- {n}" for n in repo_names) + "\n"
+    )
+    return family, originals, slot, branch
+
+
+class TestIsWorktree:
+    def test_worktree_detected(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").write_text("gitdir: /some/path/.git/worktrees/repo")
+        assert slot_manager.is_worktree(repo) is True
+
+    def test_clone_not_detected(self, tmp_path):
+        repo = init_repo(tmp_path / "repo")
+        assert slot_manager.is_worktree(repo) is False
+
+    def test_no_git_not_detected(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        assert slot_manager.is_worktree(repo) is False
+
+
+class TestResolveOriginalRepoClone:
+    def test_resolves_clone_to_original(self, tmp_path):
+        original = _init_repo_with_remote(tmp_path / "original")
+        clone = tmp_path / "clone"
+        subprocess.run([
+            "git", "clone", "--shared", str(original), str(clone),
+        ], capture_output=True, check=True)
+        resolved = slot_manager.resolve_original_repo(clone)
+        assert resolved == original.resolve()
+
+    def test_resolves_worktree_to_original(self, tmp_path):
+        family, originals, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        resolved = slot_manager.resolve_original_repo(slot / "engine")
+        assert resolved == originals["engine"]
+
+    def test_fallback_returns_self(self, tmp_path):
+        repo = init_repo(tmp_path / "standalone")
+        resolved = slot_manager.resolve_original_repo(repo)
+        assert resolved == repo
+
+
+class TestExcludeSymlinks:
+    def test_adds_entries_to_exclude(self, tmp_path):
+        repo = init_repo(tmp_path / "repo")
+        slot_manager._exclude_symlinks(repo)
+        exclude = (repo / ".git" / "info" / "exclude").read_text()
+        assert "proj" in exclude
+        assert "wksp" in exclude
+
+    def test_idempotent(self, tmp_path):
+        repo = init_repo(tmp_path / "repo")
+        slot_manager._exclude_symlinks(repo)
+        slot_manager._exclude_symlinks(repo)
+        exclude = (repo / ".git" / "info" / "exclude").read_text()
+        non_comment = [l.strip() for l in exclude.splitlines() if l.strip() and not l.startswith("#")]
+        assert non_comment.count("proj") == 1
+        assert non_comment.count("wksp") == 1
+
+
+class TestMergeSlotClone:
+    def test_clone_merge_pushes_then_merges(self, tmp_path):
+        family, originals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+        assert (originals["engine"] / "feature.py").exists()
+        assert (slot / ".landed").exists()
+
+    def test_clone_multi_repo_merge(self, tmp_path):
+        family, originals, slot, branch = _create_clone_test_repos(tmp_path, ["engine", "iot"])
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+        for name in ["engine", "iot"]:
+            assert (originals[name] / "feature.py").exists()
+
+    def test_clone_stamps_pushed_to_original(self, tmp_path):
+        family, originals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+        rc, log, _ = slot_manager.run_cmd(
+            ["git", "-C", str(originals["engine"]), "log", "--all", "--oneline", "--grep=branch closed"]
+        )
+        assert "branch closed" in log
+
+
+class TestEnsureCloneLayout:
+    def test_migrates_worktree_to_clone(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        assert slot_manager.is_worktree(slot / "engine")
+        count = slot_manager.ensure_clone_layout(slot)
+        assert count >= 1
+        assert not slot_manager.is_worktree(slot / "engine")
+        assert (slot / "engine" / ".git").is_dir()
+        assert (slot / "engine" / "feature.py").exists()
+
+    def test_noop_on_clones(self, tmp_path):
+        family, originals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
+        count = slot_manager.ensure_clone_layout(slot)
+        assert count == 0
+
+    def test_migrated_slot_can_merge(self, tmp_path):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.ensure_clone_layout(slot)
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+        assert (originals["engine"] / "feature.py").exists()

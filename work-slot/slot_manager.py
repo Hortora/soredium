@@ -104,6 +104,22 @@ def create_proj_symlink(ws_subdir: Path, repo_worktree: Path) -> None:
     proj.symlink_to(rel)
 
 
+def _exclude_symlinks(clone_path: Path) -> None:
+    exclude_file = clone_path / ".git" / "info" / "exclude"
+    exclude_file.parent.mkdir(parents=True, exist_ok=True)
+    entries = {"wksp", "proj"}
+    if exclude_file.exists():
+        existing_lines = {
+            line.strip() for line in exclude_file.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        entries -= existing_lines
+    if entries:
+        with open(exclude_file, "a") as f:
+            for entry in sorted(entries):
+                f.write(f"{entry}\n")
+
+
 def replicate_claude_md(repo_path: Path, ws_subdir: Path, repo_worktree: Path) -> None:
     orig_wksp = repo_path / "wksp"
     if not orig_wksp.is_symlink():
@@ -186,15 +202,21 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
 
         sync_main(str(repo_path))
 
+        clone_dest = slot_dir / repo_name
         rc, _, stderr = run_cmd([
-            "git", "-C", str(repo_path),
-            "worktree", "add", str(slot_dir / repo_name), "-b", branch,
+            "git", "clone", "--shared", "--branch", "main",
+            str(repo_path), str(clone_dest),
         ])
         if rc != 0:
-            print(f"ERROR=worktree_add_failed repo={repo_name} stderr={stderr.strip()}")
+            print(f"ERROR=clone_failed repo={repo_name} stderr={stderr.strip()}")
             sys.exit(1)
+        rc, _, _ = run_cmd(["git", "-C", str(clone_dest), "checkout", "-b", branch])
+        if rc != 0:
+            print(f"ERROR=branch_create_failed repo={repo_name}")
+            sys.exit(1)
+        _exclude_symlinks(clone_dest)
 
-        setup_maven_config(slot_dir / repo_name, m2_dir)
+        setup_maven_config(clone_dest, m2_dir)
 
         ws_info = resolve_workspace_source(repo_path)
         if ws_info:
@@ -205,12 +227,17 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             if ws_key not in ws_created:
                 sync_main(str(ws_source))
                 rc, _, stderr = run_cmd([
-                    "git", "-C", str(ws_source),
-                    "worktree", "add", str(ws_slot_dir), "-b", branch,
+                    "git", "clone", "--shared", "--branch", "main",
+                    str(ws_source), str(ws_slot_dir),
                 ])
                 if rc != 0:
-                    print(f"ERROR=workspace_worktree_failed ws={ws_name} stderr={stderr.strip()}")
+                    print(f"ERROR=workspace_clone_failed ws={ws_name} stderr={stderr.strip()}")
                     sys.exit(1)
+                rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
+                if rc != 0:
+                    print(f"ERROR=workspace_branch_failed ws={ws_name}")
+                    sys.exit(1)
+                _exclude_symlinks(ws_slot_dir)
                 ws_created[ws_key] = ws_slot_dir
 
             wksp_target = repo_path / "wksp"
@@ -223,9 +250,9 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                     ws_subdir = ws_slot_dir
 
                 ws_subdir.mkdir(parents=True, exist_ok=True)
-                repoint_wksp(slot_dir / repo_name, ws_subdir)
-                create_proj_symlink(ws_subdir, slot_dir / repo_name)
-                replicate_claude_md(repo_path, ws_subdir, slot_dir / repo_name)
+                repoint_wksp(clone_dest, ws_subdir)
+                create_proj_symlink(ws_subdir, clone_dest)
+                replicate_claude_md(repo_path, ws_subdir, clone_dest)
 
     primary_repo = repos[0]
     primary_wksp = slot_dir / primary_repo / "wksp"
@@ -376,16 +403,98 @@ def scan_ready(family_root: Path) -> list[dict]:
     return slots
 
 
-def resolve_original_repo(worktree_path: Path) -> Path:
-    rc, common_dir, _ = run_cmd(
-        ["git", "-C", str(worktree_path), "rev-parse", "--git-common-dir"]
+def is_worktree(repo_path: Path) -> bool:
+    git_path = repo_path / ".git"
+    return git_path.is_file()
+
+
+def resolve_original_repo(repo_path: Path) -> Path:
+    if is_worktree(repo_path):
+        rc, common_dir, _ = run_cmd(
+            ["git", "-C", str(repo_path), "rev-parse", "--git-common-dir"]
+        )
+        if rc == 0:
+            common = Path(common_dir.strip())
+            if not common.is_absolute():
+                common = (repo_path / common).resolve()
+            return common.parent
+
+    rc, url, _ = run_cmd(
+        ["git", "-C", str(repo_path), "remote", "get-url", "origin"]
     )
-    if rc != 0:
-        return worktree_path
-    common = Path(common_dir.strip())
-    if not common.is_absolute():
-        common = (worktree_path / common).resolve()
-    return common.parent
+    if rc == 0:
+        origin_path = Path(url.strip())
+        if origin_path.is_dir():
+            return origin_path.resolve()
+
+    return repo_path
+
+
+def _migrate_worktree_to_clone(worktree_path: Path) -> bool:
+    """Migrate a single worktree to a git clone --shared. Returns True on success."""
+    import tempfile
+
+    branch_rc, branch_out, _ = run_cmd(
+        ["git", "-C", str(worktree_path), "branch", "--show-current"]
+    )
+    branch = branch_out.strip() if branch_rc == 0 else ""
+    if not branch:
+        return False
+
+    original = resolve_original_repo(worktree_path)
+    if original == worktree_path:
+        return False
+
+    status_rc, status_out, _ = run_cmd(
+        ["git", "-C", str(worktree_path), "status", "--short"]
+    )
+    if status_rc == 0 and status_out.strip():
+        run_cmd(["git", "-C", str(worktree_path), "add", "-A"])
+        run_cmd(["git", "-C", str(worktree_path), "commit", "-m", "WIP: pre-migration"])
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        clone_tmp = Path(tmpdir) / worktree_path.name
+        rc, _, stderr = run_cmd([
+            "git", "clone", "--shared", str(original), str(clone_tmp),
+        ])
+        if rc != 0:
+            print(f"WARN=migration_clone_failed path={worktree_path} stderr={stderr.strip()}")
+            return False
+
+        rc, _, _ = run_cmd(["git", "-C", str(clone_tmp), "checkout", branch])
+        if rc != 0:
+            rc, _, _ = run_cmd(["git", "-C", str(clone_tmp), "checkout", "-b", branch, f"origin/{branch}"])
+            if rc != 0:
+                print(f"WARN=migration_branch_failed path={worktree_path} branch={branch}")
+                return False
+
+        orig_rc, orig_tree, _ = run_cmd(
+            ["git", "-C", str(worktree_path), "rev-parse", "HEAD^{tree}"]
+        )
+        clone_rc, clone_tree, _ = run_cmd(
+            ["git", "-C", str(clone_tmp), "rev-parse", "HEAD^{tree}"]
+        )
+        if orig_rc != 0 or clone_rc != 0 or orig_tree.strip() != clone_tree.strip():
+            print(f"WARN=migration_tree_mismatch path={worktree_path}")
+            return False
+
+        run_cmd(["git", "-C", str(original), "worktree", "remove", "--force", str(worktree_path)])
+
+        shutil.move(str(clone_tmp), str(worktree_path))
+        _exclude_symlinks(worktree_path)
+
+    return True
+
+
+def ensure_clone_layout(slot_dir: Path) -> int:
+    """Migrate any worktree repos in a slot to git clone --shared. Returns count migrated."""
+    migrated = 0
+    for sub in slot_dir.iterdir():
+        if sub.is_dir() and (sub / ".git").exists() and is_worktree(sub):
+            if _migrate_worktree_to_clone(sub):
+                migrated += 1
+                print(f"MIGRATED={sub.name}")
+    return migrated
 
 
 def merge_slot(family_root: Path, slot_num: int) -> int:
@@ -393,6 +502,7 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         return 1
+    ensure_clone_layout(slot_dir)
     if not (slot_dir / ".phase-a-complete").exists():
         print(f"ERROR=not_ready slot={slot_num}")
         return 1
@@ -449,6 +559,8 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
 
             slot_repo = slot_dir / repo_name
             original = resolve_original_repo(slot_repo)
+            if not is_worktree(slot_repo):
+                run_cmd(["git", "-C", str(slot_repo), "push", "origin", branch, "--force-with-lease"])
             rc, _, _ = run_cmd(["git", "-C", str(original), "fetch", "origin", "main"])
             if rc != 0:
                 push_failed = True
@@ -503,6 +615,8 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
                 "git", "-C", str(slot_repo), "commit", "--allow-empty",
                 "-m", f"chore: branch closed — landed as {sha} on main",
             ])
+            if not is_worktree(slot_repo):
+                run_cmd(["git", "-C", str(slot_repo), "push", "origin", branch, "--force-with-lease"])
 
         for sub in slot_dir.iterdir():
             if not sub.is_dir() or not (sub / ".git").exists():
@@ -512,6 +626,8 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
                     "git", "-C", str(sub), "commit", "--allow-empty",
                     "-m", f"chore: branch closed — landed on main",
                 ])
+                if not is_worktree(sub):
+                    run_cmd(["git", "-C", str(sub), "push", "origin", branch, "--force-with-lease"])
 
         if _wl:
             try:
@@ -593,6 +709,7 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
+    ensure_clone_layout(slot_dir)
     if not force and not is_slot_landed(slot_dir):
         print(f"ERROR=slot_not_landed slot={slot_num}")
         print("ERROR_DETAIL=slot has no .landed marker — work may be in progress")
@@ -608,9 +725,12 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
             sys.exit(1)
     for sub in slot_dir.iterdir():
         if sub.is_dir() and (sub / ".git").exists():
-            rc, _, stderr = run_cmd(["git", "worktree", "remove", "--force", str(sub)])
-            if rc != 0:
-                print(f"WARN=worktree_remove_failed dir={sub.name} stderr={stderr.strip()}")
+            if is_worktree(sub):
+                rc, _, stderr = run_cmd(["git", "worktree", "remove", "--force", str(sub)])
+                if rc != 0:
+                    print(f"WARN=worktree_remove_failed dir={sub.name} stderr={stderr.strip()}")
+            else:
+                shutil.rmtree(str(sub), ignore_errors=True)
     attic_dir = family_root / "worktrees" / "attic"
     attic_dir.mkdir(exist_ok=True)
     dest = attic_dir / str(slot_num)
@@ -694,7 +814,10 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
 
     for sub in slot_dir.iterdir():
         if sub.is_dir() and (sub / ".git").exists():
-            run_cmd(["git", "worktree", "remove", "--force", str(sub)])
+            if is_worktree(sub):
+                run_cmd(["git", "worktree", "remove", "--force", str(sub)])
+            else:
+                shutil.rmtree(str(sub), ignore_errors=True)
 
     if force_delete:
         shutil.rmtree(slot_dir, ignore_errors=True)
@@ -868,6 +991,19 @@ def main() -> None:
             sys.exit(1)
         force = "--force" in sys.argv
         archive_slot(family_root, slot_num, force=force)
+
+    elif subcommand == "ensure-clone-layout":
+        family_root = Path(args.get("target", "."))
+        slot_num = int(args.get("slot", "0"))
+        if slot_num == 0:
+            print("ERROR=missing_slot_number")
+            sys.exit(1)
+        slot_dir = family_root / "worktrees" / str(slot_num)
+        if not slot_dir.exists():
+            print(f"ERROR=slot_not_found slot={slot_num}")
+            sys.exit(1)
+        count = ensure_clone_layout(slot_dir)
+        print(f"MIGRATED_COUNT={count}")
 
     elif subcommand == "check-cross-deps":
         family_root = Path(args.get("target", "."))
