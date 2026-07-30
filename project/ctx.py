@@ -8,7 +8,7 @@ Works whether Claude opened in the workspace or the project repo.
   workspace     has proj/ → project
   single-repo   has neither (no separate workspace)
 """
-import subprocess, re, sys
+import os, subprocess, re, sys
 from pathlib import Path
 
 def run(*cmd, cwd=None):
@@ -28,14 +28,39 @@ if not cwd_root:
 proj_symlink = Path(cwd_root) / "proj"
 wksp_symlink = Path(cwd_root) / "wksp"
 
-if proj_symlink.exists():
-    # Claude opened in workspace — proj/ points to project
-    workspace = cwd_root
-    project = str(proj_symlink.resolve())
-elif wksp_symlink.exists():
-    # Claude opened in project repo — wksp/ points to workspace
-    project = cwd_root
-    workspace = str(wksp_symlink.resolve())
+def _resolve_symlink_target(symlink: Path) -> str | None:
+    """Resolve a symlink, walking up to find the nearest git root if target doesn't exist."""
+    if symlink.exists():
+        return str(symlink.resolve())
+    if not symlink.is_symlink():
+        return None
+    raw_target = Path(os.readlink(symlink))
+    if not raw_target.is_absolute():
+        raw_target = (symlink.parent / raw_target).resolve()
+    candidate = raw_target
+    while candidate != candidate.parent:
+        if candidate.is_dir() and ((candidate / ".git").exists() or (candidate / ".git").is_file()):
+            return str(candidate)
+        candidate = candidate.parent
+    return None
+
+
+if proj_symlink.exists() or proj_symlink.is_symlink():
+    resolved = _resolve_symlink_target(proj_symlink)
+    if resolved:
+        workspace = cwd_root
+        project = resolved
+    else:
+        workspace = cwd_root
+        project = cwd_root
+elif wksp_symlink.exists() or wksp_symlink.is_symlink():
+    resolved = _resolve_symlink_target(wksp_symlink)
+    if resolved:
+        project = cwd_root
+        workspace = resolved
+    else:
+        workspace = cwd_root
+        project = cwd_root
 else:
     # Single-repo mode — no separate workspace configured
     workspace = cwd_root

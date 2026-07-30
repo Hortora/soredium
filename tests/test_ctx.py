@@ -104,6 +104,75 @@ class TestPathResolution:
         assert out["CURRENT_BRANCH"] == "feat/test-branch"
 
 
+class TestBrokenSymlinkResolution:
+    """Test workspace resolution when wksp/proj symlinks have broken targets."""
+
+    def test_wksp_points_to_nonexistent_subdir(self, tmp_path):
+        """wksp → ../workspace/engine where workspace/ exists but workspace/engine/ doesn't."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to("../workspace/engine")
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["WORKSPACE"] == str(workspace)
+        assert data["PROJECT"] == str(project)
+        assert data["SINGLE_REPO"] == "no"
+
+    def test_proj_points_to_nonexistent_subdir(self, tmp_path):
+        """proj → ../project/submodule where project/ exists but project/submodule/ doesn't."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (workspace / "proj").symlink_to("../project/submodule")
+
+        result = run_ctx(workspace)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["WORKSPACE"] == str(workspace)
+        assert data["PROJECT"] == str(project)
+        assert data["SINGLE_REPO"] == "no"
+
+    def test_totally_broken_wksp_falls_to_single_repo(self, tmp_path):
+        """wksp → /nonexistent/path with no git root anywhere in chain."""
+        project = init_repo(tmp_path / "project")
+        (project / "wksp").symlink_to("/nonexistent/path/that/does/not/exist")
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["SINGLE_REPO"] == "yes"
+
+    def test_wksp_target_exists_still_works(self, tmp_path):
+        """Normal case: wksp target exists — verify no regression."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["WORKSPACE"] == str(workspace)
+        assert data["SINGLE_REPO"] == "no"
+
+    def test_wksp_deeply_nested_walks_up(self, tmp_path):
+        """wksp → ../workspace/a/b/c where workspace/ is the git root."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to("../workspace/a/b/c")
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["WORKSPACE"] == str(workspace)
+        assert data["SINGLE_REPO"] == "no"
+
+
 class TestClaudeMdParsing:
     """Test CLAUDE.md field extraction."""
 
