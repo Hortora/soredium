@@ -149,10 +149,16 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
 
     # For stack operations, ensure we're on main in the stack workspace
     if original_workspace is not None:
-        run_git(stack_workspace, "checkout", "main")
+        checkout_ok, _ = run_git(stack_workspace, "checkout", "main")
+        if not checkout_ok:
+            print("ERROR=original_workspace_checkout_failed")
+            return 1
         has_remote, _ = run_git(stack_workspace, "remote", "get-url", "origin")
         if has_remote:
-            run_git(stack_workspace, "pull", "--rebase", "origin", "main")
+            pull_ok, _ = run_git(stack_workspace, "pull", "--rebase", "origin", "main")
+            if not pull_ok:
+                print("ERROR=original_workspace_pull_failed")
+                return 1
     else:
         has_remote, _ = run_git(workspace, "remote", "get-url", "origin")
         if has_remote:

@@ -478,7 +478,10 @@ def _migrate_worktree_to_clone(worktree_path: Path) -> bool:
             print(f"WARN=migration_tree_mismatch path={worktree_path}")
             return False
 
-        run_cmd(["git", "-C", str(original), "worktree", "remove", "--force", str(worktree_path)])
+        rc, _, stderr = run_cmd(["git", "-C", str(original), "worktree", "remove", "--force", str(worktree_path)])
+        if rc != 0 or worktree_path.exists():
+            print(f"WARN=migration_worktree_remove_failed path={worktree_path} stderr={stderr.strip()}")
+            return False
 
         shutil.move(str(clone_tmp), str(worktree_path))
         _exclude_symlinks(worktree_path)
