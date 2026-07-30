@@ -192,6 +192,135 @@ class TestScanWorkspaceParameter:
         assert len(result["blog"]) == 1
 
 
+class TestPromotionFailureDetection:
+    """Tests that close_artifacts detects when promotion silently drops artifacts."""
+
+    SCRIPT = Path(__file__).parent.parent / "work-end" / "close_artifacts.py"
+
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_fails_when_workspace_artifacts_found_but_none_promoted(self, tmp_path):
+        """Scan finds workspace-routed artifacts but to-workspace-main returns PROMOTED=0.
+        close_artifacts should exit 2 (partial failure), not 0."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        scan_ws = tmp_path / "scan-ws"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+        scan_ws.mkdir()
+
+        # Scan source has specs
+        (scan_ws / "specs").mkdir()
+        (scan_ws / "specs" / "design.md").write_text("# Spec\n")
+
+        # Route specs to workspace (so they go through to-workspace-main)
+        (scan_ws / "CLAUDE.md").write_text(
+            "# Workspace\n\n## Routing\n\n"
+            "| Artifact | Destination | Notes |\n"
+            "|----------|-------------|-------|\n"
+            "| specs | workspace | |\n"
+        )
+
+        # Create branch in workspace (no specs committed to it)
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-test"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "main"],
+            capture_output=True, check=True,
+        )
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-42-test",
+             f"scan-workspace={scan_ws}"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 2, (
+            f"Expected exit 2 (partial failure) but got {result.returncode}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert not (workspace / "design" / ".artifacts-promoted").exists()
+
+    def test_fails_when_project_artifacts_found_but_none_promoted(self, tmp_path):
+        """Scan finds project-routed artifacts but to-project returns PROMOTED=0.
+        close_artifacts should exit 2 (partial failure)."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        scan_ws = tmp_path / "scan-ws"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+        scan_ws.mkdir()
+
+        # Scan source has specs (default routing: project)
+        (scan_ws / "specs").mkdir()
+        (scan_ws / "specs" / "design.md").write_text("# Spec\n")
+
+        # Workspace does NOT have these files — to-project will skip them
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "any-branch",
+             f"scan-workspace={scan_ws}"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 2, (
+            f"Expected exit 2 (partial failure) but got {result.returncode}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert not (workspace / "design" / ".artifacts-promoted").exists()
+
+    def test_stamp_written_when_all_artifacts_promoted(self, tmp_path):
+        """When promotion succeeds, stamp is written (regression guard)."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+
+        # Create branch with a spec committed
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-test"],
+            capture_output=True, check=True,
+        )
+        (workspace / "blog").mkdir()
+        (workspace / "blog" / "entry.md").write_text("# Blog\n")
+        subprocess.run(["git", "-C", str(workspace), "add", "-A"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "add blog"],
+            capture_output=True, check=True,
+        )
+
+        # Route blog to workspace
+        (workspace / "CLAUDE.md").write_text(
+            "# Workspace\n\n## Routing\n\n"
+            "| Artifact | Destination | Notes |\n"
+            "|----------|-------------|-------|\n"
+            "| blog | workspace | |\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-42-test"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 0, (
+            f"Expected exit 0 but got {result.returncode}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
 class TestCleanupSpecsRemoved:
     def test_cleanup_specs_subcommand_removed(self, tmp_path):
         """cleanup-specs is no longer a valid subcommand."""

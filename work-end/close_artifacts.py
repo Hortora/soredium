@@ -174,6 +174,9 @@ def main() -> int:
         results["workspace_promoted"] = out.get("PROMOTED", "0")
         if rc != 0:
             failures.append(f"workspace promotion: {out.get('ERROR', 'unknown')}")
+        elif out.get("PROMOTED", "0") == "0":
+            skipped = out.get("SKIPPED_PATHS", ",".join(ws_artifacts))
+            failures.append(f"workspace promotion: all artifacts skipped ({skipped})")
     else:
         results["workspace_promoted"] = "0"
 
@@ -187,6 +190,9 @@ def main() -> int:
         project_pushed = out.get("PUSHED", "no") == "yes"
         if rc != 0:
             failures.append(f"project promotion: {out.get('ERROR', 'unknown')}")
+        elif out.get("PROMOTED", "0") == "0":
+            skipped = out.get("SKIPPED_PATHS", ",".join(proj_artifacts))
+            failures.append(f"project promotion: all artifacts skipped ({skipped})")
     else:
         results["project_promoted"] = "0"
         project_pushed = True

@@ -175,6 +175,37 @@ class TestToWorkspaceMain:
         assert result.returncode == 0
         out = parse(result)
         assert out["PROMOTED"] == "0"
+        assert out["SKIPPED"] == "1"
+
+    def test_reports_skipped_count_for_missing_artifacts(self, tmp_path):
+        """When some artifacts don't exist on the branch, SKIPPED count is reported."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        init_git(ws)
+        create_branch_with_file(ws, "issue-1-test", "blog/real.md", "real content\n")
+
+        result = run_promote(
+            "to-workspace-main", str(ws),
+            branch="issue-1-test", artifacts="blog/real.md,specs/missing.md",
+        )
+        assert result.returncode == 0
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+        assert out["SKIPPED"] == "1"
+
+    def test_skipped_paths_reported(self, tmp_path):
+        """Skipped artifact paths are reported in output for diagnostics."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        init_git(ws)
+        create_branch_with_file(ws, "issue-1-test", "blog/real.md", "content\n")
+
+        result = run_promote(
+            "to-workspace-main", str(ws),
+            branch="issue-1-test", artifacts="blog/real.md,specs/missing.md",
+        )
+        out = parse(result)
+        assert "specs/missing.md" in out.get("SKIPPED_PATHS", "")
 
     def test_empty_artifacts_string(self, tmp_path):
         ws = tmp_path / "workspace"

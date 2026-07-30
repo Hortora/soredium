@@ -80,14 +80,15 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
 
     # Checkout files from branch
     promoted = 0
+    skipped: list[str] = []
     for artifact in artifacts:
         try:
             git("checkout", branch, "--", artifact, cwd=workspace)
             git("add", artifact, cwd=workspace)
             promoted += 1
-        except subprocess.CalledProcessError:
-            # Skip artifacts that don't exist on the branch
-            pass
+        except subprocess.CalledProcessError as e:
+            skipped.append(artifact)
+            print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
 
     if promoted > 0:
         try:
@@ -113,6 +114,9 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
         pass
 
     print(f"PROMOTED={promoted}")
+    if skipped:
+        print(f"SKIPPED={len(skipped)}")
+        print(f"SKIPPED_PATHS={','.join(skipped)}")
     return 0
 
 
@@ -142,11 +146,14 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
         return 1
 
     promoted = 0
+    skipped: list[str] = []
     for artifact in artifacts:
         src = ws / artifact
         dst = proj / artifact
 
         if not src.exists():
+            skipped.append(artifact)
+            print(f"SKIP_DETAIL={artifact}: source not found", file=sys.stderr)
             continue
 
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -161,8 +168,9 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
         try:
             git("add", artifact, cwd=project)
             promoted += 1
-        except subprocess.CalledProcessError:
-            pass
+        except subprocess.CalledProcessError as e:
+            skipped.append(artifact)
+            print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
 
     if promoted > 0:
         try:
@@ -181,6 +189,9 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             print(f"PUSH_ERROR={e.stderr.strip()}")
 
     print(f"PROMOTED={promoted}")
+    if skipped:
+        print(f"SKIPPED={len(skipped)}")
+        print(f"SKIPPED_PATHS={','.join(skipped)}")
     return 0
 
 
