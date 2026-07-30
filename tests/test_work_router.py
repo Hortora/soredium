@@ -453,6 +453,122 @@ class TestEpicFileDetection:
         assert result["EPIC_ACTIVE_ISSUE"] == "11"
 
 
+class TestPerProjectHandoff:
+    """Test per-project HANDOFF scoping in shared workspaces."""
+
+    @staticmethod
+    def _init_git(path):
+        subprocess.run(["git", "init", "-b", "main", str(path)], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"],
+            capture_output=True,
+        )
+
+    @staticmethod
+    def _commit_file(workspace, filename):
+        subprocess.run(
+            ["git", "-C", str(workspace), "add", filename],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", f"add {filename}"],
+            capture_output=True,
+        )
+
+    def test_shared_workspace_finds_project_handoff(self, tmp_path):
+        """HANDOFF-engine.md exists → HAS_HANDOFF=yes for engine project."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "HANDOFF-engine.md").write_text("# Handoff\nEngine work on #42.")
+        project = tmp_path / "engine"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="main",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "yes"
+        assert result["HANDOFF_PATH"] == str(workspace / "HANDOFF-engine.md")
+
+    def test_shared_workspace_ignores_other_project_handoff(self, tmp_path):
+        """Only HANDOFF-eidos.md exists → HAS_HANDOFF=no for engine project."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "HANDOFF-eidos.md").write_text("# Handoff\nEidos work on #99.")
+        project = tmp_path / "engine"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="main",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "no"
+
+    def test_project_handoff_preferred_over_generic(self, tmp_path):
+        """Both HANDOFF-engine.md and HANDOFF.md exist → project-specific wins."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "HANDOFF.md").write_text("# Handoff\nGeneric old handoff.")
+        (workspace / "HANDOFF-engine.md").write_text("# Handoff\nEngine-specific.")
+        project = tmp_path / "engine"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="main",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "yes"
+        assert result["HANDOFF_PATH"] == str(workspace / "HANDOFF-engine.md")
+
+    def test_falls_back_to_generic_handoff(self, tmp_path):
+        """Only HANDOFF.md exists (no per-project file) → backward compat."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "HANDOFF.md").write_text("# Handoff\nGeneric handoff for #42.")
+        project = tmp_path / "engine"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="main",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "yes"
+        assert result["HANDOFF_PATH"] == str(workspace / "HANDOFF.md")
+
+    def test_on_branch_project_handoff_branch_aware(self, tmp_path):
+        """On feature branch, HANDOFF-engine.md checked for issue reference."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        self._init_git(workspace)
+        (workspace / "HANDOFF-engine.md").write_text("# Handoff\nWorked on #42.")
+        self._commit_file(workspace, "HANDOFF-engine.md")
+        project = tmp_path / "engine"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="issue-42-spi",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "yes"
+        assert result["HANDOFF_PATH"] == str(workspace / "HANDOFF-engine.md")
+
+    def test_on_branch_project_handoff_wrong_issue(self, tmp_path):
+        """On feature branch, HANDOFF-engine.md references different issue → no."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        self._init_git(workspace)
+        (workspace / "HANDOFF-engine.md").write_text("# Handoff\nWorked on #99.")
+        self._commit_file(workspace, "HANDOFF-engine.md")
+        project = tmp_path / "engine"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="issue-42-spi",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "no"
+
+
 class TestCLI:
     def test_outputs_key_value(self, tmp_path, capsys):
         workspace = tmp_path / "workspace"

@@ -27,16 +27,16 @@ from pathlib import Path
 
 
 def _handoff_references_branch(
-    workspace: Path, branch_name: str
+    workspace: Path, branch_name: str, handoff_filename: str = "HANDOFF.md"
 ) -> bool:
-    """Check if HANDOFF.md on workspace main references the current branch's issue."""
+    """Check if the handoff file on workspace main references the current branch's issue."""
     issue_match = re.match(r"issue-(\d+)", branch_name)
     if not issue_match:
         return True  # non-standard branch — can't determine, assume resume
 
     issue_num = issue_match.group(1)
     result = subprocess.run(
-        ["git", "-C", str(workspace), "show", "main:HANDOFF.md"],
+        ["git", "-C", str(workspace), "show", f"main:{handoff_filename}"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -138,14 +138,19 @@ def detect_state(current_branch: str, project_path: str,
 
     has_handoff = False
     handoff_path = ""
-    handoff_candidate = workspace / "HANDOFF.md"
-    if handoff_candidate.exists():
+    project_name = Path(project_path).name
+    project_handoff = workspace / f"HANDOFF-{project_name}.md"
+    generic_handoff = workspace / "HANDOFF.md"
+    handoff_candidate = project_handoff if project_handoff.exists() else (
+        generic_handoff if generic_handoff.exists() else None
+    )
+    if handoff_candidate is not None:
         handoff_path = str(handoff_candidate)
         if on_main:
             has_handoff = True
         else:
             has_handoff = _handoff_references_branch(
-                workspace, current_branch
+                workspace, current_branch, handoff_candidate.name
             )
 
     if on_main:

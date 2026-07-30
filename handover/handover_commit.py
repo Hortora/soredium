@@ -35,29 +35,24 @@ def run_git(repo: str, *args: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def commit_to_main(workspace: str, branch: str) -> int:
-    """Commit HANDOFF.md to workspace main."""
+def commit_to_main(workspace: str, branch: str, handoff_file: str = "HANDOFF.md") -> int:
+    """Commit a HANDOFF file to workspace main."""
     today = date.today().isoformat()
     commit_msg = f"docs: session handover {today}"
 
     if branch != "main":
-        # Stash current work
         run_git(workspace, "stash")
 
-        # Switch to main
         ok, _ = run_git(workspace, "checkout", "main")
         if not ok:
-            # Restore original branch
             run_git(workspace, "checkout", branch)
             run_git(workspace, "stash", "pop")
             print("ERROR=checkout_main_failed")
             return 1
 
-        # Pull latest
         run_git(workspace, "pull", "--rebase", "origin", "main")
 
-        # Add and commit
-        ok, _ = run_git(workspace, "add", "HANDOFF.md")
+        ok, _ = run_git(workspace, "add", handoff_file)
         if not ok:
             run_git(workspace, "checkout", branch)
             run_git(workspace, "stash", "pop")
@@ -71,10 +66,8 @@ def commit_to_main(workspace: str, branch: str) -> int:
             print("ERROR=commit_failed")
             return 1
 
-        # Push (non-fatal)
         push_ok, _ = run_git(workspace, "push")
 
-        # Return to original branch
         run_git(workspace, "checkout", branch)
         run_git(workspace, "stash", "pop")
 
@@ -83,10 +76,9 @@ def commit_to_main(workspace: str, branch: str) -> int:
         return 0
 
     else:
-        # Already on main
         run_git(workspace, "pull", "--rebase", "origin", "main")
 
-        ok, _ = run_git(workspace, "add", "HANDOFF.md")
+        ok, _ = run_git(workspace, "add", handoff_file)
         if not ok:
             print("ERROR=add_failed")
             return 1
@@ -130,7 +122,8 @@ def main() -> int:
         if not branch:
             print("ERROR=missing_branch")
             return 1
-        return commit_to_main(workspace, branch)
+        handoff_file = kv.get("file", "HANDOFF.md")
+        return commit_to_main(workspace, branch, handoff_file)
 
     else:
         print("ERROR=unknown_subcommand")

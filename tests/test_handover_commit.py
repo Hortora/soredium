@@ -176,6 +176,78 @@ def test_unknown_subcommand():
     assert "ERROR=unknown_subcommand" in result.stdout
 
 
+# ---------------------------------------------------------------------------
+# Per-project HANDOFF filename
+# ---------------------------------------------------------------------------
+
+def test_commit_project_handoff_on_main(workspace_repo):
+    """commit-to-main with file= commits per-project HANDOFF file."""
+    ws = workspace_repo
+    (ws / "HANDOFF-engine.md").write_text("# Engine handover\n")
+
+    result = subprocess.run(
+        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws),
+         "branch=main", "file=HANDOFF-engine.md"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "COMMITTED=yes" in result.stdout
+
+    show = subprocess.run(
+        ["git", "-C", str(ws), "show", "main:HANDOFF-engine.md"],
+        capture_output=True, text=True,
+    )
+    assert "Engine handover" in show.stdout
+
+
+def test_commit_project_handoff_from_branch(workspace_repo):
+    """commit-to-main from branch with file= commits per-project HANDOFF."""
+    ws = workspace_repo
+    subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-42-test"],
+                    check=True, capture_output=True)
+
+    (ws / "HANDOFF-engine.md").write_text("# Engine branch handover\n")
+
+    result = subprocess.run(
+        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws),
+         "branch=issue-42-test", "file=HANDOFF-engine.md"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "COMMITTED=yes" in result.stdout
+
+    branch = subprocess.run(
+        ["git", "-C", str(ws), "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert branch == "issue-42-test"
+
+    show = subprocess.run(
+        ["git", "-C", str(ws), "show", "main:HANDOFF-engine.md"],
+        capture_output=True, text=True,
+    )
+    assert "Engine branch handover" in show.stdout
+
+
+def test_default_file_is_handoff_md(workspace_repo):
+    """Without file= param, commits HANDOFF.md (backward compat)."""
+    ws = workspace_repo
+    (ws / "HANDOFF.md").write_text("# Generic\n")
+
+    result = subprocess.run(
+        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws),
+         "branch=main"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+
+    show = subprocess.run(
+        ["git", "-C", str(ws), "show", "main:HANDOFF.md"],
+        capture_output=True, text=True,
+    )
+    assert "Generic" in show.stdout
+
+
 def test_missing_subcommand():
     """No subcommand fails."""
     result = subprocess.run(
