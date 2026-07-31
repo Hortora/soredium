@@ -19,6 +19,7 @@ from review import (
     _write_jsonl,
     parse_args,
 )
+from prompts import build_reviewer_prompt
 
 
 class TestBuildReviewerEvents:
@@ -293,3 +294,63 @@ class TestParseArgs:
         args = self._parse(["--spec", "x.md", "--title", "t",
                             "--source-dirs", "/tmp", "--type", "readiness"])
         assert args.mode == "final-review"
+
+
+class TestReviewerBriefsByType:
+
+    def test_coherence_brief_focuses_on_completeness(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="coherence",
+        )
+        assert "completeness" in prompt.lower() or "complete" in prompt.lower()
+
+    def test_structure_brief_focuses_on_decomposition(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="structure",
+        )
+        assert "decomposition" in prompt.lower() or "boundaries" in prompt.lower()
+
+    def test_robustness_brief_focuses_on_failure(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="robustness",
+        )
+        assert "failure" in prompt.lower() or "break" in prompt.lower()
+
+    def test_light_degree_includes_escalation_instruction(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="coherence", degree="light",
+        )
+        assert "ESCALATE:" in prompt
+
+    def test_standard_degree_includes_escalation(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="structure", degree="standard",
+        )
+        assert "ESCALATE:" in prompt
+
+    def test_adversarial_degree_no_escalation(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="robustness", degree="adversarial",
+        )
+        assert "ESCALATE:" not in prompt
+
+    def test_deep_degree_no_escalation(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="robustness", degree="deep",
+        )
+        assert "ESCALATE:" not in prompt
+
+    def test_coherence_does_not_include_adversarial_framing(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="coherence", degree="light",
+        )
+        assert "try to break" not in prompt.lower()
+        assert "adversarial design review" not in prompt.lower()

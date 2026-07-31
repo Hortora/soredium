@@ -13,12 +13,32 @@ def build_reviewer_prompt(
     spec_path: str = "",
     mode: str = "spec-review",
     depth: str | None = None,
+    degree: str | None = None,
     maturity_stage: str = "pre-release",
 ) -> str:
+    resolved_degree = degree or depth
     if mode == "pre-review":
         return _build_pre_review_reviewer_prompt(
             round_num, focus_items, handover_path, convergence_override_ids,
             source_dirs, workspace_root, spec_path,
+        )
+    if mode == "coherence":
+        return _build_typed_reviewer_prompt(
+            "coherence", round_num, focus_items, handover_path,
+            convergence_override_ids, source_dirs, workspace_root,
+            spec_path, resolved_degree, maturity_stage,
+        )
+    if mode == "structure":
+        return _build_typed_reviewer_prompt(
+            "structure", round_num, focus_items, handover_path,
+            convergence_override_ids, source_dirs, workspace_root,
+            spec_path, resolved_degree, maturity_stage,
+        )
+    if mode == "robustness":
+        return _build_typed_reviewer_prompt(
+            "robustness", round_num, focus_items, handover_path,
+            convergence_override_ids, source_dirs, workspace_root,
+            spec_path, resolved_degree, maturity_stage,
         )
     if mode == "code-review":
         return _build_code_review_reviewer_prompt(
@@ -204,6 +224,150 @@ def build_sweep_prompt(role: str, round_num: int, workspace_root: str = "") -> s
         f"This handover will inform your successor's approach. Be candid about "
         f"uncertainty."
     )
+
+
+# ---------------------------------------------------------------------------
+# Typed review briefs — coherence, structure, robustness
+# ---------------------------------------------------------------------------
+
+_TYPE_BRIEFS: dict[str, str] = {
+    "coherence": (
+        "You are reviewing this spec for COHERENCE. Focus on:\n"
+        "- Completeness: are any requirements missing or underspecified?\n"
+        "- Internal consistency: do sections contradict each other?\n"
+        "- Gaps: are there scenarios the spec doesn't address?\n"
+        "- Ambiguity: could any requirement be interpreted two different ways?\n"
+        "\n"
+        "Do NOT deep-dive architecture, decomposition, or failure modes. "
+        "Stay focused on whether the spec is complete and self-consistent."
+    ),
+    "structure": (
+        "You are reviewing this spec for STRUCTURE. Focus on:\n"
+        "- Decomposition: are boundaries clean and responsibilities clear?\n"
+        "- Dependencies: are they well-ordered? Any circular dependencies?\n"
+        "- Simplicity: could this be simpler without losing capability?\n"
+        "- Coupling: are modules too tightly coupled?\n"
+        "- Ownership: is it clear which component owns each responsibility?\n"
+        "\n"
+        "Evaluate the architectural decisions, not the completeness of requirements."
+    ),
+    "robustness": (
+        "You are reviewing this spec for ROBUSTNESS. Your job is to try to break "
+        "this design. Focus on:\n"
+        "- Failure scenarios: what happens when component X fails?\n"
+        "- Concurrency: are there race conditions or ordering assumptions?\n"
+        "- Edge cases: what inputs or states are not handled?\n"
+        "- Data integrity: where could data be lost, corrupted, or duplicated?\n"
+        "- Error propagation: do errors surface clearly or get swallowed?\n"
+        "\n"
+        "Construct specific failure scenarios. Name the component, the trigger, "
+        "and the consequence."
+    ),
+}
+
+_ESCALATION_INSTRUCTION = (
+    "\n\n## Escalation Assessment\n\n"
+    "After your review, assess whether this spec warrants a deeper review. "
+    "Consider: did you encounter complexity you could not fully evaluate at this "
+    "depth? Are there interaction effects between components that need adversarial "
+    "pressure? Include this structured block at the end of your response:\n\n"
+    "```\n"
+    "## Escalation Assessment\n\n"
+    "ESCALATE: yes|no\n"
+    "RECOMMENDED_TYPE: <coherence|structure|robustness>\n"
+    "RECOMMENDED_DEGREE: <light|standard|adversarial|deep>\n"
+    "REASON: <one sentence>\n"
+    "```"
+)
+
+
+def _build_typed_reviewer_prompt(
+    review_type: str,
+    round_num: int,
+    focus_items: list[str],
+    handover_path: str | None,
+    convergence_override_ids: list[str] | None = None,
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+    degree: str | None = None,
+    maturity_stage: str = "pre-release",
+) -> str:
+    ws = workspace_root
+    parts: list[str] = []
+
+    if degree == "deep":
+        parts.append("ultrathink")
+        parts.append("")
+
+    parts.append(f"This is round {round_num} of a {review_type} review.")
+    parts.append("")
+    parts.append(_TYPE_BRIEFS[review_type])
+    parts.append("")
+    parts.append(f"Read the current spec at {spec_path or ws + '/spec.md'}.")
+    if round_num > 1:
+        parts.append(f"Read the tracker at {ws}/tracker.md for issue status and focus items.")
+    parts.append("")
+    if source_dirs:
+        parts.append("Project directories (full read access):")
+        for sd in source_dirs:
+            parts.append(f"  - {sd}")
+        parts.append("")
+    parts.append(
+        f"Write your review to {ws}/responses/reviewer-{round_num}.md following the structured "
+        "output format described in the review context appended to your system prompt."
+    )
+    parts.append("")
+    parts.append("Do NOT update the spec. Do NOT implement anything. Review only.")
+
+    if handover_path:
+        parts.append("")
+        parts.append(
+            f"Read the prior reviewer's handover at {ws}/{handover_path} for accumulated "
+            f"insights from previous rounds."
+        )
+
+    if focus_items:
+        parts.append("")
+        parts.append(
+            f"The tracker shows {len(focus_items)} open/contested items. Focus on these: "
+            + ", ".join(focus_items)
+        )
+
+    if round_num >= 2:
+        parts.append("")
+        parts.append(
+            "EVIDENCE REQUIRED for confirmations — bare assertions are not accepted:\n"
+            "- For each ADDRESSED item you confirm as resolved: cite the specific "
+            "section (§N.N) that addresses it and state what the section now says "
+            "that resolves the concern.\n"
+            "- For each REJECTED item you accept: state why the implementor's "
+            "reasoning is correct, with specific evidence.\n"
+            "- SIGNAL: APPROVED will only be accepted when ALL items are in terminal "
+            "state (VERIFIED or ACCEPTED). If any item is still OPEN, ADDRESSED, or "
+            "REJECTED, the tracker will override your APPROVED and send you back."
+        )
+
+    if convergence_override_ids:
+        parts.append("")
+        parts.append(
+            "The following items are NOT in terminal state. You MUST provide evidence "
+            "for each: " + ", ".join(convergence_override_ids)
+        )
+
+    if maturity_stage == "released":
+        parts.append("")
+        parts.append(
+            "**This project is RELEASED — it has external consumers.** "
+            "Flag any proposed change that would break public APIs, config keys, "
+            "serialization formats, database schemas, or CLI flags without a "
+            "documented migration path."
+        )
+
+    if degree in ("light", "standard"):
+        parts.append(_ESCALATION_INSTRUCTION)
+
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
