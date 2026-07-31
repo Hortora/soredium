@@ -388,18 +388,8 @@ def main() -> int:
             print("ERROR: --spec, --title, and --source-dirs required", flush=True)
             return 1
 
-    # Depth resolution for final-review mode
-    resolved_depth: str | None = None
-    if args.mode == "final-review":
-        if args.depth:
-            resolved_depth = args.depth
-        # On resume, depth loaded later from .depth file
-        # On fresh start, default to standard if no --depth
-        if not args.workspace and not resolved_depth:
-            resolved_depth = "standard"
-    else:
-        if args.depth:
-            print(f"WARNING: --depth is only supported for final-review mode, ignored for {args.mode}", flush=True)
+    # Degree/depth resolution — applies to all modes now
+    resolved_depth: str | None = args.degree
 
     start_round = 1
 
@@ -1551,13 +1541,19 @@ def _print_summary(tracker: Tracker, round_num: int, cost: float, spec_path: str
         _log(f"  Spec:    {tracker.project_name}")
 
 
-REVIEW_MODES: Final = ("pre-review", "spec-review", "code-review", "final-review")
+REVIEW_MODES: Final = (
+    "pre-review", "spec-review", "code-review", "final-review",
+    "coherence", "structure", "robustness",
+)
 
 MODE_DEFAULTS: Final = {
     "pre-review": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 3.0},
     "spec-review": {"max_rounds": 10, "min_rounds": 4, "budget_per_session": 5.0},
     "code-review": {"max_rounds": 4, "min_rounds": 2, "budget_per_session": 5.0},
     "final-review": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 5.0},
+    "coherence": {"max_rounds": 1, "min_rounds": 1, "budget_per_session": 1.5},
+    "structure": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 5.0},
+    "robustness": {"max_rounds": 6, "min_rounds": 4, "budget_per_session": 5.0},
 }
 
 DEPTH_PRESETS: Final = {
@@ -1566,14 +1562,50 @@ DEPTH_PRESETS: Final = {
     "deep":     {"max_rounds": 5, "min_rounds": 3, "budget_per_session": 8.0},
 }
 
+REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness")
+
+DEGREE_PRESETS: Final = {
+    "light":       {"max_rounds": 1,  "min_rounds": 1, "budget_per_session": 1.5},
+    "standard":    {"max_rounds": 3,  "min_rounds": 2, "budget_per_session": 5.0},
+    "adversarial": {"max_rounds": 6,  "min_rounds": 4, "budget_per_session": 5.0},
+    "deep":        {"max_rounds": 10, "min_rounds": 6, "budget_per_session": 8.0},
+}
+
+TYPE_DEFAULTS: Final = {
+    "coherence": "light",
+    "structure": "standard",
+    "robustness": "adversarial",
+    "conformance": "standard",
+    "readiness": "standard",
+}
+
+TYPE_TO_MODE: Final = {
+    "coherence": "coherence",
+    "structure": "structure",
+    "robustness": "robustness",
+    "conformance": "code-review",
+    "readiness": "final-review",
+}
+
+MODE_TO_TYPE: Final = {
+    "pre-review": ("coherence", "light"),
+    "spec-review": ("structure", "adversarial"),
+    "code-review": ("conformance", "standard"),
+    "final-review": ("readiness", "standard"),
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Adversarial Design Review")
     parser.add_argument("--spec", default=None, help="Path to the design spec (not needed with --workspace)")
     parser.add_argument("--title", default=None, help="Short name for the review (not needed with --workspace)")
     parser.add_argument("--source-dirs", nargs="+", default=None, help="Context directories")
-    parser.add_argument("--mode", choices=REVIEW_MODES, default="spec-review",
-                        help="Review phase (default: spec-review)")
+    parser.add_argument("--mode", choices=REVIEW_MODES, default=None,
+                        help="Review mode (legacy — prefer --type)")
+    parser.add_argument("--type", dest="review_type", choices=REVIEW_TYPES, default=None,
+                        help="Review type: what aspect to examine")
+    parser.add_argument("--degree", choices=tuple(DEGREE_PRESETS.keys()), default=None,
+                        help="Review degree: how deeply to examine")
     parser.add_argument("--max-rounds", type=int, default=None)
     parser.add_argument("--min-rounds", type=int, default=None,
                         help="Minimum rounds before APPROVED is accepted")
@@ -1589,22 +1621,62 @@ def parse_args() -> argparse.Namespace:
                         help="Architectural files for agents to prioritise (overrides auto-detection)")
     parser.add_argument("--diff-base", default=None,
                         help="Git ref to diff against for code-review and final-review modes (branch, SHA, or tag)")
-    parser.add_argument("--depth", choices=("light", "standard", "deep"),
+    parser.add_argument("--depth", choices=("light", "standard", "deep", "adversarial"),
                         default=None,
-                        help="Review depth for final-review mode (default: auto-detect)")
+                        help="Review depth (legacy alias for --degree)")
     parser.add_argument("--chunked", action="store_true",
                         help="Run implementor in priority-ordered chunks")
     parser.add_argument("--stage", choices=("pre-release", "released"),
                         default="pre-release",
                         help="Project maturity stage — released adds backward-compat checks")
     args = parser.parse_args()
-    defaults = MODE_DEFAULTS[args.mode]
-    if args.max_rounds is None:
-        args.max_rounds = defaults["max_rounds"]
-    if args.min_rounds is None:
-        args.min_rounds = defaults["min_rounds"]
-    if args.budget_per_session is None:
-        args.budget_per_session = defaults["budget_per_session"]
+
+    # --- Resolve --depth as alias for --degree ---
+    if args.depth and not args.degree:
+        args.degree = args.depth
+
+    # --- Resolve type vs mode ---
+    if args.review_type and args.mode:
+        parser.error("--type and --mode are mutually exclusive")
+    if args.review_type:
+        args.mode = TYPE_TO_MODE[args.review_type]
+    elif args.mode:
+        mapped = MODE_TO_TYPE.get(args.mode)
+        if mapped:
+            args.review_type = mapped[0]
+            if not args.degree:
+                args.degree = mapped[1]
+        else:
+            args.review_type = args.mode
+    else:
+        args.mode = "spec-review"
+        args.review_type = "structure"
+        if not args.degree:
+            args.degree = "adversarial"
+
+    # --- Resolve degree defaults ---
+    if not args.degree:
+        args.degree = TYPE_DEFAULTS.get(args.review_type, "standard")
+
+    # --- Apply degree presets (degree overrides mode defaults) ---
+    degree_preset = DEGREE_PRESETS.get(args.degree)
+    mode_defaults = MODE_DEFAULTS.get(args.mode, MODE_DEFAULTS["spec-review"])
+
+    if degree_preset:
+        if args.max_rounds is None:
+            args.max_rounds = degree_preset["max_rounds"]
+        if args.min_rounds is None:
+            args.min_rounds = degree_preset["min_rounds"]
+        if args.budget_per_session is None:
+            args.budget_per_session = degree_preset["budget_per_session"]
+    else:
+        if args.max_rounds is None:
+            args.max_rounds = mode_defaults["max_rounds"]
+        if args.min_rounds is None:
+            args.min_rounds = mode_defaults["min_rounds"]
+        if args.budget_per_session is None:
+            args.budget_per_session = mode_defaults["budget_per_session"]
+
     return args
 
 

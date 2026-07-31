@@ -1,9 +1,12 @@
-"""Tests for JSONL event building and writing."""
+"""Tests for JSONL event building, writing, and CLI parsing."""
 
 import json
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -14,6 +17,7 @@ from review import (
     _build_chunk_start_event,
     _build_chunk_end_event,
     _write_jsonl,
+    parse_args,
 )
 
 
@@ -208,3 +212,84 @@ class TestChunkEvents:
         assert event["priority"] == "HIGH"
         assert event["addressed"] == 3
         assert event["skipped"] == 1
+
+
+class TestParseArgs:
+
+    def _parse(self, argv: list[str]):
+        with patch("sys.argv", ["review.py"] + argv):
+            return parse_args()
+
+    def test_type_flag_accepted(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "coherence"])
+        assert args.review_type == "coherence"
+
+    def test_all_types_accepted(self):
+        for t in ("coherence", "structure", "robustness", "conformance", "readiness"):
+            args = self._parse(["--spec", "x.md", "--title", "t",
+                                "--source-dirs", "/tmp", "--type", t])
+            assert args.review_type == t
+
+    def test_degree_flag_accepted(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "structure",
+                            "--degree", "adversarial"])
+        assert args.degree == "adversarial"
+
+    def test_degree_presets_applied(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "coherence",
+                            "--degree", "adversarial"])
+        assert args.max_rounds == 6
+        assert args.min_rounds == 4
+
+    def test_default_degree_per_type(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "robustness"])
+        assert args.degree == "adversarial"
+        assert args.max_rounds == 6
+
+    def test_default_degree_coherence_is_light(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "coherence"])
+        assert args.degree == "light"
+        assert args.max_rounds == 1
+
+    def test_default_degree_structure_is_standard(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "structure"])
+        assert args.degree == "standard"
+        assert args.max_rounds == 3
+
+    def test_backward_compat_mode_maps_to_type(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--mode", "pre-review"])
+        assert args.review_type == "coherence"
+
+    def test_backward_compat_spec_review_maps_to_structure(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--mode", "spec-review"])
+        assert args.review_type == "structure"
+
+    def test_backward_compat_depth_alias(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "structure",
+                            "--depth", "light"])
+        assert args.degree == "light"
+
+    def test_no_flags_defaults_to_structure_adversarial(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp"])
+        assert args.review_type == "structure"
+        assert args.degree == "adversarial"
+
+    def test_mode_kept_for_internal_use(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "conformance"])
+        assert args.mode == "code-review"
+
+    def test_readiness_maps_to_final_review_mode(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "readiness"])
+        assert args.mode == "final-review"
