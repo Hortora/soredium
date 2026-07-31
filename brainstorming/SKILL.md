@@ -66,6 +66,10 @@ flowchart TD
     WRITE["Write design doc"]
     REVIEW["Spec self-review\n(fix inline)"]
     USER{"User reviews spec?"}
+    DEPTH["Review depth prompt\n(type + degree via AskUserQuestion)"]
+    SKIP{"Skip review?"}
+    DESIGNREVIEW["Run design-review\n(--type --degree)"]
+    ESCALATE{"Escalation\nrecommended?"}
     PLANS(("Invoke writing-plans"))
 
     CONTEXT --> QUESTIONS
@@ -77,7 +81,13 @@ flowchart TD
     WRITE --> REVIEW
     REVIEW --> USER
     USER -->|"changes requested"| WRITE
-    USER -->|"approved"| PLANS
+    USER -->|"approved"| DEPTH
+    DEPTH --> SKIP
+    SKIP -->|"yes"| PLANS
+    SKIP -->|"no"| DESIGNREVIEW
+    DESIGNREVIEW --> ESCALATE
+    ESCALATE -->|"yes, escalate"| DEPTH
+    ESCALATE -->|"no"| PLANS
 ```
 
 **The terminal state is invoking writing-plans.** Do NOT invoke any other
@@ -195,6 +205,25 @@ spec before proceeding:
 Wait for the user's response. If they request changes, make them and
 re-run the spec review loop. Only proceed once the user approves.
 
+### Review Depth Prompt
+
+After the user approves the spec, prompt for review depth before
+transitioning to writing-plans. Follow the three-part flow defined
+in `design-review/review-tiers.md`:
+
+1. Analyze the spec for complexity signals and present the full
+   recommendation with reasoning as text.
+2. Use `AskUserQuestion` for type selection (Skip is an option;
+   recommended option first with "(Recommended)" suffix).
+3. If not Skip: use `AskUserQuestion` for degree selection.
+
+If a review is selected, invoke `design-review` with `--type` and
+`--degree` flags. After review completes, check for escalation
+assessment. If escalation is recommended, present it and ask whether
+to proceed with the deeper review.
+
+If Skip is selected, proceed directly to writing-plans.
+
 ### Implementation
 
 Invoke writing-plans to create a detailed implementation plan. Do NOT
@@ -228,7 +257,8 @@ See [visual-companion.md](visual-companion.md) for the full guide.
   approved design"
 
 **Invokes:**
-- `writing-plans` — the only valid terminal state
+- `design-review` — conditionally, when review depth prompt selects a review (not Skip)
+- `writing-plans` — terminal state after review completes (or Skip)
 
 **Complements:**
 - `forage` — SEARCH for relevant garden entries during context gathering

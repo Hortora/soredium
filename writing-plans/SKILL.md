@@ -235,9 +235,23 @@ Optionally, dispatch a plan reviewer subagent using the template at
 [plan-document-reviewer-prompt.md](plan-document-reviewer-prompt.md)
 for an independent review.
 
+## Review Depth Prompt (Plans)
+
+After the plan is written and approved, assess whether it warrants review.
+Plans are typically lighter than specs — default recommendation is
+Coherence / Light or Skip.
+
+Follow the same three-part flow as brainstorming's Review Depth Prompt
+(see `design-review/review-tiers.md`):
+1. Present full recommendation with reasoning as text.
+2. `AskUserQuestion` for type (Skip as an option).
+3. If not Skip: `AskUserQuestion` for degree.
+
+If a review surfaces issues, revise the plan before proceeding to execution.
+
 ## Execution Handoff
 
-After saving the plan, offer execution choice:
+After saving the plan (and optional review), offer execution choice:
 
 **"Plan complete and saved to `$WORKSPACE/plans/<filename>.md`."**
 
@@ -273,6 +287,7 @@ Plan is complete when:
   this skill produces the plan.
 
 **Invokes:**
+- `design-review` — conditionally, when review depth prompt selects a review (not Skip)
 - `subagent-driven-development` — premium execution mode (recommended
   for 3+ independent tasks)
 - `executing-plans` — direct execution mode (sequential plans, low

@@ -33,43 +33,74 @@ If MISSING, add it using the `update-config` skill or tell the user:
 
 This is a one-time setup. Once added, the skill runs without prompts.
 
-## Step 0.5 — Select review phase
+## Step 0.5 — Select review type and degree
 
-Present the phase checklist. Default selection depends on context:
-- If the user said "pre-review" or "validate the approach" → default to pre-review only
-- Otherwise → default to spec review only (current behavior)
+Reviews have two dimensions: **type** (what to examine) and **degree** (how deeply).
+See [review-tiers.md](review-tiers.md) for the full model and recommendation signals.
 
+**Three-part flow:**
+
+1. **Present full recommendation as text** — analyze the spec for complexity signals,
+   then present the recommended type, degree, and reasoning. Be specific to this spec.
+
+2. **Type selection via AskUserQuestion** — recommended option first with "(Recommended)".
+   Skip is always an option.
+
+```python
+AskUserQuestion(questions=[{
+    "question": "Review this spec?",
+    "header": "Review type",
+    "options": [
+        {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
+        {"label": "Skip", "description": "No review needed"},
+        {"label": "Coherence", "description": "Completeness, consistency, gaps"},
+        {"label": "Structure", "description": "Decomposition, boundaries, dependencies"},
+        {"label": "Robustness", "description": "Failure modes, edge cases, error paths"},
+    ],
+    "multiSelect": false,
+}])
 ```
-Review phases — toggle to select:
 
-[ ] 1  Pre-review     Approach validation (2-3 rounds, lightweight)
-[x] 2  Spec review    Full adversarial review (4-10 rounds)
-[ ] 3  Code review    Implementation vs reviewed spec (2-4 rounds)
-[ ] 4  Final review   Production-readiness check (1-5 rounds, depth-scaled)
+3. **Degree selection via AskUserQuestion** (if not Skip):
 
-Type numbers to toggle, "go" to proceed:
+```python
+AskUserQuestion(questions=[{
+    "question": "Review degree?",
+    "header": "Depth",
+    "options": [
+        {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
+        {"label": "Light", "description": "~1 min — quick pass, flags if deeper needed"},
+        {"label": "Standard", "description": "~5 min — thorough examination"},
+        {"label": "Adversarial", "description": "~12 min — actively tries to break the design"},
+        {"label": "Deep", "description": "~25 min — exhaustive, ultrathink enabled"},
+    ],
+    "multiSelect": false,
+}])
 ```
 
+**If invoked with explicit flags** (`/design-review --type robustness --degree deep`):
+skip the prompt and use the flags directly.
 
-**If the user just says "design review" or "review this spec"**, skip the checklist
-entirely and proceed with spec review (phase 2). Only show the checklist when
-the user explicitly mentions phases or pre-review, or asks to choose.
+**If the user just says "design review"** without specifying type or asking to choose:
+still show the recommendation and prompt — the recommendation helps the user pick the
+right depth rather than defaulting to the heaviest option.
 
-**If multiple phases are selected**, they run in sequence. Pre-review completes first
-(approach validated), then spec review begins on the same artifact. Between phases,
-tell the user:
+**Mapping to `--type` and `--degree`:**
 
-> Pre-review complete. The approach has been validated.
-> Ready to begin spec review on the same spec?
+| Type | `--type` flag | Default degree |
+|------|--------------|----------------|
+| Coherence | `coherence` | Light |
+| Structure | `structure` | Standard |
+| Robustness | `robustness` | Adversarial |
+| Conformance | `conformance` | Standard |
+| Readiness | `readiness` | Standard |
 
-Wait for confirmation before starting the next phase. The user may want to revise
-the spec based on pre-review findings before the heavier spec review.
+**Backward compat:** `--mode pre-review|spec-review|code-review|final-review` still
+accepted and mapped to the new types. `--depth` accepted as alias for `--degree`.
 
-**Mapping to `--mode`:**
-- Phase 1 → `--mode pre-review`
-- Phase 2 → `--mode spec-review` (default, current behavior)
-- Phase 3 → `--mode code-review`
-- Phase 4 → `--mode final-review` (not yet available)
+**After the review completes (light/standard):** check the review output for an
+escalation assessment. If `ESCALATE: yes`, present the recommendation to the user
+and ask whether to proceed with the escalated review.
 
 ## Step 1 — Identify the spec
 
@@ -263,16 +294,23 @@ from the next round.
 
 | User says | Flag |
 |-----------|------|
-| "pre-review this" / "validate the approach" | `--mode pre-review` |
-| "light review" / "quick check" | `--depth light` |
-| "deep review" / "thorough" | `--depth deep` |
+| "coherence check" / "completeness review" | `--type coherence` |
+| "structure review" / "architecture review" | `--type structure` |
+| "robustness review" / "try to break this" | `--type robustness` |
+| "conformance review" / "code vs spec" | `--type conformance` |
+| "readiness review" / "production check" | `--type readiness` |
+| "light review" / "quick check" | `--degree light` |
+| "standard review" | `--degree standard` |
+| "adversarial" / "stress test this" | `--degree adversarial` |
+| "deep review" / "thorough" / "ultrathink" | `--degree deep` |
 | "use sonnet" / "cheap mode" | `--model sonnet` |
 | "fresh sessions" / "no continuity" | `--fresh-sessions` |
 | "more rounds" / "up to 15" | `--max-rounds 15` |
 | "shorter windows" | `--session-window 3` |
 | "use these arch files" / specific arch context | `--arch-files /path/to/PLATFORM.md /path/to/ARC42.md` |
-| "review code against spec" / "code review mode" | `--mode code-review` |
 | "diff against main" / "changes since release" | `--diff-base main` or `--diff-base v1.0` |
+| Legacy: "pre-review this" | `--mode pre-review` (maps to `--type coherence --degree light`) |
+| Legacy: "code review mode" | `--mode code-review` (maps to `--type conformance`) |
 
 ## What this skill does NOT do
 
