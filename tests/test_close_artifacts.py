@@ -29,15 +29,16 @@ class TestScanArtifacts:
         assert len(result["specs"]) == 2
         assert "specs/design.md" in result["specs"]
 
-    def test_does_not_use_branch_subdirectory(self, tmp_path):
-        """The old branch-based spec path is dead."""
+    def test_finds_specs_in_subdirectories(self, tmp_path):
+        """Specs in issue-specific subdirectories are found."""
         (tmp_path / "specs" / "issue-42-feat").mkdir(parents=True)
         (tmp_path / "specs" / "issue-42-feat" / "spec.md").write_text("x")
         (tmp_path / "specs").mkdir(exist_ok=True)
         (tmp_path / "specs" / "top-level.md").write_text("y")
 
         result = scan_artifacts(tmp_path)
-        assert result["specs"] == ["specs/top-level.md"]
+        assert "specs/top-level.md" in result["specs"]
+        assert "specs/issue-42-feat/spec.md" in result["specs"]
 
     def test_finds_all_artifact_types(self, tmp_path):
         for cat in ("specs", "adr", "blog", "plans", "snapshots"):
@@ -360,6 +361,67 @@ class TestPromotionFailureDetection:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert not (workspace / "design" / ".artifacts-promoted").exists()
+
+
+class TestPostPushVerification:
+    """After push, artifact_promote must verify artifacts are on origin/main."""
+
+    SCRIPT = Path(__file__).parent.parent / "work-end" / "artifact_promote.py"
+
+    def _init_repo_with_remote(self, path):
+        remote = path.parent / f".{path.name}-bare.git"
+        remote.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "--bare", str(remote)], capture_output=True, check=True)
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", str(remote), str(path)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "-b", "main"], capture_output=True)
+        (path / "README.md").write_text("# test\n")
+        subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-m", "init"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(path), "push", "-u", "origin", "main"], capture_output=True, check=True)
+        return path, remote
+
+    def test_reports_verified_after_successful_push(self, tmp_path):
+        """After push succeeds, PUSH_VERIFIED=yes confirms artifacts on origin/main."""
+        ws, remote = self._init_repo_with_remote(tmp_path / "workspace")
+
+        subprocess.run(["git", "-C", str(ws), "checkout", "-b", "feat"], capture_output=True, check=True)
+        (ws / "blog").mkdir()
+        (ws / "blog" / "entry.md").write_text("# Blog\n")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "add blog"], capture_output=True, check=True)
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT), "to-workspace-main", str(ws),
+             "branch=feat", "artifacts=blog/entry.md"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "PUSHED=yes" in result.stdout
+        assert "PUSH_VERIFIED=yes" in result.stdout
+
+    def test_push_failure_triggers_no_verification(self, tmp_path):
+        """When push itself fails, PUSHED=failed is reported and no verification runs."""
+        ws, remote = self._init_repo_with_remote(tmp_path / "workspace")
+
+        subprocess.run(["git", "-C", str(ws), "checkout", "-b", "feat"], capture_output=True, check=True)
+        (ws / "blog").mkdir()
+        (ws / "blog" / "entry.md").write_text("# Blog\n")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "add blog"], capture_output=True, check=True)
+
+        # Break the remote so push fails
+        shutil.rmtree(remote)
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT), "to-workspace-main", str(ws),
+             "branch=feat", "artifacts=blog/entry.md"],
+            capture_output=True, text=True,
+        )
+        assert "PUSHED=failed" in result.stdout
+        assert "PUSH_VERIFIED" not in result.stdout, "Verification should not run when push fails"
 
 
 class TestCleanupSpecsRemoved:

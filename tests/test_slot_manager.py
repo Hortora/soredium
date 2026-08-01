@@ -1,5 +1,7 @@
 """Tests for work-slot/slot_manager.py"""
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -93,6 +95,41 @@ class TestResolveWorkspaceSource:
         repo.mkdir(parents=True)
         result = slot_manager.resolve_workspace_source(repo)
         assert result is None
+
+
+class TestWorkspaceNameCollision:
+    @patch("slot_manager.run_cmd")
+    def test_deconflicts_workspace_name_with_repo_name(self, mock_cmd, tmp_path):
+        """When a repo is named 'work' and the shared workspace would also
+        clone as 'work', create_slot must deconflict the names."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        work_repo = init_repo(family / "work")
+        shared_ws = init_repo(tmp_path / "public" / "casehub")
+        (shared_ws / "work").mkdir()
+        (work_repo / "wksp").symlink_to(shared_ws / "work")
+
+        mock_cmd.return_value = (0, "", "")
+
+        result = slot_manager.create_slot(
+            family_root=family,
+            repos=["work"],
+            branch="issue-99-test",
+            issue="99",
+            issue_repo="casehubio/parent",
+            covers="99",
+            context="Test collision",
+        )
+
+        slot_dir = family / "worktrees" / str(result["slot_number"])
+        assert (slot_dir / ".slot").exists()
+        # The workspace clone must NOT be at slot_dir/work (that's the repo)
+        # It should be at slot_dir/work-casehub (deconflicted)
+        assert not any(
+            c.args[0] == "git" and "clone" in c.args and str(slot_dir / "work") == c.args[-1]
+            for c in mock_cmd.call_args_list
+            if len(c.args[0]) > 3 and isinstance(c.args[0], list)
+        ), "workspace clone tried to use same path as repo clone"
 
 
 class TestSetupMavenConfig:
@@ -962,3 +999,285 @@ class TestEnsureCloneLayout:
         exit_code = slot_manager.merge_slot(family, 1)
         assert exit_code == 0
         assert (originals["engine"] / "feature.py").exists()
+
+
+class TestCleanupRemnantDir:
+    def test_removes_idea_directory(self, tmp_path):
+        target = tmp_path / "repo"
+        target.mkdir()
+        (target / ".idea").mkdir()
+        (target / ".idea" / "workspace.xml").write_text("<xml/>")
+        assert slot_manager._cleanup_remnant_dir(target) is True
+        assert not target.exists()
+
+    def test_removes_multiple_ide_artifacts(self, tmp_path):
+        target = tmp_path / "repo"
+        target.mkdir()
+        for name in [".idea", ".run", ".vscode"]:
+            d = target / name
+            d.mkdir()
+            (d / "config").write_text("x")
+        assert slot_manager._cleanup_remnant_dir(target) is True
+        assert not target.exists()
+
+    def test_preserves_non_ide_content(self, tmp_path):
+        target = tmp_path / "repo"
+        target.mkdir()
+        (target / ".idea").mkdir()
+        (target / "src.java").write_text("class Foo {}")
+        assert slot_manager._cleanup_remnant_dir(target) is False
+        assert target.exists()
+        assert not (target / ".idea").exists()
+        assert (target / "src.java").exists()
+
+    def test_nonexistent_path_returns_true(self, tmp_path):
+        assert slot_manager._cleanup_remnant_dir(tmp_path / "nonexistent") is True
+
+    def test_already_empty_dir(self, tmp_path):
+        target = tmp_path / "empty"
+        target.mkdir()
+        assert slot_manager._cleanup_remnant_dir(target) is True
+        assert not target.exists()
+
+    def test_nested_ide_artifacts(self, tmp_path):
+        """Slot dir with subdirs that each only have IDE artifacts."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        engine = slot / "engine"
+        engine.mkdir()
+        (engine / ".idea").mkdir()
+        (engine / ".idea" / "workspace.xml").write_text("<xml/>")
+        assert slot_manager._cleanup_remnant_dir(slot) is True
+        assert not slot.exists()
+
+
+class TestMigrateWorktreeIdeCleanup:
+    def test_migration_succeeds_despite_ide_artifacts(self, tmp_path):
+        """After git worktree remove leaves .idea behind, migration should clean it and succeed."""
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        wt_path = slot / "engine"
+        assert slot_manager.is_worktree(wt_path)
+
+        (wt_path / ".idea").mkdir()
+        (wt_path / ".idea" / "workspace.xml").write_text("<xml/>")
+
+        result = slot_manager._migrate_worktree_to_clone(wt_path)
+        assert result is True
+        assert not slot_manager.is_worktree(wt_path)
+        assert (wt_path / ".git").is_dir()
+        assert (wt_path / "feature.py").exists()
+
+
+class TestArchiveSlotDoubleArchive:
+    def test_blocks_when_attic_slot_already_exists(self, tmp_path, capsys):
+        """archive_slot must refuse if attic/<N>/ already exists — prevents nesting."""
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        # First archive — should succeed
+        slot_manager.archive_slot(family, 1)
+        assert (family / "worktrees" / "attic" / "1").exists()
+
+        # Recreate slot dir (simulates remnant ghost)
+        (family / "worktrees" / "1").mkdir()
+        (family / "worktrees" / "1" / ".slot").write_text("ghost")
+
+        # Second archive — should error, not nest
+        with pytest.raises(SystemExit):
+            slot_manager.archive_slot(family, 1, force=True)
+        captured = capsys.readouterr()
+        assert "ERROR=attic_slot_exists" in captured.out
+
+
+class TestArchiveSlotCleanup:
+    def test_cleans_remnant_after_move(self, tmp_path):
+        """If shutil.move succeeds but source dir reappears, archive cleans it up."""
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        original_move = shutil.move
+
+        def move_then_recreate(src, dst):
+            result = original_move(src, dst)
+            Path(src).mkdir(parents=True)
+            (Path(src) / "engine").mkdir()
+            (Path(src) / "engine" / ".idea").mkdir()
+            return result
+
+        with patch("slot_manager.shutil.move", side_effect=move_then_recreate):
+            slot_manager.archive_slot(family, 1)
+
+        assert not slot.exists(), "remnant directory should be cleaned after archive"
+        assert (family / "worktrees" / "attic" / "1").exists()
+
+    def test_warns_if_remnant_persists(self, tmp_path, capsys):
+        """If cleanup can't remove the dir (non-IDE content), warn."""
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        original_move = shutil.move
+
+        def move_then_recreate_with_content(src, dst):
+            result = original_move(src, dst)
+            Path(src).mkdir(parents=True)
+            (Path(src) / "real_file.txt").write_text("not an IDE artifact")
+            return result
+
+        with patch("slot_manager.shutil.move", side_effect=move_then_recreate_with_content):
+            slot_manager.archive_slot(family, 1)
+
+        captured = capsys.readouterr()
+        assert "WARN=remnant_dir_persists" in captured.out
+
+
+class TestEscapeSlotCwd:
+    def test_escapes_when_cwd_inside_slot(self, tmp_path):
+        slot = tmp_path / "worktrees" / "1"
+        slot.mkdir(parents=True)
+        escape_to = tmp_path
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(slot)
+            assert slot_manager._escape_slot_cwd(slot, escape_to) is True
+            assert Path.cwd().resolve() == escape_to.resolve()
+        finally:
+            os.chdir(original_cwd)
+
+    def test_escapes_when_cwd_in_subdirectory(self, tmp_path):
+        slot = tmp_path / "worktrees" / "1"
+        engine = slot / "engine"
+        engine.mkdir(parents=True)
+        escape_to = tmp_path
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(engine)
+            assert slot_manager._escape_slot_cwd(slot, escape_to) is True
+            assert Path.cwd().resolve() == escape_to.resolve()
+        finally:
+            os.chdir(original_cwd)
+
+    def test_noop_when_cwd_outside_slot(self, tmp_path):
+        slot = tmp_path / "worktrees" / "1"
+        slot.mkdir(parents=True)
+        escape_to = tmp_path
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            assert slot_manager._escape_slot_cwd(slot, escape_to) is False
+        finally:
+            os.chdir(original_cwd)
+
+
+class TestArchiveSlotPromotionGate:
+    def test_warns_when_no_promotion_stamp(self, tmp_path, capsys):
+        """archive_slot should warn when .artifacts-promoted stamp is missing."""
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        # No .artifacts-promoted stamp — promotion never ran
+        slot_manager.archive_slot(family, 1)
+
+        captured = capsys.readouterr()
+        assert "WARN=artifacts_not_promoted" in captured.out
+
+    def test_no_warning_when_stamp_exists(self, tmp_path, capsys):
+        """No warning when .artifacts-promoted stamp is present."""
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        # Simulate promotion stamp from close_artifacts.py
+        ws_dirs = [d for d in slot.iterdir() if d.is_dir() and d.name.startswith("work")]
+        # No workspace dir in this test — create a fake design/ with stamp
+        # The stamp lives in workspace design/ but for non-workspace slots, we check the slot itself
+        stamp_dir = slot / "design"
+        stamp_dir.mkdir(exist_ok=True)
+        (stamp_dir / ".artifacts-promoted").write_text("timestamp=2026-07-31\n")
+
+        slot_manager.archive_slot(family, 1)
+
+        captured = capsys.readouterr()
+        assert "WARN=artifacts_not_promoted" not in captured.out
+
+    def test_force_archive_still_warns_about_promotion(self, tmp_path, capsys):
+        """Even --force should warn about missing promotion stamp."""
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+
+        slot_manager.archive_slot(family, 1, force=True)
+
+        captured = capsys.readouterr()
+        assert "WARN=artifacts_not_promoted" in captured.out
+
+
+class TestClaudeProjectMatching:
+    def test_exact_match(self):
+        assert slot_manager._claude_project_matches(
+            "-path-worktrees-1", "-path-worktrees-1"
+        ) is True
+
+    def test_subdirectory_match(self):
+        assert slot_manager._claude_project_matches(
+            "-path-worktrees-1-engine", "-path-worktrees-1"
+        ) is True
+
+    def test_no_false_positive_on_prefix_number(self):
+        """Slot 1 must not match slot 10, 11, 100, etc."""
+        assert slot_manager._claude_project_matches(
+            "-path-worktrees-10", "-path-worktrees-1"
+        ) is False
+        assert slot_manager._claude_project_matches(
+            "-path-worktrees-10-engine", "-path-worktrees-1"
+        ) is False
+
+    def test_no_match_on_unrelated(self):
+        assert slot_manager._claude_project_matches(
+            "-path-worktrees-2-engine", "-path-worktrees-1"
+        ) is False
+
+
+class TestIsProjectRepo:
+    def test_excludes_workspace_dirs(self):
+        assert slot_manager.is_project_repo("work") is False
+        assert slot_manager.is_project_repo("work-casehub") is False
+        assert slot_manager.is_project_repo("work-casehub-ras") is False
+
+    def test_includes_real_repos(self):
+        assert slot_manager.is_project_repo("engine") is True
+        assert slot_manager.is_project_repo("blocks") is True
+
+    def test_includes_worker_named_repos(self):
+        """Repos named 'worker', 'workflow' etc must not be excluded."""
+        assert slot_manager.is_project_repo("worker") is True
+        assert slot_manager.is_project_repo("workflow") is True
+        assert slot_manager.is_project_repo("workbench") is True
+
+    def test_excludes_infrastructure_dirs(self):
+        assert slot_manager.is_project_repo(".m2") is False
+        assert slot_manager.is_project_repo("attic") is False
+
+
+class TestRemoveSlotForceDeleteClaude:
+    def test_force_delete_removes_claude_projects(self, tmp_path, monkeypatch):
+        """force-delete must remove Claude session dirs for the destroyed slot."""
+        family = tmp_path / "casehub"
+        slot = family / "worktrees" / "1"
+        slot.mkdir(parents=True)
+        (slot / ".slot").write_text("test")
+        repo = slot / "engine"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+
+        fake_home = tmp_path / "home"
+        claude_projects = fake_home / ".claude" / "projects"
+        claude_projects.mkdir(parents=True)
+        slot_path_encoded = str(slot / "engine").replace("/", "-")
+        proj_dir = claude_projects / slot_path_encoded
+        proj_dir.mkdir()
+        (proj_dir / "memory.md").write_text("session memory")
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        with patch("slot_manager.run_cmd") as mock_cmd:
+            mock_cmd.return_value = (0, "", "")
+            slot_manager.remove_slot(family, 1, force_delete=True)
+
+        assert not proj_dir.exists(), "Claude session dir was not removed during force-delete"

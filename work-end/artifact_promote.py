@@ -7,13 +7,13 @@ Usage: python3 artifact_promote.py <subcommand> <args...>
 Subcommands:
     to-workspace-main  <workspace> branch=<name> artifacts=<comma-sep-paths>
     to-project         <project> <workspace> artifacts=<comma-sep-paths>
-    cleanup-specs      <workspace> branch=<name>
     close-issues       <repo> covers=<comma-sep-issue-numbers>
     archive-plans      <workspace> branch=<name>
 
 Output (KEY=value lines):
     PROMOTED=<count>   (for to-workspace-main, to-project)
-    CLEANED=<count>    (for cleanup-specs)
+    PUSHED=yes|failed|skipped
+    PUSH_VERIFIED=yes|failed  (after successful push, verifies artifacts on origin/main)
     CLOSED=<count>     (for close-issues)
 
 Error output:
@@ -48,7 +48,7 @@ def _has_remote(cwd: str) -> bool:
         return False
 
 
-def _push_or_report(cwd: str) -> None:
+def _push_or_report(cwd: str, verify_paths: list[str] | None = None) -> None:
     if not _has_remote(cwd):
         print("PUSHED=skipped")
         return
@@ -58,6 +58,26 @@ def _push_or_report(cwd: str) -> None:
     except subprocess.CalledProcessError as e:
         print("PUSHED=failed")
         print(f"PUSH_ERROR={e.stderr.strip()}")
+        return
+
+    if verify_paths:
+        try:
+            git("fetch", "origin", "main", cwd=cwd)
+        except subprocess.CalledProcessError:
+            print("PUSH_VERIFIED=failed")
+            print("PUSH_VERIFY_DETAIL=fetch origin/main failed after push")
+            return
+        missing = []
+        for path in verify_paths:
+            try:
+                git("cat-file", "-e", f"origin/main:{path}", cwd=cwd)
+            except subprocess.CalledProcessError:
+                missing.append(path)
+        if missing:
+            print("PUSH_VERIFIED=failed")
+            print(f"PUSH_VERIFY_MISSING={','.join(missing)}")
+        else:
+            print("PUSH_VERIFIED=yes")
 
 
 def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
@@ -110,6 +130,8 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
             skipped.append(artifact)
             print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
 
+    promoted_paths = [a for a in artifacts if a not in skipped]
+
     if promoted > 0:
         try:
             git("commit", "-m", f"docs(work-end): promote artifacts from {branch}", cwd=workspace)
@@ -120,7 +142,7 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
                 print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
                 return 1
 
-        _push_or_report(workspace)
+        _push_or_report(workspace, verify_paths=promoted_paths)
 
     # Switch back to branch
     try:
@@ -187,6 +209,8 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             skipped.append(artifact)
             print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
 
+    promoted_paths = [a for a in artifacts if a not in skipped]
+
     if promoted > 0:
         try:
             git("commit", "-m", "docs(work-end): promote artifacts from workspace", cwd=project)
@@ -196,7 +220,7 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
                 print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
                 return 1
 
-        _push_or_report(project)
+        _push_or_report(project, verify_paths=promoted_paths)
 
     print(f"PROMOTED={promoted}")
     if skipped:

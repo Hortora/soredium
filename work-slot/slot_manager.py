@@ -33,6 +33,39 @@ except ImportError:
     _wl = None
 
 
+_IDE_ARTIFACTS = {".idea", ".run", ".settings", ".project", ".classpath", ".vscode"}
+
+
+def _cleanup_remnant_dir(path: Path) -> bool:
+    """Remove IDE artifacts and empty directories left after git operations.
+    Recurses into subdirectories. Returns True if path no longer exists."""
+    if not path.exists():
+        return True
+    for item in list(path.iterdir()):
+        if item.is_dir() and item.name in _IDE_ARTIFACTS:
+            shutil.rmtree(str(item), ignore_errors=True)
+        elif item.is_dir():
+            _cleanup_remnant_dir(item)
+    try:
+        path.rmdir()
+        return True
+    except OSError:
+        return False
+
+
+def _escape_slot_cwd(slot_dir: Path, escape_to: Path) -> bool:
+    """If CWD is inside slot_dir, chdir to escape_to. Returns True if moved."""
+    try:
+        cwd = Path.cwd().resolve()
+        slot_resolved = slot_dir.resolve()
+        if cwd == slot_resolved or slot_resolved in cwd.parents:
+            os.chdir(escape_to)
+            return True
+    except OSError:
+        pass
+    return False
+
+
 def run_cmd(args: list[str], cwd: str | None = None) -> tuple[int, str, str]:
     result = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
     return result.returncode, result.stdout, result.stderr
@@ -221,6 +254,8 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         ws_info = resolve_workspace_source(repo_path)
         if ws_info:
             ws_source, ws_name = ws_info
+            if ws_name in repos:
+                ws_name = f"work-{ws_source.name}"
             ws_key = str(ws_source)
             ws_slot_dir = slot_dir / ws_name
 
@@ -296,7 +331,11 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
 
 
 def is_project_repo(name: str) -> bool:
-    return not name.startswith("work") and name != ".m2" and name != "attic"
+    if name in (".m2", "attic"):
+        return False
+    if name == "work" or name.startswith("work-"):
+        return False
+    return True
 
 
 def get_slot_repos(slot_dir: Path) -> list[str]:
@@ -479,7 +518,9 @@ def _migrate_worktree_to_clone(worktree_path: Path) -> bool:
             return False
 
         rc, _, stderr = run_cmd(["git", "-C", str(original), "worktree", "remove", "--force", str(worktree_path)])
-        if rc != 0 or worktree_path.exists():
+        if worktree_path.exists():
+            _cleanup_remnant_dir(worktree_path)
+        if rc != 0 and worktree_path.exists():
             print(f"WARN=migration_worktree_remove_failed path={worktree_path} stderr={stderr.strip()}")
             return False
 
@@ -650,6 +691,16 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     return 1
 
 
+def _claude_project_matches(proj_name: str, slot_path_encoded: str) -> bool:
+    """Check if a Claude project directory name matches a slot path.
+    Uses boundary-aware matching to prevent /worktrees/1 matching /worktrees/10."""
+    if proj_name == slot_path_encoded:
+        return True
+    if proj_name.startswith(slot_path_encoded + "-"):
+        return True
+    return False
+
+
 def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
     """Move .claude/projects/ directories to match the slot's new attic path."""
     claude_projects = Path.home() / ".claude" / "projects"
@@ -663,13 +714,31 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
     for proj_dir in claude_projects.iterdir():
         if not proj_dir.is_dir():
             continue
-        if slot_path_encoded in proj_dir.name:
-            new_name = proj_dir.name.replace(slot_path_encoded, dest_path_encoded)
+        if _claude_project_matches(proj_dir.name, slot_path_encoded):
+            new_name = proj_dir.name.replace(slot_path_encoded, dest_path_encoded, 1)
             new_path = claude_projects / new_name
             if not new_path.exists():
                 shutil.move(str(proj_dir), str(new_path))
                 moved += 1
     return moved
+
+
+def remove_claude_projects(slot_dir: Path) -> int:
+    """Remove .claude/projects/ directories that reference a slot being destroyed."""
+    claude_projects = Path.home() / ".claude" / "projects"
+    if not claude_projects.is_dir():
+        return 0
+
+    slot_path_encoded = str(slot_dir).replace("/", "-")
+    removed = 0
+
+    for proj_dir in list(claude_projects.iterdir()):
+        if not proj_dir.is_dir():
+            continue
+        if _claude_project_matches(proj_dir.name, slot_path_encoded):
+            shutil.rmtree(str(proj_dir), ignore_errors=True)
+            removed += 1
+    return removed
 
 
 def is_slot_landed(slot_dir: Path) -> bool:
@@ -726,11 +795,29 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
                 print(f"ERROR_DETAIL={f}")
             print("HINT=pass --force to override, or investigate the failed merge")
             sys.exit(1)
+    has_promotion_stamp = any(
+        (sub / "design" / ".artifacts-promoted").exists()
+        for sub in slot_dir.iterdir()
+        if sub.is_dir()
+    ) or (slot_dir / "design" / ".artifacts-promoted").exists()
+    if not has_promotion_stamp:
+        print(f"WARN=artifacts_not_promoted slot={slot_num}")
+
     attic_dir = family_root / "worktrees" / "attic"
     attic_dir.mkdir(exist_ok=True)
     dest = attic_dir / str(slot_num)
+    if dest.exists():
+        print(f"ERROR=attic_slot_exists slot={slot_num}")
+        print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
+        sys.exit(1)
     moved = relocate_claude_projects(slot_dir, dest)
+    escaped = _escape_slot_cwd(slot_dir, family_root)
+    if escaped:
+        print(f"CWD_ESCAPED={family_root}")
     shutil.move(str(slot_dir), str(dest))
+    if slot_dir.exists():
+        if not _cleanup_remnant_dir(slot_dir):
+            print(f"WARN=remnant_dir_persists path={slot_dir}")
     if moved:
         print(f"CLAUDE_PROJECTS_MOVED={moved}")
 
@@ -807,7 +894,14 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
         print("HINT=pass --force-delete to override, or run work-end first")
         sys.exit(1)
 
+    escaped = _escape_slot_cwd(slot_dir, family_root)
+    if escaped:
+        print(f"CWD_ESCAPED={family_root}")
+
     if force_delete:
+        removed = remove_claude_projects(slot_dir)
+        if removed:
+            print(f"CLAUDE_PROJECTS_REMOVED={removed}")
         for sub in slot_dir.iterdir():
             if sub.is_dir() and (sub / ".git").exists():
                 if is_worktree(sub):
@@ -815,13 +909,22 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
                 else:
                     shutil.rmtree(str(sub), ignore_errors=True)
         shutil.rmtree(slot_dir, ignore_errors=True)
+        if slot_dir.exists():
+            _cleanup_remnant_dir(slot_dir)
         print(f"DELETED={slot_num}")
     else:
         attic_dir = family_root / "worktrees" / "attic"
         attic_dir.mkdir(exist_ok=True)
         dest = attic_dir / str(slot_num)
+        if dest.exists():
+            print(f"ERROR=attic_slot_exists slot={slot_num}")
+            print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
+            sys.exit(1)
         moved = relocate_claude_projects(slot_dir, dest)
         shutil.move(str(slot_dir), str(dest))
+        if slot_dir.exists():
+            if not _cleanup_remnant_dir(slot_dir):
+                print(f"WARN=remnant_dir_persists path={slot_dir}")
         if moved:
             print(f"CLAUDE_PROJECTS_MOVED={moved}")
         print(f"ARCHIVED={slot_num}")

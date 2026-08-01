@@ -108,13 +108,17 @@ Set active issue for commit linkage (`Refs #$EPIC_ACTIVE_ISSUE`).
 
 If `IN_SLOT=yes` but `IS_EPIC=no`: read .slot for issue context.
 
+**Load design specs (mandatory):** Run work-start Step 3c — scan workspace
+and project for specs, read them all. These are the design decisions for
+this branch. Do not begin implementation without them.
+
 Summarise what the last session accomplished and continue working.
 Do NOT invoke work-start — the branch and scaffold already exist.
 
 **On start (option 1 when `HAS_HANDOFF=no`):**
 
-No handover to read. Run work-start resume path (Steps 0, 2, 3, 3b, 11)
-for platform coherence, protocols, and IntelliJ pre-checks.
+No handover to read. Run work-start resume path (Steps 0, 2, 3, 3b, 3c, 11)
+for platform coherence, protocols, spec loading, and IntelliJ pre-checks.
 If `IS_EPIC=yes` or `IN_SLOT=yes`: read epic/slot context as above.
 Then begin working — the branch and scaffold already exist.
 

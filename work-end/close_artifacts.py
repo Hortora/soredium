@@ -179,6 +179,9 @@ def main() -> int:
             failures.append(f"workspace promotion: all artifacts skipped ({skipped})")
         if out.get("PUSHED") == "failed":
             failures.append(f"workspace push failed: {out.get('PUSH_ERROR', 'unknown')}")
+        if out.get("PUSH_VERIFIED") == "failed":
+            missing = out.get("PUSH_VERIFY_MISSING", "unknown")
+            failures.append(f"workspace push verification failed: artifacts not on origin/main ({missing})")
     else:
         results["workspace_promoted"] = "0"
 
@@ -196,6 +199,9 @@ def main() -> int:
             failures.append(f"project promotion: all artifacts skipped ({skipped})")
         if out.get("PUSHED") == "failed":
             failures.append(f"project push failed: {out.get('PUSH_ERROR', 'unknown')}")
+        if out.get("PUSH_VERIFIED") == "failed":
+            missing = out.get("PUSH_VERIFY_MISSING", "unknown")
+            failures.append(f"project push verification failed: artifacts not on origin/main ({missing})")
     else:
         results["project_promoted"] = "0"
 

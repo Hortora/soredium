@@ -443,10 +443,6 @@ If `STAGE=push STATUS=pass`: continue to 4b.
   ```bash
   python3 ~/.claude/skills/work-end/artifact_promote.py to-workspace-main <original-workspace> branch=<branch> artifacts=<paths>
   ```
-- Clean up specs in slot workspace:
-  ```bash
-  python3 ~/.claude/skills/work-end/artifact_promote.py cleanup-specs <slot-workspace> branch=<branch>
-  ```
 - Publish blog:
   ```bash
   python3 ~/.claude/skills/work-end/blog_dest.py <original-workspace>/blog <branch>

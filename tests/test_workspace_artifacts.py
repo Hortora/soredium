@@ -252,15 +252,62 @@ class TestScanEdgeCases:
         result = scan(tmp_path)
         assert len(result["snapshots"]) == 2
 
-    def test_subdirectories_in_artifact_dirs_ignored(self, tmp_path):
-        """Only top-level files are scanned, not nested subdirs."""
+    def test_specs_in_issue_subdirectories_found(self, tmp_path):
+        """Specs organized in issue-specific subdirectories must be found."""
         (tmp_path / "specs").mkdir()
         (tmp_path / "specs" / "design.md").write_text("spec")
-        (tmp_path / "specs" / "subfolder").mkdir()
-        (tmp_path / "specs" / "subfolder" / "nested.md").write_text("nested")
+        issue_dir = tmp_path / "specs" / "issue-273-cloudevent-adapter"
+        issue_dir.mkdir()
+        (issue_dir / "2026-06-23-adapter-design.md").write_text("nested spec")
 
         result = scan(tmp_path)
-        assert result["specs"] == ["specs/design.md"]
+        assert "specs/design.md" in result["specs"]
+        assert "specs/issue-273-cloudevent-adapter/2026-06-23-adapter-design.md" in result["specs"]
+
+    def test_blogs_in_subdirectories_found(self, tmp_path):
+        """Blog entries in subdirectories must be found."""
+        (tmp_path / "blog").mkdir()
+        (tmp_path / "blog" / "2026-07-01-entry.md").write_text("top-level")
+        sub = tmp_path / "blog" / "2026-07"
+        sub.mkdir()
+        (sub / "2026-07-15-deep.md").write_text("nested")
+
+        result = scan(tmp_path)
+        assert "blog/2026-07-01-entry.md" in result["blog"]
+        assert "blog/2026-07/2026-07-15-deep.md" in result["blog"]
+
+    def test_plans_attic_subdirectory_excluded(self, tmp_path):
+        """Plans in attic/ subdirectories must still be excluded."""
+        (tmp_path / "plans").mkdir()
+        (tmp_path / "plans" / "current-plan.md").write_text("plan")
+        attic = tmp_path / "plans" / "attic" / "issue-87"
+        attic.mkdir(parents=True)
+        (attic / "archived-plan.md").write_text("old")
+
+        result = scan(tmp_path)
+        assert result["plans"] == ["plans/current-plan.md"]
+
+    def test_adrs_in_docs_adr_found(self, tmp_path):
+        """ADRs at docs/adr/ (not just adr/) must be found."""
+        docs_adr = tmp_path / "docs" / "adr"
+        docs_adr.mkdir(parents=True)
+        (docs_adr / "0001-decision.md").write_text("# ADR")
+        (docs_adr / "INDEX.md").write_text("# Index")
+
+        result = scan(tmp_path)
+        assert result["adr"] == ["docs/adr/0001-decision.md"]
+
+    def test_adrs_from_both_locations_merged(self, tmp_path):
+        """If both adr/ and docs/adr/ exist, both are scanned."""
+        (tmp_path / "adr").mkdir()
+        (tmp_path / "adr" / "0001-top.md").write_text("# ADR")
+        docs_adr = tmp_path / "docs" / "adr"
+        docs_adr.mkdir(parents=True)
+        (docs_adr / "0002-nested.md").write_text("# ADR")
+
+        result = scan(tmp_path)
+        assert "adr/0001-top.md" in result["adr"]
+        assert "docs/adr/0002-nested.md" in result["adr"]
 
     def test_design_dir_not_scanned_as_artifact(self, tmp_path):
         """design/ contains .meta and JOURNAL.md — not an artifact category."""

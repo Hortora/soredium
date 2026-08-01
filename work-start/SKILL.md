@@ -188,6 +188,13 @@ If no results: proceed silently.
 **Skip** if the garden is not configured or the work description has no
 searchable domain keywords (e.g., a pure tooling or docs task).
 
+### Step 3c — Load existing specs
+
+See Resume Path below for the full step definition. This step is shared
+between the new-branch and resume paths. On new branches, pre-existing
+specs from a prior branch or related issue may already exist in the
+project's `docs/specs/` directory — load them if they match the issue.
+
 ### Step 4 — Issue
 
 If tracking disabled: skip silently. Set `ISSUE_N`, `ISSUE_TITLE`, `ISSUE_REPO_GITHUB` to blank. Proceed to Step 5.
@@ -531,7 +538,51 @@ Surface `.meta`:
    Project: <branch>  Workspace: <branch>
 ```
 
-Run Steps 0, 2, 3, 3b, 11 only. Skip all branch creation steps.
+Run Steps 0, 2, 3, 3b, 3c, 11 only. Skip all branch creation steps.
+
+### Step 3c — Load existing specs (MANDATORY — do not skip)
+
+**This step runs on both resume and new-branch paths.** Design specs are
+the authoritative source of architectural decisions for the branch. Working
+without them leads to proposing alternatives to settled designs.
+
+Scan **all** locations where specs may exist. Search the issue number
+(from `.meta`) and the branch slug — specs may use either as an
+organising key, or may use date-based names with no issue reference.
+
+**Always search both workspace AND project — never just one.**
+
+```bash
+# 1. Workspace specs (created during brainstorming)
+find "$WORKSPACE/specs/" -name "*.md" -not -name "INDEX.md" 2>/dev/null
+
+# 2. Project specs (promoted at close, or pre-existing)
+#    THIS IS THE MOST COMMONLY MISSED LOCATION
+find "$PROJECT/docs/specs/" -name "*.md" -not -name "INDEX.md" 2>/dev/null
+
+# 3. Slot workspace specs (if in slot context)
+find "$SLOT_WORKSPACE/specs/" -name "*.md" -not -name "INDEX.md" 2>/dev/null
+```
+
+**If specs are found:**
+1. Read every spec file found (they are design decisions, not optional context)
+2. Surface them:
+   ```
+   Design specs loaded:
+     - <path-1> — <first-line-title>
+     - <path-2> — <first-line-title>
+   ```
+3. Carry these as the **design context** for all implementation work — do not
+   propose alternatives to decisions documented in specs without first flagging
+   the contradiction
+
+**If no specs found:** proceed silently — the branch may not have reached
+the design phase yet.
+
+**Why mandatory:** The slot 66 incident showed that missing specs during
+context gathering led to re-deriving design decisions that had already been
+made, wasting effort and risking contradictions. Specs are cheap to read
+and expensive to miss.
 
 ### Epic Overlay
 
@@ -570,6 +621,7 @@ Platform doc: [read / not found]
 Coherence Protocol: [any concerns raised, or "clear"]
 Protocols checked: [list any relevant ones read]
 Garden search: [N GEs surfaced for <domain> / no matches / skipped]
+Design specs: [N specs loaded / none found]
 Project board: [N issues activated / not configured / failed: <reason>]
 IntelliJ: ✅ connected / ✅ connected, project auto-opened / ⚠️ MCP unavailable after retry — stopped / ⚠️ MCP unavailable (user confirmed docs-only, proceeding explicitly)
 
