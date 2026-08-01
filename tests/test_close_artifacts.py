@@ -206,9 +206,10 @@ class TestPromotionFailureDetection:
         subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
         subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
 
-    def test_fails_when_workspace_artifacts_found_but_none_promoted(self, tmp_path):
-        """Scan finds workspace-routed artifacts but to-workspace-main returns PROMOTED=0.
-        close_artifacts should exit 2 (partial failure), not 0."""
+    def test_promotes_workspace_artifacts_from_scan_source(self, tmp_path):
+        """Scan finds workspace-routed artifacts in scan-workspace.
+        With source-dir fix, to-workspace-main copies from scan source.
+        Previously this was BUG 1 — branch not available, all skipped."""
         workspace = tmp_path / "workspace"
         project = tmp_path / "project"
         scan_ws = tmp_path / "scan-ws"
@@ -217,26 +218,14 @@ class TestPromotionFailureDetection:
         (workspace / "design").mkdir()
         scan_ws.mkdir()
 
-        # Scan source has specs
         (scan_ws / "specs").mkdir()
         (scan_ws / "specs" / "design.md").write_text("# Spec\n")
 
-        # Route specs to workspace (so they go through to-workspace-main)
         (scan_ws / "CLAUDE.md").write_text(
             "# Workspace\n\n## Routing\n\n"
             "| Artifact | Destination | Notes |\n"
             "|----------|-------------|-------|\n"
             "| specs | workspace | |\n"
-        )
-
-        # Create branch in workspace (no specs committed to it)
-        subprocess.run(
-            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-test"],
-            capture_output=True, check=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(workspace), "checkout", "main"],
-            capture_output=True, check=True,
         )
 
         result = subprocess.run(
@@ -246,15 +235,15 @@ class TestPromotionFailureDetection:
             capture_output=True, text=True,
         )
 
-        assert result.returncode == 2, (
-            f"Expected exit 2 (partial failure) but got {result.returncode}.\n"
+        assert result.returncode == 0, (
+            f"Expected exit 0 but got {result.returncode}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert not (workspace / "design" / ".artifacts-promoted").exists()
 
-    def test_fails_when_project_artifacts_found_but_none_promoted(self, tmp_path):
-        """Scan finds project-routed artifacts but to-project returns PROMOTED=0.
-        close_artifacts should exit 2 (partial failure)."""
+    def test_promotes_project_artifacts_from_scan_source(self, tmp_path):
+        """Scan finds project-routed artifacts in scan-workspace.
+        With scan_source fix, to-project reads from scan source.
+        Previously this was BUG 2 — read from original workspace, all skipped."""
         workspace = tmp_path / "workspace"
         project = tmp_path / "project"
         scan_ws = tmp_path / "scan-ws"
@@ -263,11 +252,8 @@ class TestPromotionFailureDetection:
         (workspace / "design").mkdir()
         scan_ws.mkdir()
 
-        # Scan source has specs (default routing: project)
         (scan_ws / "specs").mkdir()
         (scan_ws / "specs" / "design.md").write_text("# Spec\n")
-
-        # Workspace does NOT have these files — to-project will skip them
 
         result = subprocess.run(
             [sys.executable, str(self.SCRIPT),
@@ -276,11 +262,17 @@ class TestPromotionFailureDetection:
             capture_output=True, text=True,
         )
 
-        assert result.returncode == 2, (
-            f"Expected exit 2 (partial failure) but got {result.returncode}.\n"
+        out = {}
+        for line in result.stdout.strip().splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                out[k] = v
+
+        assert out.get("PROJECT_PROMOTED") == "1", (
+            f"Expected PROJECT_PROMOTED=1 but got {out.get('PROJECT_PROMOTED', '0')}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert not (workspace / "design" / ".artifacts-promoted").exists()
+        assert (project / "specs" / "design.md").is_file()
 
     def test_stamp_written_when_all_artifacts_promoted(self, tmp_path):
         """When promotion succeeds, stamp is written (regression guard)."""
@@ -517,3 +509,199 @@ class TestArchivePlans:
 
         # bad.md was NOT archived (checkout failed → skipped)
         assert not (attic / "bad.md").exists()
+
+
+# ===========================================================================
+# BUG 2: Slot mode — to_project reads from scan_source, not workspace
+# ===========================================================================
+
+class TestSlotModeProjectPromotion:
+    """Slot mode: scan_source has artifacts, but to_project reads from
+    workspace (original, on main) where they don't exist."""
+
+    SCRIPT = Path(__file__).parent.parent / "work-end" / "close_artifacts.py"
+
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_promotes_to_project_from_scan_source(self, tmp_path):
+        """When scan-workspace is set, to_project should read artifacts from
+        the scan source (slot workspace), not the original workspace.
+        BUG 2 regression test."""
+        workspace = tmp_path / "original-workspace"
+        project = tmp_path / "project"
+        slot_ws = tmp_path / "slot-workspace"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+
+        # Slot workspace has a spec (not the original workspace)
+        (slot_ws / "specs").mkdir(parents=True)
+        (slot_ws / "specs" / "design.md").write_text("# Spec from slot\n")
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-42-test",
+             f"scan-workspace={slot_ws}"],
+            capture_output=True, text=True,
+        )
+
+        out = {}
+        for line in result.stdout.strip().splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                out[k] = v
+
+        assert out.get("PROJECT_PROMOTED", "0") != "0", (
+            f"Expected PROJECT_PROMOTED >= 1 but got {out.get('PROJECT_PROMOTED', '0')}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert (project / "specs" / "design.md").is_file()
+
+
+# ===========================================================================
+# BUG 3: Slot mode — archive_plans with source-dir
+# ===========================================================================
+
+class TestSlotModeArchivePlans:
+    """Slot mode: archive_plans needs source-dir to copy plans from
+    slot workspace when branch doesn't exist on original workspace."""
+
+    def test_archives_from_source_dir(self, tmp_path):
+        """Plans should be archived from source-dir when the branch
+        doesn't exist on the original workspace. BUG 3 regression test."""
+        ws = tmp_path / "original-workspace"
+        ws.mkdir()
+        subprocess.run(["git", "init", str(ws)], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "checkout", "-b", "main"], capture_output=True)
+        (ws / "plans").mkdir()
+        (ws / "plans" / ".gitkeep").write_text("")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "init"], capture_output=True)
+
+        # Slot workspace has a plan file
+        slot_ws = tmp_path / "slot-workspace"
+        (slot_ws / "plans").mkdir(parents=True)
+        (slot_ws / "plans" / "implementation.md").write_text("# Plan\n")
+
+        script = Path(__file__).parent.parent / "work-end" / "artifact_promote.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "archive-plans", str(ws),
+             "branch=issue-42-test", f"source-dir={slot_ws}"],
+            capture_output=True, text=True,
+        )
+
+        out = {}
+        for line in result.stdout.strip().splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                out[k] = v
+
+        assert result.returncode == 0
+        assert int(out.get("ARCHIVED", "0")) >= 1, (
+            f"Expected ARCHIVED >= 1 but got {out.get('ARCHIVED', '0')}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+        subprocess.run(["git", "-C", str(ws), "checkout", "main"], capture_output=True)
+        attic = ws / "plans" / "attic" / "issue-42-test"
+        assert (attic / "implementation.md").exists()
+
+
+# ===========================================================================
+# End-to-end: slot mode through close_artifacts.py
+# ===========================================================================
+
+class TestSlotModeEndToEnd:
+    """Integration: close_artifacts.py with scan-workspace, both routing paths."""
+
+    SCRIPT = Path(__file__).parent.parent / "work-end" / "close_artifacts.py"
+
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_promotes_both_workspace_and_project_artifacts(self, tmp_path):
+        """Slot workspace has blog (workspace-routed) and specs (project-routed).
+        Both should be promoted successfully."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        slot_ws = tmp_path / "slot-ws"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+
+        (slot_ws / "blog").mkdir(parents=True)
+        (slot_ws / "blog" / "entry.md").write_text("# Blog\n")
+        (slot_ws / "specs").mkdir()
+        (slot_ws / "specs" / "design.md").write_text("# Spec\n")
+
+        (slot_ws / "CLAUDE.md").write_text(
+            "# Workspace\n\n## Routing\n\n"
+            "| Artifact | Destination | Notes |\n"
+            "|----------|-------------|-------|\n"
+            "| blog | workspace | |\n"
+            "| specs | project | |\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-42-test",
+             f"scan-workspace={slot_ws}"],
+            capture_output=True, text=True,
+        )
+
+        out = {}
+        for line in result.stdout.strip().splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                out[k] = v
+
+        assert out.get("WORKSPACE_PROMOTED", "0") != "0", (
+            f"Blog not promoted to workspace.\nstdout: {result.stdout}"
+        )
+        assert out.get("PROJECT_PROMOTED", "0") != "0", (
+            f"Spec not promoted to project.\nstdout: {result.stdout}"
+        )
+        assert (project / "specs" / "design.md").is_file()
+
+    def test_archives_plans_in_slot_mode(self, tmp_path):
+        """Plans in scan-workspace are archived to original workspace attic."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        slot_ws = tmp_path / "slot-ws"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+        (workspace / "plans").mkdir()
+        subprocess.run(["git", "-C", str(workspace), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "dirs"], capture_output=True)
+
+        (slot_ws / "plans").mkdir(parents=True)
+        (slot_ws / "plans" / "impl.md").write_text("# Plan\n")
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-99-test",
+             f"scan-workspace={slot_ws}"],
+            capture_output=True, text=True,
+        )
+
+        out = {}
+        for line in result.stdout.strip().splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                out[k] = v
+
+        assert int(out.get("PLANS_ARCHIVED", "0")) >= 1, (
+            f"Plans not archived.\nstdout: {result.stdout}"
+        )

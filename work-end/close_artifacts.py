@@ -166,11 +166,14 @@ def main() -> int:
 
     # Promote to workspace main
     if ws_artifacts:
-        rc, out = run_script("artifact_promote.py", [
+        ws_args = [
             "to-workspace-main", str(workspace),
             f"branch={branch}",
             f"artifacts={','.join(ws_artifacts)}",
-        ])
+        ]
+        if scan_source != workspace:
+            ws_args.append(f"source-dir={scan_source}")
+        rc, out = run_script("artifact_promote.py", ws_args)
         results["workspace_promoted"] = out.get("PROMOTED", "0")
         if rc != 0:
             failures.append(f"workspace promotion: {out.get('ERROR', 'unknown')}")
@@ -187,8 +190,9 @@ def main() -> int:
 
     # Promote to project
     if proj_artifacts:
+        read_source = str(scan_source) if scan_source != workspace else str(workspace)
         rc, out = run_script("artifact_promote.py", [
-            "to-project", str(project), str(workspace),
+            "to-project", str(project), read_source,
             f"artifacts={','.join(proj_artifacts)}",
         ])
         results["project_promoted"] = out.get("PROMOTED", "0")
@@ -207,9 +211,10 @@ def main() -> int:
 
     # Archive plans
     if artifacts["plans"]:
-        rc, out = run_script("artifact_promote.py", [
-            "archive-plans", str(workspace), f"branch={branch}",
-        ])
+        plan_args = ["archive-plans", str(workspace), f"branch={branch}"]
+        if scan_source != workspace:
+            plan_args.append(f"source-dir={scan_source}")
+        rc, out = run_script("artifact_promote.py", plan_args)
         results["plans_archived"] = out.get("ARCHIVED", "0")
         if rc != 0:
             failures.append(f"plan archival: {out.get('ERROR', 'unknown')}")

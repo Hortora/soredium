@@ -83,6 +83,7 @@ def _push_or_report(cwd: str, verify_paths: list[str] | None = None) -> None:
 def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
     branch = params.get("branch", "")
     artifacts_str = params.get("artifacts", "")
+    source_dir = params.get("source-dir", "")
 
     if not branch:
         print("ERROR=missing_branch")
@@ -115,20 +116,35 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
     try:
         git("pull", "--rebase", "origin", "main", cwd=workspace)
     except subprocess.CalledProcessError:
-        # Pull may fail if no remote — continue
         pass
 
-    # Checkout files from branch
     promoted = 0
     skipped: list[str] = []
     for artifact in artifacts:
-        try:
-            git("checkout", branch, "--", artifact, cwd=workspace)
+        if source_dir:
+            src = Path(source_dir) / artifact
+            if not src.exists():
+                skipped.append(artifact)
+                print(f"SKIP_DETAIL={artifact}: not found in source-dir", file=sys.stderr)
+                continue
+            dst = ws / artifact
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(str(src), str(dst))
+            else:
+                shutil.copy2(str(src), str(dst))
             git("add", artifact, cwd=workspace)
             promoted += 1
-        except subprocess.CalledProcessError as e:
-            skipped.append(artifact)
-            print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
+        else:
+            try:
+                git("checkout", branch, "--", artifact, cwd=workspace)
+                git("add", artifact, cwd=workspace)
+                promoted += 1
+            except subprocess.CalledProcessError as e:
+                skipped.append(artifact)
+                print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
 
     promoted_paths = [a for a in artifacts if a not in skipped]
 
@@ -193,13 +209,15 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             print(f"SKIP_DETAIL={artifact}: source not found", file=sys.stderr)
             continue
 
-        dst.parent.mkdir(parents=True, exist_ok=True)
-
-        if src.is_dir():
+        if src.resolve() == dst.resolve():
+            pass
+        elif src.is_dir():
+            dst.parent.mkdir(parents=True, exist_ok=True)
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
         else:
+            dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
 
         try:
@@ -267,13 +285,15 @@ def close_issues(repo: str, params: dict[str, str]) -> int:
 
 def archive_plans(workspace: str, params: dict[str, str]) -> int:
     branch = params.get("branch", "")
+    source_dir = params.get("source-dir", "")
     if not branch:
         print("ERROR=missing_branch")
         print("ERROR_DETAIL=branch= argument required")
         return 1
 
     ws = Path(workspace)
-    plans_dir = ws / "plans"
+    scan_root = Path(source_dir) if source_dir else ws
+    plans_dir = scan_root / "plans"
     if not plans_dir.is_dir():
         print("ARCHIVED=0")
         return 0
@@ -298,22 +318,33 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
     except subprocess.CalledProcessError:
         pass
 
+    ws_plans = ws / "plans"
+    ws_plans.mkdir(parents=True, exist_ok=True)
+
     skipped: list[str] = []
     for pf in plan_files:
-        rel = str(pf.relative_to(ws))
-        try:
-            git("checkout", branch, "--", rel, cwd=workspace)
-        except subprocess.CalledProcessError as e:
-            skipped.append(pf.name)
-            print(f"SKIP_DETAIL={pf.name}: {e.stderr.strip()}", file=sys.stderr)
+        if source_dir:
+            dst = ws_plans / pf.name
+            try:
+                shutil.copy2(str(pf), str(dst))
+            except Exception as e:
+                skipped.append(pf.name)
+                print(f"SKIP_DETAIL={pf.name}: {e}", file=sys.stderr)
+        else:
+            rel = str(pf.relative_to(ws))
+            try:
+                git("checkout", branch, "--", rel, cwd=workspace)
+            except subprocess.CalledProcessError as e:
+                skipped.append(pf.name)
+                print(f"SKIP_DETAIL={pf.name}: {e.stderr.strip()}", file=sys.stderr)
 
-    attic_dir = plans_dir / "attic" / branch
+    attic_dir = ws_plans / "attic" / branch
     attic_dir.mkdir(parents=True, exist_ok=True)
     archived = 0
     for pf in plan_files:
         if pf.name in skipped:
             continue
-        src = ws / "plans" / pf.name
+        src = ws_plans / pf.name
         if src.exists():
             shutil.move(str(src), str(attic_dir / pf.name))
             archived += 1

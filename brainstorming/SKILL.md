@@ -65,8 +65,8 @@ flowchart TD
     APPROVE{"User approves design?"}
     WRITE["Write design doc"]
     REVIEW["Spec self-review\n(fix inline)"]
-    USER{"User reviews spec?"}
-    DEGREE["Review depth prompt\n(degree only via AskUserQuestion)"]
+    DEGREE["Review depth prompt\n(includes self-review option)"]
+    SELFREV{"Self-review\nselected?"}
     SKIP{"Skip?"}
     DESIGNREVIEW["Run design-review\n(all dimensions + cross-cutting)"]
     ESCALATE{"Escalation\nrecommended?"}
@@ -79,10 +79,10 @@ flowchart TD
     APPROVE -->|"no, revise"| DESIGN
     APPROVE -->|"yes"| WRITE
     WRITE --> REVIEW
-    REVIEW --> USER
-    USER -->|"changes requested"| WRITE
-    USER -->|"approved"| DEGREE
-    DEGREE --> SKIP
+    REVIEW --> DEGREE
+    DEGREE --> SELFREV
+    SELFREV -->|"yes"| WRITE
+    SELFREV -->|"no"| SKIP
     SKIP -->|"yes"| PLANS
     SKIP -->|"no"| DESIGNREVIEW
     DESIGNREVIEW --> ESCALATE
@@ -193,25 +193,14 @@ Optionally, dispatch a spec reviewer subagent using the template at
 [spec-document-reviewer-prompt.md](spec-document-reviewer-prompt.md)
 for an independent review.
 
-### User Review Gate
-
-After the spec review loop passes, ask the user to review the written
-spec before proceeding:
-
-> "Spec written and committed to `<path>`. Please review it and let me
-> know if you want to make any changes before we move to the review
-> depth prompt."
-
-Wait for the user's response. If they request changes, make them and
-re-run the spec review loop. Only proceed to the Review Depth Prompt
-once the user approves. Do NOT skip ahead to writing-plans.
-
 ### Review Depth Prompt → writing-plans (MANDATORY gate)
 
 **You MUST complete this step before invoking writing-plans. There is no
 path from spec approval to writing-plans that bypasses this prompt.**
 
-After the user approves the spec:
+After the spec is written and committed, go straight to the review
+prompt. Do NOT ask "let me know if you want changes" as a separate
+step — "Review it yourself" is an option in the prompt itself.
 
 1. Analyze the spec for complexity signals and present the full
    recommendation with reasoning as text (see `design-review/review-tiers.md`
@@ -222,10 +211,11 @@ After the user approves the spec:
 
 ```python
 AskUserQuestion(questions=[{
-    "question": "Review depth? (coherence + structure + robustness + cross-cutting)",
+    "question": "Spec committed to <path>. Review depth?",
     "header": "Review",
     "options": [
         {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
+        {"label": "Review it yourself", "description": "Self-review — read and suggest changes before proceeding"},
         {"label": "Skip", "description": "No review needed"},
         {"label": "Light", "description": "~2 min — single pass per dimension"},
         {"label": "Standard", "description": "~5 min — 2-3 rounds per dimension"},
@@ -236,7 +226,10 @@ AskUserQuestion(questions=[{
 }])
 ```
 
-3. If not Skip: invoke `design-review` with `--degree` flag only.
+3. If "Review it yourself": re-read the spec, propose changes, apply
+   on confirmation, then re-present this prompt. Loop until the user
+   selects a review depth or Skip.
+4. If not Skip: invoke `design-review` with `--degree` flag only.
    design-review handles multi-dimension orchestration and cross-cutting
    automatically.
 

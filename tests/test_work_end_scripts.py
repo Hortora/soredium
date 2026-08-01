@@ -987,3 +987,155 @@ class TestBranchCleanupErrors:
     def test_create_epic_closed_no_positional(self):
         result = run_cleanup("create-epic-closed")
         assert result.returncode == 1
+
+
+# ===========================================================================
+# BUG 1: to_workspace_main slot mode — source-dir parameter
+# ===========================================================================
+
+class TestToWorkspaceMainSlotMode:
+    """Slot mode: branch doesn't exist on original workspace.
+    source-dir enables filesystem copy instead of git checkout."""
+
+    def test_promotes_from_source_dir(self, tmp_path):
+        """When source-dir is set, artifacts are copied from that directory
+        instead of using git checkout from branch. BUG 1 regression test."""
+        ws = tmp_path / "original-workspace"
+        ws.mkdir()
+        init_git(ws)
+
+        slot_ws = tmp_path / "slot-workspace"
+        (slot_ws / "blog").mkdir(parents=True)
+        (slot_ws / "blog" / "entry.md").write_text("# Blog Entry\n")
+
+        result = run_promote(
+            "to-workspace-main", str(ws),
+            branch="issue-42-feat",
+            artifacts="blog/entry.md",
+            **{"source-dir": str(slot_ws)},
+        )
+        assert result.returncode == 0
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+
+        subprocess.run(
+            ["git", "-C", str(ws), "checkout", "main"],
+            capture_output=True, check=True,
+        )
+        assert (ws / "blog" / "entry.md").is_file()
+        assert (ws / "blog" / "entry.md").read_text() == "# Blog Entry\n"
+
+    def test_source_dir_promotes_multiple_artifacts(self, tmp_path):
+        """source-dir with multiple artifacts."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        init_git(ws)
+
+        slot = tmp_path / "slot"
+        (slot / "specs").mkdir(parents=True)
+        (slot / "specs" / "a.md").write_text("spec a\n")
+        (slot / "blog").mkdir()
+        (slot / "blog" / "b.md").write_text("blog b\n")
+
+        result = run_promote(
+            "to-workspace-main", str(ws),
+            branch="issue-1",
+            artifacts="specs/a.md,blog/b.md",
+            **{"source-dir": str(slot)},
+        )
+        assert result.returncode == 0
+        out = parse(result)
+        assert out["PROMOTED"] == "2"
+
+    def test_source_dir_skips_missing_artifact(self, tmp_path):
+        """source-dir with one present and one missing artifact."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        init_git(ws)
+
+        slot = tmp_path / "slot"
+        (slot / "specs").mkdir(parents=True)
+        (slot / "specs" / "exists.md").write_text("here\n")
+
+        result = run_promote(
+            "to-workspace-main", str(ws),
+            branch="issue-1",
+            artifacts="specs/exists.md,specs/missing.md",
+            **{"source-dir": str(slot)},
+        )
+        assert result.returncode == 0
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+        assert out["SKIPPED"] == "1"
+
+    def test_without_source_dir_uses_git_checkout(self, tmp_path):
+        """Without source-dir, existing git checkout behavior is preserved."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        init_git(ws)
+        create_branch_with_file(ws, "issue-99", "adr/0001.md", "# ADR\n")
+
+        result = run_promote(
+            "to-workspace-main", str(ws),
+            branch="issue-99", artifacts="adr/0001.md",
+        )
+        assert result.returncode == 0
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+
+
+# ===========================================================================
+# BUG 4: to_project single-repo mode — SameFileError
+# ===========================================================================
+
+class TestToProjectSingleRepo:
+    """Single-repo mode: workspace=project. shutil.copy2(src, dst) crashes
+    when src and dst resolve to the same file."""
+
+    def test_same_path_no_crash(self, tmp_path):
+        """When project and workspace are the same directory, to_project
+        should not crash with SameFileError. BUG 4 regression test."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        init_git(repo)
+
+        (repo / "specs").mkdir()
+        (repo / "specs" / "design.md").write_text("# Spec\n")
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "specs/design.md"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-m", "add spec"],
+            capture_output=True, check=True,
+        )
+
+        result = run_promote(
+            "to-project", str(repo), str(repo),
+            artifacts="specs/design.md",
+        )
+        assert result.returncode == 0, (
+            f"Expected exit 0 but got {result.returncode}.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
+
+    def test_single_repo_directory_no_crash(self, tmp_path):
+        """Directory artifact in single-repo mode should not crash."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        init_git(repo)
+
+        (repo / "specs" / "issue-42").mkdir(parents=True)
+        (repo / "specs" / "issue-42" / "design.md").write_text("# Spec\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add"], capture_output=True, check=True)
+
+        result = run_promote(
+            "to-project", str(repo), str(repo),
+            artifacts="specs/issue-42",
+        )
+        assert result.returncode == 0
+        out = parse(result)
+        assert out["PROMOTED"] == "1"
