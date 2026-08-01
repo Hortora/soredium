@@ -1328,3 +1328,52 @@ class TestReadPromotionStamp:
         promoted, published, _ = slot_manager._read_promotion_stamp(slot)
         assert promoted == []
         assert published == []
+
+
+class TestUnignoreSubdir:
+    """Tests for _unignore_subdir — removes gitignore entries that hide workspace subdirs in slots."""
+
+    def test_removes_slash_prefix_entry(self, tmp_path):
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("/claudony\n/connectors\n/engine\n")
+        slot_manager._unignore_subdir(tmp_path, "claudony")
+        content = gitignore.read_text()
+        assert "/claudony" not in content
+        assert "/connectors" in content
+        assert "/engine" in content
+
+    def test_removes_bare_name_entry(self, tmp_path):
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("claudony\nother\n")
+        slot_manager._unignore_subdir(tmp_path, "claudony")
+        content = gitignore.read_text()
+        assert "claudony" not in content
+        assert "other" in content
+
+    def test_removes_trailing_slash_entry(self, tmp_path):
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("/claudony/\nother\n")
+        slot_manager._unignore_subdir(tmp_path, "claudony")
+        content = gitignore.read_text()
+        assert "claudony" not in content
+
+    def test_no_gitignore_file(self, tmp_path):
+        slot_manager._unignore_subdir(tmp_path, "claudony")
+
+    def test_subdir_not_in_gitignore(self, tmp_path):
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("/engine\n/connectors\n")
+        slot_manager._unignore_subdir(tmp_path, "claudony")
+        content = gitignore.read_text()
+        assert "/engine" in content
+        assert "/connectors" in content
+
+    def test_preserves_other_entries(self, tmp_path):
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("*.pyc\n__pycache__\n/claudony\n.DS_Store\n")
+        slot_manager._unignore_subdir(tmp_path, "claudony")
+        content = gitignore.read_text()
+        assert "*.pyc" in content
+        assert "__pycache__" in content
+        assert ".DS_Store" in content
+        assert "claudony" not in content

@@ -157,6 +157,20 @@ def setup_maven_config(repo_worktree: Path, m2_path: Path) -> None:
         gitignore.write_text(entry + "\n")
 
 
+def _unignore_subdir(ws_clone: Path, subdir_name: str) -> None:
+    """Remove a gitignore entry that hides a workspace subdirectory in a slot clone.
+    In the main workspace, children like /claudony are separate git repos and correctly
+    gitignored. In a slot clone, they're plain directories that must be tracked."""
+    gitignore = ws_clone / ".gitignore"
+    if not gitignore.exists():
+        return
+    lines = gitignore.read_text().splitlines()
+    patterns_to_remove = {f"/{subdir_name}", subdir_name, f"/{subdir_name}/"}
+    filtered = [line for line in lines if line.strip() not in patterns_to_remove]
+    if len(filtered) != len(lines):
+        gitignore.write_text("\n".join(filtered) + "\n" if filtered else "")
+
+
 def repoint_wksp(repo_worktree: Path, ws_subdir: Path) -> None:
     wksp = repo_worktree / "wksp"
     if wksp.is_symlink() or wksp.exists():
@@ -321,6 +335,8 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                     ws_subdir = ws_slot_dir
 
                 ws_subdir.mkdir(parents=True, exist_ok=True)
+                if rel_subdir != Path("."):
+                    _unignore_subdir(ws_slot_dir, str(rel_subdir.parts[0]))
                 repoint_wksp(clone_dest, ws_subdir)
                 create_proj_symlink(ws_subdir, clone_dest)
                 replicate_claude_md(repo_path, ws_subdir, clone_dest)
