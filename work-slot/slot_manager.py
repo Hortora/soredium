@@ -36,6 +36,42 @@ except ImportError:
 _IDE_ARTIFACTS = {".idea", ".run", ".settings", ".project", ".classpath", ".vscode"}
 
 
+def _read_promotion_stamp(slot_dir: Path) -> tuple[list[str], list[str], str]:
+    """Read artifact promotion data from .artifacts-promoted stamps in the slot.
+    Returns (promoted_files, published_blogs, publish_dest)."""
+    promoted: list[str] = []
+    published: list[str] = []
+    pub_dest = ""
+
+    for sub in slot_dir.iterdir():
+        if not sub.is_dir():
+            continue
+        stamp = sub / "design" / ".artifacts-promoted"
+        if not stamp.exists():
+            continue
+        stamp_data: dict[str, str] = {}
+        for line in stamp.read_text().splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                stamp_data[k.strip()] = v.strip()
+
+        ws_count = int(stamp_data.get("workspace_promoted", "0"))
+        proj_count = int(stamp_data.get("project_promoted", "0"))
+        blog_count = int(stamp_data.get("blog_published", "0"))
+        plans_count = int(stamp_data.get("plans_archived", "0"))
+
+        if ws_count > 0:
+            promoted.append(f"workspace:{ws_count}")
+        if proj_count > 0:
+            promoted.append(f"project:{proj_count}")
+        if plans_count > 0:
+            promoted.append(f"plans:{plans_count}")
+        if blog_count > 0:
+            published.append(f"blog:{blog_count}")
+
+    return promoted, published, pub_dest
+
+
 def _cleanup_remnant_dir(path: Path) -> bool:
     """Remove IDE artifacts and empty directories left after git operations.
     Recurses into subdirectories. Returns True if path no longer exists."""
@@ -824,7 +860,15 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
     if _wl:
         try:
             _conn = _wl.connect()
-            _wl.record_slot_archive(_conn, slot_num, str(family_root))
+            promoted, published, pub_dest = _read_promotion_stamp(dest)
+            _wl.record_slot_archive(
+                _conn, slot_num, str(family_root),
+                promoted=promoted,
+                published=published,
+                publish_dest=pub_dest,
+                archived_from=str(slot_dir),
+                archived_to=str(dest),
+            )
             _conn.close()
         except Exception:
             pass

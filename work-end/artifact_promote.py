@@ -298,17 +298,21 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
     except subprocess.CalledProcessError:
         pass
 
+    skipped: list[str] = []
     for pf in plan_files:
         rel = str(pf.relative_to(ws))
         try:
             git("checkout", branch, "--", rel, cwd=workspace)
-        except subprocess.CalledProcessError:
-            pass
+        except subprocess.CalledProcessError as e:
+            skipped.append(pf.name)
+            print(f"SKIP_DETAIL={pf.name}: {e.stderr.strip()}", file=sys.stderr)
 
     attic_dir = plans_dir / "attic" / branch
     attic_dir.mkdir(parents=True, exist_ok=True)
     archived = 0
     for pf in plan_files:
+        if pf.name in skipped:
+            continue
         src = ws / "plans" / pf.name
         if src.exists():
             shutil.move(str(src), str(attic_dir / pf.name))
@@ -336,6 +340,9 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
         pass
 
     print(f"ARCHIVED={archived}")
+    if skipped:
+        print(f"SKIPPED={len(skipped)}")
+        print(f"SKIPPED_PATHS={','.join(skipped)}")
     return 0
 
 

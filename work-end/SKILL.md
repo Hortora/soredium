@@ -565,13 +565,14 @@ verification, and squash — but defers merge and all post-merge actions.
 - Steps 8k–12 (build verification, mark closed, ARC42 scan, handover)
 
 **After Phase A completes:**
-- Write `.phase-a-complete` marker in the slot root (one level up from
-  the repo worktree):
+- Write `.phase-a-complete` marker via script (also records the event
+  in the worklog):
+  ```bash
+  python3 ~/.claude/skills/work-end/phase_a_complete.py <SLOT_ROOT> \
+    branch=<BRANCH_NAME> repos=<comma-separated-repo-names> \
+    family-root=<FAMILY_ROOT>
   ```
-  branch=<BRANCH_NAME>
-  repos=<comma-separated repo names>
-  timestamp=<ISO-8601>
-  ```
+  Read `MARKER=<path>` and `WORKLOG=yes|skipped` from output.
 - Desktop notification via `terminal-notifier`:
   "Slot N ready to land: <branch> on <primary-repo>"
 - **Offer slot closure:**

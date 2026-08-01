@@ -468,3 +468,52 @@ class TestArchivePlans:
         subprocess.run(["git", "-C", str(ws), "checkout", "main"], capture_output=True)
         attic = plans / "attic" / "issue-42"
         assert attic.is_dir()
+
+    def test_archive_plans_skips_on_checkout_failure(self, tmp_path):
+        """When git checkout branch -- plan fails, the plan is skipped and not
+        archived with the stale main version. Regression test for bare pass."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        subprocess.run(["git", "init", str(ws)], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "checkout", "-b", "main"], capture_output=True)
+
+        plans = ws / "plans"
+        plans.mkdir()
+        (plans / "good.md").write_text("good plan")
+        (plans / "bad.md").write_text("stale main version — should NOT be archived")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "add plans"], capture_output=True)
+
+        # Create branch with both files
+        subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-99"], capture_output=True)
+        (plans / "good.md").write_text("good plan — branch version")
+        (plans / "bad.md").write_text("bad plan — branch version")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "update plans"], capture_output=True)
+
+        import importlib
+        ap = importlib.import_module("artifact_promote")
+
+        original_git = ap.git
+
+        def mock_git(*cmd, cwd):
+            if cmd[:2] == ("checkout", "issue-99") and "--" in cmd and "plans/bad.md" in cmd:
+                raise subprocess.CalledProcessError(1, cmd, stderr="error: simulated failure")
+            return original_git(*cmd, cwd=cwd)
+
+        with patch.object(ap, "git", side_effect=mock_git):
+            rc = ap.archive_plans(str(ws), {"branch": "issue-99"})
+
+        assert rc == 0
+
+        # Switch to main to see the attic (archive commits on main)
+        subprocess.run(["git", "-C", str(ws), "checkout", "main"], capture_output=True)
+
+        # good.md was archived (checkout succeeded)
+        attic = plans / "attic" / "issue-99"
+        assert (attic / "good.md").exists()
+
+        # bad.md was NOT archived (checkout failed → skipped)
+        assert not (attic / "bad.md").exists()

@@ -1281,3 +1281,50 @@ class TestRemoveSlotForceDeleteClaude:
             slot_manager.remove_slot(family, 1, force_delete=True)
 
         assert not proj_dir.exists(), "Claude session dir was not removed during force-delete"
+
+
+class TestReadPromotionStamp:
+    """Tests for _read_promotion_stamp helper."""
+
+    def test_reads_stamp_counts(self, tmp_path):
+        slot = tmp_path / "1"
+        slot.mkdir()
+        repo = slot / "engine"
+        (repo / "design").mkdir(parents=True)
+        (repo / "design" / ".artifacts-promoted").write_text(
+            "timestamp=2026-08-01T00:00:00\n"
+            "branch=issue-42\n"
+            "workspace_promoted=2\n"
+            "project_promoted=1\n"
+            "issues_closed=3\n"
+            "blog_published=1\n"
+            "plans_archived=2\n"
+        )
+        promoted, published, dest = slot_manager._read_promotion_stamp(slot)
+        assert "workspace:2" in promoted
+        assert "project:1" in promoted
+        assert "plans:2" in promoted
+        assert "blog:1" in published
+
+    def test_no_stamp(self, tmp_path):
+        slot = tmp_path / "1"
+        slot.mkdir()
+        (slot / "engine").mkdir()
+        promoted, published, dest = slot_manager._read_promotion_stamp(slot)
+        assert promoted == []
+        assert published == []
+
+    def test_zero_counts_excluded(self, tmp_path):
+        slot = tmp_path / "1"
+        slot.mkdir()
+        repo = slot / "engine"
+        (repo / "design").mkdir(parents=True)
+        (repo / "design" / ".artifacts-promoted").write_text(
+            "workspace_promoted=0\n"
+            "project_promoted=0\n"
+            "blog_published=0\n"
+            "plans_archived=0\n"
+        )
+        promoted, published, _ = slot_manager._read_promotion_stamp(slot)
+        assert promoted == []
+        assert published == []

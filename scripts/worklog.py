@@ -335,7 +335,12 @@ def record_slot_merge(conn: sqlite3.Connection, slot_number: int,
 
 @safe
 def record_slot_archive(conn: sqlite3.Connection, slot_number: int,
-                        family_root: str) -> None:
+                        family_root: str,
+                        promoted: list[str] | None = None,
+                        published: list[str] | None = None,
+                        publish_dest: str | None = None,
+                        archived_from: str | None = None,
+                        archived_to: str | None = None) -> None:
     sid = _find_slot(conn, slot_number, family_root)
     if sid is None:
         return
@@ -343,7 +348,19 @@ def record_slot_archive(conn: sqlite3.Connection, slot_number: int,
         "UPDATE slots SET state='archived', archived_at=? WHERE id=?",
         (_now(), sid),
     )
-    _log_event(conn, "slot-archive", slot_id=sid)
+    meta: dict = {}
+    if promoted:
+        meta["promoted"] = promoted
+    if published:
+        meta["published"] = published
+    if publish_dest:
+        meta["publish_dest"] = publish_dest
+    if archived_from:
+        meta["archived_from"] = archived_from
+    if archived_to:
+        meta["archived_to"] = archived_to
+    _log_event(conn, "slot-archive", slot_id=sid,
+               metadata=meta if meta else None)
     conn.commit()
 
 
