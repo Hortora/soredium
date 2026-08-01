@@ -394,52 +394,66 @@ Use when: "sweep", "garden sweep", "scan for garden entries", or at the end of a
 
 Unlike CAPTURE (where you provide the specific knowledge), SWEEP reviews the session from conversation memory and proposes findings. It covers all four categories explicitly.
 
-**Step 1 — Scan for Gotchas** (non-obvious things that went wrong)
+**Steps 1–4 — Scan all four categories (silently)**
 
-Review the session for:
-- Bugs whose symptom misled about the root cause
-- Silent failures with no error or warning
-- Things that required multiple failed approaches before the fix
-- Workarounds for things that "should" work but don't
+Scan the full session across all four categories. Do NOT prompt per item —
+collect all candidates first, then present them as a batch.
 
-For each candidate, compute the Garden Score then present:
-*"During this session we hit [X] — the symptom was [Y] but the actual cause was [Z]. Scored [N]/15 — worth submitting as a gotcha?"*
+**Gotchas** — bugs whose symptom misled about root cause; silent failures;
+things requiring multiple failed approaches; workarounds for things that
+"should" work.
 
-**Step 2 — Scan for Techniques** (non-obvious approaches that worked)
+**Techniques** — solutions a skilled developer wouldn't reach for; tool/API
+combos used in undocumented ways; patterns more elegant than expected.
 
-Review the session for:
-- Solutions a skilled developer wouldn't naturally reach for
-- Tool or API combinations used in undocumented or unexpected ways
-- Patterns that solved a problem more elegantly than expected
+**Undocumented** — flags, options, or behaviours only discoverable via source;
+features that work but have no docs; things found via trial and error.
 
-For each candidate, compute the Garden Score then present:
-*"We used [approach] to [achieve outcome] — most developers would have [done it the hard way]. Scored [N]/15 — worth submitting as a technique?"*
+**Conventions** — naming/structuring decisions where alternatives exist;
+team style choices with explicit rationale; editorial bar applies (score ≥6).
 
-**Step 3 — Scan for Undocumented** (exists but isn't in any docs)
+**Score threshold:** Only include candidates scoring ≥8 (conventions: ≥6
+with editorial bar met).
 
-Review the session for:
-- Flags, options, or behaviours only discoverable via source code
-- Features that work but have no official documentation
-- Things discovered through trial and error or commit history
+**Step 5 — Batch presentation and selection**
 
-For each candidate, compute the Garden Score then present:
-*"We discovered [X] — it exists and works but there's no documentation for it. Scored [N]/15 — worth submitting as undocumented?"*
+Present all candidates in a single numbered list with type and one-line summary:
 
-**Score threshold during SWEEP:** Only propose candidates scoring ≥8. **Exception — conventions:** the editorial bar applies rather than the score gate mechanically; a score of 6–8 is typical for a well-articulated convention with clear alternatives. See "The bar for conventions" above.
+```
+Sweep found N items:
 
-**Step 4 — Scan for Conventions** (deliberate style choices with known alternatives)
+  1. [gotcha] Silent push failure in artifact promotion — score 12/15
+  2. [technique] Boundary-aware path matching for Claude projects — score 9/15
+  3. [technique] Post-push verification via git cat-file — score 10/15
+  4. [convention] Review outputs to ~/reviews/ not ~/adr/ — score 7/15
+```
 
-Review the session for:
-- Naming or structuring decisions made deliberately where a different valid choice existed
-- Patterns adopted as a team/project style that another project could consciously adopt or reject
-- Moments where alternatives were compared and one was chosen for explicit reasons
+Then use `AskUserQuestion` with `multiSelect: true` — all items as options
+(pre-selected by default). The user deselects any they don't want:
 
-For each candidate, compute the Garden Score then present:
-*"We chose [X] for [concern] — an alternative is [Y]. Scored [N]/15 — worth submitting as a convention entry?"* (propose if scoring ≥6 and editorial bar is met)
+```python
+AskUserQuestion(questions=[{
+    "question": "Which items to capture?",
+    "header": "Sweep",
+    "options": [
+        {"label": "Accept all", "description": "Capture all N items (default)"},
+        {"label": "[gotcha] Silent push failure...", "description": "Score 12/15"},
+        {"label": "[technique] Boundary-aware path matching...", "description": "Score 9/15"},
+        # ... one per candidate
+    ],
+    "multiSelect": true,
+}])
+```
 
-**Step 5 — Submit confirmed entries (batched delivery)**
+- **Accept all selected** → capture everything, no further prompts
+- **Subset selected** → capture only selected items
+- **None selected** → skip sweep entirely
 
-For each confirmed entry, run CAPTURE steps 0–6 (GE-ID generation through writing the file). Work from session context — do NOT ask the user to re-describe things you already know. Track the list of written entry paths as you go.
+**One prompt. No per-item confirmation.**
+
+**Step 6 — Submit selected entries (batched delivery)**
+
+For each selected entry, run CAPTURE steps 0–6 (GE-ID generation through writing the file). Work from session context — do NOT ask the user to re-describe things you already know. Track the list of written entry paths as you go.
 
 After all entry files are written, validate and deliver as a single batch:
 

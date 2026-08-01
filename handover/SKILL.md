@@ -374,13 +374,14 @@ through what actually happened in the conversation:
 > Scan for: naming schemes, module structures, config strategies, or other
 > choices where another project could legitimately choose differently.
 
-For each finding, **propose it explicitly** before proceeding:
+Collect all candidates silently, then present as a **single batch prompt**
+using `AskUserQuestion` with `multiSelect: true`. All items pre-selected.
+User deselects any they don't want, or accepts all with one click.
 
-> "During this session we hit X — [brief description]. Worth submitting
-> to the garden as a [gotcha / technique / undocumented / convention]?"
+Do NOT prompt per-item — one prompt for the entire sweep.
 
-If confirmed → invoke `forage` CAPTURE with the specific content already
-known from context. Do NOT invoke forage and ask it to find things.
+If confirmed → invoke `forage` CAPTURE for each selected item with the
+specific content already known from context.
 
 If nothing surfaces in any category → proceed to Step 3.
 

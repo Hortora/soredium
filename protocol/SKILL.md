@@ -218,34 +218,58 @@ for patterns and constraints that should become protocols. Unlike forage SWEEP
 (which finds universal technical knowledge), protocol SWEEP finds project-specific
 rules that recurred or were enforced informally.
 
-**Step 1 — Scan for implicit rules**
+**Steps 1–2 — Scan for rules and violations (silently)**
 
-Review the session for:
-- "We should always..." or "never..." statements about this project
-- Constraints enforced more than once (same rule applied to different files)
-- Workarounds that became de facto policy
-- Patterns copied across modules without a written source of truth
+Scan the full session. Do NOT prompt per item — collect all candidates first.
 
-For each candidate, propose explicitly:
-> "We established that [X] — this looks like a standing rule worth formalising as a protocol. Worth capturing?"
+**Implicit rules** — "we should always...", constraints enforced more than once,
+workarounds that became policy, patterns copied without a written source of truth.
 
-**Step 2 — Scan for rule violations discovered**
+**Rule violations** — existing protocol violated and re-confirmed, new module
+taught the same constraint as existing modules. For these, note which existing
+protocol needs its violation_hint enriched.
 
-Review the session for cases where an existing protocol was violated:
-- A file was found that broke a rule, was corrected, and the rule re-confirmed
-- A new module was set up and had to be taught the same constraint as existing modules
+**Step 3 — Batch presentation and selection**
 
-For each: check if the violation_hint on the existing protocol is clear enough.
-If not, offer to enrich it via the existing entry.
+Present all candidates in a single numbered list:
 
-**Step 3 — Submit confirmed entries**
+```
+Protocol sweep found N items:
 
-For each confirmed entry, run CAPTURE Steps 1–8 from context. Do NOT ask the user
+  1. [new] Archive must verify promotion stamp before moving to attic
+  2. [new] Specs must be loaded before implementation work begins
+  3. [enrich] externalised-scripts-require-tests — add violation_hint for recovery scripts
+```
+
+Then use `AskUserQuestion` with `multiSelect: true` — all items as options:
+
+```python
+AskUserQuestion(questions=[{
+    "question": "Which protocols to capture?",
+    "header": "Protocols",
+    "options": [
+        {"label": "Accept all", "description": "Capture all N items (default)"},
+        {"label": "[new] Archive must verify...", "description": "Standing rule from this session"},
+        {"label": "[enrich] externalised-scripts...", "description": "Existing protocol needs update"},
+    ],
+    "multiSelect": true,
+}])
+```
+
+- **Accept all selected** → capture everything, no further prompts
+- **Subset selected** → capture only selected items
+- **None selected** → skip sweep entirely
+
+**One prompt. No per-item confirmation.**
+
+**Step 4 — Submit selected entries**
+
+For each selected entry, run CAPTURE Steps 1–8 from context. Do NOT ask the user
 to re-describe rules already established in the session.
 
-**Step 4 — Report**
+**Step 5 — Report**
 
-Tell the user: N candidates found, M confirmed and committed. If nothing surfaced:
+Tell the user: N candidates found, M captured and committed. If nothing surfaced:
 "No new protocol candidates found in this session."
 
 ---
