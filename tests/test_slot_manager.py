@@ -1377,3 +1377,41 @@ class TestUnignoreSubdir:
         assert "__pycache__" in content
         assert ".DS_Store" in content
         assert "claudony" not in content
+
+    def test_artifact_committable_after_unignore(self, tmp_path):
+        """Integration: after _unignore_subdir, files in the subdirectory
+        are visible to git and can be committed. Regression test for #148."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        subprocess.run(["git", "init", str(ws)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "config", "user.email", "t@t.com"], capture_output=True)
+
+        (ws / ".gitignore").write_text("/claudony\n")
+        subprocess.run(["git", "-C", str(ws), "add", ".gitignore"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "init"], capture_output=True)
+
+        subdir = ws / "claudony" / "blog"
+        subdir.mkdir(parents=True)
+        (subdir / "entry.md").write_text("# Blog Entry\n")
+
+        check_before = subprocess.run(
+            ["git", "-C", str(ws), "status", "--short"],
+            capture_output=True, text=True,
+        )
+        assert "claudony" not in check_before.stdout, "dir should be invisible before fix"
+
+        slot_manager._unignore_subdir(ws, "claudony")
+
+        check_after = subprocess.run(
+            ["git", "-C", str(ws), "status", "--short"],
+            capture_output=True, text=True,
+        )
+        assert "claudony" in check_after.stdout, "dir should be visible after fix"
+
+        subprocess.run(["git", "-C", str(ws), "add", "claudony/blog/entry.md"], capture_output=True)
+        result = subprocess.run(
+            ["git", "-C", str(ws), "commit", "-m", "add blog entry"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, f"commit should succeed: {result.stderr}"
