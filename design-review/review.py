@@ -442,7 +442,7 @@ def main() -> int:
             _log(f"Resuming review: {ws}")
             _log(f"Last completed round: {last_round}, resuming from round {start_round}")
     else:
-        adr_root = Path.home() / "adr"
+        adr_root = Path.home() / "reviews"
         existing = sorted(adr_root.glob(f"*/{args.title}-*")) if adr_root.exists() else []
         existing = [d for d in existing if d.is_dir()]
         if existing:
@@ -1543,7 +1543,7 @@ def _print_summary(tracker: Tracker, round_num: int, cost: float, spec_path: str
 
 REVIEW_MODES: Final = (
     "pre-review", "spec-review", "code-review", "final-review",
-    "coherence", "structure", "robustness",
+    "coherence", "structure", "robustness", "crosscutting",
 )
 
 MODE_DEFAULTS: Final = {
@@ -1554,6 +1554,7 @@ MODE_DEFAULTS: Final = {
     "coherence": {"max_rounds": 1, "min_rounds": 1, "budget_per_session": 1.5},
     "structure": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 5.0},
     "robustness": {"max_rounds": 6, "min_rounds": 4, "budget_per_session": 5.0},
+    "crosscutting": {"max_rounds": 5, "min_rounds": 2, "budget_per_session": 5.0},
 }
 
 DEPTH_PRESETS: Final = {
@@ -1562,7 +1563,7 @@ DEPTH_PRESETS: Final = {
     "deep":     {"max_rounds": 5, "min_rounds": 3, "budget_per_session": 8.0},
 }
 
-REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness")
+REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness", "crosscutting")
 
 DEGREE_PRESETS: Final = {
     "light":       {"max_rounds": 1,  "min_rounds": 1, "budget_per_session": 1.5},
@@ -1577,6 +1578,7 @@ TYPE_DEFAULTS: Final = {
     "robustness": "adversarial",
     "conformance": "standard",
     "readiness": "standard",
+    "crosscutting": "standard",
 }
 
 TYPE_TO_MODE: Final = {
@@ -1585,6 +1587,7 @@ TYPE_TO_MODE: Final = {
     "robustness": "robustness",
     "conformance": "code-review",
     "readiness": "final-review",
+    "crosscutting": "crosscutting",
 }
 
 MODE_TO_TYPE: Final = {

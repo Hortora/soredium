@@ -354,3 +354,54 @@ class TestReviewerBriefsByType:
         )
         assert "try to break" not in prompt.lower()
         assert "adversarial design review" not in prompt.lower()
+
+    def test_crosscutting_brief_mentions_contradictions(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="crosscutting",
+        )
+        assert "contradiction" in prompt.lower()
+        assert "intersection" in prompt.lower()
+
+    def test_crosscutting_brief_does_not_re_review(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="crosscutting",
+        )
+        assert "not re-review" in prompt.lower() or "do not re-review" in prompt.lower()
+
+    def test_crosscutting_light_includes_escalation(self):
+        prompt = build_reviewer_prompt(
+            round_num=1, focus_items=[], handover_path=None,
+            mode="crosscutting", degree="light",
+        )
+        assert "ESCALATE:" in prompt
+
+
+class TestParseArgsCrosscutting:
+
+    def _parse(self, argv: list[str]):
+        with patch("sys.argv", ["review.py"] + argv):
+            return parse_args()
+
+    def test_crosscutting_type_accepted(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "crosscutting"])
+        assert args.review_type == "crosscutting"
+
+    def test_crosscutting_maps_to_crosscutting_mode(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "crosscutting"])
+        assert args.mode == "crosscutting"
+
+    def test_crosscutting_default_degree_is_standard(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "crosscutting"])
+        assert args.degree == "standard"
+
+    def test_all_types_includes_crosscutting(self):
+        for t in ("coherence", "structure", "robustness", "conformance",
+                  "readiness", "crosscutting"):
+            args = self._parse(["--spec", "x.md", "--title", "t",
+                                "--source-dirs", "/tmp", "--type", t])
+            assert args.review_type == t

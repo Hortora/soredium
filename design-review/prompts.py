@@ -40,6 +40,12 @@ def build_reviewer_prompt(
             convergence_override_ids, source_dirs, workspace_root,
             spec_path, resolved_degree, maturity_stage,
         )
+    if mode == "crosscutting":
+        return _build_typed_reviewer_prompt(
+            "crosscutting", round_num, focus_items, handover_path,
+            convergence_override_ids, source_dirs, workspace_root,
+            spec_path, resolved_degree, maturity_stage,
+        )
     if mode == "code-review":
         return _build_code_review_reviewer_prompt(
             round_num, focus_items, handover_path, convergence_override_ids,
@@ -262,6 +268,21 @@ _TYPE_BRIEFS: dict[str, str] = {
         "\n"
         "Construct specific failure scenarios. Name the component, the trigger, "
         "and the consequence."
+    ),
+    "crosscutting": (
+        "You are performing a CROSS-CUTTING review. Your input is the findings "
+        "from independent dimension reviews (coherence, structure, robustness). "
+        "Read each dimension's tracker.md — they are listed as Architectural Files "
+        "in your context. Focus on:\n"
+        "- Contradictions: does one dimension's resolution conflict with another's?\n"
+        "- Intersection failures: does a boundary (structure) create a failure "
+        "mode (robustness) that neither reviewer connected?\n"
+        "- Coverage gaps: did all reviewers assume someone else would check X?\n"
+        "- Conformance drift: does the spec's intent (coherence) match the "
+        "structure reviewer's assumptions?\n"
+        "\n"
+        "Do NOT re-review the spec from scratch. Review the reviews against "
+        "each other, with the spec as reference."
     ),
 }
 

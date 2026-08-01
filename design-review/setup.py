@@ -38,7 +38,7 @@ def setup_review(
     depth: str | None = None,
 ) -> Path:
     if adr_root is None:
-        adr_root = Path.home() / "adr"
+        adr_root = Path.home() / "reviews"
 
     project_name = _derive_project_name(source_dirs)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -179,11 +179,11 @@ def _init_review_git(ws: Path, adr_root: Path) -> None:
         subprocess.run(["git", "init"], cwd=adr_root, capture_output=True, check=True)
         subprocess.run(["git", "config", "user.email", "adr-tool@local"],
                        cwd=adr_root, capture_output=True, check=True)
-        subprocess.run(["git", "config", "user.name", "ADR Tool"],
+        subprocess.run(["git", "config", "user.name", "Review Tool"],
                        cwd=adr_root, capture_output=True, check=True)
         (adr_root / ".gitignore").write_text("progress.log\n.system-prompt.md\n.spec-path\n.status\n.hil-timeout\n")
         subprocess.run(["git", "add", ".gitignore"], cwd=adr_root, capture_output=True, check=True)
-        subprocess.run(["git", "commit", "-m", "init: adr root"],
+        subprocess.run(["git", "commit", "-m", "init: reviews root"],
                        cwd=adr_root, capture_output=True, check=True)
     # Initial commit for this review in the shared root
     subprocess.run(["git", "add", "-A"], cwd=adr_root, capture_output=True, check=True)
@@ -917,6 +917,57 @@ def _final_review_implementor_md() -> str:
 _MODE_GENERATORS["final-review"] = {
     "reviewer": _final_review_reviewer_md,
     "implementor": _final_review_implementor_md,
+}
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting mode generators
+# ---------------------------------------------------------------------------
+
+def _crosscutting_reviewer_md() -> str:
+    constraints = _assemble_constraints([
+        _CORE_APPROACH_REVIEWER,
+        _DEFERRED_ITEMS,
+        "### Code navigation",
+        _INTELLIJ_OPEN,
+        _INTELLIJ_USE,
+        "### Progress narration",
+        _NARRATION.replace("{ROLE}", "reviewer"),
+        "### Context sources",
+        _ARCH_DOCS,
+        _SPECS_AND_ADRS,
+    ])
+    return f"""\
+# Role: Cross-Cutting Reviewer
+
+You are synthesising findings from independent dimension reviews
+(coherence, structure, robustness). Your job is NOT to re-review
+the spec from scratch. Your job is to find problems BETWEEN their
+findings.
+
+Read each dimension's tracker.md (listed under Architectural Files
+in context.md). Then read the spec. Find where one dimension's
+resolution creates a problem in another dimension's domain.
+
+Focus on:
+- **Contradictions** — does one dimension's resolution conflict with another's?
+- **Intersection failures** — does a boundary (structure) create a failure
+  mode (robustness) that neither reviewer connected?
+- **Coverage gaps** — did all reviewers assume someone else would check X?
+- **Conformance drift** — does the spec's intent (coherence) match the
+  structure reviewer's assumptions?
+
+{constraints}
+"""
+
+
+def _crosscutting_implementor_md() -> str:
+    return _default_implementor_md()
+
+
+_MODE_GENERATORS["crosscutting"] = {
+    "reviewer": _crosscutting_reviewer_md,
+    "implementor": _crosscutting_implementor_md,
 }
 
 

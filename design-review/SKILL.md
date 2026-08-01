@@ -33,74 +33,63 @@ If MISSING, add it using the `update-config` skill or tell the user:
 
 This is a one-time setup. Once added, the skill runs without prompts.
 
-## Step 0.5 — Select review type and degree
+## Step 0.5 — Select review degree
 
-Reviews have two dimensions: **type** (what to examine) and **degree** (how deeply).
-See [review-tiers.md](review-tiers.md) for the full model and recommendation signals.
+Reviews are lifecycle-driven. The **lifecycle point** determines which dimensions
+run. The **degree** is the user's only choice. See [review-tiers.md](review-tiers.md).
 
-**Three-part flow:**
+### Lifecycle detection
 
-1. **Present full recommendation as text** — analyze the spec for complexity signals,
-   then present the recommended type, degree, and reasoning. Be specific to this spec.
+Determine the lifecycle point from context:
+- **Post-spec** (default): invoked on a spec file, or brainstorming handed off
+- Post-brainstorming, post-implementation, pre-ship: future lifecycle points
 
-2. **Type selection via AskUserQuestion** — recommended option first with "(Recommended)".
-   Skip is always an option.
+For post-spec, all three dimensions run automatically:
+- **Coherence** — completeness, consistency, gaps
+- **Structure** — decomposition, boundaries, dependencies
+- **Robustness** — failure modes, edge cases, error paths
+- **Cross-cutting** — automatic after all dimensions complete
+
+### Recommendation engine
+
+Analyze the spec for complexity signals and present a recommendation:
+
+| Signal | Recommendation |
+|--------|---------------|
+| Config-only, rename, mechanical wiring | Skip |
+| Clear requirements, known domain, small scope | Light |
+| New module, API surface changes | Standard |
+| Cross-module boundaries, dependency ordering | Standard |
+| Auth, security, PII, concurrency, distributed state | Adversarial |
+| Novel architecture, first-of-kind, high-stakes | Deep |
+
+### Degree-only prompt
 
 ```python
 AskUserQuestion(questions=[{
-    "question": "Review this spec?",
-    "header": "Review type",
+    "question": "Review depth? (coherence + structure + robustness + cross-cutting)",
+    "header": "Review",
     "options": [
         {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
         {"label": "Skip", "description": "No review needed"},
-        {"label": "Coherence", "description": "Completeness, consistency, gaps"},
-        {"label": "Structure", "description": "Decomposition, boundaries, dependencies"},
-        {"label": "Robustness", "description": "Failure modes, edge cases, error paths"},
+        {"label": "Light", "description": "~2 min — single pass per dimension"},
+        {"label": "Standard", "description": "~5 min — 2-3 rounds per dimension"},
+        {"label": "Adversarial", "description": "~12 min — 4-6 rounds per dimension"},
+        {"label": "Deep", "description": "~25 min — 8-10 rounds + ultrathink"},
     ],
     "multiSelect": false,
 }])
 ```
 
-3. **Degree selection via AskUserQuestion** (if not Skip):
+**If invoked with explicit `--type` flag** (`/design-review --type robustness`):
+run only that single dimension (backward compat, old behavior). No cross-cutting.
 
-```python
-AskUserQuestion(questions=[{
-    "question": "Review degree?",
-    "header": "Depth",
-    "options": [
-        {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
-        {"label": "Light", "description": "~1 min — quick pass, flags if deeper needed"},
-        {"label": "Standard", "description": "~5 min — thorough examination"},
-        {"label": "Adversarial", "description": "~12 min — actively tries to break the design"},
-        {"label": "Deep", "description": "~25 min — exhaustive, ultrathink enabled"},
-    ],
-    "multiSelect": false,
-}])
-```
+**If invoked with `--degree` only:** run all dimensions at that degree.
 
-**If invoked with explicit flags** (`/design-review --type robustness --degree deep`):
-skip the prompt and use the flags directly.
+**Backward compat:** `--mode`, `--depth` still accepted and mapped.
 
-**If the user just says "design review"** without specifying type or asking to choose:
-still show the recommendation and prompt — the recommendation helps the user pick the
-right depth rather than defaulting to the heaviest option.
-
-**Mapping to `--type` and `--degree`:**
-
-| Type | `--type` flag | Default degree |
-|------|--------------|----------------|
-| Coherence | `coherence` | Light |
-| Structure | `structure` | Standard |
-| Robustness | `robustness` | Adversarial |
-| Conformance | `conformance` | Standard |
-| Readiness | `readiness` | Standard |
-
-**Backward compat:** `--mode pre-review|spec-review|code-review|final-review` still
-accepted and mapped to the new types. `--depth` accepted as alias for `--degree`.
-
-**After the review completes (light/standard):** check the review output for an
-escalation assessment. If `ESCALATE: yes`, present the recommendation to the user
-and ask whether to proceed with the escalated review.
+**After light/standard reviews:** check for escalation assessment. If `ESCALATE: yes`,
+present the recommendation and ask whether to proceed with the escalated review.
 
 ## Step 1 — Identify the spec
 
@@ -139,7 +128,7 @@ Extract a short kebab-case title from the spec filename or content:
 Before creating a new workspace, check if one already exists for this title:
 
 ```bash
-ls -d ~/adr/*/{title}-* 2>/dev/null
+ls -d ~/reviews/*/{title}-* ~/adr/*/{title}-* 2>/dev/null
 ```
 
 If a workspace exists:
@@ -150,132 +139,155 @@ If a workspace exists:
 
 **Never silently create a duplicate workspace.** The user has already spent tokens on the prior run.
 
-## Step 4 — Run the review
+## Step 4 — Launch dimension reviews
 
-**IMPORTANT: This is a long-running process (10-30 minutes). Do NOT run it
-inline with the Bash tool — the output will be captured and invisible to the
-user until the process finishes or times out.**
+**IMPORTANT: These are long-running processes. Do NOT run inline — use
+`run_in_background: true` on all Bash tool calls.**
+
+### Single-type mode (backward compat)
+
+If the user provided `--type X`, launch a single review.py with that type.
+Skip cross-cutting. Use the old behavior exactly.
+
+### Multi-dimension mode (default for post-spec)
+
+Launch three review.py instances as parallel background processes. Each
+gets the same spec, source-dirs, and degree. Title includes the dimension:
 
 Tell the user BEFORE running:
-> Starting adversarial design review of **{title}**.
+> Starting post-spec review of **{title}** at **{degree}** depth.
 >
-> This runs as a background process. I'll check progress periodically.
-> You can also monitor directly:
-> - `tail -f ~/adr/*/{title}-*/progress.log`
-> - Open `~/adr/*/{title}-*/tracker.md` in Typora
+> Launching 3 dimension reviews in parallel:
+> - Coherence (completeness, consistency, gaps)
+> - Structure (decomposition, boundaries, dependencies)
+> - Robustness (failure modes, edge cases, error paths)
+>
+> Cross-cutting analysis will run automatically after all dimensions complete.
+> Monitor: `tail -f ~/reviews/*/{title}-*/progress.log`
 
-Then run in the background:
+Launch all three with `run_in_background: true`:
 
 ```bash
-python3 /Users/mdproctor/.claude/skills/design-review/review.py \
-  --spec {spec_path} \
-  --title {title} \
-  --mode {mode} \
-  --stage {maturity_stage} \
-  --source-dirs {dirs}
+python3 ~/.claude/skills/design-review/review.py \
+  --spec {spec_path} --title {title}-coherence \
+  --type coherence --degree {degree} \
+  --stage {maturity_stage} --source-dirs {dirs}
 ```
 
-Where `{mode}` is `pre-review` or `spec-review` based on the phase selected
-in Step 0.5. If mode is `spec-review` (the default), you may omit `--mode`.
+```bash
+python3 ~/.claude/skills/design-review/review.py \
+  --spec {spec_path} --title {title}-structure \
+  --type structure --degree {degree} \
+  --stage {maturity_stage} --source-dirs {dirs}
+```
 
-`{maturity_stage}` comes from `MATURITY_STAGE` in the ctx.py output. If `pre-release`
-(the default), you may omit `--stage`.
+```bash
+python3 ~/.claude/skills/design-review/review.py \
+  --spec {spec_path} --title {title}-robustness \
+  --type robustness --degree {degree} \
+  --stage {maturity_stage} --source-dirs {dirs}
+```
 
-Use `run_in_background: true` on the Bash tool call.
+## Step 5 — Set up unified watchdog
 
-## Step 5 — Set up watchdog
+**Immediately after launching**, create a SINGLE watchdog cron (not three)
+to monitor all dimension reviews. Use a 5-minute interval.
 
-**Immediately after launching the background process**, create a cron watchdog
-to monitor progress. This is mandatory — without it, stalls go undetected.
+Use `CronCreate` with `recurring: true` and this prompt:
 
-Use `CronCreate` with a 5-minute interval and this prompt:
-
-> Check the design review progress for {title}. Read the last 10 lines of
-> ~/adr/*/{title}-*/progress.log.
+> Check progress of the post-spec review for {title}. Read the last 10
+> lines of each progress log:
+> - `~/reviews/*/{title}-coherence-*/progress.log`
+> - `~/reviews/*/{title}-structure-*/progress.log`
+> - `~/reviews/*/{title}-robustness-*/progress.log`
 >
-> Terminal status lines:
-> - `REVIEW DONE` — read tracker.md AND the spec (symlinked at spec.md in
->   the workspace). Validate that the review's changes are present in the
->   spec, then report results. Delete this cron job.
-> - `REVIEW PAUSED` — the review needs human input (timeout or SIGTERM).
->   Tell the user what happened and offer to resume.
-> - `REVIEW ABORTED` — user chose to abort. Report and delete cron.
-> - `REVIEW FAILED` / `REVIEW CRASHED` — report the error, suggest resuming.
-> - `REVIEW INTERRUPTED` — KeyboardInterrupt. Suggest resuming.
+> Track which dimensions have completed (`REVIEW DONE` in progress.log).
+> Report status for each dimension.
 >
-> Also check for `.hil-timeout` marker file in the workspace. If it exists,
-> the agent hit the soft timeout (600s) and is still running (up to 1800s
-> hard timeout). Read the marker, tell the user the agent is still exploring,
-> and ask: continue or kill? If kill, write "kill" to the marker file.
-> If continue, write "extend" to reset the timer.
+> **When ALL dimensions are complete:** find each workspace's tracker.md path,
+> then launch the cross-cutting review:
+> ```bash
+> python3 ~/.claude/skills/design-review/review.py \
+>   --spec {spec_path} --title {title}-crosscutting \
+>   --type crosscutting --degree {degree} \
+>   --stage {maturity_stage} --source-dirs {dirs} \
+>   --arch-files <coherence-tracker-path> <structure-tracker-path> <robustness-tracker-path>
+> ```
+> Run this in the background. The `--arch-files` paths are the tracker.md
+> files from each dimension workspace.
 >
-> If progress.log exists but hasn't been updated in 10+ minutes and no
-> terminal line is present, warn the user that the review appears stalled.
+> If a cross-cutting review is already running, check its progress.log.
+>
+> **When cross-cutting completes:** read all 4 tracker.md files. Present
+> unified results using the template in Step 8. Delete this cron.
+>
+> **Failure handling:**
+> - `REVIEW PAUSED` — needs human input. Tell the user.
+> - `REVIEW FAILED` / `REVIEW CRASHED` — report error, suggest resuming.
+> - `REVIEW INTERRUPTED` — suggest resuming.
+> - `.hil-timeout` marker — agent hit soft timeout, ask continue or kill.
+> - No update for 10+ min — warn about stall.
+>
+> If one dimension fails, still launch cross-cutting for the surviving
+> dimensions (if 2+ completed). If only 1 completed, skip cross-cutting
+> and present results for that dimension alone.
 
-Set `recurring: true`. Store the cron job ID so you can delete it when the
-review completes.
+Store the cron job ID for cleanup.
 
 ## Step 6 — Handle notifications
 
 You will receive notifications from two sources:
 
-1. **Background task completion** — the Bash `run_in_background` notification
-   fires when the Python process exits. Read progress.log to determine outcome.
-2. **Watchdog cron** — fires every 5 minutes with a progress check.
+1. **Background task completion** — fires when each review.py process exits
+2. **Watchdog cron** — fires every 5 minutes with progress check
 
-On either notification:
-- If the review completed: present results, delete the watchdog cron
-- If it failed/crashed: report the error, suggest resuming, delete the cron
-- If stalled: warn the user, suggest resuming or checking IntelliJ
+On notification:
+- If all reviews completed: the watchdog handles cross-cutting launch and results
+- If a dimension failed: report which one, suggest resuming
+- If stalled: warn the user
 
 ## Step 7 — Handle failures
 
-If the process exits with an error:
+If a review.py process exits with an error:
 
-1. Read the progress log to understand where it failed
-2. Check if it's a permission issue (common: `claude -p` needs permission approval)
-   - Fix: suggest the user run `! python3 /Users/mdproctor/.claude/skills/design-review/review.py ...`
-     from the prompt (the `!` prefix runs it in the foreground with visible prompts)
-3. Check if it's a timeout (SESSION_TIMEOUT = 600s per claude -p call)
-4. Report the error clearly to the user with the specific failure
-5. If the workspace was partially created, suggest resuming:
+1. Read its progress log to understand the failure
+2. Check for permission issues (`claude -p` needs permission approval)
+3. Check for timeouts (SESSION_TIMEOUT = 600s per claude -p call)
+4. Report clearly which dimension failed
+5. Suggest resuming:
    ```bash
-   python3 /Users/mdproctor/.claude/skills/design-review/review.py \
-     --workspace ~/adr/{project}/{title}-{timestamp}/ \
+   python3 ~/.claude/skills/design-review/review.py \
+     --workspace ~/reviews/{project}/{title}-{dimension}-{timestamp}/ \
      --source-dirs {dirs}
    ```
 
 ## Step 8 — Validate and present results
 
-When the review completes:
+When all reviews complete (including cross-cutting):
 
-1. **Read the final spec** — the spec is symlinked at `spec.md` in the workspace
-   (or read the path from `.spec-path`). Read it end to end.
-2. **Read the tracker** — `tracker.md` in the workspace. Check which items are
-   verified, accepted, deferred, and any still unresolved.
-3. **Validate** — confirm the tracker's verified/accepted items are actually
-   reflected in the spec. Don't trust the tracker alone — the spec is the evidence.
-4. **Report** — use this exact template (fill in values, omit lines that are 0):
+1. **Read the final spec** — symlinked at `spec.md` in any workspace
+2. **Read all trackers** — tracker.md from each dimension workspace
+3. **Validate** — confirm verified/accepted items are reflected in the spec
+4. **Report** — use this template:
 
 ```
-Design review complete.
+Post-spec review complete: **{title}**
 
-- {N} rounds, {M} issues raised
-- {V} verified (reviewer confirmed fixes in the spec)
-- {A} accepted (reviewer accepted implementor's rejection)
-- {D} deferred
-- {U} unresolved
-- Cost: ${C}
-- Health: {no issues | N timeout(s), M error(s)}
-- Spec: file://{spec_path}
+| Dimension | Rounds | Issues | Verified | Accepted | Deferred | Unresolved | Cost |
+|-----------|--------|--------|----------|----------|----------|------------|------|
+| Coherence | {N} | {M} | {V} | {A} | {D} | {U} | ${C} |
+| Structure | {N} | {M} | {V} | {A} | {D} | {U} | ${C} |
+| Robustness | {N} | {M} | {V} | {A} | {D} | {U} | ${C} |
+| Cross-cutting | {N} | {M} | {V} | {A} | {D} | {U} | ${C} |
+| **Total** | | **{M}** | **{V}** | **{A}** | **{D}** | **{U}** | **${C}** |
 
-{If unresolved items exist, list each with ID, title, and status}
+Health: {no issues | N timeout(s), M error(s)}
+Spec: file://{spec_path}
+
+{If unresolved items exist in any dimension, list each}
 ```
 
-Do NOT substitute a narrative summary for this template. The structured
-format is what the user needs to make a go/no-go decision. You can add
-a brief narrative AFTER the template if the review surfaced notable
-findings worth highlighting.
+Do NOT substitute a narrative summary for this template.
 
 ## Resuming a failed/interrupted review
 
@@ -292,25 +304,24 @@ from the next round.
 
 ## Optional flags the user can request
 
-| User says | Flag |
-|-----------|------|
-| "coherence check" / "completeness review" | `--type coherence` |
-| "structure review" / "architecture review" | `--type structure` |
-| "robustness review" / "try to break this" | `--type robustness` |
-| "conformance review" / "code vs spec" | `--type conformance` |
-| "readiness review" / "production check" | `--type readiness` |
-| "light review" / "quick check" | `--degree light` |
-| "standard review" | `--degree standard` |
-| "adversarial" / "stress test this" | `--degree adversarial` |
-| "deep review" / "thorough" / "ultrathink" | `--degree deep` |
-| "use sonnet" / "cheap mode" | `--model sonnet` |
-| "fresh sessions" / "no continuity" | `--fresh-sessions` |
-| "more rounds" / "up to 15" | `--max-rounds 15` |
-| "shorter windows" | `--session-window 3` |
-| "use these arch files" / specific arch context | `--arch-files /path/to/PLATFORM.md /path/to/ARC42.md` |
-| "diff against main" / "changes since release" | `--diff-base main` or `--diff-base v1.0` |
-| Legacy: "pre-review this" | `--mode pre-review` (maps to `--type coherence --degree light`) |
-| Legacy: "code review mode" | `--mode code-review` (maps to `--type conformance`) |
+| User says | Flag | Effect |
+|-----------|------|--------|
+| "light review" / "quick check" | `--degree light` | All dimensions, 1 round each |
+| "standard review" | `--degree standard` | All dimensions, 2-3 rounds |
+| "adversarial" / "stress test this" | `--degree adversarial` | All dimensions, 4-6 rounds |
+| "deep review" / "thorough" / "ultrathink" | `--degree deep` | All dimensions, 8-10 rounds + ultrathink |
+| "just coherence" / "completeness only" | `--type coherence` | Single dimension (no cross-cutting) |
+| "just structure" | `--type structure` | Single dimension |
+| "just robustness" / "try to break this" | `--type robustness` | Single dimension |
+| "conformance review" / "code vs spec" | `--type conformance` | Single dimension |
+| "readiness review" / "production check" | `--type readiness` | Single dimension |
+| "use sonnet" / "cheap mode" | `--model sonnet` | Override model |
+| "fresh sessions" / "no continuity" | `--fresh-sessions` | No session reuse |
+| "more rounds" / "up to 15" | `--max-rounds 15` | Override round count |
+| "use these arch files" | `--arch-files /path/...` | Extra context files |
+| "diff against main" | `--diff-base main` | Show branch changes |
+| Legacy: "pre-review this" | `--mode pre-review` | Maps to coherence/light |
+| Legacy: "code review mode" | `--mode code-review` | Maps to conformance |
 
 ## What this skill does NOT do
 

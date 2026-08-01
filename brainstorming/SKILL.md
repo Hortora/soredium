@@ -66,9 +66,9 @@ flowchart TD
     WRITE["Write design doc"]
     REVIEW["Spec self-review\n(fix inline)"]
     USER{"User reviews spec?"}
-    DEPTH["Review depth prompt\n(type + degree via AskUserQuestion)"]
-    SKIP{"Skip review?"}
-    DESIGNREVIEW["Run design-review\n(--type --degree)"]
+    DEGREE["Review depth prompt\n(degree only via AskUserQuestion)"]
+    SKIP{"Skip?"}
+    DESIGNREVIEW["Run design-review\n(all dimensions + cross-cutting)"]
     ESCALATE{"Escalation\nrecommended?"}
     PLANS(("Invoke writing-plans"))
 
@@ -81,12 +81,12 @@ flowchart TD
     WRITE --> REVIEW
     REVIEW --> USER
     USER -->|"changes requested"| WRITE
-    USER -->|"approved"| DEPTH
-    DEPTH --> SKIP
+    USER -->|"approved"| DEGREE
+    DEGREE --> SKIP
     SKIP -->|"yes"| PLANS
     SKIP -->|"no"| DESIGNREVIEW
     DESIGNREVIEW --> ESCALATE
-    ESCALATE -->|"yes, escalate"| DEPTH
+    ESCALATE -->|"yes, escalate"| DEGREE
     ESCALATE -->|"no"| PLANS
 ```
 
@@ -199,35 +199,50 @@ After the spec review loop passes, ask the user to review the written
 spec before proceeding:
 
 > "Spec written and committed to `<path>`. Please review it and let me
-> know if you want to make any changes before we start writing out the
-> implementation plan."
+> know if you want to make any changes before we move to the review
+> depth prompt."
 
 Wait for the user's response. If they request changes, make them and
-re-run the spec review loop. Only proceed once the user approves.
+re-run the spec review loop. Only proceed to the Review Depth Prompt
+once the user approves. Do NOT skip ahead to writing-plans.
 
-### Review Depth Prompt
+### Review Depth Prompt → writing-plans (MANDATORY gate)
 
-After the user approves the spec, prompt for review depth before
-transitioning to writing-plans. Follow the three-part flow defined
-in `design-review/review-tiers.md`:
+**You MUST complete this step before invoking writing-plans. There is no
+path from spec approval to writing-plans that bypasses this prompt.**
+
+After the user approves the spec:
 
 1. Analyze the spec for complexity signals and present the full
-   recommendation with reasoning as text.
-2. Use `AskUserQuestion` for type selection (Skip is an option;
-   recommended option first with "(Recommended)" suffix).
-3. If not Skip: use `AskUserQuestion` for degree selection.
+   recommendation with reasoning as text (see `design-review/review-tiers.md`
+   for recommendation signals).
+2. Use a single `AskUserQuestion` for **degree only** — no type selection.
+   The post-spec lifecycle automatically runs coherence + structure +
+   robustness + cross-cutting.
 
-If a review is selected, invoke `design-review` with `--type` and
-`--degree` flags. After review completes, check for escalation
-assessment. If escalation is recommended, present it and ask whether
-to proceed with the deeper review.
+```python
+AskUserQuestion(questions=[{
+    "question": "Review depth? (coherence + structure + robustness + cross-cutting)",
+    "header": "Review",
+    "options": [
+        {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
+        {"label": "Skip", "description": "No review needed"},
+        {"label": "Light", "description": "~2 min — single pass per dimension"},
+        {"label": "Standard", "description": "~5 min — 2-3 rounds per dimension"},
+        {"label": "Adversarial", "description": "~12 min — 4-6 rounds per dimension"},
+        {"label": "Deep", "description": "~25 min — 8-10 rounds + ultrathink"},
+    ],
+    "multiSelect": false,
+}])
+```
 
-If Skip is selected, proceed directly to writing-plans.
+3. If not Skip: invoke `design-review` with `--degree` flag only.
+   design-review handles multi-dimension orchestration and cross-cutting
+   automatically.
 
-### Implementation
-
-Invoke writing-plans to create a detailed implementation plan. Do NOT
-invoke any other skill. writing-plans is the next step.
+**After review completes (or Skip is selected):** invoke writing-plans
+to create the implementation plan. writing-plans is the only valid
+next step from here.
 
 ## Key Principles
 
