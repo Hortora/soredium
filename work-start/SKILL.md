@@ -183,6 +183,19 @@ If results found: surface entry IDs and titles to the user. Ask which are
 relevant before proceeding. These form the initial **garden context set** —
 carry it forward into brainstorming and implementation.
 
+**Record provenance:** After the user selects relevant entries, call:
+```
+gardenRecordProvenance(
+    issueRepo=<ISSUE_REPO_GITHUB from Step 4>,
+    issueNumber=<ISSUE_N from Step 4>,
+    specName="",
+    geIds=<pipe-separated selected GE-IDs>,
+    recordedBy="work-start"
+)
+```
+If `gardenRecordProvenance` is unavailable (engine not running), warn once
+and continue — provenance recording is never a gate on work.
+
 If no results: proceed silently.
 
 **Skip** if the garden is not configured or the work description has no

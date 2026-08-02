@@ -104,7 +104,19 @@ writing-plans.
 - Run forage SEARCH with keywords from the idea — surface relevant garden
   entries before the user starts answering design questions. A garden entry
   might document a gotcha, a technique, or a prior decision that shapes
-  the design.
+  the design. After the user selects which entries are relevant, **record
+  provenance** — call `gardenRecordProvenance` with the selected GE-IDs:
+  ```
+  gardenRecordProvenance(
+      issueRepo=<from .meta issue-repo>,
+      issueNumber=<from .meta issue>,
+      specName="",
+      geIds=<pipe-separated selected GE-IDs>,
+      recordedBy="brainstorming"
+  )
+  ```
+  If `gardenRecordProvenance` is unavailable (engine not running), warn
+  once and continue — provenance recording is never a gate on work.
 - Run protocol SEARCH with keywords from the idea — surface project rules
   and architectural constraints that may shape or constrain the design.
 - Use ide-tooling for code navigation when exploring existing architecture
@@ -172,6 +184,19 @@ writing-plans.
 
 - Write the validated design (spec) to `$WORKSPACE/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
   (if no workspace or branch, fall back to `docs/specs/` in the project)
+- **Record provenance with spec name:** If garden entries were selected
+  during context gathering, re-record provenance with the spec filename:
+  ```
+  gardenRecordProvenance(
+      issueRepo=<from .meta>,
+      issueNumber=<from .meta>,
+      specName=<spec filename>,
+      geIds=<pipe-separated selected GE-IDs>,
+      recordedBy="brainstorming"
+  )
+  ```
+  This updates the existing provenance records with the spec name via
+  UPSERT — no duplicates are created.
 - Commit the design document to git
 
 ### Spec Self-Review
