@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-slot_manager.py — Worktree slot operations for multi-repo families
+slot_manager.py — Clone-based slot operations for multi-repo families
 
 Subcommands:
   create-slot <family-root> repos=<csv> branch=<name> issue=<N> issue-repo=<o/r> [covers=<csv>] [context=<text>]

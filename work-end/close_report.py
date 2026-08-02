@@ -29,7 +29,7 @@ STEP_ORDER = [
     "stamp-workspace",
     "scaffold-cleanup",
     "hygiene",
-    "worktree-remove",
+    "slot-archive",
     "archive",
 ]
 
@@ -46,7 +46,7 @@ STEP_LABELS = {
     "stamp-workspace": "Stamped workspace branch",
     "scaffold-cleanup": "Scaffold cleaned",
     "hygiene": "Hygiene scan",
-    "worktree-remove": "Worktrees removed",
+    "slot-archive": "Slot clones archived",
     "archive": "Slot archived",
 }
 
@@ -161,10 +161,10 @@ def _format_detail(step: str, data: dict) -> str:
         findings = d.get("findings", "0")
         return f" ({findings} findings)" if findings != "0" else " (clean)"
 
-    if step == "worktree-remove":
+    if step == "slot-archive":
         count = d.get("count", "0")
         names = d.get("names", "")
-        return f" {count} worktrees ({names})" if names else f" {count} worktrees"
+        return f" {count} clones ({names})" if names else f" {count} clones"
 
     if step == "archive":
         slot = d.get("slot", "")

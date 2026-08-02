@@ -1,8 +1,8 @@
 ---
 name: work-slot
 description: >
-  Use when creating parallel worktree slots for multi-repo family work —
-  user says "create a slot", "spin up a worktree for issue #N", "parallel
+  Use when creating parallel clone-based slots for multi-repo family work —
+  user says "create a slot", "spin up a slot for issue #N", "parallel
   work on engine and iot", or invokes /work-slot. Also use "work-slot
   epic" to iterate through an epic's child issues, "work-slot next" to
   advance, "work-slot list" to see status, "work-slot remove" to archive,
@@ -13,10 +13,10 @@ slash-command: true
 
 # work-slot
 
-Create and manage numbered worktree slots for parallel development across
-a multi-repo family. Each slot is a self-contained work environment with
-isolated `.m2`, re-pointed symlinks, and a context file for the session
-that works there.
+Create and manage numbered clone-based slots for parallel development
+across a multi-repo family. Each slot contains standalone `git clone
+--shared` repos (not git worktrees), isolated `.m2`, re-pointed symlinks,
+and a context file for the session that works there.
 
 ## Slot Lifecycle
 
@@ -25,7 +25,7 @@ that works there.
 | `active` | slot dir exists, no markers | Work in progress |
 | `ready to land` | `.phase-a-complete` | Phase A done, awaiting merge |
 | `landed` | `.landed` | Merged to main, awaiting archive |
-| `archived` | in `worktrees/attic/<N>/` | Worktrees removed, metadata kept |
+| `archived` | in `worktrees/attic/<N>/` | Clones moved to attic, metadata kept |
 
 ---
 
@@ -350,8 +350,8 @@ Cross-check .slot against the GitHub epic body. Report if:
 
 ## `work-slot remove <N>`
 
-> "Archive slot <N>? Git worktrees will be removed but .slot and
-> markers are preserved in `worktrees/attic/<N>/`. (y/n)"
+> "Archive slot <N>? Slot clones will be moved to
+> `worktrees/attic/<N>/` with .slot and markers preserved. (y/n)"
 
 Wait for confirmation. Then:
 
@@ -378,8 +378,8 @@ sequence: rebase, push, close issues, promote artifacts, stamp, archive.
 
 Walk up from CWD looking for a directory that is not itself a git repo
 and contains child directories with `wksp` symlinks. For each candidate,
-verify its child repos have `.git` directories (not files) — worktree
-checkouts have `.git` files and must be skipped.
+verify its child repos have `.git` directories (not files) — a `.git`
+file indicates a git worktree (different mechanism), not a family repo.
 
 If the walk-up fails, ask:
 > "Which directory is the family root? (e.g., ~/claude/casehub)"
@@ -449,7 +449,7 @@ If `STAGE=push STATUS=pass`: continue to 4b.
   ```
 
 **4c. Stamp branches** — handled programmatically by `merge_slot()`.
-`merge_slot()` writes stamp commits on all repo and workspace worktrees
+`merge_slot()` writes stamp commits on all repo and workspace clones
 after confirming all pushes succeeded. Do NOT write stamps manually.
 
 **4d. Mark closed:**
@@ -476,7 +476,7 @@ python3 ~/.claude/skills/work-end/close_report.py render /tmp/work-end-report.js
 ```
 
 Record results into the report after each sub-step in Step 4 (rebase, merge,
-push, stamp, worktree-remove, archive) using `close_report.py record`. The
+push, stamp, slot-archive) using `close_report.py record`. The
 script produces a deterministic, structured summary identical to work-end.
 
 If "all" was selected, repeat Step 4 for next slot. If any slot fails at
@@ -486,8 +486,8 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 
 ## How slots work
 
-- **Self-contained.** Everything under `worktrees/<N>/` — repo worktrees,
-  workspace worktree, isolated `.m2`, .slot context file.
+- **Self-contained.** Everything under `worktrees/<N>/` — repo clones,
+  workspace clone, isolated `.m2`, .slot context file.
 - **Isolated .m2.** Every slot gets its own Maven local repo via
   `.mvn/maven.config`. No cross-contamination with the originals.
 - **Symlinks re-pointed.** `wksp`/`proj` symlinks point to the slot's
@@ -520,7 +520,7 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 ## Skill Chaining
 
 **Invoked by:** Human directly (`/work-slot`, "create a slot for...",
-"spin up a worktree", "parallel work on...", "drive through the epic",
+"spin up a slot", "parallel work on...", "drive through the epic",
 "work-slot epic #N")
 
 **Invokes:** Nothing — creates the environment; the human starts work.
@@ -534,8 +534,9 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
   offers to stamp/close/archive. Phase B from inside the slot still works.
 - `handover` — HANDOFF.md for session handoffs. For epic slots,
   handover auto-includes an Epic Progress section from .slot.
-- `using-git-worktrees` — same git primitive, different use case
-  (single-repo ephemeral isolation for subagent dispatch)
+- `using-git-worktrees` — different git primitive (`git worktree add`
+  vs `git clone --shared`), different use case (single-repo ephemeral
+  isolation for subagent dispatch)
 - `issue-workflow` — activate-issues called during slot creation
 - `artifact_promote.py` / `blog_dest.py` / `branch_cleanup.py` — shared
   scripts used by both work-end Phase B and work-slot merge

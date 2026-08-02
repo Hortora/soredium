@@ -600,10 +600,10 @@ Phase B directly.
 
 **Corrected ordering — merge first, then post-land actions:**
 
-**B1. Rebase branches onto current main.** Git worktrees enforce that no
-two worktrees can have the same branch checked out. The original repo has
-main; the slot worktree has the branch. Rebase the branch in the **slot
-worktree**:
+**B1. Rebase branches onto current main.** Slots are standalone clones
+(`git clone --shared`), not git worktrees. The clone has its own refs —
+the original repo cannot see the clone's branches directly. Rebase the
+branch in the **slot clone**:
 
 ```bash
 git -C <slot>/<repo> fetch origin main
@@ -611,7 +611,7 @@ git -C <slot>/<repo> rebase origin/main
 ```
 
 If any branch rebase conflicts: hard stop. No main has been modified.
-Human resolves the conflict on the branch in the slot worktree, then
+Human resolves the conflict on the branch in the slot clone, then
 re-triggers Phase B.
 
 **B1b. Cross-repo dependency check.** Before pushing, verify provider repos
@@ -626,25 +626,28 @@ Reorder the push sequence in B2 accordingly (providers before consumers).
 If a provider's changes are still on a feature branch, **hard stop** —
 the consumer cannot be pushed until the provider lands.
 
-**B2. Fast-forward and push.** Only after all rebases succeed. For each
-repo — in the **original repo** (where main is checked out):
+**B2. Push rebased branch, then fast-forward original.** Only after all
+rebases succeed. Clones do not share refs with the original — the rebased
+branch must be pushed from the clone first, then merged in the original:
 
 ```bash
-git -C <original>/<repo> fetch origin main
-git -C <original>/<repo> rebase origin/main
+# Push rebased branch from clone to original (updates the branch ref)
+git -C <slot>/<repo> push origin <branch> --force-with-lease
+
+# In the original repo: fetch, then fast-forward main
+git -C <original>/<repo> fetch origin
 git -C <original>/<repo> merge --ff-only <branch>
 git -C <original>/<repo> push origin main
 ```
 
-Git worktrees share refs, so the rebased branch tip is visible from the
-original. If `--ff-only` fails or push fails, retry from B1 — max 3
-attempts. After 3 failures, hard stop with manual instructions.
+If `--ff-only` fails or push fails, retry from B1 — max 3 attempts.
+After 3 failures, hard stop with manual instructions.
 
 **B3. Close issues.** All issues in `$COVERS`.
 
 **B4. Promote artifacts.** Runs deferred 8a–8c.
 Operations needing `main` checked out use the **original workspace**.
-Operations reading from the branch use the **slot workspace worktree**.
+Operations reading from the branch use the **slot workspace clone**.
 
 Pass `scan-workspace` to `close_artifacts.py` so artifacts are scanned
 from the slot workspace (where they live on the branch), not the original
@@ -678,17 +681,17 @@ Read `VERIFIED=yes` from output. If `VERIFIED=no`, the script prints the
 missing files. **Hard stop — do not stamp.** Report the content gap and
 instruct the user to investigate before proceeding.
 
-Only after verification passes, stamp in the **slot worktrees** (where the
+Only after verification passes, stamp in the **slot clones** (where the
 branches are checked out):
 ```bash
 git -C <slot>/<repo> commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
 git -C <slot>/work commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
 ```
 
-**B7. Archive.** `git worktree remove` for each repo + workspace
-worktree in the slot. Move the slot directory to `worktrees/attic/<N>/`
-(preserves .slot and marker files for auditing). Use `archive-slot`
-from `slot_manager.py` — do not delete the slot directory.
+**B7. Archive.** Move the slot directory to `worktrees/attic/<N>/`
+(preserves .slot, clone repos, and marker files for auditing). Use
+`archive-slot` from `slot_manager.py` — do not delete the slot directory.
+No `git worktree remove` is needed — slots are standalone clones.
 
 **B8. Post-merge steps.** Steps 8k–12 from normal work-end.
 
@@ -699,10 +702,11 @@ Before proceeding to B8, verify all prior steps ran:
 - [ ] Issues closed (B3)
 - [ ] Artifacts promoted (B4)
 - [ ] Branches stamped as closed (B6)
-- [ ] **Slot archived — worktrees removed, slot moved to `worktrees/attic/<N>/` (B7)**
+- [ ] **Slot archived — clones moved to `worktrees/attic/<N>/` (B7)**
 
-B7 is the most commonly skipped step. If the slot directory still contains
-active worktrees, B7 did not run — go back and execute it before continuing.
+B7 is the most commonly skipped step. If the slot directory still exists
+under `worktrees/<N>/` (not in attic), B7 did not run — go back and
+execute it before continuing.
 
 ---
 
