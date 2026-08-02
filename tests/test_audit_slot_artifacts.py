@@ -14,6 +14,25 @@ from audit_slot_artifacts import (
 )
 
 
+class TestSlotNumberCollisions:
+    def test_no_active_attic_overlap(self):
+        """Active slot numbers must not overlap with attic entries."""
+        worktrees = Path.home() / "claude" / "casehub" / "worktrees"
+        if not worktrees.exists():
+            pytest.skip("no casehub worktrees")
+        attic = worktrees / "attic"
+        active = {d.name for d in worktrees.iterdir()
+                  if d.is_dir() and d.name.isdigit()}
+        archived = {d.name for d in attic.iterdir()
+                    if d.is_dir() and d.name.isdigit()} if attic.exists() else set()
+        overlap = active & archived
+        assert not overlap, (
+            f"Active slot numbers collide with attic: {sorted(overlap)}. "
+            f"These are likely empty shell directories from incomplete archival — "
+            f"remove them if they contain no .slot file or git repos."
+        )
+
+
 class TestFilterProjSymlinks:
     def test_proj_paths_removed(self):
         findings = [
