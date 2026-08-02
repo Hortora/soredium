@@ -134,17 +134,22 @@ class TestCheckStaleBranches:
 
 class TestCheckUnrecoveredArtifacts:
     def test_detects_unrecovered_blog(self, tmp_path):
-        _init_git(tmp_path)
-        subprocess.run(["git", "-C", str(tmp_path), "checkout", "-b", "closed-branch"], capture_output=True)
-        (tmp_path / "design").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "design" / "EPIC-CLOSED.md").write_text("closed")
-        (tmp_path / "blog").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "blog" / "entry.md").write_text("blog")
-        subprocess.run(["git", "-C", str(tmp_path), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "close"], capture_output=True)
-        subprocess.run(["git", "-C", str(tmp_path), "checkout", "main"], capture_output=True)
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        _init_git(workspace)
+        _init_git(project)
 
-        result = check_unrecovered_artifacts(str(tmp_path), ["closed-branch"])
+        subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "closed-branch"], capture_output=True)
+        (workspace / "design").mkdir(parents=True, exist_ok=True)
+        (workspace / "design" / "EPIC-CLOSED.md").write_text("closed")
+        (workspace / "blog").mkdir(parents=True, exist_ok=True)
+        (workspace / "blog" / "entry.md").write_text("blog")
+        subprocess.run(["git", "-C", str(workspace), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "close"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "checkout", "main"], capture_output=True)
+
+        routing = {"blog": "workspace", "specs": "project"}
+        result = check_unrecovered_artifacts(str(workspace), str(project), ["closed-branch"], routing)
         assert len(result) == 1
         assert result[0]["type"] == "blog"
         assert result[0]["file"] == "entry.md"
