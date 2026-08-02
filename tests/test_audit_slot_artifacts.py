@@ -82,3 +82,42 @@ class TestFilterAlreadyRecovered:
         findings = [{"file": "blog/entry.md", "type": "blog"}]
         result = filter_already_recovered(findings, Path("/nonexistent"))
         assert len(result) == 1
+
+    def test_multi_repo_workspace_via_wksp_symlink(self, tmp_path):
+        """Multi-repo slots have paths like 'engine/blog/entry.md'.
+        The actual workspace is found via wksp symlink at family/<repo>/wksp."""
+        family = tmp_path / "family"
+
+        # Set up repo with wksp symlink pointing to separate workspace
+        repo_dir = family / "engine"
+        repo_dir.mkdir(parents=True)
+        ws = tmp_path / "workspaces" / "engine"
+        (ws / "blog").mkdir(parents=True)
+        (ws / "blog" / "recovered.md").write_text("content")
+        (repo_dir / "wksp").symlink_to(ws)
+
+        findings = [
+            {"file": "engine/blog/recovered.md", "type": "blog"},
+            {"file": "engine/blog/still-lost.md", "type": "blog"},
+        ]
+        result = filter_already_recovered(findings, family)
+        assert len(result) == 1
+        assert result[0]["file"] == "engine/blog/still-lost.md"
+
+    def test_multi_repo_engine_at_family_work(self, tmp_path):
+        """Engine workspace is at family/work/ (special case)."""
+        family = tmp_path / "family"
+        ws = family / "work"
+        (ws / "blog").mkdir(parents=True)
+        (ws / "blog" / "entry.md").write_text("content")
+
+        # engine/ dir exists but wksp -> ../work
+        engine = family / "engine"
+        engine.mkdir(parents=True)
+        (engine / "wksp").symlink_to(ws)
+
+        findings = [
+            {"file": "engine/blog/entry.md", "type": "blog"},
+        ]
+        result = filter_already_recovered(findings, family)
+        assert result == []

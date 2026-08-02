@@ -123,11 +123,34 @@ def filter_inherited(findings: list[dict], threshold: int = 3) -> list[dict]:
     return [f for f in findings if counts[f["file"]] < threshold]
 
 
-def filter_already_recovered(findings: list[dict], ws_main: Path) -> list[dict]:
-    """Remove files that already exist at the workspace main destination."""
-    if not ws_main.exists():
+def filter_already_recovered(findings: list[dict], family_root: Path) -> list[dict]:
+    """Remove files that already exist at the workspace main destination.
+
+    Handles multi-repo layout: file paths like 'engine/blog/entry.md' have
+    a repo prefix. The actual workspace is found via the wksp symlink at
+    family_root/<repo>/wksp. Falls back to family_root/<repo>/work for
+    single-repo layouts.
+    """
+    if not family_root.exists():
         return findings
-    return [f for f in findings if not (ws_main / f["file"]).exists()]
+    result = []
+    for f in findings:
+        filepath = f["file"]
+        parts = filepath.split("/", 1)
+        if len(parts) == 2:
+            repo_name, rel = parts
+            wksp_link = family_root / repo_name / "wksp"
+            work_dir = family_root / repo_name / "work"
+            if wksp_link.is_symlink():
+                ws = wksp_link.resolve()
+                if (ws / rel).exists():
+                    continue
+            elif work_dir.is_dir() and (work_dir / rel).exists():
+                continue
+        if (family_root / filepath).exists():
+            continue
+        result.append(f)
+    return result
 
 
 def main() -> int:
@@ -179,17 +202,9 @@ def main() -> int:
 
         recovered_filtered = 0
         for family_root in args.family_roots:
-            worktrees = family_root / "worktrees"
-            if not worktrees.exists():
-                continue
-            for repo_dir in family_root.iterdir():
-                if not repo_dir.is_dir() or repo_dir.name == "worktrees":
-                    continue
-                ws_path = repo_dir / "work"
-                if ws_path.exists():
-                    pre = len(all_findings)
-                    all_findings = filter_already_recovered(all_findings, ws_path)
-                    recovered_filtered += pre - len(all_findings)
+            pre = len(all_findings)
+            all_findings = filter_already_recovered(all_findings, family_root)
+            recovered_filtered += pre - len(all_findings)
 
         if args.verbose:
             print(f"FILTERED: {proj_filtered} proj/ symlinks, "
