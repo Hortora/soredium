@@ -111,18 +111,42 @@ def audit_slot(slot_dir: Path, slot_id: str, location: str) -> list[dict]:
     return findings
 
 
+def filter_proj_symlinks(findings: list[dict]) -> list[dict]:
+    """Remove findings under proj/ — symlink to project repo, not workspace artifacts."""
+    return [f for f in findings if not f["file"].startswith("proj/")]
+
+
+def filter_inherited(findings: list[dict], threshold: int = 3) -> list[dict]:
+    """Remove files that appear in threshold+ slots — inherited from main, not lost."""
+    from collections import Counter
+    counts = Counter(f["file"] for f in findings)
+    return [f for f in findings if counts[f["file"]] < threshold]
+
+
+def filter_already_recovered(findings: list[dict], ws_main: Path) -> list[dict]:
+    """Remove files that already exist at the workspace main destination."""
+    if not ws_main.exists():
+        return findings
+    return [f for f in findings if not (ws_main / f["file"]).exists()]
+
+
 def main() -> int:
-    if len(sys.argv) > 1:
-        family_roots = [Path(p) for p in sys.argv[1:]]
-    else:
-        family_roots = [
-            Path.home() / "claude" / "casehub",
-            Path.home() / "claude" / "hortora",
-        ]
+    import argparse
+    parser = argparse.ArgumentParser(description="Audit slots for lost artifacts")
+    parser.add_argument("family_roots", nargs="*", type=Path,
+                        default=[Path.home() / "claude" / "casehub",
+                                 Path.home() / "claude" / "hortora"])
+    parser.add_argument("--verbose", action="store_true",
+                        help="Show filtered-out findings with reason")
+    parser.add_argument("--summary", action="store_true",
+                        help="Show only counts, not individual files")
+    parser.add_argument("--no-filter", action="store_true",
+                        help="Skip all false-positive filters (raw output)")
+    args = parser.parse_args()
 
     all_findings = []
 
-    for family_root in family_roots:
+    for family_root in args.family_roots:
         worktrees = family_root / "worktrees"
         if not worktrees.exists():
             continue
@@ -142,14 +166,57 @@ def main() -> int:
                 findings = audit_slot(slot_dir, slot_dir.name, f"{family_name}/attic")
                 all_findings.extend(findings)
 
+    raw_count = len(all_findings)
+
+    if not args.no_filter:
+        pre_proj = len(all_findings)
+        all_findings = filter_proj_symlinks(all_findings)
+        proj_filtered = pre_proj - len(all_findings)
+
+        pre_inherited = len(all_findings)
+        all_findings = filter_inherited(all_findings, threshold=3)
+        inherited_filtered = pre_inherited - len(all_findings)
+
+        recovered_filtered = 0
+        for family_root in args.family_roots:
+            worktrees = family_root / "worktrees"
+            if not worktrees.exists():
+                continue
+            for repo_dir in family_root.iterdir():
+                if not repo_dir.is_dir() or repo_dir.name == "worktrees":
+                    continue
+                ws_path = repo_dir / "work"
+                if ws_path.exists():
+                    pre = len(all_findings)
+                    all_findings = filter_already_recovered(all_findings, ws_path)
+                    recovered_filtered += pre - len(all_findings)
+
+        if args.verbose:
+            print(f"FILTERED: {proj_filtered} proj/ symlinks, "
+                  f"{inherited_filtered} inherited (3+ slots), "
+                  f"{recovered_filtered} already recovered")
+            print(f"RAW_TOTAL={raw_count}")
+            print()
+
     if not all_findings:
         print("AUDIT_RESULT=clean")
-        print("No lost artifacts found across all slots.")
+        if raw_count > 0:
+            print(f"All {raw_count} raw findings filtered as false positives.")
+        else:
+            print("No lost artifacts found across all slots.")
         return 0
 
     print(f"AUDIT_RESULT=findings")
     print(f"TOTAL_LOST={len(all_findings)}")
     print()
+
+    if args.summary:
+        by_type: dict[str, int] = {}
+        for f in all_findings:
+            by_type[f["type"]] = by_type.get(f["type"], 0) + 1
+        for t, c in sorted(by_type.items()):
+            print(f"  {t}: {c}")
+        return 1
 
     by_slot: dict[str, dict] = {}
     for f in all_findings:
