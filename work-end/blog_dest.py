@@ -20,6 +20,8 @@ import re
 import shutil
 from pathlib import Path
 
+from workspace_artifacts import extract_image_refs
+
 try:
     import yaml
 except ImportError:
@@ -63,6 +65,11 @@ if unpublished:
     dest_path.mkdir(parents=True, exist_ok=True)
     for entry in unpublished:
         shutil.copy2(workspace_blog / entry, dest_path / entry)
+        for img_ref in extract_image_refs(workspace_blog / entry, workspace_blog):
+            img_src = workspace_blog / img_ref
+            img_dst = dest_path / img_ref
+            img_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(img_src), str(img_dst))
     print(f"UNPUBLISHED={','.join(unpublished)}")
 else:
     print("UNPUBLISHED=")

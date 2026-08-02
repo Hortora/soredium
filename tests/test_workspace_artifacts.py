@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
 
-from workspace_artifacts import scan
+from workspace_artifacts import scan, extract_image_refs
 
 
 # ── Fixture builders ──────────────────────────────────────────────
@@ -331,3 +331,151 @@ class TestScanEdgeCases:
             "specs/m-spec.md",
             "specs/z-spec.md",
         ]
+
+
+class TestExtractImageRefs:
+    def test_markdown_image_extracted(self, tmp_path):
+        img = tmp_path / "specs" / "images" / "arch.png"
+        img.parent.mkdir(parents=True)
+        img.write_bytes(b"\x89PNG")
+        md = tmp_path / "specs" / "design.md"
+        md.write_text("# Design\n\n![Architecture](images/arch.png)\n")
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == ["specs/images/arch.png"]
+
+    def test_html_img_extracted(self, tmp_path):
+        img = tmp_path / "blog" / "photo.jpg"
+        img.parent.mkdir(parents=True)
+        img.write_bytes(b"\xff\xd8")
+        md = tmp_path / "blog" / "entry.md"
+        md.write_text('<img src="photo.jpg" width="400">\n')
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == ["blog/photo.jpg"]
+
+    def test_html_img_single_quotes(self, tmp_path):
+        img = tmp_path / "blog" / "photo.jpg"
+        img.parent.mkdir(parents=True)
+        img.write_bytes(b"\xff\xd8")
+        md = tmp_path / "blog" / "entry.md"
+        md.write_text("<img src='photo.jpg' alt='test'>\n")
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == ["blog/photo.jpg"]
+
+    def test_external_urls_excluded(self, tmp_path):
+        md = tmp_path / "blog" / "entry.md"
+        md.parent.mkdir(parents=True)
+        md.write_text("![Logo](https://example.com/logo.png)\n![Other](http://example.com/other.png)\n")
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == []
+
+    def test_template_vars_excluded(self, tmp_path):
+        md = tmp_path / "blog" / "entry.md"
+        md.parent.mkdir(parents=True)
+        md.write_text('<img src="{thumb_src}" alt="thumb">\n')
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == []
+
+    def test_protocol_uris_excluded(self, tmp_path):
+        md = tmp_path / "blog" / "entry.md"
+        md.parent.mkdir(parents=True)
+        md.write_text("![Icon](chrome://skype/icon.png)\n![Data](data:image/png;base64,abc)\n")
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == []
+
+    def test_missing_image_warned(self, tmp_path, capsys):
+        md = tmp_path / "specs" / "design.md"
+        md.parent.mkdir(parents=True)
+        md.write_text("![Missing](images/gone.png)\n")
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == []
+        assert "gone.png" in capsys.readouterr().err
+
+    def test_nested_image_paths_preserved(self, tmp_path):
+        img = tmp_path / "specs" / "images" / "sub" / "deep.svg"
+        img.parent.mkdir(parents=True)
+        img.write_text("<svg/>")
+        md = tmp_path / "specs" / "design.md"
+        md.write_text("![Diagram](images/sub/deep.svg)\n")
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == ["specs/images/sub/deep.svg"]
+
+    def test_multiple_refs_in_one_file(self, tmp_path):
+        (tmp_path / "blog").mkdir()
+        for name in ["a.png", "b.jpg"]:
+            (tmp_path / "blog" / name).write_bytes(b"\x00")
+        md = tmp_path / "blog" / "entry.md"
+        md.write_text("![A](a.png)\n\n![B](b.jpg)\n")
+
+        result = extract_image_refs(md, tmp_path)
+        assert sorted(result) == ["blog/a.png", "blog/b.jpg"]
+
+    def test_duplicate_refs_deduplicated(self, tmp_path):
+        (tmp_path / "blog").mkdir()
+        (tmp_path / "blog" / "logo.png").write_bytes(b"\x00")
+        md = tmp_path / "blog" / "entry.md"
+        md.write_text("![Logo](logo.png)\n\n![Logo again](logo.png)\n")
+
+        result = extract_image_refs(md, tmp_path)
+        assert result == ["blog/logo.png"]
+
+
+class TestScanImageRefs:
+    def test_image_refs_included_in_scan(self, tmp_path):
+        (tmp_path / "specs").mkdir()
+        img = tmp_path / "specs" / "images" / "arch.svg"
+        img.parent.mkdir()
+        img.write_text("<svg/>")
+        md = tmp_path / "specs" / "design.md"
+        md.write_text("# Design\n\n![Architecture](images/arch.svg)\n")
+
+        result = scan(tmp_path)
+        assert "specs/design.md" in result["specs"]
+        assert "specs/images/arch.svg" in result["specs"]
+
+    def test_image_refs_across_all_categories(self, tmp_path):
+        for cat in ("specs", "adr", "blog", "plans"):
+            d = tmp_path / cat
+            d.mkdir()
+            img = d / "photo.png"
+            img.write_bytes(b"\x89PNG")
+            md = d / "entry.md"
+            md.write_text("![Photo](photo.png)\n")
+
+        result = scan(tmp_path)
+        for cat in ("specs", "adr", "blog", "plans"):
+            assert f"{cat}/photo.png" in result[cat], \
+                f"image not found in {cat}: {result[cat]}"
+
+    def test_non_referenced_images_excluded(self, tmp_path):
+        (tmp_path / "specs").mkdir()
+        (tmp_path / "specs" / "design.md").write_text("# No images\n")
+        (tmp_path / "specs" / "orphan.png").write_bytes(b"\x89PNG")
+
+        result = scan(tmp_path)
+        assert result["specs"] == ["specs/design.md"]
+
+    def test_snapshots_unchanged(self, tmp_path):
+        (tmp_path / "snapshots").mkdir()
+        (tmp_path / "snapshots" / "doc.md").write_text("snap")
+        (tmp_path / "snapshots" / "diagram.png").write_bytes(b"\x89PNG")
+
+        result = scan(tmp_path)
+        assert len(result["snapshots"]) == 2
+
+    def test_image_dedup_across_md_files(self, tmp_path):
+        (tmp_path / "specs").mkdir()
+        img = tmp_path / "specs" / "shared.png"
+        img.write_bytes(b"\x89PNG")
+        (tmp_path / "specs" / "a.md").write_text("![X](shared.png)\n")
+        (tmp_path / "specs" / "b.md").write_text("![Y](shared.png)\n")
+
+        result = scan(tmp_path)
+        assert result["specs"].count("specs/shared.png") == 1

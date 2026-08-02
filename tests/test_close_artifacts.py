@@ -705,3 +705,33 @@ class TestSlotModeEndToEnd:
         assert int(out.get("PLANS_ARCHIVED", "0")) >= 1, (
             f"Plans not archived.\nstdout: {result.stdout}"
         )
+
+
+class TestImagePromotion:
+    """Image refs in markdown are included in scan results."""
+
+    def test_image_promoted_alongside_markdown(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        specs = ws / "specs"
+        specs.mkdir()
+        (specs / "design.md").write_text("# Design\n\n![Arch](images/arch.svg)\n")
+        img = specs / "images" / "arch.svg"
+        img.parent.mkdir()
+        img.write_text("<svg/>")
+
+        result = scan_artifacts(ws)
+        assert "specs/design.md" in result["specs"]
+        assert "specs/images/arch.svg" in result["specs"]
+
+    def test_blog_image_in_scan_results(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        blog = ws / "blog"
+        blog.mkdir()
+        (blog / "entry.md").write_text("![Photo](photo.png)\n")
+        (blog / "photo.png").write_bytes(b"\x89PNG")
+
+        result = scan_artifacts(ws)
+        assert "blog/entry.md" in result["blog"]
+        assert "blog/photo.png" in result["blog"]
