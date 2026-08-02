@@ -55,6 +55,21 @@ class TestCheckUnpublishedBlogs:
         result = check_unpublished_blogs(str(tmp_path / "workspace"), str(dest))
         assert result == ["unpublished.md"]
 
+    def test_tilde_in_blog_dest_expanded(self, tmp_path, monkeypatch):
+        """blog_dest with ~ must be expanded — Path('~/...') treats ~ as literal."""
+        blog = tmp_path / "workspace" / "blog"
+        blog.mkdir(parents=True)
+        (blog / "entry.md").write_text("content")
+
+        fake_home = tmp_path / "fakehome"
+        dest = fake_home / "dest"
+        dest.mkdir(parents=True)
+        (dest / "entry.md").write_text("content")
+
+        monkeypatch.setenv("HOME", str(fake_home))
+        result = check_unpublished_blogs(str(tmp_path / "workspace"), "~/dest")
+        assert result == [], f"tilde not expanded — entry reported as unpublished"
+
     def test_no_blog_dir(self, tmp_path):
         result = check_unpublished_blogs(str(tmp_path), "/some/dest")
         assert result == []

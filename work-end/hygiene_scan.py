@@ -44,7 +44,7 @@ def check_unpublished_blogs(workspace: str, blog_dest: str) -> list[str]:
     if not blog_dir.is_dir() or not blog_dest:
         return []
 
-    dest_path = Path(blog_dest)
+    dest_path = Path(blog_dest).expanduser()
     unpublished = []
     for f in blog_dir.iterdir():
         if f.name == "INDEX.md" or not f.name.endswith(".md"):
