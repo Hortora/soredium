@@ -121,8 +121,8 @@ INVALID_MESSAGES: dict[tuple[str, str], str] = {
     ('paused', 'work_end'):     "Cannot close a paused branch. Resume it first, then close.",
     ('paused', 'work_next'):    "Cannot advance — branch is paused. Resume first.",
     ('paused', 'work_pause'):   "Branch is already paused.",
-    ('closing:promoted', 'abort_close'): "Cannot abort — artifacts already promoted. Continue forward.",
-    ('closing:pushed', 'abort_close'):   "Cannot abort — artifacts already promoted. Branch pushed — continue forward.",
+    ('closing:promoted', 'abort_close'): "Cannot abort — artifacts already workspace-promoted and project-promoted. Continue forward.",
+    ('closing:pushed', 'abort_close'):   "Cannot abort — artifacts already workspace-promoted and project-promoted. Branch pushed — continue forward.",
     ('closing:merged', 'abort_close'):   "Cannot abort — content already merged to main. Continue forward.",
     ('closing:stamped', 'abort_close'):  "Cannot abort — branch already stamped. Only cleanup remains.",
 }

@@ -150,7 +150,7 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
 
     if promoted > 0:
         try:
-            git("commit", "-m", f"docs(work-end): promote artifacts from {branch}", cwd=workspace)
+            git("commit", "-m", f"docs(work-end): workspace-promote artifacts from {branch} to workspace main", cwd=workspace)
         except subprocess.CalledProcessError as e:
             # Nothing to commit (already up to date)
             if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
@@ -236,7 +236,7 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
 
     if promoted > 0:
         try:
-            git("commit", "-m", "docs(work-end): promote artifacts from workspace", cwd=project)
+            git("commit", "-m", "docs(work-end): project-promote artifacts from workspace to project", cwd=project)
         except subprocess.CalledProcessError as e:
             if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
                 print("ERROR=commit_failed")

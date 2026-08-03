@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Unified artifact promotion, archival, issue close, and blog publish.
+Unified artifact promotion (workspace and project), archival, issue close, and blog publish.
 
 Replaces work-end Steps 8a-8c, 8f, 8g with a single mechanical call.
-Scans workspace for artifacts, resolves routing, promotes/publishes,
-writes a stamp file proving completion.
+Scans workspace for artifacts, resolves routing, workspace-promotes and
+project-promotes per routing config, writes a stamp file proving completion.
 
 Usage:
     python3 close_artifacts.py <workspace> <project> <branch> \
@@ -62,7 +62,7 @@ def run_script(script: str, args: list[str]) -> tuple[int, dict[str, str]]:
 
 
 def scan_artifacts(workspace: Path) -> dict[str, list[str]]:
-    """Scan workspace for promotable artifacts. Returns category -> list of relative paths."""
+    """Scan workspace for artifacts to workspace-promote or project-promote. Returns category -> list of relative paths."""
     return _scan_workspace(workspace)
 
 
@@ -105,7 +105,7 @@ def write_stamp(workspace: Path, branch: str, results: dict[str, str]) -> Path:
     )
     subprocess.run(
         ["git", "-C", str(workspace), "commit", "-m",
-         f"chore(work-end): artifact promotion stamp for {branch}"],
+         f"chore(work-end): workspace and project promotion stamp for {branch}"],
         capture_output=True,
     )
 

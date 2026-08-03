@@ -181,8 +181,7 @@ See `docs/superpowers/specs/2026-04-13-design-journal-design.md`.
 ## Epic Lifecycle
 
 Workspace branches are the unit of epic work. Each epic gets a branch in both the
-project and the workspace. When the epic closes, artifacts are promoted or posted,
-and both branches are deleted.
+project and the workspace. When the epic closes, artifacts are workspace-promoted and project-promoted (or posted), and both branches are deleted.
 
 ### epic-start
 

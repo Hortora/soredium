@@ -103,8 +103,8 @@ feat: promote <artifact-type> from <project> epic <epic-name>
 ```
 
 **On failure:** `epic-close` reports what succeeded and what failed — it does
-not roll back successful promotions. The user resolves failures manually
-(e.g. no network for push) and can re-run the promotion for that artifact.
+not roll back successful workspace or project promotions. The user resolves failures manually
+(e.g. no network for push) and can re-run the specific promotion for that artifact.
 
 **Subdirectory convention:** when routing to a base destination, the
 artifact's standard subdirectory is appended automatically:

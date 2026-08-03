@@ -377,7 +377,7 @@ scans, blog recovery, and stamp verification.
 ## `work-slot merge`
 
 Merge ready-to-land slots from the main repo. Runs the full Phase B
-sequence: rebase, push, close issues, promote artifacts, stamp, archive.
+sequence: rebase, push, close issues, workspace-promote and project-promote artifacts, stamp, archive.
 
 ### Step 1 — Find family root
 
@@ -508,7 +508,7 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 4. Runs work-end — detects slot mode, runs Phase A (review, verify,
    squash, push branch), stops before merge. Desktop notification.
 5. Human returns later, says "merge" — work-end Phase B runs (rebase,
-   push main, close issues, promote artifacts, cleanup slot)
+   push main, close issues, workspace-promote and project-promote artifacts, cleanup slot)
 
 ### What it doesn't do
 

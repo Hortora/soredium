@@ -8,7 +8,7 @@ description: >
 
 # work-end
 
-Closes the current branch cleanly. Promotes artifacts, merges the journal,
+Closes the current branch cleanly. Workspace-promotes and project-promotes artifacts, merges the journal,
 closes the issue, rebases the project branch onto the project base branch, marks the
 branch closed, returns to the workspace base (main).
 
@@ -40,7 +40,7 @@ The pre-push hook blocks diverged pushes, but prevention is better than detectio
 | "I'll review after merging" | Post-merge review is post-incident review. |
 | "Doc sync has nothing to sync" | Run it and let the skill decide. Your guess is often wrong. |
 | "CLAUDE.md hasn't changed" | Conventions established during implementation need to be captured. |
-| "I'll promote artifacts manually" | 195 orphaned specs. Run close_artifacts.py. The verification gate catches you. |
+| "I'll promote artifacts to workspace and project manually" | 195 orphaned specs. Run close_artifacts.py. The verification gate catches you. |
 | "close_artifacts.py is overkill for this branch" | The script takes 2 seconds. Skipping it loses specs permanently. |
 
 ---
@@ -82,7 +82,7 @@ corresponding event (`review_pass`, `promote_pass`, `push_pass`, `merge_pass`,
 
 **Abort:** from `closing:review` or `closing:verified` only. Fire
 `transition(meta, 'abort_close')` to return to `active`. Post-promotion
-states are forward-only.
+states (after workspace and project promotion) are forward-only.
 
 ---
 
@@ -610,7 +610,7 @@ verification, and squash — but defers merge and all post-merge actions.
   rebase onto main.** Do not merge, do not push main.
 
 **What is deferred to Phase B:**
-- Steps 8a–8c (artifact promotion, spec cleanup) — 8c depends on 8b
+- Steps 8a–8c (workspace and project artifact promotion, spec cleanup) — 8c depends on 8b
 - Step 8f (issue close) — depends on successful merge
 - Step 8g (blog publish) — depends on successful merge
 - Steps 8k–12 (build verification, mark closed, ARC42 scan, handover)
@@ -696,7 +696,7 @@ After 3 failures, hard stop with manual instructions.
 
 **B3. Close issues.** All issues in `$COVERS`.
 
-**B4. Promote artifacts.** Runs deferred 8a–8c.
+**B4. Workspace-promote and project-promote artifacts.** Runs deferred 8a–8c.
 Operations needing `main` checked out use the **original workspace**.
 Operations reading from the branch use the **slot workspace clone**.
 
@@ -712,7 +712,7 @@ python3 ~/.claude/skills/work-end/close_artifacts.py \
 ```
 
 Without `scan-workspace`, Phase B would scan the original workspace
-(now on main) and find no branch artifacts to promote.
+(now on main) and find no branch artifacts to workspace-promote or project-promote.
 
 **B5. Publish blog entries (8g).** Run against the **original workspace**.
 
@@ -751,7 +751,7 @@ No `git worktree remove` is needed — slots are standalone clones.
 Before proceeding to B8, verify all prior steps ran:
 - [ ] Branches rebased and pushed (B1–B2)
 - [ ] Issues closed (B3)
-- [ ] Artifacts promoted (B4)
+- [ ] Artifacts workspace-promoted and project-promoted (B4)
 - [ ] Branches stamped as closed (B6)
 - [ ] **Slot archived — clones moved to `slots/attic/<N>/` (B7)**
 
@@ -777,7 +777,7 @@ Step 8h renders the final report mechanically from this data.
 
 ### 8a — Close artifacts (single script call)
 
-Run the unified artifact promotion script:
+Run the unified artifact promotion script (workspace-promotes and project-promotes):
 
 ```bash
 python3 ~/.claude/skills/work-end/close_artifacts.py \
@@ -820,7 +820,7 @@ journal merge must happen separately — `close_artifacts.py` does not
 handle journal merges (they require interactive user approval). Run
 8d after 8a completes.
 
-### 8a-verify — Verify promotion (mechanical — HARD GATE)
+### 8a-verify — Verify workspace and project promotion (mechanical — HARD GATE)
 
 **This step cannot be skipped.** Evidence-based verification that artifacts
 actually landed at their expected destinations. The LLM cannot rationalize
@@ -834,19 +834,18 @@ python3 ~/.claude/skills/work-end/verify_promotion.py \
 Read `VERIFIED`, `TOTAL`, `LANDED`, `MISSING`, `MISSING_LIST` from output.
 
 **If `VERIFIED=no`** → **hard stop.** Report:
-> "⚠️ Artifact promotion verification failed.
+> "⚠️ Artifact promotion (workspace and project) verification failed.
 >  {MISSING} of {TOTAL} artifacts not at expected destination:
 >  {MISSING_LIST}
 >
 >  Re-run close_artifacts.py (Step 8a) to fix. Do NOT proceed."
 
-Do NOT continue to 8d, 8e, or 8j. The promotion must succeed before
-any downstream steps run.
+Do NOT continue to 8d, 8e, or 8j. Both workspace and project promotion must succeed before any downstream steps run.
 
 **If `VERIFIED=yes`** → continue silently.
 
 **Why this exists:** LLMs executing work-end skip `close_artifacts.py` and
-manually replicate promotion inline, silently dropping specs. The stamp gate
+manually replicate workspace/project promotion inline, silently dropping specs. The stamp gate
 at 8j catches missing stamps but the LLM rationalizes around it. This
 verification checks the filesystem directly — 195 orphaned specs across 22
 workspaces proved the trust-based approach doesn't work.
@@ -1387,7 +1386,7 @@ Show every item — both ticked and skipped with reason.
 - `subagent-driven-development` — final close step
 
 **Invokes:**
-- `code-review` — Step 3c, mandatory gate before artifact promotion (body-only diffs)
+- `code-review` — Step 3c, mandatory gate before workspace and project artifact promotion (body-only diffs)
 - `design-review` — Step 3c (`--mode final-review`), mandatory gate for structural diffs
 - `forage` — SWEEP (Step 3b pre-close sweep)
 - `protocol` — SWEEP (Step 3b pre-close sweep)

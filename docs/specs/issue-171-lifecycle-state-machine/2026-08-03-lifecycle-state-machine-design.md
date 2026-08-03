@@ -32,8 +32,8 @@ Eleven states in a single flat namespace. No nested sub-machines.
 | `transitioning` | Between epic issues, context refresh pending | `state: transitioning` | **No — transient** |
 | `paused` | On pause stack, WIP committed | `state: paused` | Yes |
 | `closing:review` | Close initiated, code review pending | `state: closing:review` | Yes |
-| `closing:verified` | Review passed, artifact promotion pending | `state: closing:verified` | Yes |
-| `closing:promoted` | Artifacts promoted, merge pending | `state: closing:promoted` | Yes |
+| `closing:verified` | Review passed, workspace and project artifact promotion pending | `state: closing:verified` | Yes |
+| `closing:promoted` | Artifacts workspace-promoted and project-promoted, merge pending | `state: closing:promoted` | Yes |
 | `closing:pushed` | Branch squashed and pushed, merge to main pending | `state: closing:pushed` | Yes |
 | `closing:merged` | Merged to main, stamp pending | `state: closing:merged` | Yes |
 | `closing:stamped` | Stamped, cleanup pending | `state: closing:stamped` | Yes |
@@ -81,7 +81,7 @@ Events are the inputs to the state machine. Each event corresponds to a user com
 | `work_resume` | User command (`work resume`) | Resume a paused branch |
 | `work_end` | User command (`work end`) | Initiate close sequence |
 | `review_pass` | System (code review completes) | Code review passed |
-| `promote_pass` | System (`close_artifacts.py` succeeds) | Artifacts promoted |
+| `promote_pass` | System (`close_artifacts.py` succeeds) | Artifacts workspace-promoted and project-promoted |
 | `push_pass` | System (squash + push branch succeeds) | Branch squashed and pushed to fork |
 | `merge_pass` | System (rebase + push main succeeds) | Branch merged to main |
 | `stamp_pass` | System (stamp written + verified) | Branch stamped as closed |
@@ -174,17 +174,17 @@ Every `(state, event)` pair not in the transition table is invalid. The state ma
 | `closing:review` | `work_next` | Can't advance mid-close | "Cannot advance — close sequence in progress." |
 | `closing:*` | `work` | Can't start new work mid-close | "Close sequence in progress. Complete or abort first." |
 | `closing:*` | `work_epic` | Can't start epic mid-close | "Close sequence in progress. Complete or abort first." |
-| `closing:verified` | `review_pass` | Already past review | "Review already passed — currently at promotion stage." |
-| `closing:promoted` | `promote_pass` | Already past promotion | "Promotion already passed — currently at push stage." |
+| `closing:verified` | `review_pass` | Already past review | "Review already passed — currently at workspace/project promotion stage." |
+| `closing:promoted` | `promote_pass` | Already past promotion | "Workspace and project promotion already passed — currently at push stage." |
 | `closing:pushed` | `push_pass` | Already past push | "Push already complete — currently at merge stage." |
-| `closing:promoted` | `abort_close` | Past artifact promotion | "Cannot abort — artifacts already promoted. Continue forward." |
-| `closing:pushed` | `abort_close` | Past artifact promotion | "Cannot abort — artifacts already promoted. Branch pushed — continue forward." |
+| `closing:promoted` | `abort_close` | Past workspace and project promotion | "Cannot abort — artifacts already workspace-promoted and project-promoted. Continue forward." |
+| `closing:pushed` | `abort_close` | Past workspace and project promotion | "Cannot abort — artifacts already workspace-promoted and project-promoted. Branch pushed — continue forward." |
 | `closing:merged` | `abort_close` | Content on main | "Cannot abort — content already merged to main. Continue forward." |
 | `closing:stamped` | `abort_close` | Branch stamped | "Cannot abort — branch already stamped. Only cleanup remains." |
 
 ### 4.2 Abort from Closing States
 
-Only pre-artifact closing states can be aborted. Once artifacts are promoted (`closing:promoted` and beyond), the close path is forward-only — issues have been closed, specs promoted, and blogs published. These operations are practically irreversible without manual intervention.
+Only pre-artifact closing states can be aborted. Once artifacts are workspace-promoted and project-promoted (`closing:promoted` and beyond), the close path is forward-only — issues have been closed, specs promoted to workspace main and project, and blogs published. These operations are practically irreversible without manual intervention.
 
 | From | Event | To | Side Effects |
 |------|-------|----|-------------|
@@ -194,7 +194,7 @@ Only pre-artifact closing states can be aborted. Once artifacts are promoted (`c
 This handles the case where code review finds issues that need fixing — abort the close, fix the code, then re-initiate `work_end`.
 
 **Why `closing:promoted` and later are non-abortable:**
-- `closing:promoted` — `close_artifacts.py` has already closed GitHub issues, promoted specs to main, and published blogs. Aborting would leave promoted artifacts on main with no corresponding branch close.
+- `closing:promoted` — `close_artifacts.py` has already closed GitHub issues, workspace-promoted specs to workspace main and project-promoted specs to the project repo, and published blogs. Aborting would leave promoted artifacts on workspace main and project with no corresponding branch close.
 - `closing:merged` — content has been rebased onto the base branch and pushed to the fork. Aborting would mean continuing work on a branch whose content is already on main, producing duplicate commits on the next close.
 - `closing:stamped` — branch has a closure stamp commit. Only cleanup remains.
 
@@ -374,7 +374,7 @@ A git pre-push hook reads `state:` from `.meta` and blocks pushes that skip clos
 | `state: transitioning` | **BLOCK** — "Issue transition in progress" | ALLOW |
 | `state: paused` | **BLOCK** — "Branch is paused" (defensive — see note) | ALLOW |
 | `state: closing:review` | **BLOCK** — "Code review not complete" | ALLOW |
-| `state: closing:verified` | **BLOCK** — "Artifacts not promoted" | ALLOW |
+| `state: closing:verified` | **BLOCK** — "Artifacts not promoted (workspace and project)" | ALLOW |
 | `state: closing:promoted` | **BLOCK** — "Push not complete" | ALLOW |
 | `state: closing:pushed` | ALLOW — merge push | ALLOW |
 | `state: closing:merged` | ALLOW — stamp push | ALLOW |
@@ -444,13 +444,13 @@ When a session starts and finds a non-resting state, it must recover.
 | `scaffolded` | Session start reads `.meta` | Auto-resolve: run context setup (T5/T16). No timeout needed — this is the normal path for slot sessions. |
 | `transitioning` | Session start reads `.meta` | Auto-resolve: run context refresh (T7/T17). |
 | `closing:review` | Session start reads `.meta` | "Close was interrupted at code review. Continue review? (y) / Abort close? (n)" |
-| `closing:verified` | Session start reads `.meta` | "Close was interrupted at artifact promotion. Continue? (y) / Abort? (n)" |
-| `closing:promoted` | Session start reads `.meta` | "Close was interrupted at push. Artifacts already promoted — continue. (y)" |
+| `closing:verified` | Session start reads `.meta` | "Close was interrupted at workspace/project artifact promotion. Continue? (y) / Abort? (n)" |
+| `closing:promoted` | Session start reads `.meta` | "Close was interrupted at push. Artifacts already workspace-promoted and project-promoted — continue. (y)" |
 | `closing:pushed` | Session start reads `.meta` | "Close was interrupted at merge. Branch pushed — continue. (y)" |
 | `closing:merged` | Session start reads `.meta` | "Close was interrupted at stamping. Content on main — continue. (y)" |
 | `closing:stamped` | Session start reads `.meta` | "Close was interrupted at cleanup. Branch stamped — continue. (y)" |
 
-Aborting is only available from `closing:review` and `closing:verified` (pre-artifact states). From `closing:promoted` and later, the close path is forward-only — artifacts have been promoted, issues closed, and/or content merged. The only option is to continue from the current gate.
+Aborting is only available from `closing:review` and `closing:verified` (pre-artifact states). From `closing:promoted` and later, the close path is forward-only — artifacts have been workspace-promoted and project-promoted, issues closed, and/or content merged. The only option is to continue from the current gate.
 
 **`paused` is absent from this table** because paused branches are discovered via `.pause-stack` on main, not via stale `.meta` detection. The session-start routing (§3.4) checks `.pause-stack` and offers the stack picker — this is normal routing, not stale state recovery.
 
@@ -848,7 +848,7 @@ In two-repo casehub projects, ctx.py's `WORKSPACE` and `PROJECT` names invert re
 
 ### 14.2 Cherry-Pick Conflicts from Session Wrap (GE-20260605-1f6896)
 
-The closing sub-states prevent this: artifacts are promoted during `closing:verified → closing:promoted` (Step 8a), which commits to workspace main. The merge (Step 8j / `closing:promoted → closing:merged`) only touches the project repo. No cherry-pick is used — the rebase operates on the project branch. Artifacts and code live in separate repos and never conflict.
+The closing sub-states prevent this: artifacts are workspace-promoted and project-promoted during `closing:verified → closing:promoted` (Step 8a), which commits to workspace main and the project repo respectively. The merge (Step 8j / `closing:promoted → closing:merged`) only touches the project branch. No cherry-pick is used — the rebase operates on the project branch. Artifacts and code live in separate repos and never conflict.
 
 In single-repo mode, the filter-repo preprocessing (Step 8j) strips scaffold paths before rebase, preventing scaffold-artifact conflicts.
 
@@ -1041,7 +1041,7 @@ TRANSITION_TABLE: dict[tuple[str, str], tuple[str, list[str], list[str]]] = {
     ('closing:merged', 'stamp_pass'):     ('closing:stamped',   ['write_stamp'],                                    []),
     ('closing:stamped', 'cleanup_pass'):  ('idle',              ['write_epic_closed'],                               ['return_to_main', 'write_handoff']),
     
-    # Abort (pre-artifact states only — post-promotion is forward-only)
+    # Abort (pre-artifact states only — post workspace/project promotion is forward-only)
     ('closing:review', 'abort_close'):    ('active', ['clear_closing_markers'],                                     []),
     ('closing:verified', 'abort_close'):  ('active', ['clear_closing_markers'],                                     []),
 }

@@ -3,7 +3,8 @@
 Pre-push hook: enforce lifecycle state gates.
 
 Blocks pushes to main/base branch unless the lifecycle state has passed
-the artifact promotion gate (closing:pushed or later).
+the artifact promotion gate — workspace and project promotion complete
+(closing:pushed or later).
 
 Install: symlink or copy to .git/hooks/pre-push in each repo.
 
