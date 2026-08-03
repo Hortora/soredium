@@ -393,8 +393,8 @@ series: <branch-name>                            # omit if no prior entries in t
 Keep it to one line — it's a navigation aid, not an introduction. Omit if this is the first entry in the series (no prior entries found in Step 0).
 
 After writing, update `<BLOG_DIR>/INDEX.md` (create if absent):
-```markdown
-| [YYYY-MM-DD-initialsNN-title.md](...) | YYYY-MM-DD | <one-line summary> |
+```bash
+python3 write-content/update_blog_index.py <blog-file-path> --summary "<one-line summary>"
 ```
 
 ---
