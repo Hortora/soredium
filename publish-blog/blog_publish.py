@@ -40,9 +40,18 @@ def copy_entry(source_path: str, dest_dir: str) -> None:
         sys.exit(1)
 
 
+def _current_branch(repo: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", repo, "branch", "--show-current"],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def commit_destination(dest_repo: str, files_csv: str, message: str) -> None:
     """
     Add, commit, and push files in destination git repo.
+    Verifies the destination is on main before committing.
 
     Args:
         dest_repo: Path to destination git repository
@@ -54,6 +63,17 @@ def commit_destination(dest_repo: str, files_csv: str, message: str) -> None:
     """
     repo_path = Path(dest_repo)
     files = [f.strip() for f in files_csv.split(",") if f.strip()]
+
+    branch = _current_branch(dest_repo)
+    if branch and branch != "main":
+        print(f"WARN=dest_not_on_main branch={branch} — switching to main", flush=True)
+        rc = subprocess.run(
+            ["git", "-C", dest_repo, "checkout", "main"],
+            capture_output=True,
+        )
+        if rc.returncode != 0:
+            print(f"ERROR=checkout_main_failed branch={branch}", flush=True)
+            sys.exit(1)
 
     # Add each file
     for file in files:
@@ -90,6 +110,7 @@ def commit_destination(dest_repo: str, files_csv: str, message: str) -> None:
 def remove_source(source_repo: str, files_csv: str) -> None:
     """
     Remove published blog entries from source repo.
+    Verifies the source is on main before removing.
 
     Args:
         source_repo: Path to source git repository
@@ -100,6 +121,17 @@ def remove_source(source_repo: str, files_csv: str) -> None:
     """
     repo_path = Path(source_repo)
     files = [f.strip() for f in files_csv.split(",") if f.strip()]
+
+    branch = _current_branch(source_repo)
+    if branch and branch != "main":
+        print(f"WARN=source_not_on_main branch={branch} — switching to main", flush=True)
+        rc = subprocess.run(
+            ["git", "-C", source_repo, "checkout", "main"],
+            capture_output=True,
+        )
+        if rc.returncode != 0:
+            print(f"ERROR=checkout_main_failed branch={branch}", flush=True)
+            sys.exit(1)
 
     # Remove each file with git rm
     removed_count = 0

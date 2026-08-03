@@ -243,6 +243,19 @@ def main() -> int:
         blog_subdir = out.get("BLOG_SUBDIR", "")
 
         if unpublished and blog_repo:
+            blog_branch_rc = subprocess.run(
+                ["git", "-C", blog_repo, "branch", "--show-current"],
+                capture_output=True, text=True,
+            )
+            blog_branch = blog_branch_rc.stdout.strip() if blog_branch_rc.returncode == 0 else ""
+            if blog_branch and blog_branch != "main":
+                switch_rc = subprocess.run(
+                    ["git", "-C", blog_repo, "checkout", "main"],
+                    capture_output=True,
+                )
+                if switch_rc.returncode != 0:
+                    failures.append(f"blog dest not on main ({blog_branch}), checkout failed")
+
             add_rc = subprocess.run(
                 ["git", "-C", blog_repo, "add", f"{blog_subdir}/"],
                 capture_output=True,

@@ -198,6 +198,22 @@ Full rules: **[diary-visual-elements.md](diary-visual-elements.md)**
 
 Resolve to an **absolute path**.
 
+**Slot-escape guard (mandatory):** After resolving the blog directory, validate it:
+
+```bash
+python3 ~/.claude/skills/write-content/resolve_blog_dir.py <WORKSPACE> <CLAUDE_MD_PATH> [slot_root=<SLOT_ROOT>]
+```
+
+Read `BLOG_DIR` and `WARNING` from output. If `WARNING` is non-empty, the resolved
+path escapes the slot boundary — an absolute `Blog directory:` in CLAUDE.md points
+outside the slot clone. The script falls back to `$WORKSPACE/blog/`. Surface the
+warning to the user.
+
+To detect slot mode: check `is_slot_path()` from `slot_manager.py` against
+`$PROJECT` (from ctx.py). If in a slot, pass `slot_root=` as the slot directory
+(parent of the project clone). If not in a slot, omit `slot_root` — the escape
+check is skipped.
+
 **Scan CLAUDE.md** for audience and topics:
 ```bash
 cat CLAUDE.md 2>/dev/null | head -80
