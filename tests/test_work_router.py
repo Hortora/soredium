@@ -569,6 +569,90 @@ class TestPerProjectHandoff:
         assert result["HAS_HANDOFF"] == "no"
 
 
+class TestWorkspaceDirty:
+    """Test workspace_dirty detection — workspace on stale branch from another session (#168)."""
+
+    @staticmethod
+    def _init_git(path, branch="main"):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "-b", branch, str(path)], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"],
+            capture_output=True,
+        )
+
+    def test_workspace_on_stale_branch_project_on_main(self, tmp_path):
+        """Workspace on non-main branch, project on main, no .meta → workspace_dirty."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        project = tmp_path / "project"
+        self._init_git(project)
+        result = work_router.detect_state(
+            current_branch="issue-402-spi-catalogue",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["ROUTE"] == "workspace_dirty"
+        assert result["WORKSPACE_BRANCH"] == "issue-402-spi-catalogue"
+        assert result["PROJECT_BRANCH"] == "main"
+
+    def test_workspace_on_branch_project_on_same_branch(self, tmp_path):
+        """Both repos on same non-main branch → resume_branch (not dirty)."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        project = tmp_path / "project"
+        self._init_git(project)
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", "issue-42-feat"],
+            capture_output=True,
+        )
+        result = work_router.detect_state(
+            current_branch="issue-42-feat",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["ROUTE"] == "resume_branch"
+
+    def test_workspace_dirty_not_triggered_single_repo(self, tmp_path):
+        """Single repo mode → never workspace_dirty."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        result = work_router.detect_state(
+            current_branch="issue-402-stale",
+            project_path=str(repo),
+            workspace_path=str(repo),
+        )
+        assert result["ROUTE"] == "resume_branch"
+
+    def test_workspace_dirty_not_triggered_with_meta(self, tmp_path):
+        """Workspace on non-main, project on main, but .meta exists → resume_branch."""
+        workspace = tmp_path / "workspace"
+        design = workspace / "design"
+        design.mkdir(parents=True)
+        (design / ".meta").write_text("branch: issue-42-feat\nissue: 42\n")
+        project = tmp_path / "project"
+        self._init_git(project)
+        result = work_router.detect_state(
+            current_branch="issue-42-feat",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["ROUTE"] == "resume_branch"
+
+    def test_workspace_on_main_project_on_main(self, tmp_path):
+        """Both on main → start (not dirty)."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        project = tmp_path / "project"
+        self._init_git(project)
+        result = work_router.detect_state(
+            current_branch="main",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["ROUTE"] == "start"
+
+
 class TestCLI:
     def test_outputs_key_value(self, tmp_path, capsys):
         workspace = tmp_path / "workspace"

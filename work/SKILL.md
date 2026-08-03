@@ -53,6 +53,25 @@ this state with additional tool calls.
 | `start` | → **work-start** — begin new work |
 | `resume_stack` | → show stack picker (Step 3), then **work-resume** |
 | `resume_branch` | → contextual options (Step 4) |
+| `workspace_dirty` | → warn and offer to reset (Step 2b) |
+
+**Step 2b — Workspace on stale branch (workspace_dirty)**
+
+The workspace is on a non-main branch left by another session — the project
+is on main but the workspace wasn't switched back. This means another session
+switched the workspace branch without pausing.
+
+Present:
+
+> ⚠️ Workspace is on `$WORKSPACE_BRANCH` (project is on main).
+> Another session left the workspace on this branch.
+>
+> Options:
+> 1. **reset** — switch workspace to main and start new work
+> 2. **continue** — stay on this workspace branch (advanced)
+
+- **reset** → `git -C "$WORKSPACE" checkout main`, then route to **work-start**
+- **continue** → route to **work-start** (user takes responsibility for alignment)
 
 **Step 3 — Stack picker (on main, 1+ paused branches)**
 

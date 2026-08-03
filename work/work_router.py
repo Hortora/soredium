@@ -6,7 +6,7 @@ Usage:
     python3 work_router.py <current_branch> <project_path> <workspace_path>
 
 Output (KEY=VALUE lines):
-    ROUTE=start|resume_branch|resume_stack
+    ROUTE=start|resume_branch|resume_stack|workspace_dirty
     ON_MAIN=yes|no
     CURRENT_BRANCH=<name>
     IN_SLOT=yes|no
@@ -51,6 +51,11 @@ def detect_state(current_branch: str, project_path: str,
     workspace = Path(workspace_path)
 
     on_main = current_branch == "main"
+
+    project_branch = subprocess.run(
+        ["git", "-C", str(project), "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip() if str(project) != str(workspace) else current_branch
 
     stack_file = workspace / "design" / ".pause-stack"
     stack_depth = 0
@@ -114,8 +119,19 @@ def detect_state(current_branch: str, project_path: str,
                 workspace, current_branch, handoff_candidate.name
             )
 
+    meta_file = workspace / "design" / ".meta"
+    has_meta = meta_file.exists()
+    workspace_dirty = (
+        not on_main
+        and not has_meta
+        and str(project) != str(workspace)
+        and project_branch == "main"
+    )
+
     if on_main:
         route = "resume_stack" if stack_depth > 0 else "start"
+    elif workspace_dirty:
+        route = "workspace_dirty"
     else:
         route = "resume_branch"
 
@@ -128,6 +144,9 @@ def detect_state(current_branch: str, project_path: str,
         "STACK_DEPTH": str(stack_depth),
         "HAS_HANDOFF": "yes" if has_handoff else "no",
     }
+    if workspace_dirty:
+        result["WORKSPACE_BRANCH"] = current_branch
+        result["PROJECT_BRANCH"] = project_branch
     if epic_batch:
         result["EPIC_BATCH"] = epic_batch
     if epic_active_issue:

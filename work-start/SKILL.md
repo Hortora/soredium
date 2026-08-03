@@ -105,6 +105,10 @@ Check in order — first match wins:
 
 5. CURRENT_WORKSPACE == main, no .meta, empty/absent .pause-stack
    → New branch path (Steps 0–12 below).
+   NOTE: in two-repo setups, the `work` router catches the case where
+   the workspace is on a non-main branch while the project is on main
+   (ROUTE=workspace_dirty) BEFORE work-start is invoked. This state
+   should not reach work-start — if it does, treat as state 6.
 
 6. On non-main branch, no .meta
    → "You are on <branch> with no branch scaffold.

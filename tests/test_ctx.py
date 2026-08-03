@@ -190,6 +190,20 @@ GitHub repo: Hortora/soredium
         assert result.returncode == 0
         assert data["OWNER_REPO"] == "Hortora/soredium"
 
+    def test_owner_repo_with_bold_markdown(self, tmp_path):
+        """Extract OWNER_REPO when field uses **bold** markdown (#169)."""
+        claude_md = """
+# Project
+
+**GitHub repo:** Hortora/soredium
+"""
+        repo = init_repo(tmp_path / "repo", claude_md)
+        result = run_ctx(repo)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["OWNER_REPO"] == "Hortora/soredium"
+
     def test_owner_repo_empty_when_missing(self, tmp_path):
         """OWNER_REPO empty when CLAUDE.md has no GitHub repo."""
         repo = init_repo(tmp_path / "repo", "# Project\n\nNo repo info here.")

@@ -86,11 +86,12 @@ single_repo = workspace == project
 
 claude_md = Path(project) / "CLAUDE.md"
 claude_text = claude_md.read_text() if claude_md.exists() else ""
+claude_text_clean = claude_text.replace("**", "")
 
-m = re.search(r"GitHub repo:\s*(\S+)", claude_text)
+m = re.search(r"GitHub repo:\s*(\S+)", claude_text_clean)
 owner_repo = m.group(1) if m else ""
 
-m = re.search(r"\*\*Project base branch:\*\*\s*`([^`]+)`", claude_text)
+m = re.search(r"Project base branch:\s*`([^`]+)`", claude_text_clean)
 base_branch = m.group(1) if m else "main"
 
 meta_path = Path(workspace) / "design" / ".meta"
