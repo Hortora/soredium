@@ -78,6 +78,30 @@ Run `python3 ~/.claude/skills/project/ctx.py` first. Use `CURRENT_BRANCH` from i
    class of bugs where `.meta` from a stale workspace branch provides wrong
    issue/covers/SHA context for the close operation.
 
+0b. **Epic confirmation gate** — read `IS_EPIC` from ctx.py output.
+   If `no`, skip silently. If `yes`, run:
+   ```bash
+   python3 ~/.claude/skills/work-slot/epic_manager.py check <EPIC_PATH>
+   ```
+   Read `EPIC_COMPLETE`, `SAFE_EXIT`, `CURRENT_BATCH`, `TOTAL_BATCHES`,
+   `ACTIVE_ISSUE` from output.
+
+   Three outcomes, evaluated as an if/elif/else chain:
+
+   | Check (in order) | UX |
+   |-------------------|----|
+   | `EPIC_COMPLETE=yes` | Proceed silently — all children done |
+   | `SAFE_EXIT=yes` | "Batch N/M complete. Safe exit point — close? (y/n)" |
+   | Neither | "⚠ Mid-batch (issue #X of batch N/M). Partial close loses context. Continue? (y/confirm-partial)" |
+
+   `EPIC_COMPLETE=yes` implies `SAFE_EXIT=yes` — the if/elif ordering ensures
+   only the most specific arm fires. The mid-batch confirmation requires typing
+   `confirm-partial`, not just `y`.
+
+   **Slot mode caveat:** In slot mode, "close" means Phase A (squash + push
+   branch). The prompt should say "run Phase A" not "run work-end" — the slot
+   is merged separately via `work-slot merge`.
+
 1. **If `$WORKSPACE/design/.pause-stack` exists and has entries** — check whether
    the target branch is in the stack:
    - **Current branch is in the stack** (ending a paused branch without resuming it):
@@ -1126,6 +1150,11 @@ python3 ~/.claude/skills/work-end/close_report.py record /tmp/work-end-report.js
 ```
 
 This is mandatory, not an offer. An unstamped branch looks live to the next session.
+
+**Stamp verification note:** `land_branch.py stamp` always calls `verify_stamp.py`
+before writing the stamp — there is no code path that skips verification. In slot mode,
+`merge_slot()` stamps directly after push success, which is a different but equivalent
+verification mechanism (push to main succeeds only if content is on main).
 
 **Why rebase and not merge --no-ff?** Rebase keeps the project base branch history linear and avoids a merge commit that references a branch consumers never saw. Fast-forward is a safe subset — `git rebase` fast-forwards when possible, replays commits otherwise.
 

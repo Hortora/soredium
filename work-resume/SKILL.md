@@ -188,6 +188,14 @@ Run Steps 0, 2, 3, 11 from work-start:
 
 Skip all branch creation steps — the branch already exists.
 
+## Step 9b — Epic context
+
+If the stack entry has `epic_batch` and `epic_active_issue`, display:
+> `Epic — Batch N, active: #M`
+
+This restores epic context that was recorded by work-pause (via enriched
+stack entries). If the fields are absent (older stack entries), skip silently.
+
 ---
 
 ## Step 10 — Garden search

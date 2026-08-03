@@ -485,6 +485,9 @@ python3 ~/.claude/skills/work-start/branch_create.py commit-scaffold "$WORKSPACE
 
 Read `COMMITTED=yes` and `PUSHED=yes|no` from output. Push failure is non-fatal; warn and continue.
 
+**Slot mode:** When `IN_SLOT=yes`, skip the push. The scaffold lives in the
+clone only until Phase A squashes and pushes.
+
 ### Step 11 — IntelliJ MCPs
 
 Two IntelliJ MCP servers may be present:
@@ -551,7 +554,7 @@ Surface `.meta`:
    Project: <branch>  Workspace: <branch>
 ```
 
-Run Steps 0, 2, 3, 3b, 3c, 11 only. Skip all branch creation steps.
+Run Steps 0, 2, 3, 3b, 3c, 3d, 11 only. Skip all branch creation steps.
 
 ### Step 3c — Load existing specs (MANDATORY — do not skip)
 
@@ -597,9 +600,9 @@ context gathering led to re-deriving design decisions that had already been
 made, wasting effort and risking contradictions. Specs are cheap to read
 and expensive to miss.
 
-### Epic Overlay
+### Step 3d — Epic Overlay
 
-After the standard resume steps complete, check for epic context:
+After Step 3c, check for epic context:
 
 1. **Guard — detect epic file:**
    - If `/worktrees/` in `$PROJECT`: `epic_file = $PROJECT/../.slot`

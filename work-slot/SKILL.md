@@ -268,34 +268,37 @@ Parse the JSON output. The script atomically:
 Based on the output flags:
 
 - If `batch_complete` and not `epic_complete`:
-  > "Batch N complete. Safe exit point — you can run work-end now
-  > to merge everything done so far, or continue to Batch N+1."
+  > "Batch N complete. Safe exit point — run Phase A (`work end` in
+  > the slot) to squash and prepare for merge, or continue to Batch N+1."
   >
   > "Next: #<issue> — <title> (Batch N+1)"
 
 - If `epic_complete`:
-  > "All batches complete. Epic #N is done. Run work-end to close."
+  > "All batches complete. Epic #N is done. Run Phase A (`work end`
+  > in the slot) to squash, then `work-slot merge` from the main repo."
 
 - Otherwise:
   > "Next: #<issue> — <title>"
 
 Set the active issue for commit linkage (`Refs #<next_issue>`).
 
+**Slot mode:** Commits stay local in the clone. No pushes to origin or
+GitHub until Phase A squashes and pushes the branch.
+
 ### Step 3 — GitHub checkbox (non-fatal)
 
-Check the issue's checkbox on the GitHub epic body:
+Tick the completed issue's checkbox on the GitHub epic body:
 
 ```bash
-# Fetch current body, update checkbox, push back
-gh issue view <epic-number> --repo <epic-repo> --json body
-# Replace "- [ ] #<completed>" with "- [x] #<completed>"
-gh issue edit <epic-number> --repo <epic-repo> --body-file /tmp/updated-body.md
+python3 ~/.claude/skills/work-slot/epic_manager.py tick <epic-path> \
+  issue-repo=<epic-repo> epic=<epic-number> issues=<completed-issue>
 ```
 
-This is progress signaling, not issue closure. Issues remain open
-until `work-end` closes them via COVERS.
+Read `TICK=ok|failed` from output. This is progress signaling, not issue
+closure. Issues remain open until `work-end` closes them via COVERS.
 
-If GitHub update fails (auth, network), warn and continue.
+If tick fails (auth, network), warn and continue — `archive_slot()` has
+a catch-up mechanism that retries before archival.
 
 ---
 

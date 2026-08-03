@@ -92,6 +92,10 @@ If `IS_EPIC=yes`:
 
 Always present:
 > N+1. **end** — close this branch, merge, push, return to main
+
+If `IS_EPIC=yes` and not all batches complete, annotate the end option:
+> N+1. **end** — ⚠️ epic Batch N of M — close this branch, merge, push, return to main
+
 > N+2. **pause** — commit WIP, push to stack, switch to main
 > N+3. **wrap** — end session but keep branch open (write handover)
 

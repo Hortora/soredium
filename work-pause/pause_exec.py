@@ -180,6 +180,25 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
     if slot_dir is not None:
         push_args.append(f"slot={slot_dir}")
 
+    epic_detect_dir = Path(__file__).resolve().parent.parent / "work-slot"
+    if str(epic_detect_dir) not in sys.path:
+        sys.path.insert(0, str(epic_detect_dir))
+    try:
+        from epic_manager import detect as _epic_detect
+        epic_info = _epic_detect(Path(workspace))
+        if epic_info is None and "/worktrees/" in project:
+            epic_info = _epic_detect(Path(project))
+        if epic_info:
+            cur = epic_info.get("current_batch", 0)
+            tot = len(epic_info.get("batches", []))
+            if tot:
+                push_args.append(f"epic_batch={cur}/{tot}")
+            active = epic_info.get("current_issue", 0)
+            if active:
+                push_args.append(f"epic_active_issue={active}")
+    except ImportError:
+        pass
+
     try:
         result = subprocess.run(
             push_args,

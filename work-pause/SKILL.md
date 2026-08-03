@@ -111,7 +111,14 @@ Display confirmation:
 ⏸  Paused: <branch-name>  Issue: #<N>
    WIP committed: project=<yes|no>  workspace=<yes|no>
    Stack depth: <N>
+```
 
+If the branch is mid-epic (epic fields detected by `pause_exec.py`), add:
+```
+   Epic: Batch N/M, active: #X
+```
+
+```
 You're on main — type work to resume this branch or start new work.
 ```
 
