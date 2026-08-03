@@ -149,9 +149,12 @@ def main() -> int:
     results: dict[str, str] = {}
     failures: list[str] = []
 
-    # Batch by destination
+    # Batch by destination — specs/adr need docs/ prefix when routed to project
     ws_artifacts: list[str] = []
     proj_artifacts: list[str] = []
+    proj_docs_artifacts: list[str] = []
+
+    _docs_categories = {"specs", "adr"}
 
     for category, paths in artifacts.items():
         if category == "plans":
@@ -161,6 +164,8 @@ def main() -> int:
         dest = routing.get(category, "project")
         if dest == "workspace":
             ws_artifacts.extend(paths)
+        elif category in _docs_categories:
+            proj_docs_artifacts.extend(paths)
         else:
             proj_artifacts.extend(paths)
 
@@ -188,14 +193,16 @@ def main() -> int:
     else:
         results["workspace_promoted"] = "0"
 
-    # Promote to project
+    # Promote to project (no prefix — blog, snapshots, etc.)
+    project_promoted_total = 0
+    read_source = str(scan_source) if scan_source != workspace else str(workspace)
+
     if proj_artifacts:
-        read_source = str(scan_source) if scan_source != workspace else str(workspace)
         rc, out = run_script("artifact_promote.py", [
             "to-project", str(project), read_source,
             f"artifacts={','.join(proj_artifacts)}",
         ])
-        results["project_promoted"] = out.get("PROMOTED", "0")
+        project_promoted_total += int(out.get("PROMOTED", "0"))
         if rc != 0:
             failures.append(f"project promotion: {out.get('ERROR', 'unknown')}")
         elif out.get("PROMOTED", "0") == "0":
@@ -206,8 +213,27 @@ def main() -> int:
         if out.get("PUSH_VERIFIED") == "failed":
             missing = out.get("PUSH_VERIFY_MISSING", "unknown")
             failures.append(f"project push verification failed: artifacts not on origin/main ({missing})")
-    else:
-        results["project_promoted"] = "0"
+
+    # Promote specs/adr to project with docs/ prefix
+    if proj_docs_artifacts:
+        rc, out = run_script("artifact_promote.py", [
+            "to-project", str(project), read_source,
+            f"artifacts={','.join(proj_docs_artifacts)}",
+            "dest-prefix=docs/",
+        ])
+        project_promoted_total += int(out.get("PROMOTED", "0"))
+        if rc != 0:
+            failures.append(f"project docs promotion: {out.get('ERROR', 'unknown')}")
+        elif out.get("PROMOTED", "0") == "0":
+            skipped = out.get("SKIPPED_PATHS", ",".join(proj_docs_artifacts))
+            failures.append(f"project docs promotion: all artifacts skipped ({skipped})")
+        if out.get("PUSHED") == "failed":
+            failures.append(f"project push failed: {out.get('PUSH_ERROR', 'unknown')}")
+        if out.get("PUSH_VERIFIED") == "failed":
+            missing = out.get("PUSH_VERIFY_MISSING", "unknown")
+            failures.append(f"project push verification failed: artifacts not on origin/main ({missing})")
+
+    results["project_promoted"] = str(project_promoted_total)
 
     # Archive plans
     if artifacts["plans"]:
