@@ -175,6 +175,7 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
 
 def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
     artifacts_str = params.get("artifacts", "")
+    dest_prefix = params.get("dest-prefix", "")
 
     if not artifacts_str:
         print("ERROR=missing_artifacts")
@@ -202,7 +203,8 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
     skipped: list[str] = []
     for artifact in artifacts:
         src = ws / artifact
-        dst = proj / artifact
+        dst_rel = f"{dest_prefix}{artifact}" if dest_prefix else artifact
+        dst = proj / dst_rel
 
         if not src.exists():
             skipped.append(artifact)
@@ -221,13 +223,16 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             shutil.copy2(src, dst)
 
         try:
-            git("add", artifact, cwd=project)
+            git("add", dst_rel, cwd=project)
             promoted += 1
         except subprocess.CalledProcessError as e:
             skipped.append(artifact)
             print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
 
-    promoted_paths = [a for a in artifacts if a not in skipped]
+    promoted_paths = [
+        f"{dest_prefix}{a}" if dest_prefix else a
+        for a in artifacts if a not in skipped
+    ]
 
     if promoted > 0:
         try:

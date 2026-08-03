@@ -272,7 +272,7 @@ class TestPromotionFailureDetection:
             f"Expected PROJECT_PROMOTED=1 but got {out.get('PROJECT_PROMOTED', '0')}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert (project / "specs" / "design.md").is_file()
+        assert (project / "docs" / "specs" / "design.md").is_file()
 
     def test_stamp_written_when_all_artifacts_promoted(self, tmp_path):
         """When promotion succeeds, stamp is written (regression guard)."""
@@ -560,7 +560,7 @@ class TestSlotModeProjectPromotion:
             f"Expected PROJECT_PROMOTED >= 1 but got {out.get('PROJECT_PROMOTED', '0')}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert (project / "specs" / "design.md").is_file()
+        assert (project / "docs" / "specs" / "design.md").is_file()
 
 
 # ===========================================================================
@@ -672,7 +672,7 @@ class TestSlotModeEndToEnd:
         assert out.get("PROJECT_PROMOTED", "0") != "0", (
             f"Spec not promoted to project.\nstdout: {result.stdout}"
         )
-        assert (project / "specs" / "design.md").is_file()
+        assert (project / "docs" / "specs" / "design.md").is_file()
 
     def test_archives_plans_in_slot_mode(self, tmp_path):
         """Plans in scan-workspace are archived to original workspace attic."""
@@ -705,6 +705,78 @@ class TestSlotModeEndToEnd:
         assert int(out.get("PLANS_ARCHIVED", "0")) >= 1, (
             f"Plans not archived.\nstdout: {result.stdout}"
         )
+
+
+class TestSpecPathRemapping:
+    """Specs must land at project/docs/specs/, not project/specs/."""
+
+    SCRIPT = Path(__file__).parent.parent / "work-end" / "artifact_promote.py"
+
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_to_project_remaps_specs_to_docs_specs(self, tmp_path):
+        """to-project with dest-prefix=docs/ puts specs at project/docs/specs/."""
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        self._init_git(project)
+        workspace.mkdir()
+        (workspace / "specs").mkdir()
+        (workspace / "specs" / "design.md").write_text("# Spec\n")
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             "to-project", str(project), str(workspace),
+             "artifacts=specs/design.md", "dest-prefix=docs/"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 0
+        assert "PROMOTED=1" in result.stdout
+        assert (project / "docs" / "specs" / "design.md").is_file()
+        assert not (project / "specs" / "design.md").exists()
+
+    def test_to_project_remaps_nested_spec_dirs(self, tmp_path):
+        """Nested spec dirs also get the docs/ prefix."""
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        self._init_git(project)
+        workspace.mkdir()
+        (workspace / "specs" / "issue-42-feat").mkdir(parents=True)
+        (workspace / "specs" / "issue-42-feat" / "design.md").write_text("# Spec\n")
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             "to-project", str(project), str(workspace),
+             "artifacts=specs/issue-42-feat/design.md", "dest-prefix=docs/"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 0
+        assert (project / "docs" / "specs" / "issue-42-feat" / "design.md").is_file()
+
+    def test_to_project_no_prefix_preserves_path(self, tmp_path):
+        """Without dest-prefix, behavior is unchanged (regression guard)."""
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        self._init_git(project)
+        workspace.mkdir()
+        (workspace / "specs").mkdir()
+        (workspace / "specs" / "design.md").write_text("# Spec\n")
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             "to-project", str(project), str(workspace),
+             "artifacts=specs/design.md"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 0
+        assert (project / "specs" / "design.md").is_file()
 
 
 class TestImagePromotion:
