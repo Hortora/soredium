@@ -83,14 +83,15 @@ def _resolve_clone_origin(repo: str) -> Path | None:
 
 
 def _resolve_slot_dir(clone_path: Path) -> Path | None:
-    """Given a clone inside a slot (family/worktrees/N/repo), return the slot dir."""
+    """Given a clone inside a slot (family/slots/N/repo or family/worktrees/N/repo), return the slot dir."""
     parts = clone_path.resolve().parts
-    try:
-        wt_idx = parts.index("worktrees")
-        if wt_idx + 1 < len(parts):
-            return Path(*parts[: wt_idx + 2])
-    except ValueError:
-        pass
+    for name in ("slots", "worktrees"):
+        try:
+            idx = parts.index(name)
+            if idx + 1 < len(parts):
+                return Path(*parts[:idx + 2])
+        except ValueError:
+            continue
     return None
 
 
@@ -186,7 +187,8 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
     try:
         from epic_manager import detect as _epic_detect
         epic_info = _epic_detect(Path(workspace))
-        if epic_info is None and "/worktrees/" in project:
+        from slot_manager import is_slot_path as _is_slot_path
+        if epic_info is None and _is_slot_path(project):
             epic_info = _epic_detect(Path(project))
         if epic_info:
             cur = epic_info.get("current_batch", 0)

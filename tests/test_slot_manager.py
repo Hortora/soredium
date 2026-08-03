@@ -25,31 +25,31 @@ def init_repo(path: Path) -> Path:
 
 
 class TestAllocateSlotNumber:
-    def test_empty_worktrees_dir(self, tmp_path):
-        wt = tmp_path / "worktrees"
+    def test_empty_slots_dir(self, tmp_path):
+        wt = tmp_path / "slots"
         wt.mkdir()
         assert slot_manager.allocate_slot_number(wt) == 1
 
     def test_existing_slots(self, tmp_path):
-        wt = tmp_path / "worktrees"
+        wt = tmp_path / "slots"
         wt.mkdir()
         (wt / "1").mkdir()
         (wt / "2").mkdir()
         assert slot_manager.allocate_slot_number(wt) == 3
 
     def test_gap_in_numbering(self, tmp_path):
-        wt = tmp_path / "worktrees"
+        wt = tmp_path / "slots"
         wt.mkdir()
         (wt / "1").mkdir()
         (wt / "3").mkdir()
         assert slot_manager.allocate_slot_number(wt) == 4
 
-    def test_no_worktrees_dir(self, tmp_path):
-        wt = tmp_path / "worktrees"
+    def test_no_slots_dir(self, tmp_path):
+        wt = tmp_path / "slots"
         assert slot_manager.allocate_slot_number(wt) == 1
 
     def test_considers_attic(self, tmp_path):
-        wt = tmp_path / "worktrees"
+        wt = tmp_path / "slots"
         wt.mkdir()
         (wt / "1").mkdir()
         (wt / "2").mkdir()
@@ -60,7 +60,7 @@ class TestAllocateSlotNumber:
         assert slot_manager.allocate_slot_number(wt) == 6
 
     def test_only_attic(self, tmp_path):
-        wt = tmp_path / "worktrees"
+        wt = tmp_path / "slots"
         wt.mkdir()
         attic = wt / "attic"
         attic.mkdir()
@@ -121,7 +121,7 @@ class TestWorkspaceNameCollision:
             context="Test collision",
         )
 
-        slot_dir = family / "worktrees" / str(result["slot_number"])
+        slot_dir = family / "slots" / str(result["slot_number"])
         assert (slot_dir / ".slot").exists()
         # The workspace clone must NOT be at slot_dir/work (that's the repo)
         # It should be at slot_dir/work-casehub (deconflicted)
@@ -251,7 +251,7 @@ class TestCreateSlot:
         )
 
         assert result["slot_number"] == 1
-        slot_dir = family / "worktrees" / "1"
+        slot_dir = family / "slots" / "1"
         assert slot_dir.is_dir()
         assert (slot_dir / ".m2").is_dir()
         assert (slot_dir / ".slot").exists()
@@ -260,7 +260,7 @@ class TestCreateSlot:
     @patch("slot_manager.run_cmd")
     def test_slot_numbering_increments(self, mock_cmd, tmp_path):
         family = tmp_path / "casehub"
-        (family / "worktrees" / "1").mkdir(parents=True)
+        (family / "slots" / "1").mkdir(parents=True)
         engine = init_repo(family / "engine")
         shared_ws = init_repo(tmp_path / "public" / "casehub")
         (shared_ws / "engine").mkdir()
@@ -311,15 +311,15 @@ class TestCreateSlot:
 
 
 class TestListSlots:
-    def test_empty_worktrees(self, tmp_path):
+    def test_empty_slots(self, tmp_path):
         family = tmp_path / "casehub"
-        (family / "worktrees").mkdir(parents=True)
+        (family / "slots").mkdir(parents=True)
         slots = slot_manager.list_slots(family)
         assert slots == []
 
     def test_active_slot(self, tmp_path):
         family = tmp_path / "casehub"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         slot.mkdir(parents=True)
         (slot / ".slot").write_text("# Slot 1 — issue-42-spi\n")
         (slot / "engine").mkdir()
@@ -333,7 +333,7 @@ class TestListSlots:
 
     def test_ready_to_land_slot(self, tmp_path):
         family = tmp_path / "casehub"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         slot.mkdir(parents=True)
         (slot / ".slot").write_text("# Slot 1 — issue-42-spi\n")
         (slot / ".phase-a-complete").write_text("branch=issue-42\n")
@@ -343,7 +343,7 @@ class TestListSlots:
         slots = slot_manager.list_slots(family)
         assert slots[0]["state"] == "ready to land"
 
-    def test_no_worktrees_dir(self, tmp_path):
+    def test_no_slots_dir(self, tmp_path):
         family = tmp_path / "casehub"
         family.mkdir()
         slots = slot_manager.list_slots(family)
@@ -353,7 +353,7 @@ class TestListSlots:
 class TestRemoveSlot:
     def test_archives_to_attic_by_default(self, tmp_path):
         family = tmp_path / "casehub"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         slot.mkdir(parents=True)
         (slot / ".slot").write_text("test")
         (slot / ".m2").mkdir()
@@ -364,14 +364,14 @@ class TestRemoveSlot:
             slot_manager.remove_slot(family, 1)
 
         assert not slot.exists()
-        attic = family / "worktrees" / "attic" / "1"
+        attic = family / "slots" / "attic" / "1"
         assert attic.exists()
         assert (attic / ".slot").exists()
 
     def test_preserves_repos_in_attic(self, tmp_path):
         """Default remove archives to attic with repos intact."""
         family = tmp_path / "casehub"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         slot.mkdir(parents=True)
         (slot / ".slot").write_text("test")
         (slot / ".landed").write_text("branch=test\n")
@@ -384,12 +384,12 @@ class TestRemoveSlot:
             mock_cmd.return_value = (0, "", "")
             slot_manager.remove_slot(family, 1)
 
-        attic = family / "worktrees" / "attic" / "1"
+        attic = family / "slots" / "attic" / "1"
         assert (attic / "myrepo" / "src.java").exists(), "repo deleted during archive — attic is useless without it"
 
     def test_force_delete_permanently_removes(self, tmp_path):
         family = tmp_path / "casehub"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         slot.mkdir(parents=True)
         (slot / ".slot").write_text("test")
 
@@ -398,11 +398,11 @@ class TestRemoveSlot:
             slot_manager.remove_slot(family, 1, force_delete=True)
 
         assert not slot.exists()
-        assert not (family / "worktrees" / "attic" / "1").exists()
+        assert not (family / "slots" / "attic" / "1").exists()
 
     def test_nonexistent_slot_errors(self, tmp_path, capsys):
         family = tmp_path / "casehub"
-        (family / "worktrees").mkdir(parents=True)
+        (family / "slots").mkdir(parents=True)
 
         with pytest.raises(SystemExit):
             slot_manager.remove_slot(family, 99)
@@ -451,7 +451,7 @@ class TestParseSlotMd:
 
 class TestScanReady:
     def test_finds_phase_a_complete_slots(self, tmp_path):
-        worktrees = tmp_path / "worktrees"
+        worktrees = tmp_path / "slots"
         worktrees.mkdir()
         slot1 = worktrees / "1"
         slot1.mkdir()
@@ -481,12 +481,12 @@ class TestScanReady:
         assert result[0]["context"] == "Implement SPI"
 
     def test_empty_when_no_ready_slots(self, tmp_path):
-        worktrees = tmp_path / "worktrees"
+        worktrees = tmp_path / "slots"
         worktrees.mkdir()
         (worktrees / "1").mkdir()
         assert slot_manager.scan_ready(tmp_path) == []
 
-    def test_no_worktrees_dir(self, tmp_path):
+    def test_no_slots_dir(self, tmp_path):
         assert slot_manager.scan_ready(tmp_path) == []
 
 
@@ -509,7 +509,7 @@ def _init_repo_with_remote(path: Path) -> Path:
 def _create_merge_test_repos(tmp_path, repo_names):
     family = tmp_path / "family"
     family.mkdir()
-    worktrees = family / "worktrees"
+    worktrees = family / "slots"
     worktrees.mkdir()
 
     originals = {}
@@ -569,12 +569,12 @@ class TestMergeSlot:
 
     def test_not_found(self, tmp_path):
         family = tmp_path / "family"
-        (family / "worktrees").mkdir(parents=True)
+        (family / "slots").mkdir(parents=True)
         assert slot_manager.merge_slot(family, 99) == 1
 
     def test_not_ready(self, tmp_path):
         family = tmp_path / "family"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         slot.mkdir(parents=True)
         assert slot_manager.merge_slot(family, 1) == 1
 
@@ -702,8 +702,8 @@ class TestArchiveSlot:
 
         slot_manager.archive_slot(family, 1)
 
-        assert not (family / "worktrees" / "1").exists()
-        attic_slot = family / "worktrees" / "attic" / "1"
+        assert not (family / "slots" / "1").exists()
+        attic_slot = family / "slots" / "attic" / "1"
         assert attic_slot.exists()
         assert (attic_slot / ".slot").exists()
         assert (attic_slot / ".landed").exists()
@@ -716,7 +716,7 @@ class TestArchiveSlot:
         assert (slot / "engine").is_dir()
         slot_manager.archive_slot(family, 1)
 
-        attic_slot = family / "worktrees" / "attic" / "1"
+        attic_slot = family / "slots" / "attic" / "1"
         assert (attic_slot / "engine").exists(), "repo deleted during archive — attic is useless without it"
 
     def test_blocks_archive_without_landed_marker(self, tmp_path, capsys):
@@ -746,8 +746,8 @@ class TestArchiveSlot:
 
         slot_manager.archive_slot(family, 1, force=True)
 
-        assert not (family / "worktrees" / "1").exists()
-        assert (family / "worktrees" / "attic" / "1").exists()
+        assert not (family / "slots" / "1").exists()
+        assert (family / "slots" / "attic" / "1").exists()
 
     def test_relocates_claude_projects(self, tmp_path, monkeypatch):
         family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
@@ -766,7 +766,7 @@ class TestArchiveSlot:
         slot_manager.archive_slot(family, 1)
 
         assert not proj_dir.exists()
-        attic_path = family / "worktrees" / "attic" / "1"
+        attic_path = family / "slots" / "attic" / "1"
         dest_encoded = str(attic_path / "engine").replace("/", "-")
         moved_dir = claude_projects / dest_encoded
         assert moved_dir.exists()
@@ -774,7 +774,7 @@ class TestArchiveSlot:
 
     def test_not_found_exits(self, tmp_path, capsys):
         family = tmp_path / "family"
-        (family / "worktrees").mkdir(parents=True)
+        (family / "slots").mkdir(parents=True)
         with pytest.raises(SystemExit):
             slot_manager.archive_slot(family, 99)
         captured = capsys.readouterr()
@@ -783,7 +783,7 @@ class TestArchiveSlot:
 
 class TestListSlotsExtended:
     def test_shows_landed_state(self, tmp_path):
-        worktrees = tmp_path / "worktrees"
+        worktrees = tmp_path / "slots"
         worktrees.mkdir()
         slot = worktrees / "1"
         slot.mkdir()
@@ -796,7 +796,7 @@ class TestListSlotsExtended:
         assert result[0]["state"] == "landed"
 
     def test_includes_archived(self, tmp_path):
-        worktrees = tmp_path / "worktrees"
+        worktrees = tmp_path / "slots"
         worktrees.mkdir()
         attic = worktrees / "attic"
         attic.mkdir()
@@ -819,7 +819,7 @@ class TestListSlotsExtended:
 
     def test_remnant_dir_excluded_when_archived(self, tmp_path):
         """Remnant worktrees/<N>/ after archive should not appear as active."""
-        worktrees = tmp_path / "worktrees"
+        worktrees = tmp_path / "slots"
         worktrees.mkdir()
         # Remnant directory left behind after shutil.move
         remnant = worktrees / "68"
@@ -842,7 +842,7 @@ class TestListSlotsExtended:
         assert archived[0]["state"] == "archived"
 
     def test_backward_compat_no_arg(self, tmp_path):
-        worktrees = tmp_path / "worktrees"
+        worktrees = tmp_path / "slots"
         worktrees.mkdir()
         slot = worktrees / "1"
         slot.mkdir()
@@ -888,7 +888,7 @@ def _create_clone_test_repos(tmp_path, repo_names):
     """Create a test family with clone-based slots (new model)."""
     family = tmp_path / "family"
     family.mkdir()
-    worktrees = family / "worktrees"
+    worktrees = family / "slots"
     worktrees.mkdir()
 
     originals = {}
@@ -1100,11 +1100,11 @@ class TestArchiveSlotDoubleArchive:
 
         # First archive — should succeed
         slot_manager.archive_slot(family, 1)
-        assert (family / "worktrees" / "attic" / "1").exists()
+        assert (family / "slots" / "attic" / "1").exists()
 
         # Recreate slot dir (simulates remnant ghost)
-        (family / "worktrees" / "1").mkdir()
-        (family / "worktrees" / "1" / ".slot").write_text("ghost")
+        (family / "slots" / "1").mkdir()
+        (family / "slots" / "1" / ".slot").write_text("ghost")
 
         # Second archive — should error, not nest
         with pytest.raises(SystemExit):
@@ -1132,7 +1132,7 @@ class TestArchiveSlotCleanup:
             slot_manager.archive_slot(family, 1)
 
         assert not slot.exists(), "remnant directory should be cleaned after archive"
-        assert (family / "worktrees" / "attic" / "1").exists()
+        assert (family / "slots" / "attic" / "1").exists()
 
     def test_warns_if_remnant_persists(self, tmp_path, capsys):
         """If cleanup can't remove the dir (non-IDE content), warn."""
@@ -1156,7 +1156,7 @@ class TestArchiveSlotCleanup:
 
 class TestEscapeSlotCwd:
     def test_escapes_when_cwd_inside_slot(self, tmp_path):
-        slot = tmp_path / "worktrees" / "1"
+        slot = tmp_path / "slots" / "1"
         slot.mkdir(parents=True)
         escape_to = tmp_path
         original_cwd = os.getcwd()
@@ -1168,7 +1168,7 @@ class TestEscapeSlotCwd:
             os.chdir(original_cwd)
 
     def test_escapes_when_cwd_in_subdirectory(self, tmp_path):
-        slot = tmp_path / "worktrees" / "1"
+        slot = tmp_path / "slots" / "1"
         engine = slot / "engine"
         engine.mkdir(parents=True)
         escape_to = tmp_path
@@ -1181,7 +1181,7 @@ class TestEscapeSlotCwd:
             os.chdir(original_cwd)
 
     def test_noop_when_cwd_outside_slot(self, tmp_path):
-        slot = tmp_path / "worktrees" / "1"
+        slot = tmp_path / "slots" / "1"
         slot.mkdir(parents=True)
         escape_to = tmp_path
         original_cwd = os.getcwd()
@@ -1283,7 +1283,7 @@ class TestRemoveSlotForceDeleteClaude:
     def test_force_delete_removes_claude_projects(self, tmp_path, monkeypatch):
         """force-delete must remove Claude session dirs for the destroyed slot."""
         family = tmp_path / "casehub"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         slot.mkdir(parents=True)
         (slot / ".slot").write_text("test")
         repo = slot / "engine"
@@ -1447,7 +1447,7 @@ class TestMergeSlotEpicCheck:
     def test_merge_slot_prints_epic_status(self, tmp_path, capsys):
         """merge_slot prints EPIC_STATUS for epic slots."""
         family = tmp_path / "family"
-        wt = family / "worktrees" / "72"
+        wt = family / "slots" / "72"
         wt.mkdir(parents=True)
         (wt / ".slot").write_text(
             "# Slot 72\n\n## Issue\norg/repo#50\nCovers: 83,84\nType: epic\n\n"
@@ -1474,7 +1474,7 @@ class TestArchiveSlotCheckboxFix:
 
     def test_fixes_stale_checkboxes(self, tmp_path):
         """archive_slot auto-ticks unchecked boxes for completed issues."""
-        slot_dir = tmp_path / "worktrees" / "72"
+        slot_dir = tmp_path / "slots" / "72"
         slot_dir.mkdir(parents=True)
         (slot_dir / ".slot").write_text(
             "# Slot 72\n\n## Issue\norg/repo#50\nCovers: 83,84\nType: epic\n\n"
@@ -1487,7 +1487,7 @@ class TestArchiveSlotCheckboxFix:
         assert "- [x] #84" in content
 
     def test_no_fix_needed(self, tmp_path):
-        slot_dir = tmp_path / "worktrees" / "72"
+        slot_dir = tmp_path / "slots" / "72"
         slot_dir.mkdir(parents=True)
         (slot_dir / ".slot").write_text(
             "# Slot 72\n\n## Issue\norg/repo#50\nType: epic\n\n"
@@ -1498,7 +1498,7 @@ class TestArchiveSlotCheckboxFix:
         assert fixed == 0
 
     def test_only_fixes_listed_issues(self, tmp_path):
-        slot_dir = tmp_path / "worktrees" / "72"
+        slot_dir = tmp_path / "slots" / "72"
         slot_dir.mkdir(parents=True)
         (slot_dir / ".slot").write_text(
             "# Slot 72\n\n## Issue\norg/repo#50\nType: epic\n\n"
@@ -1509,3 +1509,99 @@ class TestArchiveSlotCheckboxFix:
         content = (slot_dir / ".slot").read_text()
         assert "- [x] #83" in content
         assert "- [ ] #84" in content
+
+
+class TestSlotDirResolution:
+    def test_prefers_slots_over_worktrees(self, tmp_path):
+        (tmp_path / "slots").mkdir()
+        (tmp_path / "worktrees").mkdir()
+        result = slot_manager._resolve_slots_dir(tmp_path)
+        assert result == tmp_path / "slots"
+
+    def test_falls_back_to_worktrees(self, tmp_path):
+        (tmp_path / "worktrees").mkdir()
+        result = slot_manager._resolve_slots_dir(tmp_path)
+        assert result == tmp_path / "worktrees"
+
+    def test_returns_slots_when_neither_exists(self, tmp_path):
+        result = slot_manager._resolve_slots_dir(tmp_path)
+        assert result == tmp_path / "slots"
+
+    def test_resolve_slot_number_in_slots(self, tmp_path):
+        (tmp_path / "slots" / "1").mkdir(parents=True)
+        result = slot_manager._resolve_slot_dir_for_number(tmp_path, 1)
+        assert result == tmp_path / "slots" / "1"
+
+    def test_resolve_slot_number_falls_back_to_worktrees(self, tmp_path):
+        (tmp_path / "worktrees" / "1").mkdir(parents=True)
+        result = slot_manager._resolve_slot_dir_for_number(tmp_path, 1)
+        assert result == tmp_path / "worktrees" / "1"
+
+    def test_resolve_slot_number_prefers_slots(self, tmp_path):
+        (tmp_path / "slots" / "1").mkdir(parents=True)
+        (tmp_path / "worktrees" / "1").mkdir(parents=True)
+        result = slot_manager._resolve_slot_dir_for_number(tmp_path, 1)
+        assert result == tmp_path / "slots" / "1"
+
+
+class TestIsSlotPath:
+    def test_detects_slots_path(self):
+        assert slot_manager.is_slot_path("/home/user/family/slots/1/repo") is True
+
+    def test_detects_legacy_worktrees_path(self):
+        assert slot_manager.is_slot_path("/home/user/family/worktrees/1/repo") is True
+
+    def test_rejects_claude_worktrees(self):
+        assert slot_manager.is_slot_path("/home/user/repo/.claude/worktrees/issue-17") is False
+
+    def test_rejects_dot_worktrees(self):
+        assert slot_manager.is_slot_path("/home/user/repo/.worktrees/feat") is False
+
+    def test_rejects_plain_path(self):
+        assert slot_manager.is_slot_path("/home/user/project/src") is False
+
+
+class TestCreateSlotUsesNewDir:
+    def test_creates_under_slots_not_worktrees(self, tmp_path):
+        repo = init_repo(tmp_path / "myrepo")
+        result = slot_manager.create_slot(
+            family_root=tmp_path, repos=["myrepo"], branch="test-branch",
+            issue="1", issue_repo="org/repo", covers="1", context="test",
+        )
+        assert (tmp_path / "slots").exists()
+        assert not (tmp_path / "worktrees").exists()
+        assert (tmp_path / "slots" / "1").exists()
+
+
+class TestListSlotsDualPath:
+    def test_finds_slots_in_legacy_worktrees(self, tmp_path):
+        wt = tmp_path / "worktrees" / "1"
+        wt.mkdir(parents=True)
+        init_repo(wt / "myrepo")
+        (wt / ".slot").write_text("# Slot 1 — test-branch\n")
+        slots = slot_manager.list_slots(tmp_path)
+        assert len(slots) == 1
+        assert slots[0]["number"] == 1
+
+    def test_finds_slots_in_new_dir(self, tmp_path):
+        sd = tmp_path / "slots" / "1"
+        sd.mkdir(parents=True)
+        init_repo(sd / "myrepo")
+        (sd / ".slot").write_text("# Slot 1 — test-branch\n")
+        slots = slot_manager.list_slots(tmp_path)
+        assert len(slots) == 1
+        assert slots[0]["number"] == 1
+
+    def test_merges_both_dirs(self, tmp_path):
+        wt = tmp_path / "worktrees" / "1"
+        wt.mkdir(parents=True)
+        init_repo(wt / "repo1")
+        (wt / ".slot").write_text("# Slot 1 — old-branch\n")
+        sd = tmp_path / "slots" / "2"
+        sd.mkdir(parents=True)
+        init_repo(sd / "repo2")
+        (sd / ".slot").write_text("# Slot 2 — new-branch\n")
+        slots = slot_manager.list_slots(tmp_path)
+        assert len(slots) == 2
+        nums = {s["number"] for s in slots}
+        assert nums == {1, 2}

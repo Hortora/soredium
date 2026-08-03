@@ -127,8 +127,8 @@ class TestWorklogRecording:
             promoted=["workspace:2", "project:1"],
             published=["blog:1"],
             publish_dest="/Users/dev/blog",
-            archived_from=str(family / "worktrees/1"),
-            archived_to=str(family / "worktrees/attic/1"),
+            archived_from=str(family / "slots/1"),
+            archived_to=str(family / "slots/attic/1"),
         )
 
         events = worklog.event_log(conn, event_type="slot-archive")
@@ -137,6 +137,6 @@ class TestWorklogRecording:
         meta = json.loads(events[0]["metadata"])
         assert meta["promoted"] == ["workspace:2", "project:1"]
         assert meta["published"] == ["blog:1"]
-        assert meta["archived_from"] == str(family / "worktrees/1")
-        assert meta["archived_to"] == str(family / "worktrees/attic/1")
+        assert meta["archived_from"] == str(family / "slots/1")
+        assert meta["archived_to"] == str(family / "slots/attic/1")
         conn.close()

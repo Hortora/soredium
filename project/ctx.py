@@ -188,9 +188,10 @@ _epic_dir = Path(__file__).parent.parent / "work-slot"
 if str(_epic_dir) not in sys.path:
     sys.path.insert(0, str(_epic_dir))
 from epic_manager import detect as _epic_detect
+from slot_manager import is_slot_path as _is_slot_path
 
 _epic_info = _epic_detect(Path(workspace))
-if _epic_info is None and "/worktrees/" in str(project):
+if _epic_info is None and _is_slot_path(str(project)):
     _epic_info = _epic_detect(Path(project))
 
 is_epic = _epic_info is not None

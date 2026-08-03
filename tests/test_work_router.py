@@ -59,7 +59,7 @@ class TestDetectState:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         family = tmp_path / "family"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         project = slot / "engine"
         project.mkdir(parents=True)
         (slot / ".slot").write_text(
@@ -80,7 +80,7 @@ class TestDetectState:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         family = tmp_path / "family"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         project = slot / "engine"
         project.mkdir(parents=True)
         (slot / ".slot").write_text(
@@ -262,7 +262,7 @@ class TestSlotStates:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         family = tmp_path / "family"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         project = slot / "engine"
         project.mkdir(parents=True)
         if epic:
@@ -404,7 +404,7 @@ class TestEpicFileDetection:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         family = tmp_path / "family"
-        slot = family / "worktrees" / "1"
+        slot = family / "slots" / "1"
         project = slot / "repo"
         slot.mkdir(parents=True)
         project.mkdir()

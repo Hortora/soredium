@@ -615,7 +615,7 @@ and expensive to miss.
 After Step 3c, check for epic context:
 
 1. **Guard — detect epic file:**
-   - If `/worktrees/` in `$PROJECT`: `epic_file = $PROJECT/../.slot`
+   - If `is_slot_path($PROJECT)`: `epic_file = $PROJECT/../.slot`
    - Elif `workspace/design/.epic` exists: `epic_file = workspace/design/.epic`
    - Else: skip overlay entirely.
 2. **Detect:** Read `epic_file`. If it does not exist or does not contain

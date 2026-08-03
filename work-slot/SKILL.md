@@ -18,6 +18,8 @@ across a multi-repo family. Each slot contains standalone `git clone
 --shared` repos (not git worktrees), isolated `.m2`, re-pointed symlinks,
 and a context file for the session that works there.
 
+> **Legacy:** existing slots under `worktrees/` continue to work. New slots are created under `slots/`.
+
 ## Slot Lifecycle
 
 | State | Marker | Meaning |
@@ -25,7 +27,7 @@ and a context file for the session that works there.
 | `active` | slot dir exists, no markers | Work in progress |
 | `ready to land` | `.phase-a-complete` | Phase A done, awaiting merge |
 | `landed` | `.landed` | Merged to main, awaiting archive |
-| `archived` | in `worktrees/attic/<N>/` | Clones moved to attic, metadata kept |
+| `archived` | in `slots/attic/<N>/` | Clones moved to attic, metadata kept |
 
 ---
 
@@ -105,8 +107,8 @@ Warn and continue if iTerm2 is unavailable.
 Slot <N> created: <branch-name>
   Repos: engine, iot
   Workspace: work (shared) / work-iot (external)
-  .m2: worktrees/<N>/.m2
-  Slot context: worktrees/<N>/.slot
+  .m2: slots/<N>/.m2
+  Slot context: slots/<N>/.slot
   iTerm2: tab opened / skipped
 
 Open a CLI in <slot-dir>/<primary-repo> and run work-start.
@@ -354,7 +356,7 @@ Cross-check .slot against the GitHub epic body. Report if:
 ## `work-slot remove <N>`
 
 > "Archive slot <N>? Slot clones will be moved to
-> `worktrees/attic/<N>/` with .slot and markers preserved. (y/n)"
+> `slots/attic/<N>/` with .slot and markers preserved. (y/n)"
 
 Wait for confirmation. Then:
 
@@ -363,7 +365,7 @@ python3 ~/.claude/skills/work-slot/slot_manager.py remove-slot <family-root> slo
 ```
 
 **Default behaviour is archive to attic, not delete.** The slot directory
-moves to `worktrees/attic/<N>/` preserving .slot, `.phase-a-complete`,
+moves to `slots/attic/<N>/` preserving .slot, `.phase-a-complete`,
 `.landed`, and any other metadata for auditing and branch hygiene.
 
 **Never pass `--force-delete`** unless the user explicitly says "permanently
@@ -489,7 +491,7 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 
 ## How slots work
 
-- **Self-contained.** Everything under `worktrees/<N>/` — repo clones,
+- **Self-contained.** Everything under `slots/<N>/` — repo clones,
   workspace clone, isolated `.m2`, .slot context file.
 - **Isolated .m2.** Every slot gets its own Maven local repo via
   `.mvn/maven.config`. No cross-contamination with the originals.
@@ -500,7 +502,7 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 
 ### What happens in the slot
 
-1. Human opens a CLI session in `worktrees/<N>/<primary-repo>`
+1. Human opens a CLI session in `slots/<N>/<primary-repo>`
 2. Runs work-start — detects existing scaffold, runs resume path
 3. Does the work (implementation, tests, etc.)
 4. Runs work-end — detects slot mode, runs Phase A (review, verify,
@@ -514,7 +516,7 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 - Does not merge to main — work-end Phase B handles that
 - Does not coordinate between slots — the human sequences merges
 - **Does not delete slots** — all cleanup paths archive to
-  `worktrees/attic/<N>/`. Deletion requires explicit `--force-delete`
+  `slots/attic/<N>/`. Deletion requires explicit `--force-delete`
   from the user. An archived slot costs nothing; a deleted slot loses
   branch hygiene data, blog entries, and audit trail permanently.
 

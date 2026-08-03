@@ -64,19 +64,19 @@ class TestCheckPromoted:
 
 class TestCheckArchived:
     def test_in_attic(self, tmp_path):
-        slot = tmp_path / "worktrees" / "attic" / "72"
+        slot = tmp_path / "slots" / "attic" / "72"
         slot.mkdir(parents=True)
         assert phase_b_gate.check_archived(slot) is True
 
     def test_not_in_attic(self, tmp_path):
-        slot = tmp_path / "worktrees" / "72"
+        slot = tmp_path / "slots" / "72"
         slot.mkdir(parents=True)
         assert phase_b_gate.check_archived(slot) is False
 
 
 class TestRunGate:
     def test_all_pass(self, tmp_path):
-        slot = tmp_path / "worktrees" / "attic" / "72"
+        slot = tmp_path / "slots" / "attic" / "72"
         _make_stamped_repo(slot / "engine")
         stamp = slot / "engine" / "design" / ".artifacts-promoted"
         stamp.parent.mkdir(parents=True)
@@ -86,7 +86,7 @@ class TestRunGate:
         assert result["gate"] == "pass"
 
     def test_fail_missing_stamps(self, tmp_path):
-        slot = tmp_path / "worktrees" / "attic" / "72"
+        slot = tmp_path / "slots" / "attic" / "72"
         repo = slot / "engine"
         repo.mkdir(parents=True)
         subprocess.run(["git", "init", str(repo)], capture_output=True, check=True)
@@ -103,7 +103,7 @@ class TestRunGate:
         assert "stamps:engine" in result["missing"]
 
     def test_warn_github_unreachable(self, tmp_path):
-        slot = tmp_path / "worktrees" / "attic" / "72"
+        slot = tmp_path / "slots" / "attic" / "72"
         _make_stamped_repo(slot / "engine")
         stamp = slot / "engine" / "design" / ".artifacts-promoted"
         stamp.parent.mkdir(parents=True)
@@ -115,7 +115,7 @@ class TestRunGate:
         assert result["reason"] == "github_unreachable"
 
     def test_fail_not_archived(self, tmp_path):
-        slot = tmp_path / "worktrees" / "72"
+        slot = tmp_path / "slots" / "72"
         _make_stamped_repo(slot / "engine")
         stamp = slot / "engine" / "design" / ".artifacts-promoted"
         stamp.parent.mkdir(parents=True)

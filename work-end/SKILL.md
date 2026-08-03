@@ -384,7 +384,7 @@ After all checked items complete, proceed to Step 3c.
 
 ### Step 3b-slot — Per-repo sweep (slot mode only)
 
-When `/worktrees/` is detected in `$PROJECT` path (slot mode), replace the
+When `is_slot_path()` detects a slot path in `$PROJECT` (slot mode), replace the
 single-repo sweep above with a per-repo loop:
 
 **1. Discover repos in the slot:**
@@ -550,7 +550,7 @@ work-end close plan — <branch-name>
   Squash             <blessed-remote>/main..HEAD (mandatory before any push)
   Fork push          → origin/main (mandatory, no skip — fork is always updated first)
   Blessed repo       → prompt: push / PR / skip  (upstream remote, if present)
-  Slot archive       → worktrees/attic/<N>/  (slot mode only — B7)
+  Slot archive       → slots/attic/<N>/  (slot mode only — B7)
 
 Approve all, or step by step? (all / step)
 ```
@@ -563,7 +563,8 @@ blog against the destination and publishes only what's missing — it handles th
 
 ## Slot Mode Detection
 
-After path resolution, check if `$PROJECT` path contains `/worktrees/`:
+After path resolution, check if `$PROJECT` is a slot path (via `is_slot_path()`,
+which checks for `/slots/` and legacy `/worktrees/`):
 
 - **If yes → slot mode.** Phase A/B split applies. See below.
 - **If no → normal mode.** Existing step ordering unchanged.
@@ -712,7 +713,7 @@ git -C <slot>/<repo> commit --allow-empty -m "chore: branch closed — landed as
 git -C <slot>/work commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
 ```
 
-**B7. Archive.** Move the slot directory to `worktrees/attic/<N>/`
+**B7. Archive.** Move the slot directory to `slots/attic/<N>/`
 (preserves .slot, clone repos, and marker files for auditing). Use
 `archive-slot` from `slot_manager.py` — do not delete the slot directory.
 No `git worktree remove` is needed — slots are standalone clones.
@@ -726,10 +727,10 @@ Before proceeding to B8, verify all prior steps ran:
 - [ ] Issues closed (B3)
 - [ ] Artifacts promoted (B4)
 - [ ] Branches stamped as closed (B6)
-- [ ] **Slot archived — clones moved to `worktrees/attic/<N>/` (B7)**
+- [ ] **Slot archived — clones moved to `slots/attic/<N>/` (B7)**
 
 B7 is the most commonly skipped step. If the slot directory still exists
-under `worktrees/<N>/` (not in attic), B7 did not run — go back and
+under `slots/<N>/` (not in attic), B7 did not run — go back and
 execute it before continuing.
 
 ---

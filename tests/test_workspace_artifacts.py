@@ -213,7 +213,7 @@ class TestScanSlotWorkspace:
 
     def test_worktree_nested_in_deep_path(self, tmp_path):
         """Scan works regardless of how deep the workspace root is."""
-        deep = tmp_path / "family" / "worktrees" / "1" / "cc-praxis"
+        deep = tmp_path / "family" / "slots" / "1" / "cc-praxis"
         deep.mkdir(parents=True)
         ws = build_slot_workspace(deep)
         result = scan(ws)

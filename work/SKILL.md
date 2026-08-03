@@ -165,7 +165,7 @@ Sets up single-repo epic iteration. Must be on main.
 **Step 6 — `work next` (advance epic issue)**
 
 Advances to the next child issue in the current epic. Detects context:
-- `/worktrees/` in `$PROJECT` → slot context, epic file at
+- `is_slot_path($PROJECT)` → slot context, epic file at
   `$PROJECT/../.slot`
 - `workspace/design/.epic` exists → single-repo context
 

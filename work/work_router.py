@@ -71,8 +71,9 @@ def detect_state(current_branch: str, project_path: str,
     if str(_epic_dir) not in sys.path:
         sys.path.insert(0, str(_epic_dir))
     from epic_manager import detect as _epic_detect
+    from slot_manager import is_slot_path as _is_slot_path
 
-    if "/worktrees/" in str(project):
+    if _is_slot_path(str(project)):
         candidate = project.parent / ".slot"
         if candidate.exists():
             in_slot = True

@@ -35,6 +35,38 @@ except ImportError:
 
 _IDE_ARTIFACTS = {".idea", ".run", ".settings", ".project", ".classpath", ".vscode"}
 
+SLOT_DIR_NAME = "slots"
+LEGACY_SLOT_DIR_NAME = "worktrees"
+
+
+def _resolve_slots_dir(family_root: Path) -> Path:
+    """Return the slots directory, preferring slots/ over legacy worktrees/."""
+    new = family_root / SLOT_DIR_NAME
+    old = family_root / LEGACY_SLOT_DIR_NAME
+    if new.exists():
+        return new
+    if old.exists():
+        return old
+    return new
+
+
+def _resolve_slot_dir_for_number(family_root: Path, slot_num: int) -> Path:
+    """Find a specific slot by number, checking slots/ then worktrees/."""
+    for name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        candidate = family_root / name / str(slot_num)
+        if candidate.exists():
+            return candidate
+    return family_root / SLOT_DIR_NAME / str(slot_num)
+
+
+def is_slot_path(path: str) -> bool:
+    """Check if a path is inside a slot directory (not a git/Claude Code worktree)."""
+    if "/slots/" in path:
+        return True
+    if "/worktrees/" in path and "/.claude/worktrees/" not in path and "/.worktrees/" not in path:
+        return True
+    return False
+
 
 def _read_promotion_stamp(slot_dir: Path) -> tuple[list[str], list[str], str]:
     """Read artifact promotion data from .artifacts-promoted stamps in the slot.
@@ -267,10 +299,10 @@ Covers: {covers}
 def create_slot(family_root: Path, repos: list[str], branch: str,
                 issue: str, issue_repo: str, covers: str,
                 context: str) -> dict:
-    worktrees_dir = family_root / "worktrees"
-    worktrees_dir.mkdir(exist_ok=True)
-    slot_num = allocate_slot_number(worktrees_dir)
-    slot_dir = worktrees_dir / str(slot_num)
+    slots_dir = family_root / SLOT_DIR_NAME
+    slots_dir.mkdir(exist_ok=True)
+    slot_num = allocate_slot_number(slots_dir)
+    slot_dir = slots_dir / str(slot_num)
     slot_dir.mkdir()
     m2_dir = slot_dir / ".m2"
     m2_dir.mkdir()
@@ -456,41 +488,42 @@ def get_repo_stats(repo_path: Path) -> dict:
 
 
 def scan_ready(family_root: Path) -> list[dict]:
-    worktrees_dir = family_root / "worktrees"
-    if not worktrees_dir.exists():
-        return []
     slots = []
-    for d in sorted(worktrees_dir.iterdir()):
-        if not d.is_dir() or not d.name.isdigit():
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        slots_dir = family_root / dir_name
+        if not slots_dir.exists():
             continue
-        if not (d / ".phase-a-complete").exists():
-            continue
-        if (d / ".landed").exists():
-            continue
-        timestamp = ""
-        for line in (d / ".phase-a-complete").read_text().splitlines():
-            if line.startswith("timestamp="):
-                timestamp = line.split("=", 1)[1]
-        md = parse_slot_md(d)
-        repo_names = md.get("repos", [])
-        repo_data = []
-        for repo_name in repo_names:
-            repo_path = d / repo_name
-            if repo_path.is_dir() and (repo_path / ".git").exists():
-                stats = get_repo_stats(repo_path)
-                repo_data.append({"name": repo_name, **stats})
-            else:
-                repo_data.append({"name": repo_name, "commits": 0, "diff": ""})
-        slots.append({
-            "number": int(d.name),
-            "branch": md.get("branch", ""),
-            "repos": repo_data,
-            "issue": md.get("issue", ""),
-            "issue_repo": md.get("issue_repo", ""),
-            "covers": md.get("covers", ""),
-            "context": md.get("context", ""),
-            "phase_a_timestamp": timestamp,
-        })
+        for d in sorted(slots_dir.iterdir()):
+            if not d.is_dir() or not d.name.isdigit():
+                continue
+            if not (d / ".phase-a-complete").exists():
+                continue
+            if (d / ".landed").exists():
+                continue
+            timestamp = ""
+            for line in (d / ".phase-a-complete").read_text().splitlines():
+                if line.startswith("timestamp="):
+                    timestamp = line.split("=", 1)[1]
+            md = parse_slot_md(d)
+            repo_names = md.get("repos", [])
+            repo_data = []
+            for repo_name in repo_names:
+                repo_path = d / repo_name
+                if repo_path.is_dir() and (repo_path / ".git").exists():
+                    stats = get_repo_stats(repo_path)
+                    repo_data.append({"name": repo_name, **stats})
+                else:
+                    repo_data.append({"name": repo_name, "commits": 0, "diff": ""})
+            slots.append({
+                "number": int(d.name),
+                "branch": md.get("branch", ""),
+                "repos": repo_data,
+                "issue": md.get("issue", ""),
+                "issue_repo": md.get("issue_repo", ""),
+                "covers": md.get("covers", ""),
+                "context": md.get("context", ""),
+                "phase_a_timestamp": timestamp,
+            })
     return slots
 
 
@@ -594,7 +627,7 @@ def ensure_clone_layout(slot_dir: Path) -> int:
 
 
 def merge_slot(family_root: Path, slot_num: int) -> int:
-    slot_dir = family_root / "worktrees" / str(slot_num)
+    slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         return 1
@@ -873,7 +906,7 @@ def _fix_stale_checkboxes(slot_path: Path, issues_to_tick: list[int]) -> int:
 
 
 def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
-    slot_dir = family_root / "worktrees" / str(slot_num)
+    slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
@@ -919,7 +952,7 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
                 except Exception:
                     print("WARN=github_unreachable_for_checkbox_verify")
 
-    attic_dir = family_root / "worktrees" / "attic"
+    attic_dir = slot_dir.parent / "attic"
     attic_dir.mkdir(exist_ok=True)
     dest = attic_dir / str(slot_num)
     if dest.exists():
@@ -957,59 +990,66 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
 
 
 def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
-    worktrees_dir = family_root / "worktrees"
-    if not worktrees_dir.exists():
-        return []
-
-    attic_dir = worktrees_dir / "attic"
-    archived_nums: set[int] = set()
-    if attic_dir.exists():
-        archived_nums = {
-            int(d.name) for d in attic_dir.iterdir()
-            if d.is_dir() and d.name.isdigit()
-        }
-
     slots = []
-    for d in sorted(worktrees_dir.iterdir()):
-        if not d.is_dir() or not d.name.isdigit():
+    seen: set[int] = set()
+
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        slots_dir = family_root / dir_name
+        if not slots_dir.exists():
             continue
-        if int(d.name) in archived_nums:
-            continue
-        repos = [
-            sub.name for sub in sorted(d.iterdir())
-            if sub.is_dir() and (sub / ".git").exists() and is_project_repo(sub.name)
-        ]
-        branch = ""
-        slot_md = d / ".slot"
-        if slot_md.exists():
-            for line in slot_md.read_text().splitlines():
-                if line.startswith("# Slot") and "—" in line:
-                    branch = line.split("—", 1)[1].strip()
-                    break
 
-        if (d / ".landed").exists():
-            state = "landed"
-        elif (d / ".phase-a-complete").exists():
-            state = "ready to land"
-        else:
-            state = "active"
-
-        slots.append({
-            "number": int(d.name),
-            "branch": branch,
-            "repos": repos,
-            "state": state,
-        })
-
-    if include_archived:
-        attic_dir = worktrees_dir / "attic"
+        attic_dir = slots_dir / "attic"
+        archived_nums: set[int] = set()
         if attic_dir.exists():
+            archived_nums = {
+                int(d.name) for d in attic_dir.iterdir()
+                if d.is_dir() and d.name.isdigit()
+            }
+
+        for d in sorted(slots_dir.iterdir()):
+            if not d.is_dir() or not d.name.isdigit():
+                continue
+            num = int(d.name)
+            if num in archived_nums or num in seen:
+                continue
+            seen.add(num)
+            repos = [
+                sub.name for sub in sorted(d.iterdir())
+                if sub.is_dir() and (sub / ".git").exists() and is_project_repo(sub.name)
+            ]
+            branch = ""
+            slot_md = d / ".slot"
+            if slot_md.exists():
+                for line in slot_md.read_text().splitlines():
+                    if line.startswith("# Slot") and "—" in line:
+                        branch = line.split("—", 1)[1].strip()
+                        break
+
+            if (d / ".landed").exists():
+                state = "landed"
+            elif (d / ".phase-a-complete").exists():
+                state = "ready to land"
+            else:
+                state = "active"
+
+            slots.append({
+                "number": num,
+                "branch": branch,
+                "repos": repos,
+                "state": state,
+            })
+
+        if include_archived and attic_dir.exists():
             for d in sorted(attic_dir.iterdir()):
                 if not d.is_dir() or not d.name.isdigit():
                     continue
+                num = int(d.name)
+                if num in seen:
+                    continue
+                seen.add(num)
                 md = parse_slot_md(d)
                 slots.append({
-                    "number": int(d.name),
+                    "number": num,
                     "branch": md.get("branch", ""),
                     "repos": md.get("repos", []),
                     "state": "archived",
@@ -1019,7 +1059,7 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
 
 
 def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) -> None:
-    slot_dir = family_root / "worktrees" / str(slot_num)
+    slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
@@ -1048,7 +1088,7 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
             _cleanup_remnant_dir(slot_dir)
         print(f"DELETED={slot_num}")
     else:
-        attic_dir = family_root / "worktrees" / "attic"
+        attic_dir = slot_dir.parent / "attic"
         attic_dir.mkdir(exist_ok=True)
         dest = attic_dir / str(slot_num)
         if dest.exists():
@@ -1067,7 +1107,7 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
 
 def check_cross_deps(family_root: Path, slot_num: int) -> int:
     """Check if cross-repo Maven dependencies in a slot have landed on main."""
-    slot_dir = family_root / "worktrees" / str(slot_num)
+    slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         return 1
@@ -1230,7 +1270,7 @@ def main() -> None:
         if slot_num == 0:
             print("ERROR=missing_slot_number")
             sys.exit(1)
-        slot_dir = family_root / "worktrees" / str(slot_num)
+        slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
         if not slot_dir.exists():
             print(f"ERROR=slot_not_found slot={slot_num}")
             sys.exit(1)
