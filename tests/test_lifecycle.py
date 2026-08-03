@@ -365,6 +365,84 @@ class TestMigrateLegacyPaused:
         assert migrate_legacy_paused(meta) is False
 
 
+# --- hygiene invariants ---
+
+
+class TestHygieneInvariants:
+    @pytest.fixture
+    def git_project(self, tmp_path):
+        """Create a minimal git repo with .meta on a feature branch."""
+        project = tmp_path / "project"
+        project.mkdir()
+        subprocess.run(["git", "init", str(project)], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(project), "commit", "--allow-empty", "-m", "init"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", "issue-42-foo"],
+            capture_output=True,
+        )
+        meta_dir = project / "design"
+        meta_dir.mkdir()
+        meta = meta_dir / ".meta"
+        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+        return project, meta
+
+    def test_untracked_files_detected(self, git_project):
+        project, meta = git_project
+        (project / "leftover.py").write_text("oops")
+        violations = validate_state("closing:review", project, project)
+        assert any("Untracked" in v for v in violations)
+
+    def test_excluded_patterns_ignored(self, git_project):
+        project, meta = git_project
+        idea = project / ".idea"
+        idea.mkdir()
+        (idea / "workspace.xml").write_text("<xml/>")
+        violations = validate_state("closing:review", project, project)
+        assert not any(".idea" in v for v in violations)
+
+    def test_branch_mismatch_detected(self, git_project):
+        project, meta = git_project
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "main"], capture_output=True
+        )
+        violations = validate_state("active", project, project)
+        assert any("Branch mismatch" in v for v in violations)
+
+    def test_clean_repo_no_violations(self, git_project):
+        project, meta = git_project
+        violations = validate_state("active", project, project)
+        assert violations == []
+
+    def test_paused_skips_untracked_check(self, git_project):
+        project, meta = git_project
+        (project / "leftover.py").write_text("oops")
+        violations = validate_state("paused", project, project)
+        assert not any("Untracked" in v for v in violations)
+
+    def test_idle_skips_branch_check(self, git_project):
+        project, meta = git_project
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "main"], capture_output=True
+        )
+        violations = validate_state("idle", project, project)
+        assert not any("Branch mismatch" in v for v in violations)
+
+    def test_transition_blocked_by_untracked(self, git_project):
+        project, meta = git_project
+        (project / "leftover.py").write_text("oops")
+        with pytest.raises(InvalidState, match="Untracked"):
+            transition(meta, "work_end", project=project, workspace=project)
+
+    def test_transition_allowed_without_paths(self, git_project):
+        project, meta = git_project
+        (project / "leftover.py").write_text("oops")
+        result = transition(meta, "work_end")
+        assert result.new_state == "closing:review"
+
+
 # --- transition table completeness ---
 
 

@@ -229,15 +229,85 @@ def commit_transition(meta_path: Path, result: TransitionResult) -> None:
             write_state(meta_path, result.new_state)
 
 
+_DEFAULT_EXCLUDES = [
+    '.idea/', 'target/', 'build/', 'node_modules/',
+    '__pycache__/', '*.iml', '.worktrees/', 'slots/',
+    '.pytest_cache/', '*.pyc', 'design/',
+]
+
+
 def validate_state(
     state: str,
     project: Path,
     workspace: Path,
     exclude_patterns: Optional[list[str]] = None,
 ) -> list[str]:
-    """Check hygiene invariants. Returns list of violations (empty = clean).
-    Stub — Task 6 implements real checks."""
-    return []
+    """Check hygiene invariants. Returns list of violations (empty = clean)."""
+    import subprocess as _sp
+
+    violations: list[str] = []
+    excludes = exclude_patterns or _DEFAULT_EXCLUDES
+
+    if state not in ('paused', 'idle'):
+        _check_untracked(project, excludes, violations, "project")
+        if project.resolve() != workspace.resolve():
+            _check_untracked(workspace, excludes, violations, "workspace")
+
+    if state not in ('idle', 'paused'):
+        meta_path = (
+            workspace if project.resolve() != workspace.resolve() else project
+        ) / "design" / ".meta"
+        if meta_path.exists():
+            meta_branch = ""
+            for line in meta_path.read_text().splitlines():
+                if line.startswith("branch:"):
+                    meta_branch = line.split(":", 1)[1].strip()
+                    break
+            if meta_branch:
+                current = _sp.run(
+                    ["git", "-C", str(project), "branch", "--show-current"],
+                    capture_output=True, text=True,
+                ).stdout.strip()
+                if current and current != meta_branch:
+                    violations.append(
+                        f"Branch mismatch: .meta says '{meta_branch}', "
+                        f"git says '{current}'"
+                    )
+
+    if state == 'closing:review':
+        for repo, label in [(project, "project"), (workspace, "workspace")]:
+            if repo.resolve() == workspace.resolve() and label == "workspace":
+                continue
+            status = _sp.run(
+                ["git", "-C", str(repo), "status", "--porcelain"],
+                capture_output=True, text=True,
+            ).stdout.strip()
+            if status:
+                violations.append(f"Uncommitted changes in {label}")
+
+    return violations
+
+
+def _check_untracked(
+    repo: Path, excludes: list[str], violations: list[str], label: str,
+) -> None:
+    import subprocess as _sp
+
+    result = _sp.run(
+        ["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard"],
+        capture_output=True, text=True,
+    )
+    for f in result.stdout.strip().splitlines():
+        if f and not any(_matches_exclude(f, pat) for pat in excludes):
+            violations.append(f"Untracked file in {label}: {f}")
+
+
+def _matches_exclude(filepath: str, pattern: str) -> bool:
+    if pattern.endswith('/'):
+        return filepath.startswith(pattern) or f'/{pattern}' in filepath
+    if pattern.startswith('*.'):
+        return filepath.endswith(pattern[1:])
+    return pattern in filepath
 
 
 def is_transient(state: str) -> bool:
