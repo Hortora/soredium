@@ -394,7 +394,7 @@ Keep it to one line — it's a navigation aid, not an introduction. Omit if this
 
 After writing, update `<BLOG_DIR>/INDEX.md` (create if absent):
 ```bash
-python3 write-content/update_blog_index.py <blog-file-path> --summary "<one-line summary>"
+python3 ~/.claude/skills/write-content/update_blog_index.py <blog-file-path> --summary "<one-line summary>"
 ```
 
 ---

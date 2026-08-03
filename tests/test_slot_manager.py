@@ -817,6 +817,30 @@ class TestListSlotsExtended:
         assert "engine" in result_all[0]["repos"]
         assert "iot" in result_all[0]["repos"]
 
+    def test_remnant_dir_excluded_when_archived(self, tmp_path):
+        """Remnant worktrees/<N>/ after archive should not appear as active."""
+        worktrees = tmp_path / "worktrees"
+        worktrees.mkdir()
+        # Remnant directory left behind after shutil.move
+        remnant = worktrees / "68"
+        remnant.mkdir()
+        (remnant / ".slot").write_text("# Slot 68 — issue-152-old\n")
+        (remnant / "devtown").mkdir()
+        (remnant / "devtown" / ".git").write_text("gitdir: /fake")
+        # Archived copy in attic
+        attic = worktrees / "attic" / "68"
+        attic.mkdir(parents=True)
+        (attic / ".slot").write_text("# Slot 68 — issue-152-old\n")
+
+        result = slot_manager.list_slots(tmp_path, include_archived=False)
+        assert all(s["number"] != 68 for s in result), \
+            "archived slot 68 appeared as active due to remnant directory"
+
+        result_all = slot_manager.list_slots(tmp_path, include_archived=True)
+        archived = [s for s in result_all if s["number"] == 68]
+        assert len(archived) == 1
+        assert archived[0]["state"] == "archived"
+
     def test_backward_compat_no_arg(self, tmp_path):
         worktrees = tmp_path / "worktrees"
         worktrees.mkdir()

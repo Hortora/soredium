@@ -960,9 +960,20 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
     worktrees_dir = family_root / "worktrees"
     if not worktrees_dir.exists():
         return []
+
+    attic_dir = worktrees_dir / "attic"
+    archived_nums: set[int] = set()
+    if attic_dir.exists():
+        archived_nums = {
+            int(d.name) for d in attic_dir.iterdir()
+            if d.is_dir() and d.name.isdigit()
+        }
+
     slots = []
     for d in sorted(worktrees_dir.iterdir()):
         if not d.is_dir() or not d.name.isdigit():
+            continue
+        if int(d.name) in archived_nums:
             continue
         repos = [
             sub.name for sub in sorted(d.iterdir())
