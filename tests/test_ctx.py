@@ -235,6 +235,8 @@ issue-repo: owner/repo
 covers: 42,43
 """
         repo = init_repo(tmp_path / "repo")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-123-test-feature"],
+                       capture_output=True)
         (repo / "design").mkdir()
         (repo / "design" / ".meta").write_text(meta_content)
 
@@ -267,6 +269,8 @@ covers: 42,43
 issue: 99
 """
         repo = init_repo(tmp_path / "repo")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-99-something"],
+                       capture_output=True)
         (repo / "design").mkdir()
         (repo / "design" / ".meta").write_text(meta_content)
 
@@ -284,6 +288,8 @@ issue: 99
 issue: 123
 """
         repo = init_repo(tmp_path / "repo", claude_md)
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-123-test"],
+                       capture_output=True)
         (repo / "design").mkdir()
         (repo / "design" / ".meta").write_text(meta_content)
 
@@ -299,6 +305,10 @@ issue: 123
         project = init_repo(tmp_path / "project")
         workspace = init_repo(tmp_path / "workspace")
         (workspace / "proj").symlink_to(project)
+        subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "ws-branch"],
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "ws-branch"],
+                       capture_output=True)
         (workspace / "design").mkdir()
         (workspace / "design" / ".meta").write_text("branch: ws-branch\nissue: 42\n")
         (project / "design").mkdir()
@@ -310,6 +320,8 @@ issue: 123
     def test_malformed_meta_lines_skipped(self, tmp_path):
         """Lines without ': ' separator are silently ignored."""
         repo = init_repo(tmp_path / "project")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "good-branch"],
+                       capture_output=True)
         (repo / "design").mkdir()
         (repo / "design" / ".meta").write_text(
             "branch: good-branch\n"
@@ -623,10 +635,12 @@ class TestHasMeta:
     """Test HAS_META field."""
 
     def test_has_meta_yes(self, tmp_path):
-        """HAS_META=yes when design/.meta exists in workspace."""
+        """HAS_META=yes when design/.meta exists and branch matches."""
         repo = init_repo(tmp_path / "repo")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "test-branch"],
+                       capture_output=True)
         (repo / "design").mkdir()
-        (repo / "design" / ".meta").write_text("branch: test\n")
+        (repo / "design" / ".meta").write_text("branch: test-branch\n")
         data = parse(run_ctx(repo))
         assert data["HAS_META"] == "yes"
 
@@ -1072,6 +1086,91 @@ class TestWorktreeResolution:
         assert Path(data["WORKSPACE"]).resolve() == workspace.resolve()
         assert Path(data["PROJECT"]).resolve() == project.resolve()
         assert data["IN_WORKTREE"] == "no"
+
+
+class TestMetaBranchValidation:
+    """Test .meta branch validation — .meta is ignored when its branch doesn't match."""
+
+    def test_meta_ignored_when_branch_mismatches_current(self, tmp_path):
+        """HAS_META=no and fields empty when .meta branch != current branch."""
+        repo = init_repo(tmp_path / "repo")
+        (repo / "design").mkdir()
+        (repo / "design" / ".meta").write_text(
+            "branch: issue-99-other-work\nissue: 99\ncovers: 99\n"
+        )
+        # repo is on main, .meta says issue-99-other-work → mismatch
+        data = parse(run_ctx(repo))
+        assert data["HAS_META"] == "no"
+        assert data["ISSUE_N"] == ""
+        assert data["BRANCH_NAME"] == ""
+        assert data["COVERS"] == ""
+
+    def test_meta_valid_when_branch_matches_current(self, tmp_path):
+        """HAS_META=yes and fields populated when .meta branch matches current branch."""
+        repo = init_repo(tmp_path / "repo")
+        subprocess.run(
+            ["git", "-C", str(repo), "checkout", "-b", "issue-42-fix"],
+            capture_output=True,
+        )
+        (repo / "design").mkdir()
+        (repo / "design" / ".meta").write_text(
+            "branch: issue-42-fix\nissue: 42\ncovers: 42\n"
+        )
+        data = parse(run_ctx(repo))
+        assert data["HAS_META"] == "yes"
+        assert data["ISSUE_N"] == "42"
+        assert data["BRANCH_NAME"] == "issue-42-fix"
+
+    def test_meta_ignored_in_dual_repo_when_project_branch_differs(self, tmp_path):
+        """In dual-repo mode, .meta ignored when project is on a different branch."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (workspace / "proj").symlink_to(project)
+
+        # Workspace on epic branch with .meta
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "epic-2-post-mvp"],
+            capture_output=True,
+        )
+        (workspace / "design").mkdir()
+        (workspace / "design" / ".meta").write_text(
+            "branch: epic-2-post-mvp\nissue: 200\ncovers: 200\n"
+        )
+
+        # Project on a different branch (simulating a worktree scenario)
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", "issue-17-different"],
+            capture_output=True,
+        )
+
+        data = parse(run_ctx(workspace))
+        assert data["HAS_META"] == "no"
+        assert data["ISSUE_N"] == ""
+        assert data["BRANCH_NAME"] == ""
+
+    def test_meta_valid_in_dual_repo_when_both_branches_match(self, tmp_path):
+        """In dual-repo mode, .meta valid when both repos on the matching branch."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (workspace / "proj").symlink_to(project)
+
+        branch = "issue-42-feature"
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", branch],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", branch],
+            capture_output=True,
+        )
+        (workspace / "design").mkdir()
+        (workspace / "design" / ".meta").write_text(
+            f"branch: {branch}\nissue: 42\ncovers: 42\n"
+        )
+
+        data = parse(run_ctx(workspace))
+        assert data["HAS_META"] == "yes"
+        assert data["ISSUE_N"] == "42"
 
 
 class TestMetaNewFields:

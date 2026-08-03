@@ -101,14 +101,21 @@ if meta_path.exists():
             k, _, v = line.partition(": ")
             meta[k.strip()] = v.strip()
 
+workspace_branch = run("git", "-C", workspace, "branch", "--show-current")
+project_branch = run("git", "-C", project, "branch", "--show-current") if not single_repo else workspace_branch
+current_branch = workspace_branch
+
+meta_branch = meta.get("branch", "")
+if meta_branch and meta_branch != workspace_branch:
+    meta = {}
+elif meta_branch and not single_repo and meta_branch != project_branch:
+    meta = {}
+
 branch_name = meta.get("branch", "")
 project_sha = meta.get("project-sha", "")
 issue_n = meta.get("issue", "")
 issue_repo = meta.get("issue-repo", owner_repo)
 covers = meta.get("covers", issue_n)
-workspace_branch = run("git", "-C", workspace, "branch", "--show-current")
-project_branch = run("git", "-C", project, "branch", "--show-current") if not single_repo else workspace_branch
-current_branch = workspace_branch
 
 branch_mismatch = "no"
 mismatch_detail = ""
@@ -204,7 +211,7 @@ if _epic_info:
     _epic_batch = f"{_cur} of {_tot}" if _tot else ""
     _epic_active_issue = str(_epic_info.get("current_issue", ""))
 
-has_meta = "yes" if meta_path.exists() else "no"
+has_meta = "yes" if meta_path.exists() and meta else "no"
 
 design_repo_key = meta.get("design-repo", "")
 
