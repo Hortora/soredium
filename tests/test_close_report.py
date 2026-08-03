@@ -156,12 +156,12 @@ class TestRender:
         result = run(["render", str(rp)])
         assert "✅ Hygiene scan (3 findings)" in result.stdout
 
-    def test_worktree_remove_rendering(self, tmp_path):
+    def test_slot_archive_rendering(self, tmp_path):
         rp = tmp_path / "report.json"
         run(["init", str(rp)])
-        run(["record", str(rp), "step=worktree-remove", "result=ok", "count=3", "names=devtown,engine,workspace"])
+        run(["record", str(rp), "step=slot-archive", "result=ok", "count=3", "names=devtown,engine,workspace"])
         result = run(["render", str(rp)])
-        assert "3 worktrees (devtown,engine,workspace)" in result.stdout
+        assert "3 clones (devtown,engine,workspace)" in result.stdout
 
     def test_archive_rendering(self, tmp_path):
         rp = tmp_path / "report.json"
@@ -228,10 +228,10 @@ class TestRender:
              "blog_published=0", "plans_archived=0"])
         run(["record", str(rp), "step=stamp-project", "result=ok", "branch=issue-42"])
         run(["record", str(rp), "step=stamp-workspace", "result=ok", "branch=issue-42"])
-        run(["record", str(rp), "step=worktree-remove", "result=ok", "count=3", "names=devtown,engine,workspace"])
+        run(["record", str(rp), "step=slot-archive", "result=ok", "count=3", "names=devtown,engine,workspace"])
         run(["record", str(rp), "step=archive", "result=ok", "slot=11", "dest=worktrees/attic/11"])
 
         result = run(["render", str(rp)])
         lines = [l for l in result.stdout.splitlines() if l.strip()]
-        assert any("Worktrees removed" in l for l in lines)
+        assert any("Slot clones archived" in l for l in lines)
         assert any("Slot archived" in l for l in lines)

@@ -686,6 +686,8 @@ Work-start is complete when:
 - `work-pause` / `work-resume` — pause stack detection in Step 2
 - `using-git-worktrees` — additional code isolation layer when uncommitted
   work needs protecting during branch creation
+- `work-slot` — slot mode detection; work-start runs inside slots via
+  the resume path after slot creation
 
 **Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, GitHub issues API,
 garden (gardenSearch or fallback), `ARC42STORIES.MD`

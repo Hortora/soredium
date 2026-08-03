@@ -163,3 +163,5 @@ This is non-negotiable.
 - `writing-skills` — VBC applies when testing skill changes
 - `ide-tooling` — `ide_build_project` and `ide_diagnostics` are verification
   tools. Use them as part of the gate function.
+- `design-review` — run VBC after design-review resolves all issues and
+  before committing the updated spec

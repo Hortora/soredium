@@ -93,6 +93,7 @@ These thoughts mean STOP — you're rationalizing:
 - `protocol` — lifecycle: mid-session SWEEP for convention capture
 - `code-review` — lifecycle: pre-commit review
 - `git-commit` — lifecycle: commit creation
+- `writing-skills` — skill creation and editing workflow
 
 ## User Instructions
 

@@ -654,6 +654,10 @@ user confirmation to skip. Skipping silently is not permitted.**
 **Invokes:** Nothing — this is a terminal skill. Issue numbers produced here feed
 into `git-commit` commit messages via `Refs #N` / `Closes #N`.
 
+**Complements:**
+- `work-slot` — activate-issues called during slot creation (Phase 0 labels
+  used by work-slot for epic batching)
+
 **CLAUDE.md integration:** Phase 0 writes `## Work Tracking`. Once present, Claude
 reads it at session start and enforces Phase 1 before implementation begins and
 Phase 2 before significant tasks — without needing explicit invocation.

@@ -1300,17 +1300,17 @@ class TestDepthPersistence:
         assert depth_file.read_text() == "standard"
 
     def test_depth_file_loaded_on_resume(self, tmp_path: Path) -> None:
-        from adversarial_design_review.review import _load_depth
+        from adversarial_design_review.review import _load_degree
         ws = tmp_path / "ws"
         ws.mkdir()
         (ws / ".depth").write_text("deep")
-        assert _load_depth(ws) == "deep"
+        assert _load_degree(ws) == "deep"
 
     def test_depth_file_missing_returns_none(self, tmp_path: Path) -> None:
-        from adversarial_design_review.review import _load_depth
+        from adversarial_design_review.review import _load_degree
         ws = tmp_path / "ws"
         ws.mkdir()
-        assert _load_depth(ws) is None
+        assert _load_degree(ws) is None
 
 
 # ---------------------------------------------------------------------------

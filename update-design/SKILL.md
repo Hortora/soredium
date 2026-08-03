@@ -46,4 +46,7 @@ Read the file(s), then execute the workflow(s) they describe.
 
 **Invokes:** None (terminal skill in the chain)
 
-**Complements:** `adr` — captures point-in-time decisions alongside this skill's living-doc updates
+**Complements:**
+- `adr` — captures point-in-time decisions alongside this skill's living-doc updates
+- `implementation-doc-sync` — doc-sync handles session-scoped documentation
+  updates; update-design handles design journal sync

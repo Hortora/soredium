@@ -181,6 +181,12 @@
       "version": "1.0.0"
     },
     {
+      "name": "work-slot",
+      "source": "./work-slot",
+      "description": "Use when creating parallel clone-based slots for multi-repo family work — user says \"create a slot\", \"spin up a slot for issue #N\", \"parallel work on engine and iot\", or invokes /work-slot. Also use \"work-slot epic\" to iterate through an epic's child issues, \"work-slot next\" to advance, \"work-slot list\" to see status, \"work-slot remove\" to archive, and \"work-slot merge\" to land ready slots. NOT for single-repo worktree isolation (use using-git-worktrees for that).",
+      "version": "1.0.0"
+    },
+    {
       "name": "workspace-init",
       "source": "./workspace-init",
       "description": "Use when explicitly creating a new companion workspace from scratch — user invokes /workspace-init or says \"init work...",
@@ -189,13 +195,13 @@
     {
       "name": "write-content",
       "source": "./write-content",
-      "description": "Use when writing any piece of content — project diary entry, blog post, article, note, brief, README, news item, tech...",
+      "description": "Use when writing a diary entry, note, article, brief, README, technical documentation section, or news item. User says \"write\", \"draft\", \"write a diary entry\", \"log what we built\", \"create a post\", \"write up\", \"write the README\", or provides a topic/subject to write about. NOT for generating code (use java-dev, ts-dev etc.).",
       "version": "1.0.0"
     },
     {
       "name": "brainstorming",
       "source": "./brainstorming",
-      "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
+      "description": "Use when starting any creative work — creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
       "version": "1.0.0"
     },
     {

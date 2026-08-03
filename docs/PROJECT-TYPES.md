@@ -396,7 +396,7 @@ Can we hardcode sync logic universally?
 - User knows best what their project is
 - **Solution:** Explicit declaration in CLAUDE.md
 
-**The Pattern: Built-in types (skills, java, blog) + one configurable type (custom) + one fallback (generic) = handles everything. All routed through `git-commit`.**
+**The Pattern: Five types (skills, java, blog, custom, generic) — three built-in, one configurable, one fallback — handle everything. All routed through `git-commit`.**
 
 ---
 

@@ -404,8 +404,11 @@ Commit is complete when:
 - [`verification-before-completion`] to verify claims before committing
 - Follows `readme-sync.md` workflow for skill collection sync (automatic if README.md exists and skill changes detected, type: skills only)
 
-**Complements:** `fix-ci` — fix-ci reproduces and fixes CI failures;
-git-commit captures the fix
+**Complements:**
+- `fix-ci` — fix-ci reproduces and fixes CI failures;
+  git-commit captures the fix
+- `implementation-doc-sync` — doc-sync handles session-scoped documentation
+  updates; git-commit chains to `update-design` for design journal
 
 **Interactive setup:** If CLAUDE.md missing or no Project Type declared, guides user through setup and creates CLAUDE.md
 

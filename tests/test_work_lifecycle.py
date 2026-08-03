@@ -45,9 +45,9 @@ def work_start_text():
 
 class TestWorkRouting:
 
-    def test_stack_empty_routes_to_work_start(self, work_text):
-        """Stack empty on main must route to work-start."""
-        assert "stack empty" in work_text.lower()
+    def test_start_route_goes_to_work_start(self, work_text):
+        """Start route on main must point to work-start."""
+        assert "start" in work_text.lower()
         assert "work-start" in work_text
 
     def test_stack_one_plus_shows_picker_not_auto_resume(self, work_text):

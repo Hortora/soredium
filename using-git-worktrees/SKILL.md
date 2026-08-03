@@ -212,3 +212,6 @@ Ready to implement <feature-name>
 - `work-end` — worktree cleanup happens during branch closure
   (provenance-based: only clean up worktrees created by the tool,
   under `.worktrees/`).
+- `work-slot` — different git primitive (`git clone --shared` vs
+  `git worktree add`), different use case (multi-repo parallel work
+  vs single-repo ephemeral isolation)

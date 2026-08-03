@@ -698,6 +698,8 @@ the resume output directs the user to `/work` which handles branch resumption
   handover captures operational context for the next session
 - `work-pause` — different intent: work-pause switches branches mid-session;
   handover ends the session preserving context for resumption
+- `work-slot` — for epic slots, handover auto-includes an Epic Progress
+  section from .slot
 
 **Does NOT replace:** CLAUDE.md (auto-loaded), `--resume`/`--continue` flags
 (restore conversation history for same-machine continuation)

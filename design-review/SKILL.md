@@ -348,6 +348,7 @@ Design review is complete when:
 **Invoked by:**
 - User directly (`/design-review`, "review this design",
   "pre-review this", "tear this spec apart")
+- `writing-plans` — conditionally, when review depth prompt selects a review (not Skip)
 - `subagent-driven-development` — after implementation, SDD may invoke
   design-review `--mode final-review` for adversarial review
 - `work-end` — before branch closure, work-end may invoke design-review

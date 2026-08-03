@@ -46,6 +46,14 @@ class Confirmation:
     verdict: str  # "resolved" | "accepted" | "contested"
     reason: str = ""
 
+    @property
+    def is_resolved(self) -> bool:
+        return self.verdict == "resolved"
+
+    @property
+    def is_accepted(self) -> bool:
+        return self.verdict == "accepted"
+
 
 @dataclass
 class IssueResponse:

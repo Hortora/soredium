@@ -686,7 +686,10 @@ def main() -> int:
                     continue
                 try:
                     if conf.verdict == "resolved":
-                        tracker.mark_verified(conf.issue_id)
+                        try:
+                            tracker.mark_verified(conf.issue_id)
+                        except ValueError:
+                            tracker.mark_accepted(conf.issue_id)
                     elif conf.verdict == "accepted":
                         tracker.mark_accepted(conf.issue_id)
                     else:
@@ -1324,7 +1327,10 @@ def _rebuild_tracker(ws: Path, tracker: Tracker, through_round: int) -> None:
                     continue
                 try:
                     if conf.verdict == "resolved":
-                        tracker.mark_verified(conf.issue_id)
+                        try:
+                            tracker.mark_verified(conf.issue_id)
+                        except ValueError:
+                            tracker.mark_accepted(conf.issue_id)
                     elif conf.verdict == "accepted":
                         tracker.mark_accepted(conf.issue_id)
                     else:

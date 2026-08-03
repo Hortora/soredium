@@ -1331,7 +1331,7 @@ Show every item — both ticked and skipped with reason.
 
 **Invokes:**
 - `code-review` — Step 3c, mandatory gate before artifact promotion (body-only diffs)
-- `design-review --mode final-review` — Step 3c, mandatory gate for structural diffs
+- `design-review` — Step 3c (`--mode final-review`), mandatory gate for structural diffs
 - `forage` — SWEEP (Step 3b pre-close sweep)
 - `protocol` — SWEEP (Step 3b pre-close sweep)
 - `update-claude-md` — Step 3b pre-close sweep

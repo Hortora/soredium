@@ -126,6 +126,7 @@ Plan execution is complete when:
 - `verification-before-completion` — after each task, verify before
   marking done
 - `work-end` — after all tasks complete (handles code-review, squash, push)
+- `code-review` — via `work-end` Step 3c, mandatory review before merge
 
 **Complements:**
 - `test-driven-development` — every task follows TDD during execution.

@@ -84,5 +84,7 @@ automatic); `git-commit` after approval if user wants to commit
 - `design-review --mode final-review` — branch-level adversarial review.
   Use code-review for per-commit checklist review; use final-review for
   pre-merge production readiness checks on structural changes.
+- `requesting-code-review` — deprecated independent subagent review;
+  superseded by `design-review` `--mode final-review`
 
 **Boundary with design-review:** code-review is a pre-commit checklist for staged changes. design-review --mode code-review is spec-vs-implementation conformance checking.

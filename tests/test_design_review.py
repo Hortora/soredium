@@ -13,17 +13,14 @@ from unittest.mock import patch
 
 import pytest
 
-# Match existing test import pattern: sys.path.insert for the skill directory
-_design_review_dir = Path(__file__).parent.parent / "design-review"
-sys.path.insert(0, str(_design_review_dir))
-
-from review import (
+from adversarial_design_review.review import (
     _auto_detect_depth,
     _build_notify_command,
     _check_unresolved_before_done,
     _detect_last_round,
     _get_source_diff,
-    _load_depth,
+    _handle_decision_needed,
+    _load_degree,
     _rebuild_tracker,
     DEPTH_PRESETS,
     MODE_DEFAULTS,
@@ -32,7 +29,7 @@ from review import (
     ReviewAborted,
     verify_code_changed,
 )
-from setup import (
+from adversarial_design_review.setup import (
     _code_review_implementor_md,
     _code_review_reviewer_md,
     _default_reviewer_md,
@@ -41,8 +38,8 @@ from setup import (
     _pre_review_reviewer_md,
     setup_review,
 )
-from prompts import build_implementor_prompt, build_reviewer_prompt
-from tracker import Tracker, IssueStatus
+from adversarial_design_review.prompts import build_implementor_prompt, build_reviewer_prompt
+from adversarial_design_review.tracker import Tracker, IssueStatus
 
 
 # ---------------------------------------------------------------------------
@@ -1232,12 +1229,12 @@ class TestDepthPersistence:
         ws = tmp_path / "ws"
         ws.mkdir()
         (ws / ".depth").write_text("deep")
-        assert _load_depth(ws) == "deep"
+        assert _load_degree(ws) == "deep"
 
     def test_depth_file_missing_returns_none(self, tmp_path: Path) -> None:
         ws = tmp_path / "ws"
         ws.mkdir()
-        assert _load_depth(ws) is None
+        assert _load_degree(ws) is None
 
 
 # ---------------------------------------------------------------------------

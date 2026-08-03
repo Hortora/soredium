@@ -385,6 +385,15 @@ def verify_evidence_against_diff(
     )
 
 
+def verify_against_diff(diff: str, section_ref: str | None) -> VerifyResult:
+    if section_ref is None:
+        return VerifyResult(section_changed=True, note="no section reference — assuming changed")
+    pattern = re.compile(rf"#{{1,6}}\s+{re.escape(section_ref)}\b", re.MULTILINE)
+    if pattern.search(diff):
+        return VerifyResult(section_changed=True)
+    return VerifyResult(section_changed=False, note=f"section {section_ref} not found in diff")
+
+
 def _extract_section_number(location: str) -> str | None:
     m = re.search(r"§(\d+(?:\.\d+)*)", location)
     return m.group(1) if m else None
