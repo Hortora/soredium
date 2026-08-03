@@ -437,17 +437,32 @@ If you catch yourself thinking any of these, **STOP** and apply the correct appr
 Search the garden for the domain being implemented before writing code.
 Include domain filter if the work targets a specific domain.
 
-  Call `gardenSearch` with:
-  - `query`: the technical topic (e.g. "asyncio gather error handling").
-  - `keywords`: specific class names, function names, decorator names,
-    module names relevant to the implementation. Pipe-separated
-    (e.g. `asyncio.gather|TaskGroup|@pytest.fixture|conftest`).
+Spawn a `garden-retriever` subagent (runs in foreground — wait for results):
 
-If `gardenSearch` is unavailable or returns an error, warn once per session
+```
+Agent(
+  subagent_type: "garden-retriever",
+  run_in_background: false,
+  prompt: "Search for: <technical topic, e.g. 'asyncio gather error handling'>.
+           Keywords: <pipe-separated class names, function names, decorator names,
+           e.g. 'asyncio.gather|TaskGroup|@pytest.fixture|conftest'>.
+           Domain: <domain if applicable, else omit>."
+)
+```
+
+The subagent calls `gardenSearch`, reads entries, and returns condensed
+relevant passages — not full entries. This keeps the main model's context
+focused on the implementation task.
+
+If the subagent fails (gardenSearch MCP unavailable), warn once per session
 (skip if already warned earlier in this conversation):
   "⚠️ Garden MCP unavailable — using keyword fallback. Start engine per CLAUDE.md Dev Services."
   Then fall back to:
   git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -il -E "keyword1|keyword2" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+
+**Shadow comparison (#60):** Also run the grep command with the same keywords
+for shadow comparison data. The PostToolUse hook captures grep calls for
+`~/.hortora/logs/rag-comparison.jsonl`. Remove when #61 lands.
 
 **Load `~/.hortora/garden/approaches/testing.md`** before proceeding.
 Apply all principles from that file.

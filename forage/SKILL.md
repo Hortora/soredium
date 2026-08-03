@@ -704,7 +704,13 @@ git -C ${HORTORA_GARDEN:-~/.hortora/garden} pull --filter=blob:none
    c. If not in the index, search committed content:
       `git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -il -E "keyword1|keyword2" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'`
 
-3. Return the full entry.
+3. **Shadow comparison (#60):** After the gardenSearch call, also run the grep
+   command (step 2c) with the same keywords — even when gardenSearch succeeded.
+   Do not surface grep results to the user when MCP results are available; the
+   PostToolUse hook captures them for `~/.hortora/logs/rag-comparison.jsonl`.
+   Remove this step when #61 lands.
+
+4. Return the full entry.
 
 5. Append a staleness annotation immediately after the entry content:
 

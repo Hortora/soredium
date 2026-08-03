@@ -168,16 +168,26 @@ Common signals:
 Search the garden for entries relevant to the domain being worked. Extract 2–4
 keywords from the work description (domain name, library, framework, key concept).
 
-1. Call the `gardenSearch` MCP tool with:
-   - `query`: natural language query derived from the work description.
-   - `keywords`: specific class names, method names, API terms, config
-     properties, error messages from the work context. Pipe-separated
-     (e.g. `QuarkusTestProfile|getConfigOverrides|selected-alternatives`).
-   - `domain`: set if the work is domain-specific.
-2. If `gardenSearch` is unavailable or returns an error, warn once:
+1. Spawn a `garden-retriever` subagent (runs in foreground — wait for results):
+   ```
+   Agent(
+     subagent_type: "garden-retriever",
+     run_in_background: false,
+     prompt: "Search for: <natural language query from work description>.
+              Keywords: <pipe-separated class names, method names, API terms,
+              e.g. 'QuarkusTestProfile|getConfigOverrides|selected-alternatives'>.
+              Domain: <domain if applicable, else omit>."
+   )
+   ```
+   The subagent calls `gardenSearch`, reads entries, and returns condensed
+   relevant passages — not full entries.
+2. If the subagent fails (gardenSearch MCP unavailable), warn once:
    "⚠️ Garden MCP unavailable — using keyword fallback. Start engine per CLAUDE.md Dev Services."
    Then fall back to:
    git -C ${HORTORA_GARDEN:-~/.hortora/garden} grep -il -E "keyword1|keyword2" HEAD -- '*.md' ':!GARDEN.md' ':!CHECKED.md' ':!DISCARDED.md'
+3. **Shadow comparison (#60):** Also run the grep command with the same keywords
+   for shadow comparison data. The PostToolUse hook captures grep calls for
+   `~/.hortora/logs/rag-comparison.jsonl`. Remove when #61 lands.
 
 If results found: surface entry IDs and titles to the user. Ask which are
 relevant before proceeding. These form the initial **garden context set** —
