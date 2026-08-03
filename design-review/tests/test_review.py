@@ -12,10 +12,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from parser import Confirmation, Evidence, Issue, IssueResponse, SettledDecision
 from review import (
+    _apply_resume_degree,
     _build_reviewer_events,
     _build_implementor_events,
     _build_chunk_start_event,
     _build_chunk_end_event,
+    _detect_last_round,
+    _load_degree,
     _write_jsonl,
     parse_args,
 )
@@ -405,3 +408,203 @@ class TestParseArgsCrosscutting:
             args = self._parse(["--spec", "x.md", "--title", "t",
                                 "--source-dirs", "/tmp", "--type", t])
             assert args.review_type == t
+
+
+class TestLoadDegree:
+
+    def test_reads_saved_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            (ws / ".depth").write_text("light")
+            assert _load_degree(ws) == "light"
+
+    def test_accepts_adversarial(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            (ws / ".depth").write_text("adversarial")
+            assert _load_degree(ws) == "adversarial"
+
+    def test_accepts_all_degree_presets(self):
+        for degree in ("light", "standard", "adversarial", "deep"):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ws = Path(tmpdir)
+                (ws / ".depth").write_text(degree)
+                assert _load_degree(ws) == degree
+
+    def test_rejects_invalid_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            (ws / ".depth").write_text("turbo")
+            assert _load_degree(ws) is None
+
+    def test_missing_file_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            assert _load_degree(ws) is None
+
+
+class TestDetectLastRound:
+
+    def _setup_responses(self, tmpdir, reviewer_rounds, implementor_rounds):
+        ws = Path(tmpdir)
+        responses = ws / "responses"
+        responses.mkdir()
+        for n in reviewer_rounds:
+            (responses / f"reviewer-{n}.md").write_text(f"round {n}")
+        for n in implementor_rounds:
+            (responses / f"implementor-{n}.md").write_text(f"round {n}")
+        return ws
+
+    def test_empty_workspace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            assert _detect_last_round(ws) == (0, False)
+
+    def test_complete_round(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = self._setup_responses(tmpdir, [1], [1])
+            assert _detect_last_round(ws) == (1, False)
+
+    def test_reviewer_only_is_partial(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = self._setup_responses(tmpdir, [1], [])
+            assert _detect_last_round(ws) == (1, True)
+
+    def test_light_depth_reviewer_only_is_complete(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = self._setup_responses(tmpdir, [1], [])
+            assert _detect_last_round(ws, depth="light") == (1, False)
+
+    def test_standard_depth_reviewer_only_is_partial(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = self._setup_responses(tmpdir, [1], [])
+            assert _detect_last_round(ws, depth="standard") == (1, True)
+
+    def test_multiple_rounds(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = self._setup_responses(tmpdir, [1, 2, 3], [1, 2])
+            last, partial = _detect_last_round(ws)
+            assert last == 3
+            assert partial is True
+
+
+class TestDegreeFromCliFlag:
+
+    def _parse(self, argv: list[str]):
+        with patch("sys.argv", ["review.py"] + argv):
+            return parse_args()
+
+    def test_explicit_degree_sets_flag(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "structure",
+                            "--degree", "light"])
+        assert args._degree_from_cli is True
+
+    def test_explicit_depth_alias_sets_flag(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--type", "structure",
+                            "--depth", "light"])
+        assert args._degree_from_cli is True
+
+    def test_no_degree_flag_unset(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp"])
+        assert args._degree_from_cli is False
+
+    def test_explicit_max_rounds_sets_flag(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp", "--max-rounds", "5"])
+        assert args._max_rounds_from_cli is True
+
+    def test_no_max_rounds_flag_unset(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp"])
+        assert args._max_rounds_from_cli is False
+
+    def test_explicit_budget_sets_flag(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp",
+                            "--budget-per-session", "10.0"])
+        assert args._budget_from_cli is True
+
+    def test_no_budget_flag_unset(self):
+        args = self._parse(["--spec", "x.md", "--title", "t",
+                            "--source-dirs", "/tmp"])
+        assert args._budget_from_cli is False
+
+
+class TestApplyResumeDegree:
+    """Integration tests for the resume degree-loading path."""
+
+    def _make_args(self, degree_from_cli=False, max_rounds_from_cli=False,
+                   min_rounds_from_cli=False, budget_from_cli=False,
+                   max_rounds=6, min_rounds=4, budget=5.0):
+        import argparse
+        args = argparse.Namespace(
+            _degree_from_cli=degree_from_cli,
+            _max_rounds_from_cli=max_rounds_from_cli,
+            _min_rounds_from_cli=min_rounds_from_cli,
+            _budget_from_cli=budget_from_cli,
+            max_rounds=max_rounds,
+            min_rounds=min_rounds,
+            budget_per_session=budget,
+        )
+        return args
+
+    def test_loads_light_overrides_adversarial_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            (ws / ".depth").write_text("light")
+            args = self._make_args(max_rounds=6, min_rounds=4, budget=5.0)
+            result = _apply_resume_degree(ws, args, "adversarial")
+            assert result == "light"
+            assert args.max_rounds == 1
+            assert args.min_rounds == 1
+            assert args.budget_per_session == 1.5
+
+    def test_explicit_cli_degree_skips_loading(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            (ws / ".depth").write_text("light")
+            args = self._make_args(degree_from_cli=True)
+            result = _apply_resume_degree(ws, args, "adversarial")
+            assert result == "adversarial"
+            assert args.max_rounds == 6
+
+    def test_no_depth_file_keeps_resolved(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            args = self._make_args()
+            result = _apply_resume_degree(ws, args, "adversarial")
+            assert result == "adversarial"
+
+    def test_explicit_max_rounds_not_overridden(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            (ws / ".depth").write_text("light")
+            args = self._make_args(max_rounds_from_cli=True, max_rounds=10)
+            result = _apply_resume_degree(ws, args, "adversarial")
+            assert result == "light"
+            assert args.max_rounds == 10
+            assert args.min_rounds == 1
+
+    def test_explicit_budget_not_overridden(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            (ws / ".depth").write_text("light")
+            args = self._make_args(budget_from_cli=True, budget=99.0)
+            result = _apply_resume_degree(ws, args, "adversarial")
+            assert result == "light"
+            assert args.budget_per_session == 99.0
+            assert args.max_rounds == 1
+
+    def test_adversarial_degree_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = Path(tmpdir)
+            (ws / ".depth").write_text("adversarial")
+            args = self._make_args(max_rounds=3, min_rounds=2, budget=1.5)
+            result = _apply_resume_degree(ws, args, "standard")
+            assert result == "adversarial"
+            assert args.max_rounds == 6
+            assert args.min_rounds == 4
+            assert args.budget_per_session == 5.0

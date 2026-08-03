@@ -428,9 +428,8 @@ def main() -> int:
             diff_base_file = ws / ".diff-base"
             if diff_base_file.exists():
                 args.diff_base = diff_base_file.read_text().strip() or None
-        # Load depth from workspace for final-review resume
-        if args.mode == "final-review" and not args.depth:
-            resolved_depth = _load_depth(ws)
+        # Load degree from workspace on resume (unless explicitly passed on CLI)
+        resolved_depth = _apply_resume_degree(ws, args, resolved_depth)
         _LOG_FILE = ws / "progress.log"
         last_round, reviewer_only = _detect_last_round(ws, depth=resolved_depth)
         if reviewer_only:
@@ -1276,14 +1275,38 @@ def _auto_detect_depth(diff_stat_summary: str, new_file_count: int = 0) -> str:
     return "light"
 
 
-def _load_depth(ws: Path) -> str | None:
-    """Load persisted depth from workspace, or None if absent."""
+def _load_degree(ws: Path) -> str | None:
+    """Load persisted degree from workspace, or None if absent."""
     depth_file = ws / ".depth"
     if depth_file.exists():
         value = depth_file.read_text().strip()
-        if value in DEPTH_PRESETS:
+        if value in DEGREE_PRESETS:
             return value
     return None
+
+
+def _apply_resume_degree(
+    ws: Path, args: argparse.Namespace, resolved_depth: str | None,
+) -> str | None:
+    """Load saved degree from workspace on resume, applying presets.
+
+    Returns the resolved degree. Mutates args.max_rounds, args.min_rounds,
+    and args.budget_per_session when the saved degree overrides defaults.
+    """
+    if args._degree_from_cli:
+        return resolved_depth
+    saved = _load_degree(ws)
+    if not saved:
+        return resolved_depth
+    if saved in DEGREE_PRESETS:
+        preset = DEGREE_PRESETS[saved]
+        if not args._max_rounds_from_cli:
+            args.max_rounds = preset["max_rounds"]
+        if not args._min_rounds_from_cli:
+            args.min_rounds = preset["min_rounds"]
+        if not args._budget_from_cli:
+            args.budget_per_session = preset["budget_per_session"]
+    return saved
 
 
 def _rebuild_tracker(ws: Path, tracker: Tracker, through_round: int) -> None:
@@ -1637,6 +1660,12 @@ def parse_args() -> argparse.Namespace:
     # --- Resolve --depth as alias for --degree ---
     if args.depth and not args.degree:
         args.degree = args.depth
+
+    # --- Track which args were explicitly provided (before defaulting) ---
+    args._degree_from_cli = args.degree is not None
+    args._max_rounds_from_cli = args.max_rounds is not None
+    args._min_rounds_from_cli = args.min_rounds is not None
+    args._budget_from_cli = args.budget_per_session is not None
 
     # --- Resolve type vs mode ---
     if args.review_type and args.mode:

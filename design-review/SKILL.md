@@ -258,7 +258,7 @@ If a review.py process exits with an error:
    ```bash
    python3 ~/.claude/skills/design-review/review.py \
      --workspace ~/reviews/{project}/{title}-{dimension}-{timestamp}/ \
-     --source-dirs {dirs}
+     --degree {degree} --source-dirs {dirs}
    ```
 
 ## Step 8 — Validate and present results
@@ -296,11 +296,13 @@ If the user says "resume the review" or a prior run was interrupted:
 ```bash
 python3 /Users/mdproctor/.claude/skills/design-review/review.py \
   --workspace {workspace_path} \
-  --source-dirs {dirs}
+  --degree {degree} --source-dirs {dirs}
 ```
 
 The script rebuilds tracker state from existing response files and resumes
-from the next round.
+from the next round. The degree is persisted in the workspace (`.depth` file)
+and auto-loaded on resume, but passing `--degree` explicitly is recommended
+as a safety net.
 
 ## Optional flags the user can request
 
