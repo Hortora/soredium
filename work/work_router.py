@@ -78,6 +78,11 @@ def detect_state(current_branch: str, project_path: str,
     from epic_manager import detect as _epic_detect
     from slot_manager import is_slot_path as _is_slot_path
 
+    _lifecycle_dir = Path(__file__).parent.parent / "project"
+    if str(_lifecycle_dir) not in sys.path:
+        sys.path.insert(0, str(_lifecycle_dir))
+    from lifecycle import read_state as _read_state
+
     if _is_slot_path(str(project)):
         candidate = project.parent / ".slot"
         if candidate.exists():
@@ -121,6 +126,7 @@ def detect_state(current_branch: str, project_path: str,
 
     meta_file = workspace / "design" / ".meta"
     has_meta = meta_file.exists()
+    meta_state = _read_state(meta_file) or ""
     workspace_dirty = (
         not on_main
         and not has_meta
@@ -143,6 +149,7 @@ def detect_state(current_branch: str, project_path: str,
         "IS_EPIC": "yes" if is_epic else "no",
         "STACK_DEPTH": str(stack_depth),
         "HAS_HANDOFF": "yes" if has_handoff else "no",
+        "META_STATE": meta_state,
     }
     if workspace_dirty:
         result["WORKSPACE_BRANCH"] = current_branch
