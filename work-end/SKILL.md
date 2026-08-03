@@ -62,6 +62,30 @@ with the actual value from the script output.
 
 ---
 
+## Lifecycle State Machine Integration
+
+work-end uses the lifecycle state machine to track progress through the
+closing sequence. Each gate advances the state:
+
+```
+active → closing:review → closing:verified → closing:promoted → closing:pushed → closing:merged → closing:stamped → idle
+```
+
+**On entry:** Read `META_STATE` from ctx.py. If already in a `closing:*` state
+(crashed/interrupted close), offer to continue from that gate — no need to
+restart the close sequence. If `active`, fire `transition(meta, 'work_end')`
+to enter `closing:review`.
+
+**At each gate:** after the gate action succeeds, fire `transition()` for the
+corresponding event (`review_pass`, `promote_pass`, `push_pass`, `merge_pass`,
+`stamp_pass`, `cleanup_pass`), execute effects, then `commit_transition()`.
+
+**Abort:** from `closing:review` or `closing:verified` only. Fire
+`transition(meta, 'abort_close')` to return to `active`. Post-promotion
+states are forward-only.
+
+---
+
 ## Pre-conditions
 
 Run `python3 ~/.claude/skills/project/ctx.py` first. Use `CURRENT_BRANCH` from its output. Check in order:

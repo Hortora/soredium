@@ -106,6 +106,15 @@ echo "$OUTPUT"
 echo "$OUTPUT" | grep -q "CHECKED_OUT=yes" || { echo "⚠️ Branch checkout failed."; exit 1; }
 ```
 
+**Legacy migration:** After checkout, run `migrate_legacy_paused(meta_path)` from
+`lifecycle.py`. Legacy paused branches have `.meta` without a `state:` field —
+`read_state()` defaults to `active`, but the transition table expects `paused`.
+This one-time write fixes the field permanently.
+
+**Lifecycle transition:** Fire `transition(meta_path, 'work_resume')`. This
+validates `paused → active` and returns effects `[pop_stack, reset_wip, context_resume]`.
+Execute effects (Steps 5-7 below), then `commit_transition()`.
+
 ---
 
 ## Step 5 — Remove entry from stack (on workspace main)

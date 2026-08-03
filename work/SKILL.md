@@ -178,8 +178,12 @@ Sets up single-repo epic iteration. Must be on main.
 8. Scaffold `.meta` and `JOURNAL.md` via `scaffold.py`.
 9. Write `workspace/design/.epic` via `epic_manager.write_epic()`.
 10. If `$GITHUB_PROJECT` configured, activate all child issues (non-fatal).
-11. Report: "Epic #N — M children, K batches. Active: #<first>. Run
-    work-start to begin."
+11. Report: "Epic #N — M children, K batches. Active: #<first>."
+12. **Implicit work-start:** `scaffold.py` wrote `state: scaffolded` to `.meta`.
+    Fire `transition(meta, 'auto_setup')`, execute context setup effects
+    (garden search, load specs, check protocols, verify IntelliJ), then
+    `commit_transition(meta, result)`. The branch transitions to `active`
+    automatically — no separate `work-start` invocation needed.
 
 **Step 6 — `work next` (advance epic issue)**
 
@@ -191,16 +195,23 @@ Advances to the next child issue in the current epic. Detects context:
 Steps:
 
 1. Run `ctx.py` to resolve paths. Determine epic file location.
-2. Call `epic_manager.py advance <epic-path>`. The script atomically
-   checks off the current issue, appends to COVERS in `.meta`, moves
-   `← active` to next, updates Session State.
-3. Check off the completed issue's checkbox on the GitHub epic body
-   (progress signaling, not issue closure — consistent with work-slot).
-4. If `epic_complete` in the result → add the epic issue number to
+2. Fire `transition(meta, 'work_next')` — validates the transition,
+   returns effects `[advance_issue, update_meta, tick_github]`.
+3. Execute effects:
+   - `advance_issue`: Call `epic_manager.py advance <epic-path>`.
+   - `update_meta`: Update `.meta` with new issue context.
+   - `tick_github`: Check off the completed issue's checkbox on the
+     GitHub epic body.
+4. Call `commit_transition(meta, result)` — writes `state: transitioning`.
+5. If `epic_complete` in the result → add the epic issue number to
    `Covers:` in `.meta`. Report: "All children done. Run work-end."
-5. If `batch_complete` and not `epic_complete` → log: "Batch N complete.
+6. If `batch_complete` and not `epic_complete` → log: "Batch N complete.
    Safe exit point — run work-end to merge, or continue."
-6. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
+7. **Context refresh (auto-resolve):** Fire `transition(meta, 'auto_refresh')`,
+   execute context refresh effects (garden search with new issue keywords,
+   load specs matching new issue, check protocols), then
+   `commit_transition(meta, result)`. The branch transitions back to `active`.
+8. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
 
 ---
 

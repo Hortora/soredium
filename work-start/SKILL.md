@@ -70,55 +70,29 @@ instructions. Do not loop.
 
 ---
 
-## Detection
+## Detection (state-machine based)
 
-Resolve paths first. Then read:
+Read `META_STATE` from ctx.py output (already run in Path Resolution).
+The lifecycle state machine replaces the previous 6-state inference logic.
 
-```bash
-META_BRANCH=$(grep "^branch:" "$WORKSPACE/design/.meta" 2>/dev/null | sed 's/branch: //')
-CURRENT_WORKSPACE=$(git -C "$WORKSPACE" branch --show-current)
-CURRENT_PROJECT=$(git -C "$PROJECT" branch --show-current)
-```
+| `META_STATE` | Current Branch | Action |
+|-------------|---------------|--------|
+| empty | main | New branch path (Steps 0–12 below) |
+| empty | non-main | "On `<branch>` with no scaffold. Continue here (y) or switch to main (n)?" y → Steps 0, 2, 3, 11 only |
+| `scaffolded` | branch | Auto-resolve: fire `transition(meta, 'auto_setup')`, run context setup, `commit_transition()` → state becomes `active` |
+| `active` | branch | Resume path |
+| `transitioning` | branch | Auto-resolve: fire `transition(meta, 'auto_refresh')`, run context refresh, `commit_transition()` → state becomes `active` |
+| `paused` | branch | Should not reach work-start — work-resume handles this |
+| `closing:*` | branch | Close in progress — offer to continue or abort |
 
-Check in order — first match wins:
+**Orphaned `.meta` on main** (from ctx.py `BRANCH_MISMATCH=yes` when on main):
+Hard stop. Offer to switch to the surviving branch or remove `.meta`.
 
-```
-1. $WORKSPACE/design/.pause-stack exists and has entries, AND on main
-   → Route to work skill for stack picker. Do not start a new branch until
-     the user explicitly chooses "new" from the stack picker.
-     (Stack depth 1+: always show picker — never auto-resume. User chooses resume or new.)
+**Branch mismatch** (`.meta` branch != current branch, not on main):
+Invoke Branch Switch Helper. If it fails → hard stop.
 
-2. $WORKSPACE/design/.meta exists, AND
-   META_BRANCH == CURRENT_WORKSPACE == CURRENT_PROJECT (all three match)
-   → Resume path.
-
-3. $WORKSPACE/design/.meta exists, CURRENT_WORKSPACE == main
-   (orphaned — .meta on main, regardless of project branch)
-   → Hard stop. "Invoke work-end to complete or discard the abandoned branch."
-   *** Checked BEFORE state 4 — orphaned also satisfies "branches misaligned"
-   so state 4 would fire incorrectly and attempt to switch to a deleted branch. ***
-
-4. $WORKSPACE/design/.meta exists, branches misaligned
-   (META_BRANCH != CURRENT_WORKSPACE or CURRENT_PROJECT, and not orphaned)
-   → Invoke Branch Switch Helper inline.
-     If helper fails → hard stop with manual instructions (no loop).
-
-5. CURRENT_WORKSPACE == main, no .meta, empty/absent .pause-stack
-   → New branch path (Steps 0–12 below).
-   NOTE: in two-repo setups, the `work` router catches the case where
-   the workspace is on a non-main branch while the project is on main
-   (ROUTE=workspace_dirty) BEFORE work-start is invoked. This state
-   should not reach work-start — if it does, treat as state 6.
-
-6. On non-main branch, no .meta
-   → "You are on <branch> with no branch scaffold.
-      Continue here (y) or switch to main (n)?"
-      y → run Steps 0, 2, 3, 11 only. No scaffold created. Skip Step 4 —
-            no .meta exists to record the issue. This path is for hotfixes or
-            docs-only work that will not use work-end. If work-end is needed
-            later, create .meta manually first.
-      n → Branch Switch Helper to main, re-run detection.
-```
+**Pause stack**: if `.pause-stack` has entries AND on main, route to
+`work` skill for stack picker before starting a new branch.
 
 ---
 

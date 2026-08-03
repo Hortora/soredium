@@ -111,7 +111,7 @@ Slot <N> created: <branch-name>
   Slot context: slots/<N>/.slot
   iTerm2: tab opened / skipped
 
-Open a CLI in <slot-dir>/<primary-repo> and run work-start.
+Open a CLI in <slot-dir>/<primary-repo> and run `work`.
 work-start will detect the existing scaffold and run the resume path.
 ```
 
@@ -242,7 +242,7 @@ Epic slot <N> created: <branch-name>
   Repos: <list>
   Starting: Batch 1 — <name> (#<first-issue>)
 
-Open a CLI in <slot-dir>/<primary-repo> and run work-start.
+Open a CLI in <slot-dir>/<primary-repo> and run `work`.
 ```
 
 ---
@@ -512,7 +512,7 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 
 ### What it doesn't do
 
-- Does not run work-start — the human does that in the new session
+- Does not run work-start — the human runs `work` in the new session (scaffold.py writes `state: scaffolded`, auto-resolved on first `work` invocation)
 - Does not merge to main — work-end Phase B handles that
 - Does not coordinate between slots — the human sequences merges
 - **Does not delete slots** — all cleanup paths archive to

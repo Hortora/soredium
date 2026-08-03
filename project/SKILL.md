@@ -64,7 +64,17 @@ Run this first. If all conditions are met, return immediately — do nothing els
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-If `CLAUDE_OK=yes` AND `WORKSPACE_OK=yes` AND `ISSUES_STATUS` is not `absent` → return silently.
+If `CLAUDE_OK=yes` AND `WORKSPACE_OK=yes` AND `ISSUES_STATUS` is not `absent` → check lifecycle state, then return.
+
+**Lifecycle routing (after fast-path setup checks pass):**
+
+Read `META_STATE` from the ctx.py output. If `META_STATE` is non-empty (`.meta` exists on the current branch), route to the `work` router — it handles all state-based routing:
+- Transient states (`scaffolded`, `transitioning`) auto-resolve to `active`
+- `active` shows the work lifecycle menu
+- `closing:*` states offer to continue the close sequence
+- `paused` shows the pause stack
+
+If `META_STATE` is empty, return silently — the user is on main with no active work.
 
 ---
 

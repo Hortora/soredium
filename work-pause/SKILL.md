@@ -39,7 +39,7 @@ Read `$PROJECT` and `$WORKSPACE` from CLAUDE.md (see Path Resolution above).
 
 ---
 
-## Step 1 — Validate state
+## Step 1 — Validate state and fire transition
 
 ```bash
 ls "$WORKSPACE/design/.meta" 2>/dev/null || { echo "No .meta found — not on a working branch."; exit 1; }
@@ -48,6 +48,11 @@ ISSUE_N=$(grep "^issue:" "$WORKSPACE/design/.meta" | sed 's/issue: //')
 ```
 
 Must be on a branch where `$WORKSPACE/design/.meta` exists.
+
+**Lifecycle transition:** Fire `transition(meta_path, 'work_pause')`. This validates
+the transition (`active → paused`) and returns effects `[wip_commit]` with
+post-commit effects `[switch_to_main, push_stack]`. Execute pre-commit effects
+(Steps 2-3 below), then `commit_transition()`, then post-commit effects (Step 4).
 
 ---
 
