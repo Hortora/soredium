@@ -88,6 +88,7 @@ def main() -> int:
 
     meta_lines = [
         f"branch: {branch}",
+        f"state: scaffolded",
         f"project-sha: {params.get('project-sha', '')}",
         f"date: {today}",
         f"issue: {params.get('issue', '')}",
