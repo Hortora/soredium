@@ -40,6 +40,8 @@ The pre-push hook blocks diverged pushes, but prevention is better than detectio
 | "I'll review after merging" | Post-merge review is post-incident review. |
 | "Doc sync has nothing to sync" | Run it and let the skill decide. Your guess is often wrong. |
 | "CLAUDE.md hasn't changed" | Conventions established during implementation need to be captured. |
+| "I'll promote artifacts manually" | 195 orphaned specs. Run close_artifacts.py. The verification gate catches you. |
+| "close_artifacts.py is overkill for this branch" | The script takes 2 seconds. Skipping it loses specs permanently. |
 
 ---
 
@@ -793,6 +795,37 @@ correct arguments, and writes the completion stamp.
 journal merge must happen separately — `close_artifacts.py` does not
 handle journal merges (they require interactive user approval). Run
 8d after 8a completes.
+
+### 8a-verify — Verify promotion (mechanical — HARD GATE)
+
+**This step cannot be skipped.** Evidence-based verification that artifacts
+actually landed at their expected destinations. The LLM cannot rationalize
+past files that aren't on disk.
+
+```bash
+python3 ~/.claude/skills/work-end/verify_promotion.py \
+  <WORKSPACE> <PROJECT> [scan-workspace=<SCAN_WS>]
+```
+
+Read `VERIFIED`, `TOTAL`, `LANDED`, `MISSING`, `MISSING_LIST` from output.
+
+**If `VERIFIED=no`** → **hard stop.** Report:
+> "⚠️ Artifact promotion verification failed.
+>  {MISSING} of {TOTAL} artifacts not at expected destination:
+>  {MISSING_LIST}
+>
+>  Re-run close_artifacts.py (Step 8a) to fix. Do NOT proceed."
+
+Do NOT continue to 8d, 8e, or 8j. The promotion must succeed before
+any downstream steps run.
+
+**If `VERIFIED=yes`** → continue silently.
+
+**Why this exists:** LLMs executing work-end skip `close_artifacts.py` and
+manually replicate promotion inline, silently dropping specs. The stamp gate
+at 8j catches missing stamps but the LLM rationalizes around it. This
+verification checks the filesystem directly — 195 orphaned specs across 22
+workspaces proved the trust-based approach doesn't work.
 
 ### 8d — Journal merge
 
