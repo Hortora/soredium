@@ -107,10 +107,11 @@ project_branch = run("git", "-C", project, "branch", "--show-current") if not si
 current_branch = workspace_branch
 
 meta_branch = meta.get("branch", "")
-if meta_branch and meta_branch != workspace_branch:
-    meta = {}
-elif meta_branch and not single_repo and meta_branch != project_branch:
-    meta = {}
+
+from lifecycle import read_state as _read_state, is_transient as _is_transient
+_meta_state_raw = _read_state(meta_path)
+_meta_state = _meta_state_raw or ""
+_meta_is_transient = "yes" if (_meta_state and _is_transient(_meta_state)) else "no"
 
 branch_name = meta.get("branch", "")
 project_sha = meta.get("project-sha", "")
@@ -278,3 +279,5 @@ print(f"EPIC_BATCH={_epic_batch}")
 print(f"EPIC_ACTIVE_ISSUE={_epic_active_issue}")
 print(f"FLYWAY_NEXT_V={flyway_next_v}")
 print(f"META_SECTION_HASHES={meta_section_hashes}")
+print(f"META_STATE={_meta_state}")
+print(f"META_IS_TRANSIENT={_meta_is_transient}")

@@ -1103,21 +1103,21 @@ class TestWorktreeResolution:
 
 
 class TestMetaBranchValidation:
-    """Test .meta branch validation — .meta is ignored when its branch doesn't match."""
+    """Test .meta branch validation — lifecycle.py owns mismatch detection, ctx.py reports raw facts."""
 
-    def test_meta_ignored_when_branch_mismatches_current(self, tmp_path):
-        """HAS_META=no and fields empty when .meta branch != current branch."""
+    def test_meta_preserved_when_branch_mismatches_current(self, tmp_path):
+        """HAS_META=yes and fields populated even on mismatch — lifecycle.py owns validation."""
         repo = init_repo(tmp_path / "repo")
         (repo / "design").mkdir()
         (repo / "design" / ".meta").write_text(
             "branch: issue-99-other-work\nissue: 99\ncovers: 99\n"
         )
-        # repo is on main, .meta says issue-99-other-work → mismatch
+        # repo is on main, .meta says issue-99-other-work → mismatch reported, not cleared
         data = parse(run_ctx(repo))
-        assert data["HAS_META"] == "no"
-        assert data["ISSUE_N"] == ""
-        assert data["BRANCH_NAME"] == ""
-        assert data["COVERS"] == ""
+        assert data["HAS_META"] == "yes"
+        assert data["ISSUE_N"] == "99"
+        assert data["BRANCH_NAME"] == "issue-99-other-work"
+        assert data["COVERS"] == "99"
 
     def test_meta_valid_when_branch_matches_current(self, tmp_path):
         """HAS_META=yes and fields populated when .meta branch matches current branch."""
@@ -1135,8 +1135,8 @@ class TestMetaBranchValidation:
         assert data["ISSUE_N"] == "42"
         assert data["BRANCH_NAME"] == "issue-42-fix"
 
-    def test_meta_ignored_in_dual_repo_when_project_branch_differs(self, tmp_path):
-        """In dual-repo mode, .meta ignored when project is on a different branch."""
+    def test_meta_preserved_in_dual_repo_when_project_branch_differs(self, tmp_path):
+        """In dual-repo mode, .meta preserved — lifecycle.py detects mismatch via BRANCH_MISMATCH."""
         project = init_repo(tmp_path / "project")
         workspace = init_repo(tmp_path / "workspace")
         (workspace / "proj").symlink_to(project)
@@ -1158,9 +1158,10 @@ class TestMetaBranchValidation:
         )
 
         data = parse(run_ctx(workspace))
-        assert data["HAS_META"] == "no"
-        assert data["ISSUE_N"] == ""
-        assert data["BRANCH_NAME"] == ""
+        assert data["HAS_META"] == "yes"
+        assert data["ISSUE_N"] == "200"
+        assert data["BRANCH_NAME"] == "epic-2-post-mvp"
+        assert data["BRANCH_MISMATCH"] == "yes"
 
     def test_meta_valid_in_dual_repo_when_both_branches_match(self, tmp_path):
         """In dual-repo mode, .meta valid when both repos on the matching branch."""
