@@ -25,8 +25,24 @@ if not cwd_root:
     print("ERROR: not in a git repository", file=sys.stderr)
     sys.exit(1)
 
-proj_symlink = Path(cwd_root) / "proj"
-wksp_symlink = Path(cwd_root) / "wksp"
+# Detect git worktree — symlinks live in the main working tree, not worktrees
+_wt_output = run("git", "worktree", "list", "--porcelain")
+_main_wt_root = None
+if _wt_output:
+    for _line in _wt_output.splitlines():
+        if _line.startswith("worktree "):
+            _main_wt_root = _line[len("worktree "):]
+            break
+
+in_worktree = bool(
+    _main_wt_root
+    and Path(_main_wt_root).resolve() != Path(cwd_root).resolve()
+)
+main_worktree_root = _main_wt_root if in_worktree else None
+
+symlink_root = Path(main_worktree_root) if in_worktree else Path(cwd_root)
+proj_symlink = symlink_root / "proj"
+wksp_symlink = symlink_root / "wksp"
 
 def _resolve_symlink_target(symlink: Path) -> str | None:
     """Resolve a symlink, walking up to find the nearest git root if target doesn't exist."""
@@ -113,6 +129,8 @@ if not issue_n and current_branch:
 print(f"WORKSPACE={workspace}")
 print(f"PROJECT={project}")
 print(f"SINGLE_REPO={'yes' if single_repo else 'no'}")
+print(f"IN_WORKTREE={'yes' if in_worktree else 'no'}")
+print(f"MAIN_WORKTREE_ROOT={main_worktree_root or ''}")
 print(f"OWNER_REPO={owner_repo}")
 print(f"BASE_BRANCH={base_branch}")
 print(f"CURRENT_BRANCH={current_branch}")
@@ -135,6 +153,10 @@ claude_ok = "yes" if "## Project Type" in cwd_claude_text else "no"
 
 wksp_ok_symlink = (cwd / "wksp").is_symlink() and (cwd / "wksp").is_dir()
 proj_ok_symlink = (cwd / "proj").is_symlink() and (cwd / "proj").is_dir()
+if in_worktree and main_worktree_root:
+    _main = Path(main_worktree_root)
+    wksp_ok_symlink = wksp_ok_symlink or ((_main / "wksp").is_symlink() and (_main / "wksp").is_dir())
+    proj_ok_symlink = proj_ok_symlink or ((_main / "proj").is_symlink() and (_main / "proj").is_dir())
 wksp_declined = "workspace: declined" in cwd_claude_text
 workspace_ok = "yes" if (wksp_ok_symlink or proj_ok_symlink or wksp_declined) else "no"
 

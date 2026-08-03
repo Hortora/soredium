@@ -971,6 +971,109 @@ class TestEpicDetection:
         assert data["EPIC_PATH"] == str(design / ".epic")
 
 
+class TestWorktreeResolution:
+    """Test workspace/project resolution when running inside a git worktree."""
+
+    @staticmethod
+    def create_worktree(repo: Path, worktree_path: Path, branch: str) -> Path:
+        """Create a git worktree from an existing repo."""
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", str(worktree_path), "-b", branch],
+            capture_output=True, check=True,
+        )
+        return worktree_path
+
+    def test_worktree_resolves_wksp_from_main(self, tmp_path):
+        """Worktree of project repo finds wksp/ symlink in main working tree."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+
+        wt = self.create_worktree(project, tmp_path / "wt" / "feat", "feat-branch")
+        result = run_ctx(wt)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["SINGLE_REPO"] == "no"
+        assert Path(data["WORKSPACE"]).resolve() == workspace.resolve()
+        assert Path(data["PROJECT"]).resolve() == wt.resolve()
+
+    def test_worktree_resolves_proj_from_main(self, tmp_path):
+        """Worktree of workspace repo finds proj/ symlink in main working tree."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (workspace / "proj").symlink_to(project)
+
+        wt = self.create_worktree(workspace, tmp_path / "wt" / "feat", "feat-branch")
+        result = run_ctx(wt)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["SINGLE_REPO"] == "no"
+        assert Path(data["WORKSPACE"]).resolve() == wt.resolve()
+        assert Path(data["PROJECT"]).resolve() == project.resolve()
+
+    def test_worktree_without_symlinks_single_repo(self, tmp_path):
+        """Worktree of repo with no symlinks → single-repo mode."""
+        repo = init_repo(tmp_path / "repo")
+        wt = self.create_worktree(repo, tmp_path / "wt" / "feat", "feat-branch")
+        result = run_ctx(wt)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["SINGLE_REPO"] == "yes"
+
+    def test_worktree_workspace_ok_via_main(self, tmp_path):
+        """WORKSPACE_OK=yes in worktree when main working tree has symlinks."""
+        project = init_repo(tmp_path / "project", "## Project Type\n\ntype: java\n")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+
+        wt = self.create_worktree(project, tmp_path / "wt" / "feat", "feat-branch")
+        # CLAUDE.md must be committed so the worktree has it
+        subprocess.run(["git", "-C", str(project), "add", "CLAUDE.md"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "add claude"],
+                       capture_output=True, check=True)
+        # Update worktree to pick up the commit
+        subprocess.run(["git", "-C", str(wt), "merge", "main", "--no-edit"],
+                       capture_output=True)
+
+        result = run_ctx(wt)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["WORKSPACE_OK"] == "yes"
+
+    def test_in_worktree_field_yes(self, tmp_path):
+        """IN_WORKTREE=yes when running inside a git worktree."""
+        repo = init_repo(tmp_path / "repo")
+        wt = self.create_worktree(repo, tmp_path / "wt" / "feat", "feat-branch")
+        data = parse(run_ctx(wt))
+        assert data["IN_WORKTREE"] == "yes"
+        assert data["MAIN_WORKTREE_ROOT"] == str(repo.resolve())
+
+    def test_in_worktree_field_no(self, tmp_path):
+        """IN_WORKTREE=no when running in the main working tree."""
+        repo = init_repo(tmp_path / "repo")
+        data = parse(run_ctx(repo))
+        assert data["IN_WORKTREE"] == "no"
+        assert data["MAIN_WORKTREE_ROOT"] == ""
+
+    def test_non_worktree_unchanged(self, tmp_path):
+        """Regression: normal repo with wksp/ symlink still works."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+
+        data = parse(run_ctx(project))
+
+        assert data["SINGLE_REPO"] == "no"
+        assert Path(data["WORKSPACE"]).resolve() == workspace.resolve()
+        assert Path(data["PROJECT"]).resolve() == project.resolve()
+        assert data["IN_WORKTREE"] == "no"
+
+
 class TestMetaNewFields:
     """Test new .meta field extraction."""
 
