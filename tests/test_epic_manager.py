@@ -488,6 +488,176 @@ class TestWriteEpic:
         assert "## Repos" in content
         assert "engine (primary)" in content
 
+
+class TestDetect:
+    def test_detects_single_repo_epic(self, tmp_path):
+        epic_dir = tmp_path / "design"
+        epic_dir.mkdir()
+        (epic_dir / ".epic").write_text(
+            "## Issue\nHortora/soredium#99\nType: epic\n\n"
+            "## Batch Plan\n\n### Batch 1 — Setup\n"
+            "- [ ] #100 — First task ← active\n"
+        )
+        result = epic_manager.detect(tmp_path)
+        assert result is not None
+        assert result["is_epic"] is True
+        assert result["epic_path"] == epic_dir / ".epic"
+        assert result["current_issue"] == 100
+
+    def test_detects_slot_epic(self, tmp_path):
+        (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
+        result = epic_manager.detect(tmp_path)
+        assert result is not None
+        assert result["is_epic"] is True
+        assert result["epic_path"] == tmp_path / ".slot"
+
+    def test_detects_project_inside_slot(self, tmp_path):
+        (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
+        project_dir = tmp_path / "engine"
+        project_dir.mkdir()
+        result = epic_manager.detect(project_dir)
+        assert result is not None
+        assert result["epic_path"] == tmp_path / ".slot"
+
+    def test_returns_none_no_epic(self, tmp_path):
+        assert epic_manager.detect(tmp_path) is None
+
+    def test_returns_none_non_epic_slot(self, tmp_path):
+        (tmp_path / ".slot").write_text("# Slot 5\n\n## Issue\nrepo#10\n")
+        assert epic_manager.detect(tmp_path) is None
+
+    def test_prefers_design_epic_over_slot(self, tmp_path):
+        epic_dir = tmp_path / "design"
+        epic_dir.mkdir()
+        (epic_dir / ".epic").write_text(
+            "## Issue\nrepo#1\nType: epic\n\n"
+            "## Batch Plan\n\n### Batch 1 — A\n- [ ] #10 — X ← active\n"
+        )
+        (tmp_path / ".slot").write_text(SAMPLE_EPIC_SLOT_MD)
+        result = epic_manager.detect(tmp_path)
+        assert result["epic_path"] == epic_dir / ".epic"
+
+
+class TestSafeExitFix:
+    def test_safe_exit_false_mid_batch_with_prior_complete(self, tmp_path):
+        md = (
+            "## Issue\nrepo#1\nType: epic\n\n## Batch Plan\n\n"
+            "### Batch 1 — Done\n- [x] #10 — A\n- [x] #11 — B\n\n"
+            "### Batch 2 — In progress\n- [x] #12 — C\n- [ ] #13 — D ← active\n"
+        )
+        (tmp_path / ".epic").write_text(md)
+        result = epic_manager.status(tmp_path / ".epic")
+        assert result["safe_exit"] is False
+
+    def test_safe_exit_true_at_batch_boundary(self, tmp_path):
+        md = (
+            "## Issue\nrepo#1\nType: epic\n\n## Batch Plan\n\n"
+            "### Batch 1 — Done\n- [x] #10 — A\n- [x] #11 — B\n\n"
+            "### Batch 2 — Next\n- [ ] #12 — C ← active\n- [ ] #13 — D\n"
+        )
+        (tmp_path / ".epic").write_text(md)
+        result = epic_manager.status(tmp_path / ".epic")
+        assert result["safe_exit"] is True
+
+    def test_safe_exit_false_no_batches_complete(self, tmp_path):
+        md = (
+            "## Issue\nrepo#1\nType: epic\n\n## Batch Plan\n\n"
+            "### Batch 1 — Work\n- [ ] #10 — A ← active\n- [ ] #11 — B\n"
+        )
+        (tmp_path / ".epic").write_text(md)
+        result = epic_manager.status(tmp_path / ".epic")
+        assert result["safe_exit"] is False
+
+
+class TestCheckSubcommand:
+    def test_check_output_format(self, tmp_path):
+        epic = tmp_path / ".epic"
+        epic.write_text(
+            "## Issue\nrepo#1\nType: epic\n\n## Batch Plan\n\n"
+            "### Batch 1 — Work\n- [x] #10 — A\n- [ ] #11 — B ← active\n\n"
+            "### Batch 2 — More\n- [ ] #12 — C\n"
+        )
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(skill_dir / "epic_manager.py"),
+             "check", str(epic)],
+            capture_output=True, text=True,
+        )
+        lines = dict(l.split("=", 1) for l in result.stdout.strip().split("\n") if "=" in l)
+        assert lines["IS_EPIC"] == "yes"
+        assert lines["EPIC_COMPLETE"] == "no"
+        assert lines["SAFE_EXIT"] == "no"
+        assert lines["CURRENT_BATCH"] == "1"
+        assert lines["TOTAL_BATCHES"] == "2"
+        assert lines["ACTIVE_ISSUE"] == "11"
+
+    def test_check_epic_complete(self, tmp_path):
+        epic = tmp_path / ".epic"
+        epic.write_text(
+            "## Issue\nrepo#1\nType: epic\n\n## Batch Plan\n\n"
+            "### Batch 1 — Done\n- [x] #10 — A\n"
+        )
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(skill_dir / "epic_manager.py"),
+             "check", str(epic)],
+            capture_output=True, text=True,
+        )
+        lines = dict(l.split("=", 1) for l in result.stdout.strip().split("\n") if "=" in l)
+        assert lines["EPIC_COMPLETE"] == "yes"
+
+    def test_check_empty_plan_not_complete(self, tmp_path):
+        epic = tmp_path / ".epic"
+        epic.write_text(
+            "## Issue\nrepo#1\nType: epic\n\n## Batch Plan\n"
+        )
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(skill_dir / "epic_manager.py"),
+             "check", str(epic)],
+            capture_output=True, text=True,
+        )
+        lines = dict(l.split("=", 1) for l in result.stdout.strip().split("\n") if "=" in l)
+        assert lines["EPIC_COMPLETE"] == "no"
+
+    def test_check_non_epic(self, tmp_path):
+        f = tmp_path / ".slot"
+        f.write_text("# Slot 1\n\n## Issue\nrepo#42\n")
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(skill_dir / "epic_manager.py"),
+             "check", str(f)],
+            capture_output=True, text=True,
+        )
+        assert "IS_EPIC=no" in result.stdout
+
+
+class TestTickCheckboxesInBody:
+    def test_ticks_matching_checkboxes(self):
+        body = "## Scope\n- [ ] #83 — Fix auth\n- [ ] #84 — Add tests\n- [x] #85 — Done\n"
+        result = epic_manager._tick_checkboxes_in_body(body, [83])
+        assert "- [x] #83 — Fix auth" in result
+        assert "- [ ] #84 — Add tests" in result
+        assert "- [x] #85 — Done" in result
+
+    def test_idempotent(self):
+        body = "- [x] #83 — Already done\n- [ ] #84 — Not done\n"
+        result = epic_manager._tick_checkboxes_in_body(body, [83])
+        assert result == body
+
+    def test_multiple_issues(self):
+        body = "- [ ] #10 — A\n- [ ] #11 — B\n- [ ] #12 — C\n"
+        result = epic_manager._tick_checkboxes_in_body(body, [10, 12])
+        assert "- [x] #10" in result
+        assert "- [ ] #11" in result
+        assert "- [x] #12" in result
+
+    def test_preserves_trailing_newline(self):
+        body = "- [ ] #10 — A\n"
+        result = epic_manager._tick_checkboxes_in_body(body, [10])
+        assert result.endswith("\n")
+        assert not result.endswith("\n\n")
+
     def test_write_epic_file_no_repos(self, tmp_path):
         epic_path = tmp_path / ".epic"
         batches = [{"number": 1, "name": "Core",

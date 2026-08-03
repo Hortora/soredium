@@ -924,6 +924,21 @@ class TestEpicDetection:
         assert data["IS_EPIC"] == "yes"
         assert data["EPIC_PATH"] == str(design / ".epic")
 
+    def test_epic_batch_and_active_issue(self, tmp_path):
+        """EPIC_BATCH and EPIC_ACTIVE_ISSUE populated from .epic."""
+        repo = init_repo(tmp_path / "repo")
+        design = repo / "design"
+        design.mkdir(parents=True)
+        (design / ".epic").write_text(
+            "## Issue\nrepo#1\nType: epic\n\n## Batch Plan\n\n"
+            "### Batch 1 — Done\n- [x] #10 — A\n\n"
+            "### Batch 2 — Work\n- [ ] #11 — B ← active\n\n"
+            "## Session State\nCurrent batch: 2\nCurrent issue: #11 — B\n"
+        )
+        data = parse(run_ctx(repo))
+        assert data["EPIC_BATCH"] == "2 of 2"
+        assert data["EPIC_ACTIVE_ISSUE"] == "11"
+
     def test_no_epic_file(self, tmp_path):
         """IS_EPIC=no when no .epic file."""
         repo = init_repo(tmp_path / "repo")

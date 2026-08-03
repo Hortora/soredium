@@ -606,6 +606,18 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         print(f"ERROR=already_landed slot={slot_num}")
         return 1
 
+    slot_info = parse_slot_md(slot_dir)
+    _slot_is_epic = slot_info.get("is_epic", False)
+    if _slot_is_epic:
+        from epic_manager import status as _epic_status
+        _es = _epic_status(slot_dir / ".slot")
+        if _es.get("is_epic"):
+            _total = _es["total_issues"]
+            _done = _es["completed_count"]
+            _batch = _es["current_batch"]
+            _total_b = _es["total_batches"]
+            print(f"EPIC_STATUS=batch {_batch}/{_total_b}, {_done} completed, {_total - _done} remaining")
+
     branch = ""
     for line in (slot_dir / ".phase-a-complete").read_text().splitlines():
         if line.startswith("branch="):
@@ -736,6 +748,20 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
             except Exception:
                 pass
 
+        if _slot_is_epic:
+            epic_num = int(slot_info.get("issue", "0"))
+            epic_repo = slot_info.get("issue_repo", "")
+            covers_str = slot_info.get("covers", "")
+            completed = [int(x) for x in covers_str.split(",") if x.strip()]
+            if epic_num and epic_repo and completed:
+                try:
+                    from epic_manager import tick_epic_checkboxes
+                    ok = tick_epic_checkboxes(epic_repo, epic_num, completed)
+                    if not ok:
+                        print("WARN=epic_tick_failed")
+                except Exception:
+                    print("WARN=epic_tick_failed")
+
         print("STAGE=push STATUS=pass")
         print(f"LANDED_SHAS={shas_str}")
         return 0
@@ -828,6 +854,24 @@ def verify_landed_shas(slot_dir: Path, family_root: Path) -> tuple[bool, list[st
     return len(failures) == 0, failures
 
 
+def _fix_stale_checkboxes(slot_path: Path, issues_to_tick: list[int]) -> int:
+    """Tick unchecked boxes for completed issues. Returns count fixed."""
+    content = slot_path.read_text()
+    fixed = 0
+    lines = content.splitlines()
+    result = []
+    for line in lines:
+        for n in issues_to_tick:
+            if f"- [ ] #{n} " in line or line.rstrip().endswith(f"- [ ] #{n}"):
+                line = line.replace("- [ ]", "- [x]", 1)
+                fixed += 1
+                break
+        result.append(line)
+    if fixed:
+        slot_path.write_text("\n".join(result))
+    return fixed
+
+
 def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
     slot_dir = family_root / "worktrees" / str(slot_num)
     if not slot_dir.exists():
@@ -854,6 +898,26 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
     ) or (slot_dir / "design" / ".artifacts-promoted").exists()
     if not has_promotion_stamp:
         print(f"WARN=artifacts_not_promoted slot={slot_num}")
+
+    slot_info = parse_slot_md(slot_dir)
+    if slot_info.get("is_epic"):
+        covers_str = slot_info.get("covers", "")
+        completed = [int(x) for x in covers_str.split(",") if x.strip()]
+        if completed:
+            fixed = _fix_stale_checkboxes(slot_dir / ".slot", completed)
+            if fixed:
+                print(f"CHECKBOXES_FIXED={fixed}")
+                print(f"WARN=stale_checkboxes issues={','.join(str(c) for c in completed)}")
+            epic_num = int(slot_info.get("issue", "0"))
+            epic_repo = slot_info.get("issue_repo", "")
+            if epic_num and epic_repo:
+                try:
+                    from epic_manager import tick_epic_checkboxes
+                    ok = tick_epic_checkboxes(epic_repo, epic_num, completed)
+                    if not ok:
+                        print("WARN=github_unreachable_for_checkbox_verify")
+                except Exception:
+                    print("WARN=github_unreachable_for_checkbox_verify")
 
     attic_dir = family_root / "worktrees" / "attic"
     attic_dir.mkdir(exist_ok=True)

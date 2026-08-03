@@ -6,6 +6,8 @@ Subcommands:
   plan <epic-path>      Parse epic file, return batch plan as JSON
   advance <epic-path>   Advance to next issue, update file + .meta
   status <epic-path>    Return progress summary as JSON
+  check <epic-path>     Output KEY=VALUE epic state for gates
+  tick <epic-path>      Tick GitHub epic checkboxes (issue-repo=, epic=, issues=)
   write <epic-path>     Write a new .epic file (workspace=, issue=, slug=,
                         issue-repo=, context=, batches=<JSON>)
 
@@ -72,6 +74,28 @@ def parse_batch_plan(epic_path: Path) -> dict:
         "current_issue": current_issue,
         "completed": completed,
     }
+
+
+def detect(path: Path) -> dict | None:
+    """Find and parse an epic file from the given path.
+
+    Search order:
+    1. path/design/.epic (single-repo workspace)
+    2. path/.slot with Type: epic (slot directory)
+    3. path.parent/.slot with Type: epic (project inside slot)
+    """
+    candidates = [
+        path / "design" / ".epic",
+        path / ".slot",
+        path.parent / ".slot",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            result = parse_batch_plan(candidate)
+            if result.get("is_epic"):
+                result["epic_path"] = candidate
+                return result
+    return None
 
 
 def _parse_batches(content: str) -> list[dict]:
@@ -271,9 +295,26 @@ def status(epic_path: Path) -> dict:
         "completed_batches": completed_batches,
         "current_batch": plan["current_batch"],
         "current_issue": plan["current_issue"],
-        "safe_exit": completed_batches > 0,
+        "safe_exit": _is_at_batch_boundary(plan, completed_batches),
         "batches": plan["batches"],
     }
+
+
+def _is_at_batch_boundary(plan: dict, completed_batches: int) -> bool:
+    """True when at a batch boundary — no partially-completed batch."""
+    if completed_batches == 0:
+        return False
+    current_issue = plan["current_issue"]
+    if current_issue == 0:
+        return True
+    current_batch_num = plan["current_batch"]
+    for batch in plan["batches"]:
+        if batch["number"] == current_batch_num:
+            if not batch["issues"]:
+                return True
+            first_issue = batch["issues"][0]
+            return first_issue["number"] == current_issue and not first_issue["done"]
+    return False
 
 
 def write_epic_file(epic_path: Path, heading: str,
@@ -350,6 +391,46 @@ def write_epic(workspace: Path, issue: str, slug: str,
                     context=context)
 
 
+def _tick_checkboxes_in_body(body: str, issues: list[int]) -> str:
+    """Replace - [ ] #N with - [x] #N for each issue number."""
+    lines = body.splitlines()
+    result = []
+    for line in lines:
+        for n in issues:
+            if re.match(rf"^- \[ \] #{n}\b", line) or re.match(rf"^- \[ \] https://github\.com/.+/issues/{n}\b", line):
+                line = line.replace("- [ ]", "- [x]", 1)
+                break
+        result.append(line)
+    return "\n".join(result) + ("\n" if body.endswith("\n") else "")
+
+
+def tick_epic_checkboxes(issue_repo: str, epic_number: int,
+                         completed_issues: list[int]) -> bool:
+    """Tick checkboxes on the GitHub epic issue body. Returns True on success."""
+    import subprocess as _sp
+    try:
+        r = _sp.run(
+            ["gh", "api", f"repos/{issue_repo}/issues/{epic_number}",
+             "--jq", ".body"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            return False
+        body = r.stdout
+        updated = _tick_checkboxes_in_body(body, completed_issues)
+        if updated == body:
+            return True
+        r = _sp.run(
+            ["gh", "api", "-X", "PATCH",
+             f"repos/{issue_repo}/issues/{epic_number}",
+             "-f", f"body={updated}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def _parse_kv_args(args: list[str]) -> dict:
     """Parse key=value arguments from CLI."""
     result = {}
@@ -400,6 +481,33 @@ def main() -> None:
     elif command == "status":
         result = status(epic_path)
         print(json.dumps(result, indent=2))
+    elif command == "check":
+        result = status(epic_path)
+        if not result.get("is_epic"):
+            print("IS_EPIC=no")
+        else:
+            total = result["total_issues"]
+            completed = result["completed_count"]
+            epic_complete = total > 0 and completed == total
+            print("IS_EPIC=yes")
+            print(f"EPIC_COMPLETE={'yes' if epic_complete else 'no'}")
+            print(f"SAFE_EXIT={'yes' if result['safe_exit'] else 'no'}")
+            print(f"CURRENT_BATCH={result['current_batch']}")
+            print(f"TOTAL_BATCHES={result['total_batches']}")
+            print(f"ACTIVE_ISSUE={result['current_issue']}")
+            print(f"COMPLETED_COUNT={completed}")
+            print(f"TOTAL_COUNT={total}")
+    elif command == "tick":
+        kv = _parse_kv_args(sys.argv[3:])
+        issue_repo = kv.get("issue-repo", "")
+        epic_num = int(kv.get("epic", "0"))
+        issues_str = kv.get("issues", "")
+        completed = [int(x) for x in issues_str.split(",") if x.strip()]
+        if not issue_repo or not epic_num or not completed:
+            print("ERROR=missing_args")
+            sys.exit(1)
+        ok = tick_epic_checkboxes(issue_repo, epic_num, completed)
+        print(f"TICK={'ok' if ok else 'failed'}")
     elif command == "write":
         kv = _parse_kv_args(sys.argv[3:])
         workspace = Path(kv.get("workspace", ""))

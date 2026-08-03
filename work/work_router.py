@@ -67,74 +67,34 @@ def detect_state(current_branch: str, project_path: str,
     epic_batch = ""
     epic_active_issue = ""
 
+    _epic_dir = Path(__file__).parent.parent / "work-slot"
+    if str(_epic_dir) not in sys.path:
+        sys.path.insert(0, str(_epic_dir))
+    from epic_manager import detect as _epic_detect
+
     if "/worktrees/" in str(project):
         candidate = project.parent / ".slot"
         if candidate.exists():
             in_slot = True
             slot_path = str(candidate)
-            content = candidate.read_text()
 
-            in_issue_section = False
-            for line in content.splitlines():
-                if line.startswith("## Issue"):
-                    in_issue_section = True
-                    continue
-                if line.startswith("## ") and in_issue_section:
-                    break
-                if in_issue_section and line.strip() == "Type: epic":
-                    is_epic = True
-
-            if is_epic:
-                batch_numbers = re.findall(
-                    r"^### Batch (\d+)", content, re.MULTILINE
-                )
-                total_batches = len(batch_numbers)
-
-                m = re.search(
-                    r"^Current batch:\s*(\d+)", content, re.MULTILINE
-                )
-                current_batch = m.group(1) if m else "0"
-                epic_batch = f"{current_batch} of {total_batches}"
-
-                m = re.search(
-                    r"^Current issue:\s*#(\d+)", content, re.MULTILINE
-                )
-                epic_active_issue = m.group(1) if m else ""
+        epic_info = _epic_detect(project.parent) if in_slot else None
+        if epic_info:
+            is_epic = True
+            current = epic_info.get("current_batch", 0)
+            total = len(epic_info.get("batches", []))
+            epic_batch = f"{current} of {total}" if total else ""
+            epic_active_issue = str(epic_info.get("current_issue", ""))
 
     if not in_slot:
-        epic_candidate = workspace / "design" / ".epic"
-        if epic_candidate.exists():
-            epic_content = epic_candidate.read_text()
-            epic_in_issue = False
-            for line in epic_content.splitlines():
-                if line.startswith("## Issue"):
-                    epic_in_issue = True
-                    continue
-                if line.startswith("## ") and epic_in_issue:
-                    break
-                if epic_in_issue and line.strip() == "Type: epic":
-                    is_epic = True
-
-            if is_epic:
-                epic_file_path = str(epic_candidate)
-
-                batch_numbers = re.findall(
-                    r"^### Batch (\d+)", epic_content, re.MULTILINE
-                )
-                total_batches = len(batch_numbers)
-
-                m = re.search(
-                    r"^Current batch:\s*(\d+)", epic_content,
-                    re.MULTILINE
-                )
-                current_batch = m.group(1) if m else "0"
-                epic_batch = f"{current_batch} of {total_batches}"
-
-                m = re.search(
-                    r"^Current issue:\s*#(\d+)", epic_content,
-                    re.MULTILINE
-                )
-                epic_active_issue = m.group(1) if m else ""
+        epic_info = _epic_detect(workspace)
+        if epic_info:
+            is_epic = True
+            epic_file_path = str(epic_info["epic_path"])
+            current = epic_info.get("current_batch", 0)
+            total = len(epic_info.get("batches", []))
+            epic_batch = f"{current} of {total}" if total else ""
+            epic_active_issue = str(epic_info.get("current_issue", ""))
 
     has_handoff = False
     handoff_path = ""

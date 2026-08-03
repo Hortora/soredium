@@ -297,3 +297,50 @@ class TestSlotField:
             "slot=/tmp/worktrees/7")
         content = stack.read_text()
         assert "slot: /tmp/worktrees/7" in content
+
+
+class TestEpicFields:
+    """Tests for epic_batch and epic_active_issue stack fields."""
+
+    def test_push_with_epic_fields(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=issue-50-epic", "issue=50",
+            "epic_batch=2/4", "epic_active_issue=83")
+        content = stack.read_text()
+        assert "epic_batch: 2/4" in content
+        assert "epic_active_issue: 83" in content
+
+    def test_list_includes_epic_fields(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=issue-50-epic", "issue=50",
+            "epic_batch=1/3", "epic_active_issue=101")
+        result = run("list", str(stack))
+        data = parse_output(result)
+        assert data["ENTRY_1_EPIC_BATCH"] == "1/3"
+        assert data["ENTRY_1_EPIC_ACTIVE_ISSUE"] == "101"
+
+    def test_backward_compat_no_epic_fields(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        stack.write_text("- branch: old-branch\n  issue: 5\n  paused: 2026-01-01\n")
+        result = run("list", str(stack))
+        data = parse_output(result)
+        assert data["ENTRY_1_BRANCH"] == "old-branch"
+        assert data["ENTRY_1_EPIC_BATCH"] == ""
+        assert data["ENTRY_1_EPIC_ACTIVE_ISSUE"] == ""
+
+    def test_roundtrip_unknown_keys(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=test", "issue=1",
+            "future_field=value")
+        content = stack.read_text()
+        assert "future_field: value" in content
+
+    def test_epic_fields_survive_pop_of_other(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=epic-branch", "issue=50",
+            "epic_batch=2/4", "epic_active_issue=83")
+        run("push", str(stack), "branch=other-branch", "issue=99")
+        run("pop", str(stack), "other-branch")
+        result = run("list", str(stack))
+        data = parse_output(result)
+        assert data["ENTRY_1_EPIC_BATCH"] == "2/4"

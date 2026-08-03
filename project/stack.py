@@ -56,11 +56,18 @@ def _parse_entries(text: str) -> list[dict]:
 
 def _entries_to_text(entries: list[dict]) -> str:
     """Serialise entries back to YAML-block format."""
+    known_order = ("issue", "paused", "wip_project", "wip_workspace", "slot",
+                   "epic_batch", "epic_active_issue")
     lines = []
     for e in entries:
         lines.append(f"- branch: {e.get('branch', '')}")
-        for key in ("issue", "paused", "wip_project", "wip_workspace", "slot"):
+        written: set[str] = set()
+        for key in known_order:
             if key in e:
+                lines.append(f"  {key}: {e[key]}")
+                written.add(key)
+        for key in sorted(e.keys()):
+            if key not in written and key != "branch":
                 lines.append(f"  {key}: {e[key]}")
     return "\n".join(lines) + ("\n" if lines else "")
 
@@ -84,13 +91,13 @@ def cmd_depth(stack_file: Path) -> int:
 def cmd_list(stack_file: Path) -> int:
     entries = _read_entries(stack_file)
     print(f"ENTRY_COUNT={len(entries)}")
+    known_keys = ("BRANCH", "ISSUE", "PAUSED", "WIP_PROJECT", "WIP_WORKSPACE",
+                  "SLOT", "EPIC_BATCH", "EPIC_ACTIVE_ISSUE")
+    defaults = {"wip_project": "no", "wip_workspace": "no"}
     for i, e in enumerate(entries, 1):
-        print(f"ENTRY_{i}_BRANCH={e.get('branch', '')}")
-        print(f"ENTRY_{i}_ISSUE={e.get('issue', '')}")
-        print(f"ENTRY_{i}_PAUSED={e.get('paused', '')}")
-        print(f"ENTRY_{i}_WIP_PROJECT={e.get('wip_project', 'no')}")
-        print(f"ENTRY_{i}_WIP_WORKSPACE={e.get('wip_workspace', 'no')}")
-        print(f"ENTRY_{i}_SLOT={e.get('slot', '')}")
+        for display_key in known_keys:
+            dict_key = display_key.lower()
+            print(f"ENTRY_{i}_{display_key}={e.get(dict_key, defaults.get(dict_key, ''))}")
     return 0
 
 

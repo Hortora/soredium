@@ -162,12 +162,24 @@ if "## Project Type" in cwd_claude_text:
     if m:
         maturity_stage = m.group(1).lower()
 
-epic_path = Path(workspace) / "design" / ".epic"
-is_epic = False
-if epic_path.exists():
-    epic_content = epic_path.read_text()
-    if "Type: epic" in epic_content:
-        is_epic = True
+_epic_dir = Path(__file__).parent.parent / "work-slot"
+if str(_epic_dir) not in sys.path:
+    sys.path.insert(0, str(_epic_dir))
+from epic_manager import detect as _epic_detect
+
+_epic_info = _epic_detect(Path(workspace))
+if _epic_info is None and "/worktrees/" in str(project):
+    _epic_info = _epic_detect(Path(project))
+
+is_epic = _epic_info is not None
+epic_path = _epic_info["epic_path"] if _epic_info else Path("")
+_epic_batch = ""
+_epic_active_issue = ""
+if _epic_info:
+    _cur = _epic_info.get("current_batch", 0)
+    _tot = len(_epic_info.get("batches", []))
+    _epic_batch = f"{_cur} of {_tot}" if _tot else ""
+    _epic_active_issue = str(_epic_info.get("current_issue", ""))
 
 has_meta = "yes" if meta_path.exists() else "no"
 
@@ -231,5 +243,7 @@ print(f"PROJECT_NAME={project_name}")
 print(f"HAS_WRITING_STYLE_REF={has_writing_style_ref}")
 print(f"IS_EPIC={'yes' if is_epic else 'no'}")
 print(f"EPIC_PATH={str(epic_path) if is_epic else ''}")
+print(f"EPIC_BATCH={_epic_batch}")
+print(f"EPIC_ACTIVE_ISSUE={_epic_active_issue}")
 print(f"FLYWAY_NEXT_V={flyway_next_v}")
 print(f"META_SECTION_HASHES={meta_section_hashes}")

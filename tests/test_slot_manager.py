@@ -1415,3 +1415,73 @@ class TestUnignoreSubdir:
             capture_output=True, text=True,
         )
         assert result.returncode == 0, f"commit should succeed: {result.stderr}"
+
+
+class TestMergeSlotEpicCheck:
+    """Tests for merge_slot() epic status output and post-merge tick."""
+
+    def test_merge_slot_prints_epic_status(self, tmp_path, capsys):
+        """merge_slot prints EPIC_STATUS for epic slots."""
+        family = tmp_path / "family"
+        wt = family / "worktrees" / "72"
+        wt.mkdir(parents=True)
+        (wt / ".slot").write_text(
+            "# Slot 72\n\n## Issue\norg/repo#50\nCovers: 83,84\nType: epic\n\n"
+            "## Batch Plan\n\n### Batch 1 — Work\n"
+            "- [x] #83 — Done\n- [ ] #84 — Active ← active\n\n"
+            "## Session State\nCurrent batch: 1\nCurrent issue: #84 — Active\n\n"
+            "## Repos\n- engine (primary)\n"
+        )
+        (wt / ".phase-a-complete").write_text("branch=issue-50\nrepos=engine\n")
+        repo = init_repo(wt / "engine")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-50"], capture_output=True)
+        (repo / "file.txt").write_text("content")
+        subprocess.run(["git", "-C", str(repo), "add", "file.txt"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat: work"], capture_output=True)
+        with patch.object(slot_manager, "resolve_original_repo", return_value=repo):
+            with patch.object(slot_manager, "is_worktree", return_value=False):
+                result = slot_manager.merge_slot(family, 72)
+        out = capsys.readouterr().out
+        assert "EPIC_STATUS=" in out
+
+
+class TestArchiveSlotCheckboxFix:
+    """Tests for archive_slot() stale checkbox auto-fix."""
+
+    def test_fixes_stale_checkboxes(self, tmp_path):
+        """archive_slot auto-ticks unchecked boxes for completed issues."""
+        slot_dir = tmp_path / "worktrees" / "72"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 72\n\n## Issue\norg/repo#50\nCovers: 83,84\nType: epic\n\n"
+            "## Batch Plan\n\n### Batch 1 — Work\n"
+            "- [ ] #83 — Task A\n- [x] #84 — Task B\n"
+        )
+        slot_manager._fix_stale_checkboxes(slot_dir / ".slot", [83])
+        content = (slot_dir / ".slot").read_text()
+        assert "- [x] #83" in content
+        assert "- [x] #84" in content
+
+    def test_no_fix_needed(self, tmp_path):
+        slot_dir = tmp_path / "worktrees" / "72"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 72\n\n## Issue\norg/repo#50\nType: epic\n\n"
+            "## Batch Plan\n\n### Batch 1 — Work\n"
+            "- [x] #83 — Task A\n"
+        )
+        fixed = slot_manager._fix_stale_checkboxes(slot_dir / ".slot", [83])
+        assert fixed == 0
+
+    def test_only_fixes_listed_issues(self, tmp_path):
+        slot_dir = tmp_path / "worktrees" / "72"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 72\n\n## Issue\norg/repo#50\nType: epic\n\n"
+            "## Batch Plan\n\n### Batch 1 — Work\n"
+            "- [ ] #83 — Task A\n- [ ] #84 — Task B\n"
+        )
+        slot_manager._fix_stale_checkboxes(slot_dir / ".slot", [83])
+        content = (slot_dir / ".slot").read_text()
+        assert "- [x] #83" in content
+        assert "- [ ] #84" in content
