@@ -30,7 +30,7 @@ iteration logic. This creates three problems:
 Replace the fragmented routes with a unified model:
 
 - One input format: 1..n issue numbers OR free text (not mixed)
-- Epics auto-detected from GitHub and recursively expanded (unlimited depth)
+- Epics auto-detected from GitHub and recursively expanded (depth limit: 10, see §18.4)
 - One file format (`.plan`) for the issue queue, identical for branch and slot work
 - `work-next` iterates a flat leaf-issue list derived from the `.plan` tree
 - worklog.db records every issue transition for trellis observability
@@ -284,7 +284,9 @@ in worklog events and to target the correct repo for `covers:` issue closure.
 
 ### 2.4 Nested Epics
 
-Epics can contain epics at unlimited depth. Each nested epic is indented further.
+Epics can contain epics. Each nested epic is indented further. Recursion depth is
+bounded at 10 levels (§18.4) — well beyond practical use while preventing runaway
+API calls.
 
 ```markdown
 ## Queue
@@ -838,6 +840,17 @@ The `.merge-progress` resume file is preserved as a crash-recovery mechanism —
 if `work-end` fails mid-merge (e.g., network error during push), the resume
 file tracks which repos have been pushed so retry skips completed repos.
 
+**Merge failure recovery:** If fast-forward merge fails for a repo (e.g., original
+repo's main has diverged), `work-end` stops and reports which repos succeeded and
+which failed. The `.merge-progress` file records this state. Recovery path:
+1. User rebases the failed repo's feature branch onto the updated main
+2. User re-runs `work-end` — `.merge-progress` skips already-merged repos, retries
+   the failed one
+No rollback of already-merged repos — fast-forward merges don't create merge commits,
+so the changes are already on main. The partial state is forward-only by design.
+This matches the existing slot merge behavior — the spec does not change the merge
+mechanism, only collapses Phase A/B into a single `work-end` invocation.
+
 ### 8.5 Enforcement
 
 Safety gates are enforced at three layers:
@@ -1296,7 +1309,7 @@ flattened leaf list and `work-next` skips it.
 After detecting an epic's children, each child is also checked:
 
 ```
-build_queue(issue_numbers, visited=set()):
+build_queue(issue_numbers, visited=set(), depth=0):
     queue = []
     for N in issue_numbers:
         if N in visited:
@@ -1305,7 +1318,11 @@ build_queue(issue_numbers, visited=set()):
         visited.add(N)
         result = detect_epic(N)
         if result is Epic:
-            result.children = build_queue(result.children, visited)
+            if depth >= MAX_DEPTH:
+                warn("Depth limit reached at #{N}. Treating children as leaves.")
+                # children added as leaves without further recursion
+            else:
+                result.children = build_queue(result.children, visited, depth + 1)
         elif result is CompletedEpic:
             # auto-mark as done, append to covers
         queue.append(result)
@@ -1318,6 +1335,24 @@ contains epic B contains epic A) and user-provided duplicates (e.g.,
 the first occurrence wins — the duplicate is skipped at its later position.
 The warning says "Duplicate," not "Cycle," because the latter is misleading
 for the common case of overlapping input.
+
+### 18.4 Depth and API Limits
+
+| Limit | Value | Rationale |
+|-------|-------|-----------|
+| `MAX_DEPTH` | 10 | Practical epics rarely exceed 3 levels. 10 is generous but bounded. |
+| API call budget | 200 per `build_queue` | Each `detect_epic()` = 1 `gh issue view`. 200 covers a root with 20 children each having 10 grandchildren. Exceeding budget → treat remaining issues as leaves with warning. |
+| Per-call timeout | 30 seconds | Matches `tick_epic_checkboxes()` timeout. |
+
+### 18.5 API Failure Handling
+
+| Failure | Behavior |
+|---------|----------|
+| Network timeout (single call) | Retry once with 5s backoff. On second failure, treat issue as leaf with warning: "Could not fetch #{N} — treating as leaf issue." |
+| HTTP 403 rate limit | Stop recursion entirely. All remaining unresolved issues treated as leaves. Warning: "GitHub rate limit reached — N issues treated as leaves." |
+| HTTP 404 / access denied | Treat as leaf with warning: "Issue #{N} not found or inaccessible — treating as leaf." |
+| Malformed body (no `## Scope`) | Leaf issue — this is the normal non-epic case, not an error. |
+| API budget exceeded | Stop recursion. Remaining issues treated as leaves with warning. |
 
 ### 18.3 Duplicate Epic Guard
 
@@ -1344,7 +1379,21 @@ requires:
 This is the largest new-code component. It cannot be built by extending
 `_parse_batches()` — it requires a new parser.
 
-### 19.2 Data Structures
+### 19.2 Indentation Rules
+
+| Rule | Value |
+|------|-------|
+| Canonical unit | 2 spaces per nesting level |
+| Parser strategy | Relative — a child is any line indented more than its parent |
+| Tab handling | Rejected on parse with error. `.plan` uses spaces only. |
+| Inconsistent spacing | Parser accepts (relative indentation tolerates 3 or 4 spaces). Rewrite normalizes to 2 spaces per level. |
+| Skipped levels (indent 0 → indent 4) | Parser infers missing parent from context. Rewrite normalizes. |
+
+The rewriter always outputs canonical 2-space indentation, so `.plan` self-heals
+after any manual edit or merge conflict resolution. The parser is intentionally
+lenient on read and strict on write.
+
+### 19.3 Data Structures
 
 ```python
 @dataclass
