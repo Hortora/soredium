@@ -139,19 +139,22 @@ def run_cmd(args: list[str], cwd: str | None = None) -> tuple[int, str, str]:
     return result.returncode, result.stdout, result.stderr
 
 
-def allocate_slot_number(worktrees_dir: Path) -> int:
-    if not worktrees_dir.exists():
-        return 1
-    existing = [
-        int(d.name) for d in worktrees_dir.iterdir()
-        if d.is_dir() and d.name.isdigit()
-    ]
-    attic_dir = worktrees_dir / "attic"
-    if attic_dir.exists():
+def allocate_slot_number(family_root: Path) -> int:
+    existing: list[int] = []
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        base = family_root / dir_name
+        if not base.exists():
+            continue
         existing.extend(
-            int(d.name) for d in attic_dir.iterdir()
+            int(d.name) for d in base.iterdir()
             if d.is_dir() and d.name.isdigit()
         )
+        attic_dir = base / "attic"
+        if attic_dir.exists():
+            existing.extend(
+                int(d.name) for d in attic_dir.iterdir()
+                if d.is_dir() and d.name.isdigit()
+            )
     return max(existing, default=0) + 1
 
 
@@ -301,7 +304,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 context: str) -> dict:
     slots_dir = family_root / SLOT_DIR_NAME
     slots_dir.mkdir(exist_ok=True)
-    slot_num = allocate_slot_number(slots_dir)
+    slot_num = allocate_slot_number(family_root)
     slot_dir = slots_dir / str(slot_num)
     slot_dir.mkdir()
     m2_dir = slot_dir / ".m2"
@@ -412,6 +415,138 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         "branch": branch,
         "repos": repos,
     }
+
+
+def add_repo(family_root: Path, slot_number: int, repo_name: str,
+             branch: str) -> None:
+    slot_dir = family_root / SLOT_DIR_NAME / str(slot_number)
+    if not slot_dir.is_dir():
+        print(f"ERROR=slot_not_found slot={slot_number}")
+        sys.exit(1)
+
+    repo_path = family_root / repo_name
+    if not repo_path.is_dir():
+        print(f"ERROR=repo_not_found repo={repo_name}")
+        sys.exit(1)
+
+    clone_dest = slot_dir / repo_name
+    if clone_dest.exists():
+        print(f"ERROR=repo_already_in_slot repo={repo_name}")
+        sys.exit(1)
+
+    sync_main(str(repo_path))
+
+    m2_dir = slot_dir / ".m2"
+    m2_dir.mkdir(exist_ok=True)
+
+    rc, _, stderr = run_cmd([
+        "git", "clone", "--shared", "--branch", "main",
+        str(repo_path), str(clone_dest),
+    ])
+    if rc != 0:
+        print(f"ERROR=clone_failed repo={repo_name} stderr={stderr.strip()}")
+        sys.exit(1)
+
+    rc, _, _ = run_cmd(["git", "-C", str(clone_dest), "checkout", "-b", branch])
+    if rc != 0:
+        print(f"ERROR=branch_create_failed repo={repo_name}")
+        sys.exit(1)
+
+    _exclude_symlinks(clone_dest)
+    setup_maven_config(clone_dest, m2_dir)
+
+    ws_info = resolve_workspace_source(repo_path)
+    if ws_info:
+        ws_source, ws_name = ws_info
+        existing_repos = get_slot_repos(slot_dir)
+        if ws_name in existing_repos:
+            ws_name = f"work-{ws_source.name}"
+        ws_slot_dir = slot_dir / ws_name
+        if not ws_slot_dir.exists():
+            sync_main(str(ws_source))
+            rc, _, _ = run_cmd([
+                "git", "clone", "--shared", "--branch", "main",
+                str(ws_source), str(ws_slot_dir),
+            ])
+            if rc == 0:
+                run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
+                _exclude_symlinks(ws_slot_dir)
+
+        wksp_target = repo_path / "wksp"
+        if wksp_target.is_symlink():
+            orig_target = wksp_target.resolve()
+            try:
+                rel_subdir = orig_target.relative_to(ws_source)
+                ws_subdir = ws_slot_dir / rel_subdir
+            except ValueError:
+                ws_subdir = ws_slot_dir
+            ws_subdir.mkdir(parents=True, exist_ok=True)
+            if rel_subdir != Path("."):
+                _unignore_subdir(ws_slot_dir, str(rel_subdir.parts[0]))
+            repoint_wksp(clone_dest, ws_subdir)
+            create_proj_symlink(ws_subdir, clone_dest)
+            replicate_claude_md(repo_path, ws_subdir, clone_dest)
+
+    _update_slot_repos(slot_dir, repo_name, add=True)
+    print(f"ADDED={repo_name} SLOT={slot_number}")
+
+
+def remove_repo(family_root: Path, slot_number: int, repo_name: str) -> None:
+    slot_dir = family_root / SLOT_DIR_NAME / str(slot_number)
+    if not slot_dir.is_dir():
+        print(f"ERROR=slot_not_found slot={slot_number}")
+        sys.exit(1)
+
+    clone_dest = slot_dir / repo_name
+    if not clone_dest.is_dir():
+        print(f"ERROR=repo_not_in_slot repo={repo_name}")
+        sys.exit(1)
+
+    slot_info = parse_slot_md(slot_dir)
+    repos = slot_info.get("repos", [])
+    if repos and repos[0] == repo_name:
+        raise ValueError(f"Cannot remove primary repo '{repo_name}' from slot {slot_number}")
+
+    status_result = subprocess.run(
+        ["git", "-C", str(clone_dest), "diff", "--quiet", "HEAD"],
+        capture_output=True, text=True,
+    )
+    staged_result = subprocess.run(
+        ["git", "-C", str(clone_dest), "diff", "--cached", "--quiet"],
+        capture_output=True, text=True,
+    )
+    if status_result.returncode != 0 or staged_result.returncode != 0:
+        print(f"ERROR=uncommitted_changes repo={repo_name}")
+        sys.exit(1)
+
+    shutil.rmtree(str(clone_dest), ignore_errors=True)
+    _update_slot_repos(slot_dir, repo_name, add=False)
+    print(f"REMOVED={repo_name} SLOT={slot_number}")
+
+
+def _update_slot_repos(slot_dir: Path, repo_name: str, add: bool) -> None:
+    slot_file = slot_dir / ".slot"
+    if not slot_file.exists():
+        return
+    content = slot_file.read_text()
+    lines = content.splitlines()
+    new_lines = []
+    in_repos = False
+    for line in lines:
+        if line.strip() == "## Repos":
+            in_repos = True
+            new_lines.append(line)
+            continue
+        if in_repos and line.startswith("## "):
+            if add:
+                new_lines.append(f"- {repo_name}")
+            in_repos = False
+        if in_repos and not add and line.strip() == f"- {repo_name}":
+            continue
+        new_lines.append(line)
+    if in_repos and add:
+        new_lines.append(f"- {repo_name}")
+    slot_file.write_text("\n".join(new_lines) + "\n")
 
 
 def is_project_repo(name: str) -> bool:
@@ -1086,6 +1221,16 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
         shutil.rmtree(slot_dir, ignore_errors=True)
         if slot_dir.exists():
             _cleanup_remnant_dir(slot_dir)
+        if _wl:
+            try:
+                _conn = _wl.connect()
+                _wl.record_slot_archive(
+                    _conn, slot_num, str(family_root),
+                    archived_from=str(slot_dir), archived_to="deleted",
+                )
+                _conn.close()
+            except Exception:
+                pass
         print(f"DELETED={slot_num}")
     else:
         attic_dir = slot_dir.parent / "attic"
@@ -1102,6 +1247,19 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
                 print(f"WARN=remnant_dir_persists path={slot_dir}")
         if moved:
             print(f"CLAUDE_PROJECTS_MOVED={moved}")
+        if _wl:
+            try:
+                _conn = _wl.connect()
+                promoted, published, pub_dest = _read_promotion_stamp(dest)
+                _wl.record_slot_archive(
+                    _conn, slot_num, str(family_root),
+                    promoted=promoted, published=published,
+                    publish_dest=pub_dest,
+                    archived_from=str(slot_dir), archived_to=str(dest),
+                )
+                _conn.close()
+            except Exception:
+                pass
         print(f"ARCHIVED={slot_num}")
 
 

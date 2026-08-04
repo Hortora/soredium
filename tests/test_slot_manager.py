@@ -26,46 +26,66 @@ def init_repo(path: Path) -> Path:
 
 class TestAllocateSlotNumber:
     def test_empty_slots_dir(self, tmp_path):
-        wt = tmp_path / "slots"
-        wt.mkdir()
-        assert slot_manager.allocate_slot_number(wt) == 1
+        (tmp_path / "slots").mkdir()
+        assert slot_manager.allocate_slot_number(tmp_path) == 1
 
     def test_existing_slots(self, tmp_path):
-        wt = tmp_path / "slots"
-        wt.mkdir()
-        (wt / "1").mkdir()
-        (wt / "2").mkdir()
-        assert slot_manager.allocate_slot_number(wt) == 3
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        (slots / "1").mkdir()
+        (slots / "2").mkdir()
+        assert slot_manager.allocate_slot_number(tmp_path) == 3
 
     def test_gap_in_numbering(self, tmp_path):
-        wt = tmp_path / "slots"
-        wt.mkdir()
-        (wt / "1").mkdir()
-        (wt / "3").mkdir()
-        assert slot_manager.allocate_slot_number(wt) == 4
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        (slots / "1").mkdir()
+        (slots / "3").mkdir()
+        assert slot_manager.allocate_slot_number(tmp_path) == 4
 
     def test_no_slots_dir(self, tmp_path):
-        wt = tmp_path / "slots"
-        assert slot_manager.allocate_slot_number(wt) == 1
+        assert slot_manager.allocate_slot_number(tmp_path) == 1
 
     def test_considers_attic(self, tmp_path):
-        wt = tmp_path / "slots"
-        wt.mkdir()
-        (wt / "1").mkdir()
-        (wt / "2").mkdir()
-        attic = wt / "attic"
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        (slots / "1").mkdir()
+        (slots / "2").mkdir()
+        attic = slots / "attic"
         attic.mkdir()
         (attic / "3").mkdir()
         (attic / "5").mkdir()
-        assert slot_manager.allocate_slot_number(wt) == 6
+        assert slot_manager.allocate_slot_number(tmp_path) == 6
 
     def test_only_attic(self, tmp_path):
-        wt = tmp_path / "slots"
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        attic = slots / "attic"
+        attic.mkdir()
+        (attic / "4").mkdir()
+        assert slot_manager.allocate_slot_number(tmp_path) == 5
+
+    def test_considers_legacy_worktrees(self, tmp_path):
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        (slots / "1").mkdir()
+        (slots / "2").mkdir()
+        wt = tmp_path / "worktrees"
         wt.mkdir()
         attic = wt / "attic"
         attic.mkdir()
-        (attic / "4").mkdir()
-        assert slot_manager.allocate_slot_number(wt) == 5
+        (attic / "50").mkdir()
+        (attic / "60").mkdir()
+        assert slot_manager.allocate_slot_number(tmp_path) == 61
+
+    def test_considers_active_legacy_slots(self, tmp_path):
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        (slots / "1").mkdir()
+        wt = tmp_path / "worktrees"
+        wt.mkdir()
+        (wt / "54").mkdir()
+        assert slot_manager.allocate_slot_number(tmp_path) == 55
 
 
 class TestResolveWorkspaceSource:
@@ -1559,6 +1579,75 @@ class TestIsSlotPath:
 
     def test_rejects_plain_path(self):
         assert slot_manager.is_slot_path("/home/user/project/src") is False
+
+
+class TestAddRepo:
+    def test_adds_repo_to_slot(self, tmp_path):
+        family = tmp_path / "family"
+        repo1 = init_repo(family / "engine")
+        repo2 = init_repo(family / "trellis")
+        result = slot_manager.create_slot(
+            family_root=family, repos=["engine"], branch="issue-42-test",
+            issue="42", issue_repo="org/repo", covers="42", context="test",
+        )
+        slot_dir = family / "slots" / str(result["slot_number"])
+        slot_manager.add_repo(family, result["slot_number"], "trellis", "issue-42-test")
+        assert (slot_dir / "trellis").exists()
+        assert (slot_dir / "trellis" / ".git").exists()
+        current = subprocess.run(
+            ["git", "-C", str(slot_dir / "trellis"), "branch", "--show-current"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert current == "issue-42-test"
+
+    def test_updates_slot_file(self, tmp_path):
+        family = tmp_path / "family"
+        init_repo(family / "engine")
+        init_repo(family / "trellis")
+        result = slot_manager.create_slot(
+            family_root=family, repos=["engine"], branch="issue-42-test",
+            issue="42", issue_repo="org/repo", covers="42", context="test",
+        )
+        slot_dir = family / "slots" / str(result["slot_number"])
+        slot_manager.add_repo(family, result["slot_number"], "trellis", "issue-42-test")
+        content = (slot_dir / ".slot").read_text()
+        assert "trellis" in content
+
+    def test_rejects_duplicate_repo(self, tmp_path):
+        family = tmp_path / "family"
+        init_repo(family / "engine")
+        result = slot_manager.create_slot(
+            family_root=family, repos=["engine"], branch="issue-42-test",
+            issue="42", issue_repo="org/repo", covers="42", context="test",
+        )
+        with pytest.raises(SystemExit):
+            slot_manager.add_repo(family, result["slot_number"], "engine", "issue-42-test")
+
+
+class TestRemoveRepo:
+    def test_removes_repo_from_slot(self, tmp_path):
+        family = tmp_path / "family"
+        init_repo(family / "engine")
+        init_repo(family / "trellis")
+        result = slot_manager.create_slot(
+            family_root=family, repos=["engine", "trellis"], branch="issue-42-test",
+            issue="42", issue_repo="org/repo", covers="42", context="test",
+        )
+        slot_dir = family / "slots" / str(result["slot_number"])
+        slot_manager.remove_repo(family, result["slot_number"], "trellis")
+        assert not (slot_dir / "trellis").exists()
+        content = (slot_dir / ".slot").read_text()
+        assert "trellis" not in content
+
+    def test_refuses_to_remove_primary(self, tmp_path):
+        family = tmp_path / "family"
+        init_repo(family / "engine")
+        result = slot_manager.create_slot(
+            family_root=family, repos=["engine"], branch="issue-42-test",
+            issue="42", issue_repo="org/repo", covers="42", context="test",
+        )
+        with pytest.raises(ValueError, match="primary"):
+            slot_manager.remove_repo(family, result["slot_number"], "engine")
 
 
 class TestCreateSlotUsesNewDir:
