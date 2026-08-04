@@ -125,8 +125,9 @@ def _log_event(conn: sqlite3.Connection, event_type: str,
     )
 
 
-def _find_work_item(conn: sqlite3.Connection, branch: str,
-                    repo_path: str) -> int | None:
+def find_work_item(conn: sqlite3.Connection, branch: str,
+                   repo_path: str) -> int | None:
+    """Find work item ID by branch and repo path. Public API for lifecycle integration."""
     normalized = _norm(repo_path)
     row = conn.execute(
         "SELECT wi.id FROM work_items wi "
@@ -143,6 +144,9 @@ def _find_work_item(conn: sqlite3.Connection, branch: str,
         (branch,),
     ).fetchone()
     return row["id"] if row else None
+
+
+_find_work_item = find_work_item
 
 
 def _find_slot(conn: sqlite3.Connection, slot_number: int,
@@ -397,6 +401,37 @@ def record_issue_complete(conn: sqlite3.Connection, branch: str,
         "VALUES (?, ?, ?, 0)",
         (wid, issue_number, issue_repo),
     )
+    conn.commit()
+
+
+# --- Lifecycle integration ---
+
+
+@safe
+def update_work_item_state(conn: sqlite3.Connection, work_item_id: int,
+                           new_state: str) -> None:
+    """Update work item state. Sets ended_at when state is 'ended'."""
+    if new_state == "ended":
+        conn.execute(
+            "UPDATE work_items SET state=?, ended_at=? WHERE id=?",
+            (new_state, _now(), work_item_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE work_items SET state=? WHERE id=?",
+            (new_state, work_item_id),
+        )
+    conn.commit()
+
+
+@safe
+def log_transition(conn: sqlite3.Connection, event_name: str,
+                   work_item_id: int | None = None,
+                   repo_path: str | None = None,
+                   metadata: dict | None = None) -> None:
+    """Log a lifecycle transition event."""
+    _log_event(conn, event_name, work_item_id=work_item_id,
+               repo_path=repo_path, metadata=metadata)
     conn.commit()
 
 

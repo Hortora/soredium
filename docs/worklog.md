@@ -107,6 +107,40 @@ Indexed on `event_type`, `work_item_id`, `slot_id`.
 | `slot-merge` | `record_slot_merge()` | `{"landed_shas": {"engine": "abc", "iot": "def"}}` |
 | `slot-archive` | `record_slot_archive()` | — |
 
+## Automatic Emission
+
+`lifecycle.commit_transition()` automatically logs a transition event and
+updates `work_items.state` for every state change. Callers pass `repo_path`
+to enable emission:
+
+```python
+from lifecycle import transition, commit_transition
+
+result = transition(meta_path, 'work_pause')
+execute_effects(result.effects)
+commit_transition(meta_path, result, repo_path="/path/to/repo")
+```
+
+For transitions with domain metadata:
+
+```python
+result = transition(meta_path, 'merge_pass')
+sha = execute_merge(result.effects)
+commit_transition(meta_path, result, repo_path="/path/to/repo",
+    metadata={"landed_sha": sha})
+```
+
+Worklog emission is best-effort — failures warn but never block the
+`.meta` state write.
+
+### Lifecycle-to-Worklog State Mapping
+
+| Lifecycle state | work_items.state |
+|-----------------|------------------|
+| scaffolded, active, transitioning, closing:* | active |
+| paused | paused |
+| idle (from closing:stamped) | ended |
+
 ## Recording APIs
 
 All recording functions are wrapped with `@safe` — exceptions are caught and logged as `WARN=worklog_error`, never propagated. The worklog is informational; it must not block operations.
@@ -202,6 +236,7 @@ The worklog is called from these scripts (all calls are non-fatal via `@safe`):
 
 | Script | Events recorded |
 |--------|----------------|
+| `lifecycle.py` `commit_transition()` | All transition events (automatic) |
 | `slot_manager.py` `create_slot()` | `slot-create` + per-repo `work_items` |
 | `slot_manager.py` `merge_slot()` | `slot-merge` (ends all work_items) |
 | `slot_manager.py` `archive_slot()` | `slot-archive` |

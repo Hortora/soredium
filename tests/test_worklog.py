@@ -474,6 +474,133 @@ class TestFailureIsolation:
         conn2.close()
 
 
+class TestFindWorkItem:
+    def test_find_by_branch_and_repo(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/tmp/test-repo")
+        wid = worklog.record_work_start(
+            conn, "issue-1-foo", "/tmp/test-repo",
+            issue_number=1, issue_repo="org/repo",
+        )
+        found = worklog.find_work_item(conn, "issue-1-foo", "/tmp/test-repo")
+        assert found == wid
+        conn.close()
+
+    def test_find_returns_none_when_missing(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        found = worklog.find_work_item(conn, "nonexistent", "/tmp/nope")
+        assert found is None
+        conn.close()
+
+    def test_find_fallback_by_branch_only(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/tmp/test-repo")
+        wid = worklog.record_work_start(
+            conn, "issue-2-bar", "/tmp/test-repo",
+            issue_number=2, issue_repo="org/repo",
+        )
+        found = worklog.find_work_item(conn, "issue-2-bar", "/tmp/other-path")
+        assert found == wid
+        conn.close()
+
+
+class TestUpdateWorkItemState:
+    def test_update_to_paused(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/tmp/test-repo")
+        wid = worklog.record_work_start(
+            conn, "issue-1-foo", "/tmp/test-repo",
+            issue_number=1, issue_repo="org/repo",
+        )
+        worklog.update_work_item_state(conn, wid, "paused")
+        row = conn.execute(
+            "SELECT state FROM work_items WHERE id=?", (wid,)
+        ).fetchone()
+        assert row["state"] == "paused"
+        conn.close()
+
+    def test_update_to_ended_sets_ended_at(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/tmp/test-repo")
+        wid = worklog.record_work_start(
+            conn, "issue-1-foo", "/tmp/test-repo",
+            issue_number=1, issue_repo="org/repo",
+        )
+        worklog.update_work_item_state(conn, wid, "ended")
+        row = conn.execute(
+            "SELECT state, ended_at FROM work_items WHERE id=?", (wid,)
+        ).fetchone()
+        assert row["state"] == "ended"
+        assert row["ended_at"] is not None
+        conn.close()
+
+    def test_update_to_active_from_paused(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/tmp/test-repo")
+        wid = worklog.record_work_start(
+            conn, "issue-1-foo", "/tmp/test-repo",
+            issue_number=1, issue_repo="org/repo",
+        )
+        worklog.update_work_item_state(conn, wid, "paused")
+        worklog.update_work_item_state(conn, wid, "active")
+        row = conn.execute(
+            "SELECT state FROM work_items WHERE id=?", (wid,)
+        ).fetchone()
+        assert row["state"] == "active"
+        conn.close()
+
+
+class TestLogTransition:
+    def test_log_transition_writes_event(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/tmp/test-repo")
+        wid = worklog.record_work_start(
+            conn, "issue-1-foo", "/tmp/test-repo",
+            issue_number=1, issue_repo="org/repo",
+        )
+        worklog.log_transition(
+            conn, "work_pause", work_item_id=wid,
+            repo_path="/tmp/test-repo",
+            metadata={"from_state": "active", "to_state": "paused"},
+        )
+        events = worklog.event_log(conn, event_type="work_pause")
+        assert len(events) >= 1
+        last = events[0]
+        assert last["work_item_id"] == wid
+        meta = json.loads(last["metadata"])
+        assert meta["from_state"] == "active"
+        assert meta["to_state"] == "paused"
+        conn.close()
+
+    def test_log_transition_without_work_item(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.log_transition(
+            conn, "work", work_item_id=None,
+            repo_path="/tmp/test-repo",
+            metadata={"from_state": "idle", "to_state": "scaffolded"},
+        )
+        events = worklog.event_log(conn, event_type="work")
+        assert len(events) >= 1
+        assert events[0]["work_item_id"] is None
+        conn.close()
+
+    def test_log_transition_merges_caller_metadata(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.log_transition(
+            conn, "merge_pass", repo_path="/tmp/test-repo",
+            metadata={
+                "from_state": "closing:pushed",
+                "to_state": "closing:merged",
+                "landed_sha": "abc123",
+            },
+        )
+        events = worklog.event_log(conn, event_type="merge_pass")
+        meta = json.loads(events[0]["metadata"])
+        assert meta["landed_sha"] == "abc123"
+        assert meta["from_state"] == "closing:pushed"
+        conn.close()
+
+
 class TestIssueEvents:
     def _setup(self, tmp_path):
         conn = worklog.connect(str(tmp_path / "wl.db"))

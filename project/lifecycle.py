@@ -16,6 +16,7 @@ Spec: issue-171-lifecycle-state-machine
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -215,7 +216,77 @@ def transition(
     )
 
 
-def commit_transition(meta_path: Path, result: TransitionResult) -> None:
+_LIFECYCLE_TO_WORKLOG: dict[str, str | None] = {
+    'scaffolded': 'active',
+    'active': 'active',
+    'transitioning': 'active',
+    'paused': 'paused',
+    'idle': 'ended',
+}
+
+
+def _read_branch(meta_path: Path) -> Optional[str]:
+    """Read branch name from .meta."""
+    if not meta_path.exists():
+        return None
+    for line in meta_path.read_text().splitlines():
+        if line.startswith('branch:'):
+            return line.split(':', 1)[1].strip()
+    return None
+
+
+def _emit_to_worklog(
+    meta_path: Path,
+    result: TransitionResult,
+    repo_path: str,
+    metadata: Optional[dict],
+) -> None:
+    """Best-effort worklog emission. Never blocks."""
+    try:
+        import os
+        scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import worklog
+
+        db_path = os.environ.get("WORKLOG_DB")
+        conn = worklog.connect(db_path) if db_path else worklog.connect()
+
+        branch = _read_branch(meta_path)
+        if not branch:
+            conn.close()
+            return
+
+        wid = worklog.find_work_item(conn, branch, repo_path)
+
+        wl_state = _LIFECYCLE_TO_WORKLOG.get(result.new_state)
+        if wl_state and wid:
+            worklog.update_work_item_state(conn, wid, wl_state)
+
+        event_meta: dict = {
+            'from_state': result.from_state,
+            'to_state': result.new_state,
+        }
+        if metadata:
+            event_meta.update(metadata)
+
+        worklog.log_transition(
+            conn, result.event,
+            work_item_id=wid,
+            repo_path=repo_path,
+            metadata=event_meta,
+        )
+        conn.close()
+    except Exception as e:
+        print(f"WARN=worklog_error detail={e}")
+
+
+def commit_transition(
+    meta_path: Path,
+    result: TransitionResult,
+    repo_path: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> None:
     """Phase 2: Verify state unchanged, write atomically, emit worklog."""
     if result.from_state == 'idle':
         if not meta_path.exists():
@@ -235,6 +306,9 @@ def commit_transition(meta_path: Path, result: TransitionResult) -> None:
             )
         if result.new_state != 'idle':
             write_state(meta_path, result.new_state)
+
+    if repo_path:
+        _emit_to_worklog(meta_path, result, repo_path, metadata)
 
 
 _DEFAULT_EXCLUDES = [

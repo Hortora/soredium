@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Tests for project/lifecycle.py — the lifecycle state machine core."""
 
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -485,3 +487,234 @@ class TestTransitionTableCompleteness:
                 assert any(
                     k[0] == state for k in TRANSITION_TABLE
                 ), f"State {state} has no outgoing transition"
+
+
+# --- worklog emission ---
+
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+
+
+class TestWorklogEmission:
+    @pytest.fixture
+    def worklog_env(self, tmp_path):
+        """Create a worklog DB with a work item, set WORKLOG_DB env."""
+        import worklog
+        db_path = str(tmp_path / "worklog.db")
+        conn = worklog.connect(db_path)
+        repo_path = str(tmp_path / "project")
+        worklog.ensure_repo(conn, repo_path)
+        worklog.record_work_start(
+            conn, "issue-42-foo", repo_path,
+            issue_number=42, issue_repo="org/repo",
+        )
+        conn.close()
+        old = os.environ.get("WORKLOG_DB")
+        os.environ["WORKLOG_DB"] = db_path
+        yield db_path, repo_path
+        if old is None:
+            os.environ.pop("WORKLOG_DB", None)
+        else:
+            os.environ["WORKLOG_DB"] = old
+
+    def test_commit_emits_worklog_event(self, tmp_path, worklog_env):
+        import worklog
+        db_path, repo_path = worklog_env
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+
+        result = transition(meta, "work_pause")
+        commit_transition(meta, result, repo_path=repo_path)
+
+        conn = worklog.connect(db_path)
+        events = worklog.event_log(conn, event_type="work_pause")
+        assert len(events) >= 1
+        meta_json = json.loads(events[0]["metadata"])
+        assert meta_json["from_state"] == "active"
+        assert meta_json["to_state"] == "paused"
+        conn.close()
+
+    def test_commit_updates_work_item_state(self, tmp_path, worklog_env):
+        import worklog
+        db_path, repo_path = worklog_env
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+
+        result = transition(meta, "work_pause")
+        commit_transition(meta, result, repo_path=repo_path)
+
+        conn = worklog.connect(db_path)
+        items = worklog.active_work(conn)
+        paused = [i for i in items if i["branch"] == "issue-42-foo"]
+        assert len(paused) == 1
+        assert paused[0]["state"] == "paused"
+        conn.close()
+
+    def test_commit_passes_caller_metadata(self, tmp_path, worklog_env):
+        import worklog
+        db_path, repo_path = worklog_env
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-42-foo\nstate: closing:pushed\ndate: 2026-08-03\n")
+
+        result = transition(meta, "merge_pass")
+        commit_transition(
+            meta, result,
+            repo_path=repo_path,
+            metadata={"landed_sha": "abc123"},
+        )
+
+        conn = worklog.connect(db_path)
+        events = worklog.event_log(conn, event_type="merge_pass")
+        assert len(events) >= 1
+        meta_json = json.loads(events[0]["metadata"])
+        assert meta_json["landed_sha"] == "abc123"
+        assert meta_json["from_state"] == "closing:pushed"
+        assert meta_json["to_state"] == "closing:merged"
+        conn.close()
+
+    def test_commit_without_repo_path_skips_worklog(self, tmp_path):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+        result = transition(meta, "work_pause")
+        commit_transition(meta, result)
+        assert read_state(meta) == "paused"
+
+    def test_commit_survives_worklog_failure(self, tmp_path, monkeypatch):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+        monkeypatch.setenv("WORKLOG_DB", "/nonexistent/path/worklog.db")
+        result = transition(meta, "work_pause")
+        commit_transition(meta, result, repo_path=str(tmp_path / "project"))
+        assert read_state(meta) == "paused"
+
+    def test_commit_to_idle_sets_ended(self, tmp_path, worklog_env):
+        import worklog
+        db_path, repo_path = worklog_env
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-42-foo\nstate: closing:stamped\ndate: 2026-08-03\n")
+
+        result = transition(meta, "cleanup_pass")
+        commit_transition(meta, result, repo_path=repo_path)
+
+        conn = worklog.connect(db_path)
+        row = conn.execute(
+            "SELECT state, ended_at FROM work_items wi "
+            "JOIN repos r ON wi.repo_id = r.id "
+            "WHERE wi.branch='issue-42-foo'"
+        ).fetchone()
+        assert row["state"] == "ended"
+        assert row["ended_at"] is not None
+        conn.close()
+
+
+class TestWorklogIntegration:
+    def test_full_lifecycle_produces_correct_event_trail(self, tmp_path):
+        import worklog
+
+        db_path = str(tmp_path / "worklog.db")
+        project = tmp_path / "project"
+        project.mkdir()
+        repo_path = str(project)
+
+        old_env = os.environ.get("WORKLOG_DB")
+        os.environ["WORKLOG_DB"] = db_path
+
+        try:
+            conn = worklog.connect(db_path)
+            worklog.ensure_repo(conn, repo_path)
+            conn.close()
+
+            meta = tmp_path / ".meta"
+
+            # idle -> scaffolded
+            result = transition(meta, "work")
+            meta.write_text("branch: issue-99-test\nstate: scaffolded\ndate: 2026-08-04\n")
+            conn = worklog.connect(db_path)
+            worklog.record_work_start(
+                conn, "issue-99-test", repo_path,
+                issue_number=99, issue_repo="org/repo",
+            )
+            conn.close()
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # scaffolded -> active
+            result = transition(meta, "auto_setup")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # active -> paused
+            result = transition(meta, "work_pause")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # paused -> active
+            result = transition(meta, "work_resume")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # active -> closing:review
+            result = transition(meta, "work_end")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # closing:review -> closing:verified
+            result = transition(meta, "review_pass")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # closing:verified -> closing:promoted
+            result = transition(meta, "promote_pass")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # closing:promoted -> closing:pushed
+            result = transition(meta, "push_pass")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # closing:pushed -> closing:merged
+            result = transition(meta, "merge_pass")
+            commit_transition(
+                meta, result, repo_path=repo_path,
+                metadata={"landed_sha": "deadbeef"},
+            )
+
+            # closing:merged -> closing:stamped
+            result = transition(meta, "stamp_pass")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # closing:stamped -> idle
+            result = transition(meta, "cleanup_pass")
+            commit_transition(meta, result, repo_path=repo_path)
+
+            # Verify event trail
+            conn = worklog.connect(db_path)
+            events = worklog.event_log(conn, limit=50)
+
+            event_types = [e["event_type"] for e in reversed(events)]
+
+            assert "work-start" in event_types
+            assert "work" in event_types
+            assert "auto_setup" in event_types
+            assert "work_pause" in event_types
+            assert "work_resume" in event_types
+            assert "work_end" in event_types
+            assert "review_pass" in event_types
+            assert "promote_pass" in event_types
+            assert "push_pass" in event_types
+            assert "merge_pass" in event_types
+            assert "stamp_pass" in event_types
+            assert "cleanup_pass" in event_types
+
+            # Verify merge_pass has landed_sha
+            merge_events = [e for e in events if e["event_type"] == "merge_pass"]
+            assert len(merge_events) == 1
+            merge_meta = json.loads(merge_events[0]["metadata"])
+            assert merge_meta["landed_sha"] == "deadbeef"
+
+            # Verify work item ended
+            row = conn.execute(
+                "SELECT state, ended_at FROM work_items "
+                "WHERE branch='issue-99-test'"
+            ).fetchone()
+            assert row["state"] == "ended"
+            assert row["ended_at"] is not None
+            conn.close()
+        finally:
+            if old_env is None:
+                os.environ.pop("WORKLOG_DB", None)
+            else:
+                os.environ["WORKLOG_DB"] = old_env
