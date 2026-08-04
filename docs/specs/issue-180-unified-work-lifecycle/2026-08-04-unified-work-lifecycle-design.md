@@ -158,7 +158,22 @@ All slot creation, merge, and archive infrastructure is preserved:
 - `ensure_clone_layout()` — legacy worktree-to-clone migration
 - Worklog events: `slot-create` (unchanged); `slot-phase-a`, `slot-merge`,
   `slot-archive` replaced by unified `work-end` event (section 6.4)
+- `work-slot remove` records to worklog on both archive and force-delete paths
+  (no silent state drift — implemented as a fix after slot data loss incident)
+- `allocate_slot_number()` scans all four directories (`slots/`, `slots/attic/`,
+  `worktrees/`, `worktrees/attic/`) to avoid number collisions
 - Duplicate epic slot guard (scan active slots, refuse if same epic tracked)
+
+### Attic Directory Policy
+
+Two attic directories exist for historical reasons:
+
+- **`slots/attic/`** — current. All new archives go here.
+- **`worktrees/attic/`** — legacy, frozen. Contains slots archived during the
+  worktree-to-clone migration. No new entries are ever written here.
+
+New code must never write to `worktrees/attic/`. Archive paths always resolve
+to `slots/attic/<N>/`.
 
 ### Unchanged Pause/Resume Infrastructure
 
@@ -701,6 +716,12 @@ Collapsing Phase A/B into a single `work-end` simplifies slot tracking:
 
 The slot lifecycle in worklog.db becomes: `slot-create → work-end` (with
 `issue-activate` / `issue-complete` events in between for queue iteration).
+
+`work-slot remove` is a separate path from `work-end` (manual archive/cleanup,
+not a lifecycle close). It records `slot-archive` to worklog on both the archive
+path (moved to `slots/attic/`) and the force-delete path (removed entirely).
+This was added after a slot data loss incident where `remove_slot` silently
+deleted without recording, causing DB/filesystem drift.
 
 Existing events `slot-phase-a` and `slot-merge` can be kept for backward
 compatibility (old slots in the db) but are no longer written by new code.
