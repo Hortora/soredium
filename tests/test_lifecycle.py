@@ -175,10 +175,8 @@ class TestValidTransitions:
     @pytest.mark.parametrize(
         "from_state, event, expected_state, expected_effects",
         [
-            ("idle", "work", "scaffolded", ["create_branch", "write_meta"]),
-            ("idle", "work_epic", "scaffolded", ["create_branch", "write_meta", "write_epic"]),
-            ("idle", "slot_create", "scaffolded", ["create_slot", "write_meta"]),
-            ("idle", "slot_epic", "scaffolded", ["create_slot", "write_meta", "write_slot_epic"]),
+            ("idle", "work", "scaffolded", ["create_branch", "write_meta", "build_plan"]),
+            ("idle", "slot_create", "scaffolded", ["create_slot", "write_meta", "build_plan"]),
             ("scaffolded", "auto_setup", "active", ["garden_search", "load_specs", "check_protocols", "check_intellij"]),
             ("active", "work_next", "transitioning", ["advance_issue", "update_meta", "tick_github"]),
             ("transitioning", "auto_refresh", "active", ["garden_search", "load_specs", "check_protocols"]),
@@ -190,7 +188,7 @@ class TestValidTransitions:
             ("closing:promoted", "push_pass", "closing:pushed", []),
             ("closing:pushed", "merge_pass", "closing:merged", ["verify_content_landed"]),
             ("closing:merged", "stamp_pass", "closing:stamped", ["write_stamp"]),
-            ("closing:stamped", "cleanup_pass", "idle", ["write_epic_closed"]),
+            ("closing:stamped", "cleanup_pass", "idle", ["write_plan_closed"]),
         ],
     )
     def test_valid_transition(self, from_state, event, expected_state, expected_effects, tmp_path):
@@ -213,7 +211,7 @@ class TestValidTransitions:
         meta = tmp_path / ".meta"
         meta.write_text("branch: x\nstate: closing:stamped\ndate: 2026-08-03\n")
         result = transition(meta, "cleanup_pass")
-        assert result.effects == ["write_epic_closed"]
+        assert result.effects == ["write_plan_closed"]
         assert result.post_commit_effects == ["return_to_main", "write_handoff"]
 
     def test_standard_transitions_have_empty_post_commit(self, tmp_meta):
@@ -254,7 +252,6 @@ class TestInvalidTransitions:
             ("scaffolded", "work_end"),
             ("scaffolded", "work_pause"),
             ("active", "work"),
-            ("active", "work_epic"),
             ("active", "work_resume"),
             ("active", "auto_setup"),
             ("transitioning", "work_end"),
@@ -265,7 +262,6 @@ class TestInvalidTransitions:
             ("closing:review", "work_pause"),
             ("closing:review", "work_next"),
             ("closing:review", "work"),
-            ("closing:review", "work_epic"),
             ("closing:verified", "review_pass"),
             ("closing:promoted", "promote_pass"),
             ("closing:pushed", "push_pass"),
