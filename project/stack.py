@@ -57,7 +57,8 @@ def _parse_entries(text: str) -> list[dict]:
 def _entries_to_text(entries: list[dict]) -> str:
     """Serialise entries back to YAML-block format."""
     known_order = ("issue", "paused", "wip_project", "wip_workspace", "slot",
-                   "epic_batch", "epic_active_issue")
+                   "epic_batch", "epic_active_issue",
+                   "plan_active_issue", "plan_position")
     lines = []
     for e in entries:
         lines.append(f"- branch: {e.get('branch', '')}")
@@ -92,7 +93,8 @@ def cmd_list(stack_file: Path) -> int:
     entries = _read_entries(stack_file)
     print(f"ENTRY_COUNT={len(entries)}")
     known_keys = ("BRANCH", "ISSUE", "PAUSED", "WIP_PROJECT", "WIP_WORKSPACE",
-                  "SLOT", "EPIC_BATCH", "EPIC_ACTIVE_ISSUE")
+                  "SLOT", "EPIC_BATCH", "EPIC_ACTIVE_ISSUE",
+                  "PLAN_ACTIVE_ISSUE", "PLAN_POSITION")
     defaults = {"wip_project": "no", "wip_workspace": "no"}
     for i, e in enumerate(entries, 1):
         for display_key in known_keys:

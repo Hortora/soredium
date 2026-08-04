@@ -344,3 +344,43 @@ class TestEpicFields:
         result = run("list", str(stack))
         data = parse_output(result)
         assert data["ENTRY_1_EPIC_BATCH"] == "2/4"
+
+
+class TestPlanFields:
+    """Tests for plan_active_issue and plan_position stack fields."""
+
+    def test_push_with_plan_fields(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=issue-42-test", "issue=42",
+            "plan_active_issue=109", "plan_position=2/5")
+        content = stack.read_text()
+        assert "plan_active_issue: 109" in content
+        assert "plan_position: 2/5" in content
+
+    def test_list_includes_plan_fields(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=issue-42-test", "issue=42",
+            "plan_active_issue=109", "plan_position=2/5")
+        result = run("list", str(stack))
+        data = parse_output(result)
+        assert data["ENTRY_1_PLAN_ACTIVE_ISSUE"] == "109"
+        assert data["ENTRY_1_PLAN_POSITION"] == "2/5"
+
+    def test_backward_compat_no_plan_fields(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        stack.write_text("- branch: old-branch\n  issue: 5\n  paused: 2026-01-01\n")
+        result = run("list", str(stack))
+        data = parse_output(result)
+        assert data["ENTRY_1_PLAN_ACTIVE_ISSUE"] == ""
+        assert data["ENTRY_1_PLAN_POSITION"] == ""
+
+    def test_plan_fields_survive_pop_of_other(self, tmp_path):
+        stack = tmp_path / ".pause-stack"
+        run("push", str(stack), "branch=plan-branch", "issue=42",
+            "plan_active_issue=109", "plan_position=3/7")
+        run("push", str(stack), "branch=other-branch", "issue=99")
+        run("pop", str(stack), "other-branch")
+        result = run("list", str(stack))
+        data = parse_output(result)
+        assert data["ENTRY_1_PLAN_ACTIVE_ISSUE"] == "109"
+        assert data["ENTRY_1_PLAN_POSITION"] == "3/7"
