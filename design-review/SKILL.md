@@ -162,7 +162,8 @@ Tell the user BEFORE running:
 > - Structure (decomposition, boundaries, dependencies)
 > - Robustness (failure modes, edge cases, error paths)
 >
-> Cross-cutting analysis will run automatically after all dimensions complete.
+> You'll see round 1 findings as soon as they're ready (~2-5 min)
+> and can kill dimensions that aren't finding useful issues.
 > Monitor: `tail -f ~/reviews/*/{title}-*/progress.log`
 
 Launch all three with `run_in_background: true`:
@@ -188,38 +189,83 @@ python3 ~/.claude/skills/design-review/review.py \
   --stage {maturity_stage} --source-dirs {dirs}
 ```
 
-## Step 5 — Set up unified watchdog
+## Step 5 — Set up HIL watchdog
 
 **Immediately after launching**, create a SINGLE watchdog cron (not three)
-to monitor all dimension reviews. Use a 5-minute interval.
+to monitor all dimension reviews. Use a 2-minute interval.
+
+The watchdog has two checkpoints: a **round 1 checkpoint** (early HIL)
+and a **completion checkpoint** (pre-cross-cutting gate). Dimensions
+keep running between checkpoints — they are never stopped and restarted.
 
 Use `CronCreate` with `recurring: true` and this prompt:
 
-> Check progress of the post-spec review for {title}. Read the last 10
+> Check progress of the post-spec review for {title}. Read the last 20
 > lines of each progress log:
 > - `~/reviews/*/{title}-coherence-*/progress.log`
 > - `~/reviews/*/{title}-structure-*/progress.log`
 > - `~/reviews/*/{title}-robustness-*/progress.log`
 >
-> Track which dimensions have completed (`REVIEW DONE` in progress.log).
-> Report status for each dimension.
+> Track two things per dimension:
+> 1. Whether round 1 is complete (look for `EVENT:` lines containing
+>    `"type": "round_end"` with `"round_number": 1`)
+> 2. Whether the review is done (`REVIEW DONE` in progress.log)
 >
-> **When ALL dimensions are complete:** find each workspace's tracker.md path,
-> then launch the cross-cutting review:
-> ```bash
-> python3 ~/.claude/skills/design-review/review.py \
->   --spec {spec_path} --title {title}-crosscutting \
->   --type crosscutting --degree {degree} \
->   --stage {maturity_stage} --source-dirs {dirs} \
->   --arch-files <coherence-tracker-path> <structure-tracker-path> <robustness-tracker-path>
+> **CHECKPOINT 1 — Round 1 findings (fires once):**
+>
+> When ALL dimensions have completed round 1 (or exited), and this
+> checkpoint has not fired yet:
+>
+> Read each dimension's tracker.md. Present the round 1 summary:
 > ```
-> Run this in the background. The `--arch-files` paths are the tracker.md
-> files from each dimension workspace.
+> Round 1 findings:
+>   Coherence:  {N} issues ({priority breakdown})
+>   Structure:  {N} issues ({priority breakdown})
+>   Robustness: {N} issues ({priority breakdown})
+> ```
 >
-> If a cross-cutting review is already running, check its progress.log.
+> If the degree is NOT light (i.e. dimensions will continue to round 2+),
+> present four options:
+> - **Accept all** — all dimensions continue running
+> - **Refuse all** — kill all dimension processes, skip to checkpoint 2
+> - **Refuse subset** — kill selected dimension processes (the others
+>   keep running — they never stopped)
+> - **Discuss** — read tracker entries for specific findings, discuss,
+>   then re-present the options
 >
-> **When cross-cutting completes:** read all 4 tracker.md files. Present
-> unified results using the template in Step 8. Delete this cron.
+> To kill a dimension: use `TaskStop` on its background task ID, or
+> find the PID from progress.log and kill it.
+>
+> If the degree IS light: dimensions are already done (1 round). Skip
+> the four-option prompt and proceed to checkpoint 2.
+>
+> **CHECKPOINT 2 — Pre-cross-cutting gate:**
+>
+> When ALL surviving dimensions show `REVIEW DONE` (or were killed):
+>
+> Read each surviving dimension's tracker.md. Present full results:
+> ```
+> Dimension results:
+>   Coherence:  {N} rounds, {M} issues ({V} verified, {A} accepted, {D} deferred) — ${C}
+>   Robustness: {N} rounds, {M} issues ({V} verified, {A} accepted, {D} deferred) — ${C}
+>   Structure:  killed after round 1
+> ```
+>
+> Two options:
+> - **Run cross-cutting** — launch:
+>   ```bash
+>   python3 ~/.claude/skills/design-review/review.py \
+>     --spec {spec_path} --title {title}-crosscutting \
+>     --type crosscutting --degree {degree} \
+>     --stage {maturity_stage} --source-dirs {dirs} \
+>     --arch-files <surviving-tracker-paths>
+>   ```
+>   Only pass tracker.md paths for surviving dimensions.
+>   Run in background. When cross-cutting completes, present unified
+>   results using the template in Step 8.
+> - **Skip** — present final results from dimensions only (Step 8).
+>
+> **When done (all results presented):** delete this cron.
 >
 > **Failure handling:**
 > - `REVIEW PAUSED` — needs human input. Tell the user.
@@ -228,9 +274,9 @@ Use `CronCreate` with `recurring: true` and this prompt:
 > - `.hil-timeout` marker — agent hit soft timeout, ask continue or kill.
 > - No update for 10+ min — warn about stall.
 >
-> If one dimension fails, still launch cross-cutting for the surviving
-> dimensions (if 2+ completed). If only 1 completed, skip cross-cutting
-> and present results for that dimension alone.
+> If one dimension fails before round 1, proceed with survivors for
+> checkpoint 1. If only 1 dimension survives to checkpoint 2, skip
+> cross-cutting and present results for that dimension alone.
 
 Store the cron job ID for cleanup.
 
@@ -239,10 +285,10 @@ Store the cron job ID for cleanup.
 You will receive notifications from two sources:
 
 1. **Background task completion** — fires when each review.py process exits
-2. **Watchdog cron** — fires every 5 minutes with progress check
+2. **Watchdog cron** — fires every 2 minutes with progress and checkpoint logic
 
 On notification:
-- If all reviews completed: the watchdog handles cross-cutting launch and results
+- If a dimension completed: the watchdog handles checkpoint logic
 - If a dimension failed: report which one, suggest resuming
 - If stalled: warn the user
 
@@ -263,7 +309,7 @@ If a review.py process exits with an error:
 
 ## Step 8 — Validate and present results
 
-When all reviews complete (including cross-cutting):
+When all reviews complete (including optional cross-cutting):
 
 1. **Read the final spec** — symlinked at `spec.md` in any workspace
 2. **Read all trackers** — tracker.md from each dimension workspace
@@ -287,6 +333,8 @@ Spec: file://{spec_path}
 {If unresolved items exist in any dimension, list each}
 ```
 
+Omit rows for killed dimensions and for cross-cutting if it was skipped.
+
 Do NOT substitute a narrative summary for this template.
 
 ## Resuming a failed/interrupted review
@@ -294,7 +342,7 @@ Do NOT substitute a narrative summary for this template.
 If the user says "resume the review" or a prior run was interrupted:
 
 ```bash
-python3 /Users/mdproctor/.claude/skills/design-review/review.py \
+python3 ~/.claude/skills/design-review/review.py \
   --workspace {workspace_path} \
   --degree {degree} --source-dirs {dirs}
 ```

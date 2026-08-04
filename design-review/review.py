@@ -65,6 +65,7 @@ MAX_MISSING_FILE_RETRIES: Final = 2
 _LOG_FILE: Path | None = None
 _REVIEW_WS: Path | None = None
 _REVIEW_NAME: str = ""
+_REVIEW_TYPE: str = ""
 _SPEC_PATH: str = ""
 _TIMEOUT_COUNT: int = 0
 _ERROR_COUNT: int = 0
@@ -78,6 +79,12 @@ def _log(msg: str) -> None:
     if _LOG_FILE is not None:
         with open(_LOG_FILE, "a") as f:
             f.write(line + "\n")
+
+
+def _emit_event(ws: Path, event_type: str, payload: dict) -> None:
+    """Write a structured event to progress.log for external consumers."""
+    event = {"type": event_type, **payload}
+    _log(f"EVENT: {json.dumps(event)}")
 
 
 def _write_jsonl(ws: Path, role: str, round_num: int, events: list[dict]) -> None:
@@ -376,7 +383,7 @@ def _run_implementor_chunked(
 
 
 def main() -> int:
-    global _LOG_FILE, _REVIEW_WS, _REVIEW_NAME, _SPEC_PATH, _TIMEOUT_COUNT, _ERROR_COUNT
+    global _LOG_FILE, _REVIEW_WS, _REVIEW_NAME, _REVIEW_TYPE, _SPEC_PATH, _TIMEOUT_COUNT, _ERROR_COUNT
     args = parse_args()
 
     if not args.workspace:
@@ -486,8 +493,14 @@ def main() -> int:
 
     _REVIEW_WS = ws
     _REVIEW_NAME = f"{ws.parent.name}/{ws.name}"
+    _REVIEW_TYPE = args.review_type or args.mode
     _log(f"Mode: {args.mode}")
     _log(f"Progress log: {ws}/progress.log (tail -f to watch)")
+    _emit_event(ws, "dimension_start", {
+        "dimension": args.review_type or args.mode,
+        "degree": resolved_depth,
+        "phase": 1 if start_round <= 1 else 2,
+    })
 
     spec_path_file = ws / ".spec-path"
     if spec_path_file.exists():
@@ -679,6 +692,15 @@ def main() -> int:
             if new_issues:
                 _log(f"  {len(new_issues)} new issue(s) raised")
                 _inject_issue_ids(reviewer_file, new_issues)
+                priority_counts = {}
+                for issue in new_issues:
+                    p = issue.priority or "UNSPECIFIED"
+                    priority_counts[p] = priority_counts.get(p, 0) + 1
+                _emit_event(ws, "round_findings", {
+                    "dimension": args.review_type or args.mode,
+                    "round_number": round_num,
+                    "issues": priority_counts,
+                })
 
             confirmations = extract_confirmations(reviewer_content)
             for conf in confirmations:
@@ -963,6 +985,11 @@ def main() -> int:
 
         cost_per_round = cumulative_cost / round_num if round_num > 0 else 0
         _log(f"  Round {round_num} complete — ~${cost_per_round:.2f}/round, ${cumulative_cost:.2f} cumulative")
+        _emit_event(ws, "round_end", {
+            "dimension": args.review_type or args.mode,
+            "round_number": round_num,
+            "cost": round(cost_per_round, 2),
+        })
 
         if is_window_end:
             _log(f"  Session window complete — resetting sessions next round")
@@ -1568,6 +1595,17 @@ def _print_summary(tracker: Tracker, round_num: int, cost: float, spec_path: str
         _log(f"  Spec:    file://{spec_path}")
     else:
         _log(f"  Spec:    {tracker.project_name}")
+    if _REVIEW_WS:
+        _emit_event(_REVIEW_WS, "dimension_done", {
+            "dimension": _REVIEW_TYPE or "unknown",
+            "total_rounds": round_num,
+            "cost": round(cost, 2),
+            "issues": total,
+            "verified": counts["VERIFIED"],
+            "accepted": counts["ACCEPTED"],
+            "deferred": counts["DEFERRED"],
+            "unresolved": unresolved,
+        })
 
 
 REVIEW_MODES: Final = (

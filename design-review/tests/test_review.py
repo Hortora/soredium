@@ -18,6 +18,7 @@ from review import (
     _build_chunk_start_event,
     _build_chunk_end_event,
     _detect_last_round,
+    _emit_event,
     _load_degree,
     _write_jsonl,
     parse_args,
@@ -608,3 +609,107 @@ class TestApplyResumeDegree:
             assert args.max_rounds == 6
             assert args.min_rounds == 4
             assert args.budget_per_session == 5.0
+
+
+class TestEmitEvent:
+
+    def test_emit_event_writes_json_line(self, tmp_path):
+        import review
+        original = review._LOG_FILE
+        review._LOG_FILE = tmp_path / "progress.log"
+        review._LOG_FILE.touch()
+        try:
+            _emit_event(tmp_path, "dimension_start", {"dimension": "coherence", "degree": "light", "phase": 1})
+            lines = review._LOG_FILE.read_text().splitlines()
+            event_lines = [l for l in lines if "EVENT:" in l]
+            assert len(event_lines) == 1
+            json_str = event_lines[0].split("EVENT: ", 1)[1]
+            payload = json.loads(json_str)
+            assert payload["type"] == "dimension_start"
+            assert payload["dimension"] == "coherence"
+            assert payload["degree"] == "light"
+            assert payload["phase"] == 1
+        finally:
+            review._LOG_FILE = original
+
+    def test_emit_event_round_findings(self, tmp_path):
+        import review
+        original = review._LOG_FILE
+        review._LOG_FILE = tmp_path / "progress.log"
+        review._LOG_FILE.touch()
+        try:
+            _emit_event(tmp_path, "round_findings", {
+                "dimension": "robustness",
+                "round_number": 1,
+                "issues": {"HIGH": 2, "MEDIUM": 3, "LOW": 1},
+            })
+            lines = review._LOG_FILE.read_text().splitlines()
+            event_lines = [l for l in lines if "EVENT:" in l]
+            json_str = event_lines[0].split("EVENT: ", 1)[1]
+            payload = json.loads(json_str)
+            assert payload["type"] == "round_findings"
+            assert payload["issues"]["HIGH"] == 2
+            assert payload["issues"]["MEDIUM"] == 3
+        finally:
+            review._LOG_FILE = original
+
+    def test_emit_event_round_end_with_round_number(self, tmp_path):
+        """round_end with round_number is what the watchdog uses to detect round 1 completion."""
+        import review
+        original = review._LOG_FILE
+        review._LOG_FILE = tmp_path / "progress.log"
+        review._LOG_FILE.touch()
+        try:
+            _emit_event(tmp_path, "round_end", {
+                "dimension": "coherence",
+                "round_number": 1,
+                "cost": 1.27,
+            })
+            lines = review._LOG_FILE.read_text().splitlines()
+            event_lines = [l for l in lines if "EVENT:" in l]
+            json_str = event_lines[0].split("EVENT: ", 1)[1]
+            payload = json.loads(json_str)
+            assert payload["type"] == "round_end"
+            assert payload["round_number"] == 1
+            assert payload["dimension"] == "coherence"
+        finally:
+            review._LOG_FILE = original
+
+    def test_emit_event_parseable_by_grep(self, tmp_path):
+        """Events can be found by grepping for the type — the watchdog's detection mechanism."""
+        import review
+        original = review._LOG_FILE
+        review._LOG_FILE = tmp_path / "progress.log"
+        review._LOG_FILE.touch()
+        try:
+            _emit_event(tmp_path, "round_end", {"dimension": "coherence", "round_number": 1, "cost": 1.0})
+            _emit_event(tmp_path, "round_end", {"dimension": "coherence", "round_number": 2, "cost": 0.8})
+            _emit_event(tmp_path, "dimension_done", {"dimension": "coherence", "total_rounds": 2, "cost": 1.8})
+            content = review._LOG_FILE.read_text()
+            round_1_events = [l for l in content.splitlines() if '"round_number": 1' in l and '"round_end"' in l]
+            assert len(round_1_events) == 1
+            done_events = [l for l in content.splitlines() if '"dimension_done"' in l]
+            assert len(done_events) == 1
+        finally:
+            review._LOG_FILE = original
+
+    def test_emit_event_dimension_done(self, tmp_path):
+        import review
+        original = review._LOG_FILE
+        review._LOG_FILE = tmp_path / "progress.log"
+        review._LOG_FILE.touch()
+        try:
+            _emit_event(tmp_path, "dimension_done", {
+                "dimension": "structure",
+                "total_rounds": 3,
+                "cost": 4.20,
+            })
+            lines = review._LOG_FILE.read_text().splitlines()
+            event_lines = [l for l in lines if "EVENT:" in l]
+            json_str = event_lines[0].split("EVENT: ", 1)[1]
+            payload = json.loads(json_str)
+            assert payload["type"] == "dimension_done"
+            assert payload["total_rounds"] == 3
+            assert payload["cost"] == 4.20
+        finally:
+            review._LOG_FILE = original
