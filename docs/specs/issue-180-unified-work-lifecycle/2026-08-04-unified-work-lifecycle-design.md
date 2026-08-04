@@ -1444,7 +1444,7 @@ class AdvanceResult:
     epic_repo: str               # parent epic repo (for GitHub checkbox ticking)
 ```
 
-### 19.3 Parser API
+### 19.4 Parser API
 
 ```python
 def parse_plan(plan_path: Path) -> PlanTree:
@@ -1470,7 +1470,7 @@ brainstorming (§2.7, §10.2) or when the user explicitly adds issues mid-work
 inserting within an epic's children requires editing the `.plan` tree directly
 via `parse_plan` → modify → `rewrite_plan`.
 
-### 19.4 Backward Compatibility
+### 19.5 Backward Compatibility
 
 ```python
 def advance_issue(plan_path: Path | None, epic_path: Path | None,
@@ -1563,7 +1563,13 @@ def advance_issue(plan_path: Path | None, epic_path: Path | None,
   queue exhausted, cycle detection, parent `[x]` marking on child completion
 - worklog.py: `record_issue_activate`, `record_issue_complete`, `work_item_issues`
   update, query patterns
-- `.meta` covers accumulation with deduplication
+- `.meta` covers accumulation with repo-qualified deduplication (§3.2)
+- Marker validation: zero markers, multiple markers, marker on `[x]`, marker on epic (§4.5)
+- Crash recovery: `.plan`/`.meta` reconciliation after partial writes (§4.6)
+- Depth limit: `build_queue` stops at MAX_DEPTH, treats as leaves (§18.4)
+- API failure: timeout, rate limit, 404 handling (§18.5)
+- Indentation: lenient parse (3-space, 4-space, skipped levels), strict rewrite (2-space) (§19.2)
+- Free text mode: deferred worklog, first-issue covers insertion (§10.2)
 - ctx.py: `HAS_PLAN` / `PLAN_*` output with and without `.plan`
 - Pause stack: `plan_active_issue`, `plan_position` serialization
 
