@@ -171,6 +171,12 @@ def write_state(meta_path: Path, state: str) -> None:
     tmp_path.replace(meta_path)
 
 
+_DEPRECATED_EVENTS = {
+    'work_epic': ('work', "work_epic is deprecated — epic detection is now automatic. Use 'work' instead."),
+    'slot_epic': ('slot_create', "slot_epic is deprecated — epic detection is now automatic. Use 'slot_create' instead."),
+}
+
+
 def transition(
     meta_path: Path,
     event: str,
@@ -180,6 +186,11 @@ def transition(
     """Phase 1: Validate transition and return result. Does NOT write state."""
     raw_state = read_state(meta_path)
     current_state = raw_state or 'idle'
+
+    if event in _DEPRECATED_EVENTS:
+        new_event, warning = _DEPRECATED_EVENTS[event]
+        print(f"WARN=deprecated_event old={event} new={new_event} detail={warning}")
+        event = new_event
 
     key = (current_state, event)
     if key not in TRANSITION_TABLE:

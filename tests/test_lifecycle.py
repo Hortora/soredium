@@ -442,6 +442,32 @@ class TestHygieneInvariants:
 # --- transition table completeness ---
 
 
+class TestDeprecatedEvents:
+    def test_work_epic_maps_to_work(self, tmp_path, capsys):
+        meta = tmp_path / ".meta"
+        result = transition(meta, "work_epic")
+        assert result.new_state == "scaffolded"
+        assert "build_plan" in result.effects
+        captured = capsys.readouterr()
+        assert "deprecated" in captured.out.lower()
+        assert "work_epic" in captured.out
+
+    def test_slot_epic_maps_to_slot_create(self, tmp_path, capsys):
+        meta = tmp_path / ".meta"
+        result = transition(meta, "slot_epic")
+        assert result.new_state == "scaffolded"
+        assert "build_plan" in result.effects
+        captured = capsys.readouterr()
+        assert "deprecated" in captured.out.lower()
+        assert "slot_epic" in captured.out
+
+    def test_deprecated_event_from_non_idle_still_fails(self, tmp_path, capsys):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: test\nstate: active\n")
+        with pytest.raises(InvalidTransition):
+            transition(meta, "work_epic")
+
+
 class TestTransitionTableCompleteness:
     def test_all_transition_table_entries_have_valid_from_states(self):
         for (from_state, _event), (_to, _eff, _post) in TRANSITION_TABLE.items():
