@@ -18,12 +18,12 @@ Development workflow and knowledge garden skills for Claude Code.
 
 | Skill | What it does |
 |-------|-------------|
-| `work` | Unified entry point — detects branch state, routes to start/end/pause/resume, supports `work epic` / `work next` for single-repo epic iteration |
-| `work-start` | Creates issue branches, scaffolds metadata, runs pre-checks |
-| `work-end` | Closes branch, promotes artifacts, merges to main |
+| `work` | Unified entry point — detects branch state, routes to start/end/pause/resume/next. Four commands for the full lifecycle |
+| `work-start` | Begins work — accepts 1..n issues or free text, auto-detects epics, builds `.plan` queue, scaffolds metadata |
+| `work-end` | Closes branch — one command regardless of context (branch or slot). Promotes artifacts, merges to main |
 | `work-pause` | Commits WIP, pushes to pause stack, switches to main |
 | `work-resume` | Restores a paused branch, rebases onto current main |
-| `work-slot` | Parallel worktree slots for multi-repo work — create, epic iteration, list, merge, archive |
+| `work-slot` | Parallel clone-based slots for multi-repo work — create, list, status, add-repo, remove-repo, archive |
 
 ### Design & Planning
 

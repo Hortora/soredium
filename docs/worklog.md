@@ -166,7 +166,10 @@ worklog.record_slot_merge(conn, slot_number=1, family_root="/path",
 worklog.record_slot_archive(conn, slot_number=1, family_root="/path")
 ```
 
-Slot state transitions: `active` → `ready` → `landed` → `archived`.
+Slot state transitions: `active` → `archived` (work-end runs the full
+close sequence in one invocation). Legacy intermediate states (`ready`,
+`landed`) are still recorded by the deprecated `record_slot_phase_a()`
+and `record_slot_merge()` functions for backward compatibility.
 
 ## Query APIs
 

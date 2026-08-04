@@ -474,7 +474,7 @@ python3 ~/.claude/skills/work-start/branch_create.py commit-scaffold "$WORKSPACE
 Read `COMMITTED=yes` and `PUSHED=yes|no` from output. Push failure is non-fatal; warn and continue.
 
 **Slot mode:** When `IN_SLOT=yes`, skip the push. The scaffold lives in the
-clone only until Phase A squashes and pushes.
+clone only until work-end squashes and pushes.
 
 ### Step 11 — IntelliJ MCPs
 
@@ -588,30 +588,26 @@ context gathering led to re-deriving design decisions that had already been
 made, wasting effort and risking contradictions. Specs are cheap to read
 and expensive to miss.
 
-### Step 3d — Epic Overlay
+### Step 3d — Queue Overlay
 
-After Step 3c, check for epic context:
+After Step 3c, check for queue context:
 
-1. **Guard — detect epic file:**
-   - If `is_slot_path($PROJECT)`: `epic_file = $PROJECT/../.slot`
-   - Elif `workspace/design/.epic` exists: `epic_file = workspace/design/.epic`
-   - Else: skip overlay entirely.
-2. **Detect:** Read `epic_file`. If it does not exist or does not contain
-   `Type: epic` in the `## Issue` section, skip.
-3. **Display epic context:**
-   - Read `## Session State` for current batch and issue
-   - Read `## Batch Plan` for batch structure and progress
+1. **Guard:** Read `HAS_PLAN` from ctx.py output. If `HAS_PLAN=no`, skip
+   overlay entirely. If `HAS_PLAN=yes`, read `.plan` at `$PLAN_PATH`.
+2. **Display queue context:**
+   - Read `## Queue` for issue tree and progress
+   - Read `## Session State` for current position and active issue
    - Show:
      ```
-     Epic #<N> — Batch <current> of <total>
+     Queue — Position $PLAN_POSITION
        Active issue: #<issue> — <title>
        Done: <completed-count>/<total-count> issues
      ```
-4. **Set active issue** for commit linkage: `Refs #<active-issue>`
+   - If the queue contains epics with batches, show batch progress too.
+3. **Set active issue** for commit linkage: `Refs #<active-issue>`
 
-This overlay reads the epic file but does NOT modify it. It provides
-context for the session — updates happen via `work next` (single-repo)
-or `work-slot next` (slot) and handover wraps.
+This overlay reads `.plan` but does NOT modify it. It provides context
+for the session — updates happen via `work next` and handover wraps.
 
 ---
 
@@ -667,5 +663,5 @@ Work-start is complete when:
 - `work-slot` — slot mode detection; work-start runs inside slots via
   the resume path after slot creation
 
-**Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, GitHub issues API,
+**Reads from:** `ctx.py`, `.meta`, `.plan`, `.pause-stack`, CLAUDE.md, GitHub issues API,
 garden (gardenSearch or fallback), `ARC42STORIES.MD`

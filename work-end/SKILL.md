@@ -104,29 +104,24 @@ Run `python3 ~/.claude/skills/project/ctx.py` first. Use `CURRENT_BRANCH` from i
    class of bugs where `.meta` from a stale workspace branch provides wrong
    issue/covers/SHA context for the close operation.
 
-0b. **Epic confirmation gate** — read `IS_EPIC` from ctx.py output.
+0b. **Queue confirmation gate** — read `HAS_PLAN` from ctx.py output.
    If `no`, skip silently. If `yes`, run:
    ```bash
-   python3 ~/.claude/skills/work-slot/epic_manager.py check <EPIC_PATH>
+   python3 ~/.claude/skills/work-slot/plan_manager.py detect <PLAN_PATH>
    ```
-   Read `EPIC_COMPLETE`, `SAFE_EXIT`, `CURRENT_BATCH`, `TOTAL_BATCHES`,
-   `ACTIVE_ISSUE` from output.
+   Read `QUEUE_COMPLETE`, `SAFE_EXIT`, `REMAINING_COUNT` from output.
 
    Three outcomes, evaluated as an if/elif/else chain:
 
    | Check (in order) | UX |
    |-------------------|----|
-   | `EPIC_COMPLETE=yes` | Proceed silently — all children done |
-   | `SAFE_EXIT=yes` | "Batch N/M complete. Safe exit point — close? (y/n)" |
-   | Neither | "⚠ Mid-batch (issue #X of batch N/M). Partial close loses context. Continue? (y/confirm-partial)" |
+   | `QUEUE_COMPLETE=yes` | Proceed silently — all issues done |
+   | `SAFE_EXIT=yes` | "Batch complete. Safe exit point — close? (y/n)" |
+   | Neither | "⚠ Mid-queue (N issues remaining). Partial close loses context. Continue? (y/confirm-partial)" |
 
-   `EPIC_COMPLETE=yes` implies `SAFE_EXIT=yes` — the if/elif ordering ensures
-   only the most specific arm fires. The mid-batch confirmation requires typing
+   `QUEUE_COMPLETE=yes` implies `SAFE_EXIT=yes` — the if/elif ordering ensures
+   only the most specific arm fires. The mid-queue confirmation requires typing
    `confirm-partial`, not just `y`.
-
-   **Slot mode caveat:** In slot mode, "close" means Phase A (squash + push
-   branch). The prompt should say "run Phase A" not "run work-end" — the slot
-   is merged separately via `work-slot merge`.
 
 1. **If `$WORKSPACE/design/.pause-stack` exists and has entries** — check whether
    the target branch is in the stack:
@@ -592,66 +587,26 @@ blog against the destination and publishes only what's missing — it handles th
 After path resolution, check if `$PROJECT` is a slot path (via `is_slot_path()`,
 which checks for `/slots/` and legacy `/worktrees/`):
 
-- **If yes → slot mode.** Phase A/B split applies. See below.
+- **If yes → slot mode.** The unified slot close sequence runs. See below.
 - **If no → normal mode.** Existing step ordering unchanged.
 
-### Phase A — "Ready to land" (slot mode only)
+### Slot Close Sequence (unified — no Phase A/B split)
 
-Runs when the human says "work end" in a slot. Executes review,
-verification, and squash — but defers merge and all post-merge actions.
+`work-end` in a slot runs the full close sequence in one invocation:
+review, promote, squash, push, merge to original, stamp, archive.
+There is no separate merge command and no deferred phase.
 
-**What runs in Phase A:**
-- Steps 3b–3c (pre-close sweep, code review) — as normal
-- Steps 4–7 (inventory, journal validation, spec selection, close plan)
-- Step 8d–8e (journal merge, spec posting) — safe before merge
-- Step 8h (final report — partial, covering what Phase A completed)
-- Step 8i (hygiene scan)
-- Step 8j modified: squash commits, push branch to origin. **Stop before
-  rebase onto main.** Do not merge, do not push main.
+**Steps 3b–7** run as normal (pre-close sweep, code review, inventory,
+journal validation, spec selection, close plan).
 
-**What is deferred to Phase B:**
-- Steps 8a–8c (workspace and project artifact promotion, spec cleanup) — 8c depends on 8b
-- Step 8f (issue close) — depends on successful merge
-- Step 8g (blog publish) — depends on successful merge
-- Steps 8k–12 (build verification, mark closed, ARC42 scan, handover)
+**Step 8 runs the following slot-specific sequence:**
 
-**After Phase A completes:**
-- Write `.phase-a-complete` marker via script (also records the event
-  in the worklog):
-  ```bash
-  python3 ~/.claude/skills/work-end/phase_a_complete.py <SLOT_ROOT> \
-    branch=<BRANCH_NAME> repos=<comma-separated-repo-names> \
-    family-root=<FAMILY_ROOT>
-  ```
-  Read `MARKER=<path>` and `WORKLOG=yes|skipped` from output.
-- Desktop notification via `terminal-notifier`:
-  "Slot N ready to land: <branch> on <primary-repo>"
-- **Offer slot closure:**
-  > "Phase A complete. Would you like to merge, stamp, and archive
-  > this slot now? (y/n)"
-  >
-  > If **yes** → proceed to Phase B immediately (same session).
-  > If **no** → stop. Slot stays as "ready to land" for later merge
-  > via `work-slot merge` from the main repo.
+**S1. Journal merge and spec posting** (8d–8e) — safe before merge.
 
-**Epic note (slot and single-repo):** When closing an epic where all
-batches are complete (the last `work next` or `work-slot next` set
-`epic_complete=true`), the epic issue itself is included in COVERS
-(added by `work next` step 4). work-end closes it alongside the child
-issues. If the epic still has open batches (safe exit mid-epic), only
-the completed child issues are in COVERS — the epic issue stays open.
-To resume remaining children: run `work epic #N` again — it detects
-already-closed children and plans only the open remainder.
+**S2. Squash commits and push branch** (from 8j squash analysis) —
+squash in the slot clone, push branch to origin.
 
-### Phase B — "Land it" (slot mode only)
-
-Runs when the human returns to the slot and says "merge" or "work end"
-again. work-end detects `.phase-a-complete` in the slot root and enters
-Phase B directly.
-
-**Corrected ordering — merge first, then post-land actions:**
-
-**B1. Rebase branches onto current main.** Slots are standalone clones
+**S3. Rebase branches onto current main.** Slots are standalone clones
 (`git clone --shared`), not git worktrees. The clone has its own refs —
 the original repo cannot see the clone's branches directly. Rebase the
 branch in the **slot clone**:
@@ -663,9 +618,9 @@ git -C <slot>/<repo> rebase origin/main
 
 If any branch rebase conflicts: hard stop. No main has been modified.
 Human resolves the conflict on the branch in the slot clone, then
-re-triggers Phase B.
+re-triggers work-end.
 
-**B1b. Cross-repo dependency check.** Before pushing, verify provider repos
+**S3b. Cross-repo dependency check.** Before pushing, verify provider repos
 will land before consumers:
 
 ```bash
@@ -673,36 +628,29 @@ python3 ~/.claude/skills/work-slot/slot_manager.py check-cross-deps <family-root
 ```
 
 If `CHECK=fail`: the output lists which provider repos must land first.
-Reorder the push sequence in B2 accordingly (providers before consumers).
+Reorder the push sequence in S4 accordingly (providers before consumers).
 If a provider's changes are still on a feature branch, **hard stop** —
 the consumer cannot be pushed until the provider lands.
 
-**B2. Push rebased branch, then fast-forward original.** Only after all
-rebases succeed. Clones do not share refs with the original — the rebased
-branch must be pushed from the clone first, then merged in the original:
+**S4. Push rebased branch, then fast-forward original.** Only after all
+rebases succeed:
 
 ```bash
-# Push rebased branch from clone to original (updates the branch ref)
 git -C <slot>/<repo> push origin <branch> --force-with-lease
-
-# In the original repo: fetch, then fast-forward main
 git -C <original>/<repo> fetch origin
 git -C <original>/<repo> merge --ff-only <branch>
 git -C <original>/<repo> push origin main
 ```
 
-If `--ff-only` fails or push fails, retry from B1 — max 3 attempts.
+If `--ff-only` fails or push fails, retry from S3 — max 3 attempts.
 After 3 failures, hard stop with manual instructions.
 
-**B3. Close issues.** All issues in `$COVERS`.
+**S5. Close issues.** All issues in `$COVERS`.
 
-**B4. Workspace-promote and project-promote artifacts.** Runs deferred 8a–8c.
-Operations needing `main` checked out use the **original workspace**.
-Operations reading from the branch use the **slot workspace clone**.
-
-Pass `scan-workspace` to `close_artifacts.py` so artifacts are scanned
-from the slot workspace (where they live on the branch), not the original
-workspace (which is on main after B2 merge):
+**S6. Workspace-promote and project-promote artifacts.** Pass
+`scan-workspace` to `close_artifacts.py` so artifacts are scanned from
+the slot workspace (where they live on the branch), not the original
+workspace (which is on main after S4 merge):
 
 ```bash
 python3 ~/.claude/skills/work-end/close_artifacts.py \
@@ -711,53 +659,51 @@ python3 ~/.claude/skills/work-end/close_artifacts.py \
   scan-workspace=<SLOT_WORKSPACE>
 ```
 
-Without `scan-workspace`, Phase B would scan the original workspace
-(now on main) and find no branch artifacts to workspace-promote or project-promote.
+**S7. Publish blog entries.** Run against the **original workspace**.
 
-**B5. Publish blog entries (8g).** Run against the **original workspace**.
-
-**B6. Stamp branches as closed.** Both project and workspace branches.
+**S8. Stamp branches as closed.** Both project and workspace branches.
 
 **Content verification before stamping (mandatory):**
-
-Before writing any stamp, verify the branch content actually landed on main.
-Compare source files between the branch and main — if there's a diff, content
-was lost during squash and the stamp would be a lie.
 
 ```bash
 python3 ~/.claude/skills/work-end/verify_stamp.py <slot>/<repo> <branch> main
 ```
 
-Read `VERIFIED=yes` from output. If `VERIFIED=no`, the script prints the
-missing files. **Hard stop — do not stamp.** Report the content gap and
-instruct the user to investigate before proceeding.
+Read `VERIFIED=yes` from output. If `VERIFIED=no`, **hard stop — do not
+stamp.** Report the content gap.
 
-Only after verification passes, stamp in the **slot clones** (where the
-branches are checked out):
+Only after verification passes, stamp in the **slot clones**:
 ```bash
 git -C <slot>/<repo> commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
 git -C <slot>/work commit --allow-empty -m "chore: branch closed — landed as <SHA> on main"
 ```
 
-**B7. Archive.** Move the slot directory to `slots/attic/<N>/`
+**S9. Archive.** Move the slot directory to `slots/attic/<N>/`
 (preserves .slot, clone repos, and marker files for auditing). Use
 `archive-slot` from `slot_manager.py` — do not delete the slot directory.
-No `git worktree remove` is needed — slots are standalone clones.
 
-**B8. Post-merge steps.** Steps 8k–12 from normal work-end.
+**S10. Post-merge steps.** Steps 8k–12 from normal work-end.
 
-**Phase B completion gate (mandatory before declaring complete):**
+**Slot close completion gate (mandatory before declaring complete):**
 
-Before proceeding to B8, verify all prior steps ran:
-- [ ] Branches rebased and pushed (B1–B2)
-- [ ] Issues closed (B3)
-- [ ] Artifacts workspace-promoted and project-promoted (B4)
-- [ ] Branches stamped as closed (B6)
-- [ ] **Slot archived — clones moved to `slots/attic/<N>/` (B7)**
+Before proceeding to S10, verify all prior steps ran:
+- [ ] Branches rebased and pushed (S3–S4)
+- [ ] Issues closed (S5)
+- [ ] Artifacts workspace-promoted and project-promoted (S6)
+- [ ] Branches stamped as closed (S8)
+- [ ] **Slot archived — clones moved to `slots/attic/<N>/` (S9)**
 
-B7 is the most commonly skipped step. If the slot directory still exists
-under `slots/<N>/` (not in attic), B7 did not run — go back and
+S9 is the most commonly skipped step. If the slot directory still exists
+under `slots/<N>/` (not in attic), S9 did not run — go back and
 execute it before continuing.
+
+**Queue note (slot and single-repo):** When closing a branch where all
+queue items are complete (the last `work next` set `queue_complete`),
+all completed issues — including parent epic issues — are in COVERS.
+work-end closes them all. If the queue still has remaining items (safe
+exit mid-queue), only the completed child issues are in COVERS — parent
+epic issues stay open. To resume remaining children: run `work-start`
+with the same epic issue number — auto-detection skips closed children.
 
 ---
 
@@ -1229,7 +1175,7 @@ After 8j completes (workspace/project is now on main):
 If `$SINGLE_REPO_MODE = yes`:
 
 Run: `python3 ~/.claude/skills/work-end/branch_cleanup.py cleanup-scaffold <WORKSPACE> single-repo=yes`
-Read `CLEANED=yes` from output. The script removes `.meta`, `JOURNAL.md`, and `.epic` (if
+Read `CLEANED=yes` from output. The script removes `.meta`, `JOURNAL.md`, and `.plan` (if
 present), removes the `design/` directory if empty, commits, and pushes.
 
 **Why this step exists:** In two-repo mode, `.meta` and `JOURNAL.md` live on the workspace
@@ -1403,7 +1349,7 @@ Show every item — both ticked and skipped with reason.
 - `handover` — work-end includes the full wrap (Step 12); handover is for
   mid-work sessions only
 - `work-start` — opens branches; work-end closes them
-- `work-slot` — slot detection triggers Phase A/B split
+- `work-slot` — slot detection triggers unified slot close sequence
 - `using-git-worktrees` — worktree cleanup happens during branch closure
 - `verification-before-completion` — verification is implicit in work-end's
   pre-merge checks

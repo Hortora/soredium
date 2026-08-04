@@ -3,10 +3,9 @@ name: work-slot
 description: >
   Use when creating parallel clone-based slots for multi-repo family work —
   user says "create a slot", "spin up a slot for issue #N", "parallel
-  work on engine and iot", or invokes /work-slot. Also use "work-slot
-  epic" to iterate through an epic's child issues, "work-slot next" to
-  advance, "work-slot list" to see status, "work-slot remove" to archive,
-  and "work-slot merge" to land ready slots.
+  work on engine and iot", or invokes /work-slot. Also use "work-slot next"
+  to advance, "work-slot list" to see status, "work-slot remove" to archive,
+  "work-slot add-repo" to add a repo, and "work-slot remove-repo" to drop one.
   NOT for single-repo worktree isolation (use using-git-worktrees for that).
 slash-command: true
 ---
@@ -16,7 +15,7 @@ slash-command: true
 Create and manage numbered clone-based slots for parallel development
 across a multi-repo family. Each slot contains standalone `git clone
 --shared` repos (not git worktrees), isolated `.m2`, re-pointed symlinks,
-and a context file for the session that works there.
+and a `.plan` file for the issue queue.
 
 > **Legacy:** existing slots under `worktrees/` continue to work. New slots are created under `slots/`.
 
@@ -25,20 +24,23 @@ and a context file for the session that works there.
 | State | Marker | Meaning |
 |-------|--------|---------|
 | `active` | slot dir exists, no markers | Work in progress |
-| `ready to land` | `.phase-a-complete` | Phase A done, awaiting merge |
-| `landed` | `.landed` | Merged to main, awaiting archive |
 | `archived` | in `slots/attic/<N>/` | Clones moved to attic, metadata kept |
 
 ---
 
-## `work-slot create`
+## `work-slot` (create)
+
+Accepts 1..n issue numbers OR free text — same input modes as `work-start`.
+Epics are auto-detected from GitHub (recursive, unlimited nesting). A `.plan`
+file is always created, even for single issues.
 
 ### Step 1 — Gather input
 
 Ask the user for:
+- **Issues or description:** issue numbers (e.g., `#42 #50`) or free text
+  (e.g., "improve the scoring engine")
 - **Repos:** which repos in the family to include (e.g., "engine", "engine and iot")
-- **Issue:** the issue number and repo (e.g., `#42` on `casehubio/engine`)
-- **Context:** what needs doing and any background (constraints, relevant files, design decisions)
+- **Context:** what needs doing and any background
 
 The user may provide all of this in one sentence or you may need to ask.
 
@@ -48,17 +50,25 @@ Walk up from CWD looking for a directory that is not itself a git repo
 and contains child directories with `wksp` symlinks. Or accept an
 explicit path from the user.
 
-```bash
-# The family root is NOT a git repo but contains git repos with wksp symlinks
-```
-
 If the family root cannot be determined, ask:
 > "Which directory is the family root? (e.g., ~/claude/casehub)"
 
-### Step 3 — Derive branch name
+### Step 3 — Build queue and derive branch name
 
-`issue-<N>-<slug>` from the primary issue, same convention as work-start
-Step 5. Show to the user, allow override.
+**Issue mode:** For each issue number, call `plan_manager.detect_epic()`
+to check if it's an epic (has `## Scope` with `- [ ] #N` entries).
+Epics are recursively expanded. Build the queue tree via
+`plan_manager.build_queue()`.
+
+If any epic has 5+ children → batch planning (LLM-driven grouping:
+domain affinity, shared API surface, scale fit, dependency ordering).
+User approves or adjusts the batch plan.
+
+**Free text mode:** Empty queue. Issues created during brainstorming
+are added to `.plan` as created.
+
+Branch name: `issue-<N>-<slug>` from the primary issue (or text slug).
+Show to user, allow override.
 
 ### Step 4 — Create the slot
 
@@ -71,7 +81,19 @@ python3 ~/.claude/skills/work-slot/slot_manager.py create-slot <family-root> \
 Read output: `SLOT_NUMBER`, `SLOT_DIR`, `BRANCH`. If `ERROR=`, report
 and stop.
 
-### Step 5 — Activate issues on project board
+### Step 5 — Write `.plan`
+
+Write the `.plan` file at the slot root (alongside `.slot`):
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, '$HOME/.claude/skills/work-slot')
+from plan_manager import build_plan_content, rewrite_plan
+# ... build and write .plan from the approved queue
+"
+```
+
+### Step 6 — Activate issues on project board
 
 If the project has `GitHub project:` configured in CLAUDE.md (read via
 ctx.py `GITHUB_PROJECT`), activate issues on the project board:
@@ -83,7 +105,16 @@ python3 ~/.claude/skills/issue-workflow/issue_setup.py activate-issues \
 
 Non-fatal — warn and continue on failure.
 
-### Step 6 — Offer iTerm2 tab
+### Step 7 — Write batch plan to GitHub epic (if applicable)
+
+If batch planning ran in Step 3, update the epic's `## Scope` section
+on GitHub with the batch-grouped checklist.
+
+**Safeguards:**
+- Show a diff preview before writing. User confirms explicitly.
+- Preserve all content outside the Scope section.
+
+### Step 8 — Offer iTerm2 tab
 
 > "Open an iTerm2 tab in the slot? (y/n)"
 
@@ -101,14 +132,16 @@ end tell'
 
 Warn and continue if iTerm2 is unavailable.
 
-### Step 7 — Report
+### Step 9 — Report
 
 ```
 Slot <N> created: <branch-name>
   Repos: engine, iot
+  Queue: <issue-count> issues (<batch-count> batches)
   Workspace: work (shared) / work-iot (external)
   .m2: slots/<N>/.m2
-  Slot context: slots/<N>/.slot
+  .plan: slots/<N>/.plan
+  .slot: slots/<N>/.slot
   iTerm2: tab opened / skipped
 
 Open a CLI in <slot-dir>/<primary-repo> and run `work`.
@@ -128,185 +161,23 @@ Format output as a table:
 | Slot | Branch | Repos | State |
 |------|--------|-------|-------|
 | 1 | issue-42-spi | engine | active |
-| 2 | issue-55-ledger | engine, iot | ready to land |
-
----
-
-## `work-slot epic <owner/repo>#<N>`
-
-Create an epic slot — a single slot that iterates through an epic's
-child issues using batch planning. One slot, one branch, multiple
-sessions.
-
-### Step 0 — Guard: check for existing epic slot
-
-Scan active slots via `list_slots()` and check each .slot for
-`Type: epic` with the same epic issue number. If found, refuse:
-
-> "Slot N already tracks epic #M (branch: `<branch>`).
-> Run `work-slot merge` to land it first, or `work-slot status`
-> to see its progress."
-
-### Step 1 — Gather input
-
-Ask the user for:
-- **Epic:** the epic issue number and repo (e.g., `#50` on `casehubio/engine`)
-- **Repos:** which repos in the family to include
-- **Context:** background on the epic (constraints, goals)
-
-### Step 2 — Fetch child issues
-
-```bash
-gh issue view <N> --repo <owner/repo> --json body,title
-gh issue list --repo <owner/repo> --state open --limit 100
-```
-
-Parse the epic's Scope checklist (`- [ ] #N` entries) to find child
-issues. For each child, fetch title, labels, and body.
-
-### Step 3 — Estimate scale and complexity
-
-For each child issue, read its labels. If `scale:` or `complexity:`
-labels are missing, estimate from title + body using the Scale and
-Complexity Triage table (from issue-workflow). Propose labels, apply
-on user approval.
-
-### Step 4 — Batch planning
-
-Analyze children for batch grouping:
-- Same domain/subsystem → group together
-- Shared API surface (changes that should land together) → group
-- Scale fit (combine small issues, keep large ones solo or paired)
-- Dependency mentions ("depends on #N") → later batch
-
-Present a batch plan table:
-
-```
-┌────────┬──────────────┬─────────┬──────────────────────────────┐
-│ Batch  │    Issues    │  Scale  │         Why together         │
-├────────┼──────────────┼─────────┼──────────────────────────────┤
-│ 1      │ #108, #109   │ S+S     │ Vocabulary — no API change   │
-│ 2      │ #111, #112   │ M+M     │ Weighted profiles — the API  │
-│ 3      │ #116         │ M       │ Depends on #111              │
-└────────┴──────────────┴─────────┴──────────────────────────────┘
-```
-
-User approves or adjusts the batch plan. The batch plan is a one-shot
-LLM decision — re-running may produce different grouping. The approved
-plan is authoritative.
-
-### Step 5 — Write batch plan to GitHub epic
-
-Update the epic's `## Scope` section on GitHub with batch-grouped
-checklist.
-
-**Safeguards:**
-- Locate `## Scope` by heading match (case-insensitive). If not found,
-  warn and skip — .slot still has the plan.
-- Show a diff preview before writing. User confirms explicitly.
-- Preserve all content outside the Scope section.
-
-### Step 6 — Derive branch name
-
-`issue-<N>-<slug>` from the epic issue, same convention as work-start
-Step 5. Show to user, allow override.
-
-### Step 7 — Create the slot
-
-```bash
-python3 ~/.claude/skills/work-slot/slot_manager.py create-slot <family-root> \
-  repos=<csv> branch=<branch-name> issue=<N> issue-repo=<owner/repo> \
-  covers= context=<text>
-```
-
-Then overwrite .slot with the epic format:
-
-```bash
-python3 -c "
-import sys; sys.path.insert(0, '$HOME/.claude/skills/work-slot')
-from epic_manager import write_epic_slot_md
-from pathlib import Path
-import json
-# ... write_epic_slot_md with the approved batches
-"
-```
-
-Or call `write_epic_slot_md()` directly from the skill context.
-
-### Step 8 — Report
-
-```
-Epic slot <N> created: <branch-name>
-  Epic: <owner/repo>#<issue>
-  Batches: <count> (issues: <total>)
-  Repos: <list>
-  Starting: Batch 1 — <name> (#<first-issue>)
-
-Open a CLI in <slot-dir>/<primary-repo> and run `work`.
-```
+| 2 | issue-55-ledger | engine, iot | active |
 
 ---
 
 ## `work-slot next`
 
-Advance to the next issue in the epic. Run from inside an epic slot.
+Delegates to the unified `work next` command (see work/SKILL.md Step 5).
+The `.plan` file is the single source of truth — same behaviour in branch
+and slot mode.
 
-**Precondition:** .slot must contain `Type: epic`.
-
-### Step 1 — Run advance
-
-```bash
-python3 ~/.claude/skills/work-slot/epic_manager.py advance <slot-dir>/.slot
-```
-
-Parse the JSON output. The script atomically:
-1. Checks off the current issue in .slot
-2. Appends it to `COVERS` in `.meta`
-3. Moves the `← active` marker to the next issue
-4. Updates Session State
-
-### Step 2 — Announce result
-
-Based on the output flags:
-
-- If `batch_complete` and not `epic_complete`:
-  > "Batch N complete. Safe exit point — run Phase A (`work end` in
-  > the slot) to squash and prepare for merge, or continue to Batch N+1."
-  >
-  > "Next: #<issue> — <title> (Batch N+1)"
-
-- If `epic_complete`:
-  > "All batches complete. Epic #N is done. Run Phase A (`work end`
-  > in the slot) to squash, then `work-slot merge` from the main repo."
-
-- Otherwise:
-  > "Next: #<issue> — <title>"
-
-Set the active issue for commit linkage (`Refs #<next_issue>`).
-
-**Slot mode:** Commits stay local in the clone. No pushes to origin or
-GitHub until Phase A squashes and pushes the branch.
-
-### Step 3 — GitHub checkbox (non-fatal)
-
-Tick the completed issue's checkbox on the GitHub epic body:
-
-```bash
-python3 ~/.claude/skills/work-slot/epic_manager.py tick <epic-path> \
-  issue-repo=<epic-repo> epic=<epic-number> issues=<completed-issue>
-```
-
-Read `TICK=ok|failed` from output. This is progress signaling, not issue
-closure. Issues remain open until `work-end` closes them via COVERS.
-
-If tick fails (auth, network), warn and continue — `archive_slot()` has
-a catch-up mechanism that retries before archival.
+**Precondition:** `.plan` must exist at the slot root.
 
 ---
 
 ## `work-slot status`
 
-Show epic progress for the current or specified slot.
+Show queue progress for the current or specified slot.
 
 ### Usage
 
@@ -316,14 +187,13 @@ Show epic progress for the current or specified slot.
 ### Step 1 — Get status
 
 ```bash
-python3 ~/.claude/skills/work-slot/epic_manager.py status <slot-dir>/.slot
+python3 ~/.claude/skills/work-slot/plan_manager.py detect <slot-dir>/.plan
 ```
 
 ### Step 2 — Format output
 
 ```
-Epic #50 — Weighted Profiles
-Branch: issue-50-weighted-profiles (Slot 38)
+Queue — issue-50-weighted-profiles (Slot 38)
 
   Batch 1 — Vocabulary and docs (S+S+S+S) ✅
     #108 ✓  #109 ✓  #110 ✓  #114 ✓
@@ -341,15 +211,44 @@ Branch: issue-50-weighted-profiles (Slot 38)
 
 ### Step 3 — Divergence detection (optional)
 
-Cross-check .slot against the GitHub epic body. Report if:
+Cross-check `.plan` against the GitHub epic body. Report if:
 - Issues added to the epic on GitHub after batching
-- Issues closed on GitHub but not checked in .slot
+- Issues closed on GitHub but not checked in `.plan`
 
 ```
 ⚠️ Divergence detected:
   - #118 added to epic on GitHub — not in batch plan
-  Action: re-run `work-slot epic #N` after this slot completes.
+  Action: add to .plan via plan_manager.append_to_queue().
 ```
+
+---
+
+## `work-slot add-repo <repo-name>`
+
+Add a repository to an existing slot. Run from inside a slot.
+
+```bash
+python3 ~/.claude/skills/work-slot/slot_manager.py add-repo <slot-dir> repo=<repo-name>
+```
+
+Read output: `CLONED=yes`, `REPO_PATH=<path>`. If `ERROR=`, report and stop.
+
+The script clones the repo into the slot, sets up the isolated `.m2`,
+re-points `wksp`/`proj` symlinks, creates the feature branch, and
+updates `.slot` to include the new repo.
+
+---
+
+## `work-slot remove-repo <repo-name>`
+
+Remove a repository from an existing slot. Run from inside a slot.
+Cannot remove the primary repo.
+
+```bash
+python3 ~/.claude/skills/work-slot/slot_manager.py remove-repo <slot-dir> repo=<repo-name>
+```
+
+Read output: `REMOVED=yes`. If `ERROR=`, report and stop.
 
 ---
 
@@ -365,8 +264,8 @@ python3 ~/.claude/skills/work-slot/slot_manager.py remove-slot <family-root> slo
 ```
 
 **Default behaviour is archive to attic, not delete.** The slot directory
-moves to `slots/attic/<N>/` preserving .slot, `.phase-a-complete`,
-`.landed`, and any other metadata for auditing and branch hygiene.
+moves to `slots/attic/<N>/` preserving .slot, `.plan`, and any other
+metadata for auditing and branch hygiene.
 
 **Never pass `--force-delete`** unless the user explicitly says "permanently
 delete" or "destroy". Archived slots cost nothing and enable branch hygiene
@@ -374,125 +273,10 @@ scans, blog recovery, and stamp verification.
 
 ---
 
-## `work-slot merge`
-
-Merge ready-to-land slots from the main repo. Runs the full Phase B
-sequence: rebase, push, close issues, workspace-promote and project-promote artifacts, stamp, archive.
-
-### Step 1 — Find family root
-
-Walk up from CWD looking for a directory that is not itself a git repo
-and contains child directories with `wksp` symlinks. For each candidate,
-verify its child repos have `.git` directories (not files) — a `.git`
-file indicates a git worktree (different mechanism), not a family repo.
-
-If the walk-up fails, ask:
-> "Which directory is the family root? (e.g., ~/claude/casehub)"
-
-### Step 2 — Scan and present
-
-```bash
-python3 ~/.claude/skills/work-slot/slot_manager.py scan-ready <family-root>
-```
-
-Parse the JSON output. For each slot, fetch the issue title:
-```bash
-gh issue view <issue-number> --repo <issue-repo> --json title --jq '.title'
-```
-
-Present the rich listing:
-```
-Slots ready to merge:
-
-  [1] issue-42-spi
-      Repos: engine (3 commits, +142/-38)
-      Issue: casehubio/engine#42 — "Add expression SPI"
-      Context: Implement SPI for pluggable expression evaluation
-      Phase A completed: 2026-07-18 14:32
-
-Merge which slot? (number, or "all")
-```
-
-If no slots are ready: "No slots ready to merge." Stop.
-
-### Step 3 — Pre-check
-
-For every original repo across all selected slots, verify:
-1. Main checked out
-2. Clean working tree (`git -C <repo> status --short` is empty)
-3. No unpushed commits (`git -C <repo> log origin/main..main --oneline`
-   is empty)
-4. Fetch origin — warn if remote is ahead (non-blocking)
-
-If any check fails, stop and report which repo failed and why.
-
-### Step 4 — Merge each slot
-
-For each selected slot, in order:
-
-**4a. Rebase and push:**
-```bash
-python3 ~/.claude/skills/work-slot/slot_manager.py merge-slot <family-root> slot=<N>
-```
-
-Read output. If `ERROR=conflict`: stop, report which repo conflicted.
-If `ERROR=retry_exhausted`: stop, provide manual instructions.
-If `STAGE=push STATUS=pass`: continue to 4b.
-
-**4b. Post-merge actions** (skill handles these):
-- Close issues:
-  ```bash
-  python3 ~/.claude/skills/work-end/artifact_promote.py close-issues <issue-repo> covers=<covers>
-  ```
-- Promote artifacts from slot workspace to original workspace:
-  ```bash
-  python3 ~/.claude/skills/work-end/artifact_promote.py to-workspace-main <original-workspace> branch=<branch> artifacts=<paths>
-  ```
-- Publish blog:
-  ```bash
-  python3 ~/.claude/skills/work-end/blog_dest.py <original-workspace>/blog <branch>
-  ```
-
-**4c. Stamp branches** — handled programmatically by `merge_slot()`.
-`merge_slot()` writes stamp commits on all repo and workspace clones
-after confirming all pushes succeeded. Do NOT write stamps manually.
-
-**4d. Mark closed:**
-```bash
-python3 ~/.claude/skills/work-end/branch_cleanup.py create-epic-closed \
-  <slot>/<primary-workspace> branch=<branch> date=$(date +%Y-%m-%d) \
-  issues=<covers> single-repo=no
-```
-
-**4e. Archive:**
-```bash
-python3 ~/.claude/skills/work-slot/slot_manager.py archive-slot <family-root> slot=<N>
-```
-
-If archive fails: report error but do NOT roll back — code is on main.
-Report manual cleanup commands.
-
-### Step 5 — Report (mechanical)
-
-Render the close-out report from collected step results:
-
-```bash
-python3 ~/.claude/skills/work-end/close_report.py render /tmp/work-end-report.json
-```
-
-Record results into the report after each sub-step in Step 4 (rebase, merge,
-push, stamp, slot-archive) using `close_report.py record`. The
-script produces a deterministic, structured summary identical to work-end.
-
-If "all" was selected, repeat Step 4 for next slot. If any slot fails at
-4a, stop — report which slot failed and that prior slots landed.
-
----
-
 ## How slots work
 
 - **Self-contained.** Everything under `slots/<N>/` — repo clones,
-  workspace clone, isolated `.m2`, .slot context file.
+  workspace clone, isolated `.m2`, `.slot` context file, `.plan` queue.
 - **Isolated .m2.** Every slot gets its own Maven local repo via
   `.mvn/maven.config`. No cross-contamination with the originals.
 - **Symlinks re-pointed.** `wksp`/`proj` symlinks point to the slot's
@@ -505,15 +289,12 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 1. Human opens a CLI session in `slots/<N>/<primary-repo>`
 2. Runs work-start — detects existing scaffold, runs resume path
 3. Does the work (implementation, tests, etc.)
-4. Runs work-end — detects slot mode, runs Phase A (review, verify,
-   squash, push branch), stops before merge. Desktop notification.
-5. Human returns later, says "merge" — work-end Phase B runs (rebase,
-   push main, close issues, workspace-promote and project-promote artifacts, cleanup slot)
+4. Runs work-end — detects slot mode, runs the full close sequence
+   (review, promote, squash, push, merge to original, stamp, archive)
 
 ### What it doesn't do
 
 - Does not run work-start — the human runs `work` in the new session (scaffold.py writes `state: scaffolded`, auto-resolved on first `work` invocation)
-- Does not merge to main — work-end Phase B handles that
 - Does not coordinate between slots — the human sequences merges
 - **Does not delete slots** — all cleanup paths archive to
   `slots/attic/<N>/`. Deletion requires explicit `--force-delete`
@@ -525,25 +306,21 @@ If "all" was selected, repeat Step 4 for next slot. If any slot fails at
 ## Skill Chaining
 
 **Invoked by:** Human directly (`/work-slot`, "create a slot for...",
-"spin up a slot", "parallel work on...", "drive through the epic",
-"work-slot epic #N")
+"spin up a slot", "parallel work on...")
 
 **Invokes:** Nothing — creates the environment; the human starts work.
 
 **Complements:**
 - `work-start` — runs inside the slot after creation (resume path).
-  For epic slots, work-start detects `Type: epic` in .slot and
-  displays batch context on resume.
-- `work-end` — Phase A writes `.phase-a-complete`; work-slot merge reads
-  it and runs Phase B externally. After Phase A in a slot, work-end
-  offers to stamp/close/archive. Phase B from inside the slot still works.
-- `handover` — HANDOFF.md for session handoffs. For epic slots,
-  handover auto-includes an Epic Progress section from .slot.
+  For slots with a `.plan`, work-start displays queue context on resume.
+- `work-end` — runs the full close sequence inside the slot (review,
+  promote, squash, push, merge to original, stamp, archive). One command,
+  no separate merge step.
+- `handover` — HANDOFF.md for session handoffs. For slots with a `.plan`,
+  handover auto-includes a Queue Progress section.
 - `using-git-worktrees` — different git primitive (`git worktree add`
   vs `git clone --shared`), different use case (single-repo ephemeral
   isolation for subagent dispatch)
 - `issue-workflow` — activate-issues called during slot creation
-- `artifact_promote.py` / `blog_dest.py` / `branch_cleanup.py` — shared
-  scripts used by both work-end Phase B and work-slot merge
-- `epic_manager.py` — batch plan parsing, issue advancement, and
-  progress queries for epic slots
+- `plan_manager.py` — queue parsing, issue advancement, and progress
+  queries for `.plan` files

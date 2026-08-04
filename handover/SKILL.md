@@ -335,16 +335,18 @@ From the current session, recall:
 
 Do NOT read any project files to answer these. Work from conversation memory.
 
-**Epic context:** If `IS_EPIC=yes` from ctx.py output (detected via
-`$PROJECT/../.slot` in slots, or `workspace/design/.epic` in single-repo):
-- Read `## Session State` and `## Batch Plan` from the epic file
-  (`$EPIC_PATH` from ctx.py, or `$SLOT_PATH` from work_router)
-- Update `## Session State` with current position and today's date
-  as the last wrap timestamp
-- Include the `## Epic Progress` section in HANDOFF.md (see
+**Queue context:** If `HAS_PLAN=yes` from ctx.py output:
+- Read `.plan` at `$PLAN_PATH` for queue state and active issue
+- Update `.plan`'s `## Session State` with current position and today's
+  date as the last wrap timestamp
+- Include the `## Queue Progress` section in HANDOFF.md (see
   handover-reference.md template)
 - Update the `## What to do` section's `Current:` line to reflect
-  the current batch
+  the active issue
+
+**Legacy fallback:** If `HAS_PLAN=no` but `IS_EPIC=yes`, read the epic
+file at `$EPIC_PATH` for batch progress. This covers branches created
+before the `.plan` migration.
 
 ### Step 2b — Forage sweep (while context is still full)
 

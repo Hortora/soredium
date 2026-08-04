@@ -27,15 +27,15 @@ when resuming work. Contains the template, routing table, and git read patterns.
 <Always write this explicitly — it changes every session.>
 <Be specific: not "continue work" but "run X and update section Y".>
 
-## Epic Progress
+## Queue Progress
 
-<Include ONLY when IS_EPIC=yes (from ctx.py output).
- Omit entirely otherwise. Read from .epic or .slot depending on context.>
+<Include ONLY when HAS_PLAN=yes (from ctx.py output).
+ Omit entirely otherwise. Read from .plan at $PLAN_PATH.>
 
-Epic #<N> — Batch <current> of <total>
-Done: #<list of completed issues> (Batch 1, partial Batch 2)
+Queue — Position <current>/<total>
+Done: #<list of completed issues>
 Active: #<issue> — <title>
-Next: #<next-issue> → then Batch <N> (#<first-issue-in-next-batch>)
+Next: #<next-issue>
 
 ## Open Questions / Blockers
 
