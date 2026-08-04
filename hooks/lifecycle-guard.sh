@@ -10,9 +10,20 @@ CMD=$(cat | python3 -c "import json,sys; print(json.load(sys.stdin).get('tool_in
 
 # No .meta = no active lifecycle. Allow everything.
 # Check via wksp/ symlink (two-repo) or local design/.meta (single-repo).
+# When git -C <path> is used, check the TARGET repo, not CWD.
+TARGET_DIR="."
+TARGET_FROM_CMD=$(echo "$CMD" | grep -oE 'git\s+-C\s+\S+' | head -1 | sed 's/git\s*-C\s*//')
+if [ -n "$TARGET_FROM_CMD" ]; then
+  TARGET_DIR="$TARGET_FROM_CMD"
+fi
+
 HAS_META=no
-if [ -f "wksp/design/.meta" ] 2>/dev/null || [ -f "design/.meta" ] 2>/dev/null; then
+if [ -f "$TARGET_DIR/wksp/design/.meta" ] 2>/dev/null || [ -f "$TARGET_DIR/design/.meta" ] 2>/dev/null; then
   HAS_META=yes
+elif [ "$TARGET_DIR" = "." ]; then
+  if [ -f "wksp/design/.meta" ] 2>/dev/null || [ -f "design/.meta" ] 2>/dev/null; then
+    HAS_META=yes
+  fi
 fi
 if [ "$HAS_META" = "no" ]; then
   exit 0
