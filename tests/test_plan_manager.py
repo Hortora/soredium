@@ -492,6 +492,47 @@ class TestDetect:
         assert result["total_count"] == 5
 
 
+class TestDetectSlotMode:
+    def test_detect_finds_plan_in_slot_workspace(self, tmp_path):
+        """In slot mode, workspace is a clone inside the slot.
+        detect() should find design/.plan there just like branch mode."""
+        slot_dir = tmp_path / "slots" / "38"
+        slot_dir.mkdir(parents=True)
+        workspace_clone = slot_dir / "cc-praxis"
+        workspace_clone.mkdir()
+        design = workspace_clone / "design"
+        design.mkdir()
+        (design / ".plan").write_text(SINGLE_ISSUE_PLAN)
+        result = plan_manager.detect(workspace_clone)
+        assert result is not None
+        assert result["active_issue"] == 42
+
+    def test_advance_works_with_slot_paths(self, tmp_path):
+        """advance() should work with slot-mode paths for plan and meta."""
+        slot_dir = tmp_path / "slots" / "38"
+        slot_dir.mkdir(parents=True)
+        workspace_clone = slot_dir / "cc-praxis"
+        workspace_clone.mkdir()
+        design = workspace_clone / "design"
+        design.mkdir()
+        plan_file = design / ".plan"
+        plan_file.write_text(
+            "# Work Plan — test\n\n## Queue\n"
+            "- [ ] #42 — A ← active\n"
+            "- [ ] #43 — B\n\n"
+            "## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        )
+        meta = design / ".meta"
+        meta.write_text("branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
+        slot_project = slot_dir / "soredium"
+        slot_project.mkdir()
+        with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
+            result = plan_manager.advance(plan_file, meta, repo_path=str(slot_project))
+        assert result.completed == 42
+        assert result.next_issue == 43
+        mock_emit.assert_called_once_with(meta, str(slot_project), 42, 43)
+
+
 class TestReadMetaFields:
     def test_reads_branch_and_issue_repo(self, tmp_path):
         meta = tmp_path / ".meta"
@@ -632,3 +673,64 @@ class TestCompleteActiveIssue:
         with patch.object(plan_manager, '_emit_issue_events'):
             plan_manager.complete_active_issue(plan_file, meta, "/project")
         assert plan_file.read_text() == original_content
+
+
+class TestReconcileCovers:
+    def _setup(self, tmp_path, plan_content, meta_content):
+        design = tmp_path / "design"
+        design.mkdir(exist_ok=True)
+        plan_file = design / ".plan"
+        plan_file.write_text(plan_content)
+        meta = design / ".meta"
+        meta.write_text(meta_content)
+        return plan_file, meta
+
+    def test_reconciles_missing_completed_issue(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan,
+            "branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
+        reconciled = plan_manager.reconcile_covers(plan_file, meta)
+        assert reconciled == []
+
+    def test_reconciles_crash_leaves_issue_out_of_covers(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan,
+            "branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 183\n")
+        reconciled = plan_manager.reconcile_covers(plan_file, meta)
+        assert reconciled == [42]
+        covers = plan_manager._read_meta_covers(meta)
+        assert "42" in covers
+        assert "183" in covers
+
+    def test_reconciles_completed_epic_parent(self, tmp_path):
+        plan = ("# Work Plan — test\n\n## Queue\n"
+                "- [x] #50 — Epic (epic)\n"
+                "  - [x] #51 — Child A\n"
+                "  - [x] #52 — Child B\n"
+                "- [ ] #60 — Next ← active\n"
+                "\n## Session State\nCurrent: #60 — Next\nStarted: 2026-08-04\n")
+        plan_file, meta = self._setup(tmp_path, plan,
+            "branch: test\nissue: 50\nissue-repo: Org/repo\ncovers: 51\n")
+        reconciled = plan_manager.reconcile_covers(plan_file, meta)
+        assert 50 in reconciled
+        assert 52 in reconciled
+        covers = plan_manager._read_meta_covers(meta)
+        assert {"51", "50", "52"} <= covers
+
+    def test_no_reconciliation_needed(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan,
+            "branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
+        reconciled = plan_manager.reconcile_covers(plan_file, meta)
+        assert reconciled == []
+
+    def test_advance_triggers_reconciliation(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n- [ ] #44 — C\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan,
+            "branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 183\n")
+        with patch.object(plan_manager, '_emit_issue_events'):
+            result = plan_manager.advance(plan_file, meta)
+        covers = plan_manager._read_meta_covers(meta)
+        assert "42" in covers
+        assert "43" in covers
+        assert "183" in covers

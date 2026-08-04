@@ -323,6 +323,10 @@ class NoQueueFile(Exception):
 
 def advance(plan_path: Path, meta_path: Path,
             repo_path: str | None = None) -> AdvanceResult:
+    reconciled = reconcile_covers(plan_path, meta_path)
+    if reconciled:
+        print(f"RECONCILED={','.join(str(n) for n in reconciled)}")
+
     tree = parse_plan(plan_path)
     leaves = flatten_leaves(tree)
 
@@ -450,6 +454,36 @@ def _update_meta_covers(meta_path: Path, issue_number: int) -> None:
             line = f"covers: {','.join(nums)}"
         new_lines.append(line)
     meta_path.write_text("\n".join(new_lines) + "\n")
+
+
+def _collect_completed_issues(items: list[QueueItem]) -> list[int]:
+    result: list[int] = []
+    for item in items:
+        if item.completed:
+            result.append(item.issue_number)
+        if item.is_epic and item.children:
+            result.extend(_collect_completed_issues(item.children))
+    return result
+
+
+def _read_meta_covers(meta_path: Path) -> set[str]:
+    for line in meta_path.read_text().splitlines():
+        if line.startswith("covers:"):
+            raw = line.split(":", 1)[1].strip()
+            return {n.strip() for n in raw.split(",") if n.strip()}
+    return set()
+
+
+def reconcile_covers(plan_path: Path, meta_path: Path) -> list[int]:
+    """Scan [x] items in .plan against covers: in .meta. Append missing.
+    Returns list of issue numbers that were reconciled."""
+    tree = parse_plan(plan_path)
+    completed = _collect_completed_issues(tree.queue)
+    existing = _read_meta_covers(meta_path)
+    missing = [n for n in completed if str(n) not in existing]
+    for n in missing:
+        _update_meta_covers(meta_path, n)
+    return missing
 
 
 def append_to_queue(plan_path: Path, new_items: list[QueueItem]) -> None:

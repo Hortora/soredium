@@ -123,6 +123,21 @@ Run `python3 ~/.claude/skills/project/ctx.py` first. Use `CURRENT_BRANCH` from i
    only the most specific arm fires. The mid-queue confirmation requires typing
    `confirm-partial`, not just `y`.
 
+0c. **Issue-complete emission and covers reconciliation** — after the
+   queue gate confirms closing, reconcile covers and emit the final
+   `issue-complete` worklog event. If `HAS_PLAN=yes`:
+   ```python
+   from plan_manager import reconcile_covers, complete_active_issue
+   reconcile_covers(Path(PLAN_PATH), Path(META_PATH))
+   complete_active_issue(Path(PLAN_PATH), Path(META_PATH), PROJECT)
+   ```
+   `reconcile_covers` ensures all `[x]` items in `.plan` (including parent
+   epics that completed when their last child finished) are in `covers:`.
+   Without this, parent epic issues stay open on GitHub after work-end.
+   `complete_active_issue` emits the final `issue-complete` worklog event
+   so trellis sees the last active issue as ended.
+   If `.plan` doesn't exist, both calls are no-ops.
+
 1. **If `$WORKSPACE/design/.pause-stack` exists and has entries** — check whether
    the target branch is in the stack:
    - **Current branch is in the stack** (ending a paused branch without resuming it):
