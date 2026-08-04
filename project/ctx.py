@@ -198,6 +198,22 @@ if str(_epic_dir) not in sys.path:
     sys.path.insert(0, str(_epic_dir))
 from epic_manager import detect as _epic_detect
 from slot_manager import is_slot_path as _is_slot_path
+from plan_manager import detect as _plan_detect, flatten_leaves as _plan_flatten, parse_plan as _plan_parse
+
+_plan_info = _plan_detect(Path(workspace))
+if _plan_info is None and _is_slot_path(str(project)):
+    _plan_info = _plan_detect(Path(project))
+
+_has_plan = _plan_info is not None
+_plan_path = _plan_info["plan_path"] if _plan_info else ""
+_plan_active_issue = str(_plan_info["active_issue"]) if _plan_info and _plan_info["active_issue"] else ""
+_plan_position = ""
+_plan_batch = ""
+if _plan_info:
+    completed = _plan_info.get("completed_count", 0)
+    total = _plan_info.get("total_count", 0)
+    _plan_position = f"{completed}/{total}" if total else ""
+    _plan_batch = _plan_info.get("current_batch") or ""
 
 _epic_info = _epic_detect(Path(workspace))
 if _epic_info is None and _is_slot_path(str(project)):
@@ -279,5 +295,10 @@ print(f"EPIC_BATCH={_epic_batch}")
 print(f"EPIC_ACTIVE_ISSUE={_epic_active_issue}")
 print(f"FLYWAY_NEXT_V={flyway_next_v}")
 print(f"META_SECTION_HASHES={meta_section_hashes}")
+print(f"HAS_PLAN={'yes' if _has_plan else 'no'}")
+print(f"PLAN_PATH={_plan_path}")
+print(f"PLAN_ACTIVE_ISSUE={_plan_active_issue}")
+print(f"PLAN_POSITION={_plan_position}")
+print(f"PLAN_BATCH={_plan_batch}")
 print(f"META_STATE={_meta_state}")
 print(f"META_IS_TRANSIENT={_meta_is_transient}")
