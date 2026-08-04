@@ -807,3 +807,216 @@ class TestImagePromotion:
         result = scan_artifacts(ws)
         assert "blog/entry.md" in result["blog"]
         assert "blog/photo.png" in result["blog"]
+
+
+# ===========================================================================
+# Issue #181: stamp not committed, promote skips updated files
+# ===========================================================================
+
+class TestStampCommitReliability:
+    """Bug #181.1: .artifacts-promoted stamp must be committed atomically.
+
+    If to_workspace_main() fails to return to the branch (checkout fails
+    silently), write_stamp() writes the stamp on the wrong branch.
+    """
+
+    SCRIPT = Path(__file__).parent.parent / "work-end" / "close_artifacts.py"
+
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_stamp_committed_on_branch_not_main(self, tmp_path):
+        """After promotion, stamp must be a committed file on the branch,
+        not an untracked file on main or the wrong branch."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-test"],
+            capture_output=True, check=True,
+        )
+        (workspace / "blog").mkdir()
+        (workspace / "blog" / "entry.md").write_text("# Blog\n")
+        subprocess.run(["git", "-C", str(workspace), "add", "-A"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "add blog"],
+            capture_output=True, check=True,
+        )
+
+        (workspace / "CLAUDE.md").write_text(
+            "# Workspace\n\n## Routing\n\n"
+            "| Artifact | Destination | Notes |\n"
+            "|----------|-------------|-------|\n"
+            "| blog | workspace | |\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-42-test"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+
+        # Workspace must be back on the branch after close_artifacts completes
+        branch_result = subprocess.run(
+            ["git", "-C", str(workspace), "branch", "--show-current"],
+            capture_output=True, text=True,
+        )
+        assert branch_result.stdout.strip() == "issue-42-test", (
+            f"Workspace should be on issue-42-test but is on {branch_result.stdout.strip()}"
+        )
+
+        # Stamp must be committed (not untracked)
+        status = subprocess.run(
+            ["git", "-C", str(workspace), "status", "--short"],
+            capture_output=True, text=True,
+        )
+        assert ".artifacts-promoted" not in status.stdout, (
+            f"Stamp is untracked/modified — not committed:\n{status.stdout}"
+        )
+
+        # Stamp must exist in the git tree on this branch
+        cat_result = subprocess.run(
+            ["git", "-C", str(workspace), "cat-file", "-e", "HEAD:design/.artifacts-promoted"],
+            capture_output=True,
+        )
+        assert cat_result.returncode == 0, (
+            "Stamp not in git tree on branch HEAD"
+        )
+
+
+class TestPromoteUpdatedFiles:
+    """Bug #181.2: promote must overwrite files already on main, not skip them.
+
+    If a spec was manually recovered to workspace main and then the branch
+    edits it further, to_workspace_main() must overwrite the stale version
+    on main with the branch version.
+    """
+
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_overwrites_stale_spec_on_main(self, tmp_path):
+        """A spec exists on main (from prior recovery) and an updated version
+        exists on the branch. Promotion must use the branch version."""
+        ws = tmp_path / "workspace"
+        self._init_git(ws)
+
+        # Put a stale spec on main
+        (ws / "specs").mkdir()
+        (ws / "specs" / "design.md").write_text("# Spec v1 — stale\n")
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "recover spec"], capture_output=True)
+
+        # Create branch with updated spec
+        subprocess.run(
+            ["git", "-C", str(ws), "checkout", "-b", "issue-74-test"],
+            capture_output=True, check=True,
+        )
+        (ws / "specs" / "design.md").write_text("# Spec v2 — updated with 213 more lines\n" + "x\n" * 213)
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(ws), "commit", "-m", "update spec"],
+            capture_output=True, check=True,
+        )
+
+        script = Path(__file__).parent.parent / "work-end" / "artifact_promote.py"
+        result = subprocess.run(
+            [sys.executable, str(script),
+             "to-workspace-main", str(ws),
+             "branch=issue-74-test",
+             "artifacts=specs/design.md"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        assert "PROMOTED=1" in result.stdout, (
+            f"Expected PROMOTED=1 but got:\n{result.stdout}"
+        )
+
+        # Verify the promoted version is v2, not v1
+        subprocess.run(["git", "-C", str(ws), "checkout", "main"], capture_output=True)
+        content = (ws / "specs" / "design.md").read_text()
+        assert "v2" in content, (
+            f"Main has stale spec — promotion did not overwrite.\nContent: {content[:100]}"
+        )
+        assert "v1" not in content
+
+    def test_promote_reports_count_even_when_overwriting(self, tmp_path):
+        """When a file already exists on main with different content,
+        promote must still count it as promoted (not skip it)."""
+        ws = tmp_path / "workspace"
+        self._init_git(ws)
+
+        (ws / "blog").mkdir()
+        (ws / "blog" / "entry.md").write_text("# Entry v1\n")
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "old blog"], capture_output=True)
+
+        subprocess.run(
+            ["git", "-C", str(ws), "checkout", "-b", "issue-99-test"],
+            capture_output=True, check=True,
+        )
+        (ws / "blog" / "entry.md").write_text("# Entry v2 — updated\n")
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(ws), "commit", "-m", "update blog"],
+            capture_output=True, check=True,
+        )
+
+        script = Path(__file__).parent.parent / "work-end" / "artifact_promote.py"
+        result = subprocess.run(
+            [sys.executable, str(script),
+             "to-workspace-main", str(ws),
+             "branch=issue-99-test",
+             "artifacts=blog/entry.md"],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 0
+        assert "PROMOTED=1" in result.stdout, (
+            f"File was skipped instead of overwritten:\n{result.stdout}"
+        )
+
+    def test_promote_noop_when_content_identical(self, tmp_path):
+        """When file on main is identical to branch version (prior manual
+        recovery was up to date), promote should still succeed (count as
+        promoted) even though git sees nothing to commit."""
+        ws = tmp_path / "workspace"
+        self._init_git(ws)
+
+        (ws / "specs").mkdir()
+        (ws / "specs" / "design.md").write_text("# Identical content\n")
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "spec on main"], capture_output=True)
+
+        subprocess.run(
+            ["git", "-C", str(ws), "checkout", "-b", "issue-88-test"],
+            capture_output=True, check=True,
+        )
+        # Don't change the file — content is identical
+        subprocess.run(["git", "-C", str(ws), "commit", "--allow-empty", "-m", "branch work"], capture_output=True)
+
+        script = Path(__file__).parent.parent / "work-end" / "artifact_promote.py"
+        result = subprocess.run(
+            [sys.executable, str(script),
+             "to-workspace-main", str(ws),
+             "branch=issue-88-test",
+             "artifacts=specs/design.md"],
+            capture_output=True, text=True,
+        )
+
+        # Should succeed even though nothing to commit
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        assert "PROMOTED=1" in result.stdout
