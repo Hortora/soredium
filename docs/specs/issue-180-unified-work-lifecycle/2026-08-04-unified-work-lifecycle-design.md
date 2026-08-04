@@ -943,12 +943,19 @@ After existing cross-repo detection (unchanged), issue resolution proceeds as:
 
 - Step 1: accept free text as work description (existing behavior)
 - Step 4: skip issue-workflow Phase 2. `.meta` `issue:` and `issue-repo:` start empty.
-- Step 9: scaffold writes `.meta` with empty `issue:`
+- Step 9: scaffold writes `.meta` with empty `issue:` and empty `covers:`.
+  **Worklog:** scaffold.py skips `record_work_start()` when `issue` is empty. The
+  worklog entry is deferred until the first issue is created — no ghost
+  `issue_number=0` record.
 - `.plan` created with empty queue
 - During brainstorming (Step 12), issues are created via issue-workflow Phase 2 and
   appended to `.plan`. First issue created becomes the primary — `.meta` `issue:` and
-  `issue-repo:` are set. If the first issue is in a different repo than the project,
-  `issue-repo:` reflects that (cross-repo tracking).
+  `issue-repo:` are set, AND the issue is added to `covers:` immediately. This
+  ensures a single-issue free text branch can close without needing `work-next`.
+  **Worklog:** `record_work_start()` is called now (with the real issue number),
+  followed by `record_issue_activate()`.
+- If the first issue is in a different repo than the project, `issue-repo:` reflects
+  that (cross-repo tracking). `covers:` uses the qualified format per §3.2.
 
 ### 10.3 Changes to Step 9 (Scaffold)
 
