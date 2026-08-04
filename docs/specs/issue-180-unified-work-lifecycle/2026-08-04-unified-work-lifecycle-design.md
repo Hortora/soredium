@@ -465,8 +465,7 @@ automatically when all their children complete.
 1. Find the validated `← active` item
 2. Mark it `[x]`, append its issue number to `covers:` in `.meta` (with
    repo-qualified deduplication per §3.2)
-3. Record `issue-complete` in worklog.db
-4. Find the next leaf:
+3. Find the next leaf:
    - If the completed item has a next sibling → that's next
    - If no next sibling and parent is an epic → check if all children done;
      if so, mark parent `[x]` and append the parent epic's issue number to
@@ -475,11 +474,12 @@ automatically when all their children complete.
      exhaust the queue.
    - When landing on an epic (not a leaf) → descend to its first child
      (recursively, for nested epics)
-5. Mark the new item `← active`
-6. Record `issue-activate` in worklog.db
-7. Update `.plan` `## Session State` (current issue, queue position)
-8. Write `.plan` atomically (tmp-file + rename, matching `lifecycle.py:write_state()`)
-9. Write `.meta` `covers:` atomically (tmp-file + rename)
+4. Mark the new item `← active`
+5. Update `.plan` `## Session State` (current issue, queue position)
+6. Write `.plan` atomically (tmp-file + rename, matching `lifecycle.py:write_state()`)
+7. Write `.meta` `covers:` atomically (tmp-file + rename)
+8. Record `issue-complete` in worklog.db (for the completed issue)
+9. Record `issue-activate` in worklog.db (for the next issue)
 10. Return result dict: `{completed, next_issue, batch_complete, epic_complete, safe_exit}`
 
 **Caller responsibilities** (not part of `advance_issue` effect):
@@ -551,19 +551,28 @@ This ensures each individual file write is atomic — no partial file content.
 
 **Crash scenarios:**
 
-| Crash point | `.plan` state | `.meta` state | Recovery |
-|-------------|--------------|--------------|----------|
-| Before `.plan` write | Old (active on current) | Old | No damage. `work-next` retries normally. |
-| After `.plan`, before `.meta` | New (current `[x]`, next `← active`; parent epics may also be `[x]`) | Old (missing current AND any auto-completed parents from `covers:`) | On next `work-next`, step 0 validation sees `← active` on an uncompleted item — proceeds normally. The completed issue AND any auto-completed parent epics are NOT in `covers:`. **Fix:** `work-next` step 0 scans for ALL `[x]` items (leaf AND non-leaf) not in `covers:` and appends them. |
-| After both writes | New | New | Clean. No recovery needed. |
+| Crash point | `.plan` state | `.meta` state | worklog.db state | Recovery |
+|-------------|--------------|--------------|-----------------|----------|
+| Before `.plan` write | Old (active on current) | Old | Old | No damage. `work-next` retries normally. |
+| After `.plan`, before `.meta` | New (current `[x]`, next `← active`; parent epics may also be `[x]`) | Old (missing current AND any auto-completed parents from `covers:`) | Old | On next `work-next`, step 0 validation sees `← active` on an uncompleted item — proceeds normally. The completed issue AND any auto-completed parent epics are NOT in `covers:`. **Fix:** `work-next` step 0 scans for ALL `[x]` items (leaf AND non-leaf) not in `covers:` and appends them. |
+| After `.meta`, before worklog | New | New | Old (missing `issue-complete` and `issue-activate`) | Files are consistent. Worklog is behind — it has not recorded the transition. On next `work-next`, the worklog catches up: step 8 records `issue-complete` for the previously completed issue, step 9 records `issue-activate` for the current issue. This is acceptable because worklog is observability, not a gate (§6.2). Trellis may show stale active issue until the next `work-next` or until `.plan` is re-scanned. |
+| After all writes | New | New | New | Clean. No recovery needed. |
 
 **The reconciliation rule:** Before advancing, `work-next` checks ALL `[x]` items
 in `.plan` — both leaf issues and parent epics — against `covers:` in `.meta`.
 Any `[x]` item not in `covers:` is appended. This covers the case where a child
-completion triggers parent epic auto-completion (§4.2 step 4) and a crash occurs
+completion triggers parent epic auto-completion (§4.2 step 3) and a crash occurs
 before `.meta` is written — both the child and the parent epic are recovered.
 This makes the post-`.plan`-pre-`.meta` crash window self-healing on the next
 invocation.
+
+**Write ordering rationale:** Worklog recording (steps 8-9) is placed AFTER file
+writes (steps 6-7) deliberately. This ensures worklog is always behind-or-equal
+to the authoritative file state, never ahead. A crash between file writes and
+worklog means files reflect the truth and worklog catches up on the next
+invocation. The alternative — worklog before files — would create a window where
+worklog says issue #43 is active but `.plan` still shows #42, confusing any
+observer that reads both sources (§16).
 
 ---
 
@@ -797,14 +806,11 @@ They add `.plan`-aware checks to the existing infrastructure.
 - Branch alignment: workspace and project on matching branches — existing
   `validate_state()` check
 - `.plan` status check (skill-layer, not `validate_state()`) — if uncompleted
-  items remain, the skill prompts the user BEFORE calling `transition('work_end')`.
-  User options:
-  - **Continue working**: skill does not fire the transition, branch stays `active`.
-    No abort transition needed — the close sequence never started.
-  - **Close at safe exit** (batch boundary): skill fires transition, close proceeds.
-  - **Close mid-batch** (`confirm-partial`): skill fires transition, close proceeds.
-  This check is a skill-layer concern because it requires interactive prompting.
-  `validate_state()` handles mechanical hygiene only (untracked files, branch mismatch).
+  items remain, the skill presents the unified close prompt (§9.2) BEFORE
+  calling `transition('work_end')`. This is a skill-layer concern because it
+  requires interactive prompting. `validate_state()` handles mechanical hygiene
+  only (untracked files, branch mismatch). If the user chooses [C] (continue
+  working), the transition never fires — no abort transition needed.
 - All files saved in IDE (if IntelliJ MCP available)
 
 ### 8.2 Post-Review Invariants (before `closing:verified → closing:promoted`)
@@ -877,23 +883,35 @@ Safety gates are enforced at three layers:
 All items in `.plan` are `[x]`. `covers:` in `.meta` has all issue numbers. `work-end`
 closes everything in `covers:`.
 
-### 9.2 Incomplete Queue
+### 9.2 Incomplete Queue — Unified Close Prompt
 
 Uncompleted items remain in `.plan`. They are NOT in `covers:` and don't get closed
-— unless the user explicitly adds them at close time (see below).
+— unless the user explicitly adds them at close time.
 
-At close time, the skill-layer prompt (§8.1) surfaces uncompleted items with options:
+When `work-end` is invoked and uncompleted items remain, the skill layer presents
+a single unified close prompt BEFORE firing the `work_end` transition (§8.1).
+This prompt combines the gate question ("should we close?") with the content
+question ("what about remaining issues?") into one interaction:
 
-- **[C] Continue working** — don't close yet, branch stays `active`
-- **[A] Add all remaining to covers** — append all uncompleted issue numbers to
-  `covers:`, then close. Prevents silent issue loss when the user worked organically
-  on multiple issues without calling `work-next`.
-- **[S] Select** — let the user pick which uncompleted items to add to `covers:`
-- **[X] Close without them** — uncompleted items stay open on GitHub
+- **[C] Continue working** — don't close yet, branch stays `active`. The
+  `work_end` transition never fires — no abort transition needed.
+- **[A] Add all remaining to covers and close** — append all uncompleted issue
+  numbers to `covers:`, then fire `work_end` transition and proceed with close
+  sequence. Prevents silent issue loss when the user worked organically on
+  multiple issues without calling `work-next`.
+- **[S] Select which to add, then close** — let the user pick which uncompleted
+  items to add to `covers:`, then fire `work_end` transition.
+- **[X] Close without them** — uncompleted items stay open on GitHub. Fire
+  `work_end` transition and proceed.
 
-If the queue has batch structure, additional context is shown (batch boundary
-= safe exit, mid-batch = requires confirmation). Uncompleted items are always
-reported in the work-end summary and handover, regardless of the user's choice.
+**Batch context:** If the queue has batch structure, the prompt includes batch
+position context. At a batch boundary (safe exit point per §4.4), [X] is the
+natural choice and needs no extra confirmation. Mid-batch, [A] and [X] include
+a warning: "You're mid-batch (N/M in current batch). Are you sure?" with a
+confirmation step before proceeding.
+
+Uncompleted items are always reported in the work-end summary and handover,
+regardless of the user's choice.
 
 ### 9.2.1 Slot Re-Entry After Safe Exit
 
@@ -917,8 +935,28 @@ complete close-and-archive.
 ### 9.3 Issue Closure
 
 `covers:` is the authoritative list. Only issues in `covers:` get closed at `work-end`.
-This is unchanged from today — `covers:` just grows incrementally via `work-next`
-rather than being set all-at-once at branch creation.
+
+**Changed from today:** The `covers:` format now includes repo-qualified entries
+(`repo#N` for cross-repo issues, bare `N` for same-repo — see §3.2). The closure
+mechanism must be updated to parse this format:
+
+1. **`close_issues()` in `artifact_promote.py`:** Currently splits `covers:` on
+   commas and passes each token as a bare issue number to
+   `gh issue close <token> --repo <single_issue_repo>`. Must be updated to:
+   - Parse each token: if it contains `#`, split into `(repo, number)` and call
+     `gh issue close <number> --repo <repo>`
+   - If bare number (no `#`), call `gh issue close <number> --repo <issue_repo>`
+     (same as today — `issue_repo` from `.meta`)
+
+2. **`_update_meta_covers()` in `epic_manager.py` (or its replacement in
+   `plan_manager`):** Currently stores bare `str(issue_number)`. Must be updated
+   to write repo-qualified format: `repo#N` when the issue's repo differs from
+   the primary `issue-repo:` in `.meta`, bare `N` otherwise. Deduplication uses
+   `(number, repo)` tuples — `42` and `engine#42` are distinct entries when
+   `issue-repo:` is not `engine`.
+
+The `covers:` field grows incrementally via `work-next` (§4.2 step 2) rather
+than being set all-at-once at branch creation.
 
 ### 9.4 Scaffold Cleanup and EPIC-CLOSED.md
 
@@ -1223,7 +1261,32 @@ update to `scanEpicFile()`. The `.plan` format (`## Queue` with indentation-base
 nesting, `← active` markers) is structurally different from `.epic` (`Current batch:`,
 flat checkbox lines).
 
-### 16.3 Trellis Data Model
+### 16.3 Dual-Source Conflict Resolution
+
+When Trellis has access to both sources (same-machine session with filesystem
+access), `.plan` is authoritative for the active issue. worklog.db is
+authoritative for cross-session queries where `.plan` is not accessible (the
+file is on a branch that may not be checked out).
+
+**Conflict window:** Because worklog recording follows file writes (§4.2
+steps 8-9 after steps 6-7), a crash between `.meta` write and worklog write
+creates a window where `.plan`'s `← active` marker shows the new active issue
+but worklog.db's latest `issue-activate` event still refers to the previous
+issue. This disagreement is temporary and self-healing on the next `work-next`
+invocation.
+
+**Trellis behavior when sources disagree:**
+- If `.plan` is readable and its `← active` marker names a different issue
+  than worklog.db's latest `issue-activate`: use `.plan`'s value. Display a
+  staleness indicator on the worklog-sourced value.
+- If `.plan` is not readable (branch not checked out, slot archived):
+  fall back to worklog.db — the last-known value.
+
+This policy prevents implementors from making ad-hoc choices about which source
+to trust. The asymmetry is deliberate: `.plan` is always at least as current as
+worklog.db (never behind), so it is the safer source when available.
+
+### 16.4 Trellis Data Model
 
 New records added to `WorkspaceModel`:
 
