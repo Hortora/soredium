@@ -554,7 +554,7 @@ This ensures each individual file write is atomic — no partial file content.
 | Crash point | `.plan` state | `.meta` state | Recovery |
 |-------------|--------------|--------------|----------|
 | Before `.plan` write | Old (active on current) | Old | No damage. `work-next` retries normally. |
-| After `.plan`, before `.meta` | New (current `[x]`, next `← active`) | Old (missing current in `covers:`) | On next `work-next`, step 0 validation sees `← active` on an uncompleted item — proceeds normally. The completed issue is NOT in `covers:`. **Fix:** `work-next` step 0 scans for `[x]` items not in `covers:` and appends them. |
+| After `.plan`, before `.meta` | New (current `[x]`, next `← active`; parent epics may also be `[x]`) | Old (missing current AND any auto-completed parents from `covers:`) | On next `work-next`, step 0 validation sees `← active` on an uncompleted item — proceeds normally. The completed issue AND any auto-completed parent epics are NOT in `covers:`. **Fix:** `work-next` step 0 scans for ALL `[x]` items (leaf AND non-leaf) not in `covers:` and appends them. |
 | After both writes | New | New | Clean. No recovery needed. |
 
 **The reconciliation rule:** Before advancing, `work-next` checks all `[x]` leaf
@@ -577,9 +577,9 @@ next invocation.
 
 | # | Before | After |
 |---|--------|-------|
-| T1 | `(idle, work) → scaffolded` effects: `[create_branch, write_meta, write_plan]` | effects: `[create_branch, write_meta, write_plan]` |
+| T1 | `(idle, work) → scaffolded` effects: `[create_branch, write_meta]` | effects: `[create_branch, write_meta, write_plan]` |
 | T2 | `(idle, work_epic) → scaffolded` effects: `[create_branch, write_meta, write_epic]` | **Removed** |
-| T3 | `(idle, slot_create) → scaffolded` effects: `[create_slot, write_meta, write_plan]` | effects: `[create_slot, write_meta, write_plan]` |
+| T3 | `(idle, slot_create) → scaffolded` effects: `[create_slot, write_meta]` | effects: `[create_slot, write_meta, write_plan]` |
 | T4 | `(idle, slot_epic) → scaffolded` effects: `[create_slot, write_meta, write_slot_epic]` | **Removed** |
 | T6 | `(active, work_next) → transitioning` effects: `[advance_issue, update_meta, tick_github]` | Same, but `advance_issue` reads `.plan` instead of `.epic` |
 | Tcleanup | `(closing:stamped, cleanup_pass) → idle` effects: `[write_epic_closed]` | effects: `[write_plan_closed]` — removes `design/.plan` during scaffold cleanup alongside `.meta` and `JOURNAL.md` |
@@ -1336,6 +1336,12 @@ the first occurrence wins — the duplicate is skipped at its later position.
 The warning says "Duplicate," not "Cycle," because the latter is misleading
 for the common case of overlapping input.
 
+### 18.3 Duplicate Epic Guard
+
+Before building the queue, scan active slots and branches for epics already being
+tracked. Refuse if the same epic is already in progress (same as today's
+`work-slot epic` Step 0).
+
 ### 18.4 Depth and API Limits
 
 | Limit | Value | Rationale |
@@ -1353,12 +1359,6 @@ for the common case of overlapping input.
 | HTTP 404 / access denied | Treat as leaf with warning: "Issue #{N} not found or inaccessible — treating as leaf." |
 | Malformed body (no `## Scope`) | Leaf issue — this is the normal non-epic case, not an error. |
 | API budget exceeded | Stop recursion. Remaining issues treated as leaves with warning. |
-
-### 18.3 Duplicate Epic Guard
-
-Before building the queue, scan active slots and branches for epics already being
-tracked. Refuse if the same epic is already in progress (same as today's
-`work-slot epic` Step 0).
 
 ---
 
