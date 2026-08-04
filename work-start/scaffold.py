@@ -86,6 +86,8 @@ def main() -> int:
     branch = params["branch"]
     today = params.get("date", date.today().isoformat())
 
+    has_plan = params.get("plan", "") == "yes"
+
     meta_lines = [
         f"branch: {branch}",
         f"state: scaffolded",
@@ -98,16 +100,34 @@ def main() -> int:
         f"design-repo: {params.get('design-repo', 'project')}",
         f"design-section-hashes: {params.get('design-section-hashes', '')}",
     ]
+    if has_plan:
+        meta_lines.append("plan: yes")
 
     try:
         meta_path.write_text("\n".join(meta_lines) + "\n")
         journal_path.write_text(f"# Design Journal — {branch}\n")
+
+        if has_plan:
+            plan_path = design_dir / ".plan"
+            plan_content = params.get("plan-content", "")
+            if plan_content:
+                plan_path.write_text(plan_content)
+            elif not plan_path.exists():
+                plan_path.write_text(
+                    f"# Work Plan — {branch}\n\n"
+                    f"## Queue\n"
+                    f"(empty — issues created during design)\n\n"
+                    f"## Session State\n"
+                    f"Started: {today}\n"
+                )
     except OSError as e:
         print(f"ERROR=Failed to write scaffold: {e}", file=sys.stderr)
         return 1
 
     print(f"META_PATH={meta_path}")
     print(f"JOURNAL_PATH={journal_path}")
+    if has_plan:
+        print(f"PLAN_PATH={design_dir / '.plan'}")
     print("CREATED=yes")
 
     if _wl:
