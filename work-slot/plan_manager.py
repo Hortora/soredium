@@ -63,66 +63,6 @@ _STARTED_RE = re.compile(r'^Started:\s*(.+)')
 _LAST_WRAP_RE = re.compile(r'^Last wrap:\s*(.+)')
 
 
-def parse_plan(plan_path: Path) -> PlanTree:
-    content = plan_path.read_text()
-    lines = content.splitlines()
-
-    heading = ""
-    queue: list[QueueItem] = []
-    current_issue = None
-    started = ""
-    last_wrap = None
-    in_queue = False
-    in_session = False
-
-    for line in lines:
-        if line.startswith("# Work Plan"):
-            heading = line[2:].strip()
-            continue
-        if line.strip() == "## Queue":
-            in_queue = True
-            in_session = False
-            continue
-        if line.strip() == "## Session State":
-            in_queue = False
-            in_session = True
-            continue
-        if line.startswith("## ") and line.strip() != "## Queue" and line.strip() != "## Session State":
-            in_queue = False
-            in_session = False
-            continue
-
-        if in_session:
-            m = _CURRENT_RE.match(line.strip())
-            if m:
-                current_issue = int(m.group(1))
-            m = _STARTED_RE.match(line.strip())
-            if m:
-                started = m.group(1).strip()
-            m = _LAST_WRAP_RE.match(line.strip())
-            if m:
-                last_wrap = m.group(1).strip()
-
-        if in_queue:
-            _parse_queue_line(line, queue, 0)
-
-    return PlanTree(heading=heading, queue=queue, current_issue=current_issue,
-                    started=started, last_wrap=last_wrap)
-
-
-def _parse_queue_line(line: str, items: list[QueueItem], base_indent: int) -> None:
-    pass
-
-
-def _build_item_tree(lines: list[str]) -> list[QueueItem]:
-    """Parse indented queue lines into a tree of QueueItems."""
-    result: list[QueueItem] = []
-    i = 0
-    while i < len(lines):
-        i = _parse_item_at(lines, i, result, 0)
-    return result
-
-
 def _indent_level(line: str) -> int:
     return len(line) - len(line.lstrip())
 

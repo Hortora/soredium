@@ -335,16 +335,18 @@ From the current session, recall:
 
 Do NOT read any project files to answer these. Work from conversation memory.
 
-**Epic context:** If `IS_EPIC=yes` from ctx.py output (detected via
-`$PROJECT/../.slot` in slots, or `workspace/design/.epic` in single-repo):
-- Read `## Session State` and `## Batch Plan` from the epic file
-  (`$EPIC_PATH` from ctx.py, or `$SLOT_PATH` from work_router)
-- Update `## Session State` with current position and today's date
-  as the last wrap timestamp
-- Include the `## Epic Progress` section in HANDOFF.md (see
+**Queue context:** If `HAS_PLAN=yes` from ctx.py output:
+- Read `.plan` at `$PLAN_PATH` for queue state and active issue
+- Update `.plan`'s `## Session State` with current position and today's
+  date as the last wrap timestamp
+- Include the `## Queue Progress` section in HANDOFF.md (see
   handover-reference.md template)
 - Update the `## What to do` section's `Current:` line to reflect
-  the current batch
+  the active issue
+
+**Legacy fallback:** If `HAS_PLAN=no` but `IS_EPIC=yes`, read the epic
+file at `$EPIC_PATH` for batch progress. This covers branches created
+before the `.plan` migration.
 
 ### Step 2b — Forage sweep (while context is still full)
 
@@ -498,9 +500,29 @@ Options:
 
 Wait for a decision on each. Apply all decisions before continuing.
 
-**If nothing is flagged** → proceed silently to Step 5b.
+**If nothing is flagged** → proceed silently to Step 5b (issue repo cross-check).
 
-### Step 5b — Suggest and offer to rename the session
+### Step 5b — Issue repo cross-check (always runs)
+
+Before committing, validate that every `#N` issue reference in the draft belongs to this project's repo — not a different repo the session happened to touch.
+
+**If `OWNER_REPO` is empty:** skip silently.
+
+**Otherwise:** scan the draft's What's Left and What's Next sections for `#N` patterns. Deduplicate.
+
+For each `#N` found, verify it exists in the project repo:
+```bash
+gh issue view <N> --repo <OWNER_REPO> --json title --jq '.title' 2>/dev/null
+```
+
+If the issue does not exist in `OWNER_REPO` (command fails or returns nothing), it belongs to a different repo. Remove it from the draft before proceeding — no prompt needed. If the removal empties the What's Next table entirely, replace it with `See \`<OWNER_REPO>\` open issues.`
+
+Log which issues were removed and why:
+> "Removed #N, #M from What's Next — not found in `<OWNER_REPO>` (likely from a cross-repo session)."
+
+**Why this exists:** cross-repo triage sessions recall issues from the repo they were triaging, not the project repo they're writing the handover for. The resume path (Step R3) catches stale issues but only checks state (open/closed) — it doesn't catch wrong-repo issues because it also uses `OWNER_REPO`. This step catches them at write time.
+
+### Step 5c — Suggest and offer to rename the session
 
 **Only prompt if the session has an auto-generated name.** Auto-generated names
 follow a random three-word pattern (e.g. `gleaming-stargazing-newell`,
@@ -637,6 +659,7 @@ flowchart TD
 | Skipping the freshness check | Old handover misleads the next session | `git log -1 --format="%ar" -- HANDOFF.md` before using |
 | Writing "continue work" as next step | Too vague to act on | Be specific — name the file, command, or section |
 | Scanning CLAUDE.md for workspace path when resuming | Multiple CLAUDE.mds are loaded; parent's `**Workspace:**` is found first and points to the wrong repo | Use `git rev-parse --show-toplevel` from CWD — that is always the workspace |
+| Writing cross-repo issue references into What's Next | Triage sessions recall issues from the repo they triaged, not the project repo | Step 5b validates every `#N` against `OWNER_REPO` before committing |
 
 ---
 
@@ -659,6 +682,7 @@ Handover is complete when:
 - ✅ Cross-Module section present only for active blockers with tracked issues; omitted if none or if items are just static dependencies
 - ✅ What's Left items carry Scale · Complexity tags
 - ✅ What's Next table carries Scale / Complexity / Notes columns
+- ✅ Issue repo cross-check passed — all `#N` references verified against `OWNER_REPO`
 - ✅ References table uses paths only — no file content inline
 - ✅ Nothing from CLAUDE.md is duplicated
 - ✅ arc42 stale scan performed (if ARC42STORIES.MD exists) — stale statuses, resolved blockers, and closed-issue forward refs checked and fixed

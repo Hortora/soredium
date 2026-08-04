@@ -1,12 +1,12 @@
 ---
 name: work
 description: >
-  Use when the user says "work", "work end", "work pause", or "work resume" —
-  detects current branch state and routes to the correct work lifecycle skill
-  automatically. "work" alone starts new work or shows the pause stack.
-  "work end" closes the branch. "work pause" saves state. "work resume" shows
-  the stack and returns to a paused branch. Replaces needing to know which
-  lifecycle skill to invoke.
+  Use when the user says "work", "work end", "work pause", "work resume",
+  or "work next" — detects current branch state and routes to the correct
+  work lifecycle skill automatically. "work" alone starts new work or
+  shows the pause stack. "work end" closes the branch. "work pause" saves
+  state. "work resume" shows the stack and returns to a paused branch.
+  "work next" advances to the next issue in the .plan queue.
 ---
 
 # work
@@ -25,8 +25,7 @@ correct skill — developer says `work` to begin, `work-end` to close,
 |------------|---------|
 | `work end` | → **work-end** immediately (no router needed) |
 | `work pause` | → **work-pause** immediately (no router needed) |
-| `work epic #N` | → epic setup (Step 5) |
-| `work next` | → advance epic issue (Step 6) |
+| `work next` | → advance to next issue in `.plan` queue (Step 5) |
 | `work` / `work start` / `work resume` / `resume handover` / `resume` / `continue` | → run the router (Step 1b) |
 
 For `work end` and `work pause`, route immediately — no state
@@ -94,7 +93,7 @@ If stack depth > 3, prefix with: `⚠️  Stack has <N> paused branches — cons
 **Step 4 — On feature branch: contextual options**
 
 Present options based on the router output. The router has already
-determined slot context, epic state, pause stack depth, and handoff
+determined slot context, queue state, pause stack depth, and handoff
 existence — do NOT re-derive these.
 
 If `HAS_HANDOFF=yes`:
@@ -106,14 +105,14 @@ If `HAS_HANDOFF=no`:
 If `STACK_DEPTH > 0`:
 > 2. **switch** — you have <N> paused branch(es) — resume one instead
 
-If `IS_EPIC=yes`:
-> N. **next** — mark current child issue done, advance to next
+If `HAS_PLAN=yes`:
+> N. **next** — mark current issue done, advance to next in `.plan` queue
 
 Always present:
 > N+1. **end** — close this branch, merge, push, return to main
 
-If `IS_EPIC=yes` and not all batches complete, annotate the end option:
-> N+1. **end** — ⚠️ epic Batch N of M — close this branch, merge, push, return to main
+If `HAS_PLAN=yes` and queue has remaining items, annotate the end option:
+> N+1. **end** — ⚠️ queue has N remaining issues — close this branch, merge, push, return to main
 
 > N+2. **pause** — commit WIP, push to stack, switch to main
 > N+3. **wrap** — end session but keep branch open (write handover)
@@ -121,15 +120,15 @@ If `IS_EPIC=yes` and not all batches complete, annotate the end option:
 **On resume (option 1 when `HAS_HANDOFF=yes`):**
 
 Read `$HANDOFF_PATH`.
-If `IS_EPIC=yes`: read the epic file at `$EPIC_PATH` (single-repo) or
-`$SLOT_PATH` (slot) for batch progress and active issue. Display:
+If `HAS_PLAN=yes`: read `.plan` at `$PLAN_PATH` for queue progress and
+active issue. Display:
 ```
-Epic — Batch $EPIC_BATCH
-Active issue: #$EPIC_ACTIVE_ISSUE
+Queue — Position $PLAN_POSITION
+Active issue: #$PLAN_ACTIVE_ISSUE
 ```
-Set active issue for commit linkage (`Refs #$EPIC_ACTIVE_ISSUE`).
+Set active issue for commit linkage (`Refs #$PLAN_ACTIVE_ISSUE`).
 
-If `IN_SLOT=yes` but `IS_EPIC=no`: read .slot for issue context.
+If `IN_SLOT=yes` and `HAS_PLAN=no`: read .slot for issue context.
 
 **Load design specs (mandatory):** Run work-start Step 3c — scan workspace
 and project for specs, read them all. These are the design decisions for
@@ -142,7 +141,7 @@ Do NOT invoke work-start — the branch and scaffold already exist.
 
 No handover to read. Run work-start resume path (Steps 0, 2, 3, 3b, 3c, 11)
 for platform coherence, protocols, spec loading, and IntelliJ pre-checks.
-If `IS_EPIC=yes` or `IN_SLOT=yes`: read epic/slot context as above.
+If `HAS_PLAN=yes` or `IN_SLOT=yes`: read .plan/slot context as above.
 Then begin working — the branch and scaffold already exist.
 
 **On switch (option 2):**
@@ -152,61 +151,29 @@ Route to **work-pause** (saves current branch), then **work-resume**
 **On end/pause/wrap:**
 Route to work-end, work-pause, or handover respectively.
 
-**Step 5 — `work epic #N` (epic setup)**
+**Step 5 — `work next` (advance to next issue in `.plan` queue)**
 
-Sets up single-repo epic iteration. Must be on main.
+Advances to the next issue in the `.plan` queue. Works identically in
+branch and slot mode — the `.plan` file is the single source of truth.
 
-1. Resolve paths via `ctx.py`. Use `$OWNER_REPO` for the repo.
-2. Fetch the epic issue: `gh issue view <N> --repo $OWNER_REPO --json title,body`
-3. Parse child issues from `## Scope` checklist (`- [ ] #N` entries).
-   For each child, check state via `gh issue view <child> --repo $OWNER_REPO
-   --json state` — skip CLOSED children (handles mid-epic resume after
-   prior work-end).
-4. Fetch title/labels for each open child.
-5. If 5+ open children → batch planning (LLM-driven grouping: domain
-   affinity, shared API surface, scale fit, dependency ordering — same
-   criteria as `work-slot epic` Step 4). Otherwise flat ordered list as
-   a single batch.
-6. Sync main before branch creation (equivalent to work-start Step 4d):
-   `git fetch origin main && git rebase origin/main`
-7. Create or reset branch (target: `issue-N-<slug>`):
-   - Branch does not exist → `git checkout -b issue-N-<slug>`
-   - Branch exists with closure stamp (`chore: branch closed` as latest
-     commit subject) → mid-epic resume. Reset: `git checkout -B issue-N-<slug>`
-   - Branch exists without stamp → error: "Epic branch already exists
-     and is active. Use `work` to resume."
-8. Scaffold `.meta` and `JOURNAL.md` via `scaffold.py`.
-9. Write `workspace/design/.epic` via `epic_manager.write_epic()`.
-10. If `$GITHUB_PROJECT` configured, activate all child issues (non-fatal).
-11. Report: "Epic #N — M children, K batches. Active: #<first>."
-12. **Implicit work-start:** `scaffold.py` wrote `state: scaffolded` to `.meta`.
-    Fire `transition(meta, 'auto_setup')`, execute context setup effects
-    (garden search, load specs, check protocols, verify IntelliJ), then
-    `commit_transition(meta, result)`. The branch transitions to `active`
-    automatically — no separate `work-start` invocation needed.
-
-**Step 6 — `work next` (advance epic issue)**
-
-Advances to the next child issue in the current epic. Detects context:
-- `is_slot_path($PROJECT)` → slot context, epic file at
-  `$PROJECT/../.slot`
-- `workspace/design/.epic` exists → single-repo context
+**Precondition:** `.plan` must exist (`HAS_PLAN=yes` from ctx.py).
 
 Steps:
 
-1. Run `ctx.py` to resolve paths. Determine epic file location.
+1. Run `ctx.py` to resolve paths. Read `PLAN_PATH` from output.
 2. Fire `transition(meta, 'work_next')` — validates the transition,
    returns effects `[advance_issue, update_meta, tick_github]`.
 3. Execute effects:
-   - `advance_issue`: Call `epic_manager.py advance <epic-path>`.
-   - `update_meta`: Update `.meta` with new issue context.
+   - `advance_issue`: Call `plan_manager.advance(<PLAN_PATH>, <META_PATH>)`.
+     The function atomically checks off the current issue, appends it to
+     `covers:` in `.meta`, and moves the `← active` marker to the next
+     leaf issue.
    - `tick_github`: Check off the completed issue's checkbox on the
-     GitHub epic body.
+     GitHub epic body (if the completed issue was an epic child).
 4. Call `commit_transition(meta, result)` — writes `state: transitioning`.
-5. If `epic_complete` in the result → add the epic issue number to
-   `Covers:` in `.meta`. Report: "All children done. Run work-end."
-6. If `batch_complete` and not `epic_complete` → log: "Batch N complete.
-   Safe exit point — run work-end to merge, or continue."
+5. If `queue_complete` in the result → report: "All issues done. Run work-end."
+6. If `batch_complete` and not `queue_complete` → log: "Batch N complete.
+   Safe exit point — run work-end to close, or continue."
 7. **Context refresh (auto-resolve):** Fire `transition(meta, 'auto_refresh')`,
    execute context refresh effects (garden search with new issue keywords,
    load specs matching new issue, check protocols), then

@@ -78,22 +78,25 @@ Use `forage` for session-time capture and `harvest` for deduplication. The `gard
 
 ## Work Lifecycle
 
-Four commands replace the fragmented `work-start` + `epic begin/close` workflow.
-Unified entry point detects branch state and handles the full session lifecycle.
+Four commands: `work-start` (begin), `work-end` (close), `work-pause` (save state),
+`work next` (advance queue). The `work` router detects state and dispatches.
+Epics are auto-detected from GitHub — no separate epic command. `.plan` is the
+universal issue queue, created for every branch (even single-issue).
+`work-end` in a slot runs the full close sequence — no separate merge step.
 
 **Key decisions:**
 
 | Decision | Chosen | Why | Alternatives Rejected |
 |---|---|---|---|
 | Branch naming | `issue-NNN-<slug>` for all branches | Issue number is the stable key; slug is a convenience | `epic-<name>` prefix (forces artificial epic vs issue distinction; breaks update-design detection) |
-| `.meta` present on all branches | Every branch gets `.meta` + `JOURNAL.md` | No lightweight vs epic distinction — consistent behaviour regardless of scope | Separate lightweight/epic branch types (maintenance complexity, detection ambiguity) |
+| `.meta` + `.plan` on all branches | Every branch gets `.meta` + `JOURNAL.md` + `.plan` | Uniform for trellis observability — no lightweight vs epic distinction | Separate lightweight/epic branch types (maintenance complexity, detection ambiguity) |
 | `design-repo` stored in `.meta` | `design-repo: workspace|project` persisted at branch creation | Routing config may change between sessions; `.meta` is the stable source of truth at close | Re-derive from routing config at `work-end` (stale routing config causes wrong merge target) |
 | Detection state ordering | Orphaned `.meta` check (state 3) before misaligned branches (state 4) | Orphaned state also satisfies "misaligned" — wrong order causes Branch Switch Helper to switch to a deleted branch | Checking misalignment first (breaks for branches deleted after PR merge) |
-| Atomic pause | `work-pause` Step 3 push must succeed before Step 4 writes `.paused` to main | `.paused` on main must always correspond to committed pause record in `.meta` on the branch | Write `.paused` optimistically (leaves orphaned `.paused` if push fails) |
-| Stash references recorded | Record `stash@{N}` at pause; `work-resume` pops by reference not by position | Bare `stash pop` pops wrong stash if user manually stashes between pause and resume | Bare `stash pop` (works only if no manual stash operations occurred) |
+| WIP commit on pause | `work-pause` commits all work as a `WIP:` commit on the branch | Durable and visible in history; no stash fragility | `git stash` (wrong stash pops if user manually stashes between pause and resume) |
 | Journal merge branch context | When `design → workspace`, journal merge happens during `work-end` 8a main-visit, not after returning to epic branch | Epic branch is discarded at close — commits to it after 8a are lost | Merge on epic branch, cherry-pick to main (complex; 8a already does the workspace cherry-pick) |
 | `EPIC-CLOSED.md` location | `$WORKSPACE/design/EPIC-CLOSED.md` on the workspace epic branch | Consistent with all other lifecycle files (`.meta`, `JOURNAL.md`); hygiene scan already traverses epic branches for `.meta` detection | Workspace root (inconsistent location; no advantage over design/) |
-| Epic deprecation | `epic/SKILL.md` retained with deprecation header; not deleted | Migration period — existing sessions still invoke it | Hard delete (breaks in-flight sessions) |
+| Unified slot close | `work-end` in a slot runs the full sequence (review, promote, squash, push, merge, stamp, archive) | No path where Claude can skip steps or misroute between separate commands | Phase A/B split with separate `work-slot merge` (Claude skipped steps, left slots without `.landed` markers) |
+| Auto-epic detection | `work-start` checks each issue for `## Scope` with `- [ ] #N` and recursively expands | No need for a separate `work epic` or `work-slot epic` command | Separate epic commands (fragmented routing, four entry events for one operation) |
 
 **update-design workspace mode detection (corrected):**
 
