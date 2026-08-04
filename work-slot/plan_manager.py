@@ -8,6 +8,7 @@ It replaces .epic as the source of truth for issue iteration order.
 import json
 import re
 import subprocess
+import sys as _sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -61,6 +62,38 @@ _BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*←\s*curren
 _CURRENT_RE = re.compile(r'^Current:\s*#(\d+)')
 _STARTED_RE = re.compile(r'^Started:\s*(.+)')
 _LAST_WRAP_RE = re.compile(r'^Last wrap:\s*(.+)')
+
+
+def _read_meta_fields(meta_path: Path) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in meta_path.read_text().splitlines():
+        if ':' in line:
+            k, _, v = line.partition(':')
+            fields[k.strip()] = v.strip()
+    return fields
+
+
+def _emit_issue_events(meta_path: Path, repo_path: str,
+                       completed: int, next_issue: int | None) -> None:
+    try:
+        _scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
+        if _scripts_dir not in _sys.path:
+            _sys.path.insert(0, _scripts_dir)
+        import worklog
+
+        fields = _read_meta_fields(meta_path)
+        branch = fields.get("branch", "")
+        issue_repo = fields.get("issue-repo", "")
+        if not branch:
+            return
+
+        conn = worklog.connect()
+        worklog.record_issue_complete(conn, branch, repo_path, completed, issue_repo)
+        if next_issue is not None:
+            worklog.record_issue_activate(conn, branch, repo_path, next_issue, issue_repo)
+        conn.close()
+    except Exception as e:
+        print(f"WARN=worklog_error detail={e}")
 
 
 def _indent_level(line: str) -> int:
@@ -288,7 +321,8 @@ class NoQueueFile(Exception):
     pass
 
 
-def advance(plan_path: Path, meta_path: Path) -> AdvanceResult:
+def advance(plan_path: Path, meta_path: Path,
+            repo_path: str | None = None) -> AdvanceResult:
     tree = parse_plan(plan_path)
     leaves = flatten_leaves(tree)
 
@@ -328,6 +362,16 @@ def advance(plan_path: Path, meta_path: Path) -> AdvanceResult:
     tree.current_issue = next_leaf.issue_number if next_leaf else None
     rewrite_plan(plan_path, tree)
 
+    if repo_path:
+        try:
+            _emit_issue_events(
+                meta_path, repo_path,
+                completed_leaf.issue_number,
+                next_leaf.issue_number if next_leaf else None,
+            )
+        except Exception as e:
+            print(f"WARN=worklog_error detail={e}")
+
     return AdvanceResult(
         completed=completed_leaf.issue_number,
         next_issue=next_leaf.issue_number if next_leaf else None,
@@ -339,9 +383,9 @@ def advance(plan_path: Path, meta_path: Path) -> AdvanceResult:
 
 
 def advance_issue(plan_path: Path | None, epic_path: Path | None,
-                  meta_path: Path) -> AdvanceResult:
+                  meta_path: Path, repo_path: str | None = None) -> AdvanceResult:
     if plan_path and plan_path.exists():
-        return advance(plan_path, meta_path)
+        return advance(plan_path, meta_path, repo_path=repo_path)
     if epic_path and epic_path.exists():
         try:
             import epic_manager
@@ -349,6 +393,16 @@ def advance_issue(plan_path: Path | None, epic_path: Path | None,
         except ImportError:
             pass
     raise NoQueueFile("No .plan or .epic found")
+
+
+def complete_active_issue(plan_path: Path, meta_path: Path,
+                          repo_path: str) -> int | None:
+    tree = parse_plan(plan_path)
+    active = _find_active_leaf(tree.queue)
+    if not active:
+        return None
+    _emit_issue_events(meta_path, repo_path, active.issue_number, next_issue=None)
+    return active.issue_number
 
 
 def _mark_completed(items: list[QueueItem], issue_number: int) -> bool:

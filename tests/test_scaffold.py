@@ -6,6 +6,8 @@ Covers: happy path field writing, idempotency, missing workspace,
 missing required params, defaults, .meta format correctness.
 """
 
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -183,3 +185,57 @@ class TestErrorCases:
     def test_exits_1_when_no_args(self, tmp_path):
         result = subprocess.run([sys.executable, str(SCRIPT)], capture_output=True, text=True)
         assert result.returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# Worklog issue-activate integration
+# ---------------------------------------------------------------------------
+
+SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
+
+
+class TestScaffoldIssueActivate:
+
+    def _run_with_db(self, workspace, db_path, *extra_args):
+        env = {**os.environ, "WORKLOG_DB": db_path}
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), str(workspace)] + list(extra_args),
+            capture_output=True, text=True, env=env,
+        )
+
+    def _get_events(self, db_path, event_type):
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import worklog
+        conn = worklog.connect(db_path)
+        events = worklog.event_log(conn, event_type=event_type)
+        conn.close()
+        return events
+
+    def test_emits_issue_activate_after_work_start(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        db_path = str(tmp_path / "test-worklog.db")
+        result = self._run_with_db(ws, db_path, *required_args(
+            issue="42", **{"issue-repo": "Org/repo", "covers": "42"}))
+        assert result.returncode == 0
+        events = self._get_events(db_path, "issue-activate")
+        assert len(events) == 1
+        meta = json.loads(events[0]["metadata"])
+        assert meta["issue_number"] == 42
+        assert meta["issue_repo"] == "Org/repo"
+
+    def test_skips_issue_activate_when_no_issue(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        db_path = str(tmp_path / "test-worklog.db")
+        self._run_with_db(ws, db_path, *required_args())
+        events = self._get_events(db_path, "issue-activate")
+        assert len(events) == 0
+
+    def test_scaffold_succeeds_without_worklog_env(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        result = run(ws, *required_args(issue="42", **{"issue-repo": "Org/repo"}))
+        assert result.returncode == 0
+        out = parse(result)
+        assert out["CREATED"] == "yes"

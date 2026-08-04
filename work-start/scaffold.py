@@ -132,13 +132,23 @@ def main() -> int:
 
     if _wl:
         try:
-            _conn = _wl.connect()
+            import os as _os
+            _db_path = _os.environ.get("WORKLOG_DB")
+            _conn = _wl.connect(_db_path) if _db_path else _wl.connect()
+            issue_num = int(params.get("issue", "0") or "0")
+            issue_repo = params.get("issue-repo", "")
             _wl.record_work_start(
                 _conn, branch, str(workspace),
-                issue_number=int(params.get("issue", "0") or "0"),
-                issue_repo=params.get("issue-repo", ""),
+                issue_number=issue_num,
+                issue_repo=issue_repo,
                 covers=params.get("covers", ""),
             )
+            if issue_num > 0:
+                _wl.record_issue_activate(
+                    _conn, branch, str(workspace),
+                    issue_number=issue_num,
+                    issue_repo=issue_repo,
+                )
             _conn.close()
         except Exception:
             pass

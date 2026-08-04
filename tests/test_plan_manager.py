@@ -1,9 +1,10 @@
-"""Tests for plan_manager — .plan tree parser, writer, flatten, detect."""
+"""Tests for plan_manager — .plan tree parser, writer, flatten, detect, worklog emission."""
 
 import pytest
 import sys
 import unittest.mock
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "work-slot"))
 import plan_manager
@@ -489,3 +490,145 @@ class TestDetect:
         assert result["active_issue"] == 109
         assert result["completed_count"] == 2
         assert result["total_count"] == 5
+
+
+class TestReadMetaFields:
+    def test_reads_branch_and_issue_repo(self, tmp_path):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-42-fix\nstate: active\nissue: 42\nissue-repo: Hortora/soredium\n")
+        fields = plan_manager._read_meta_fields(meta)
+        assert fields["branch"] == "issue-42-fix"
+        assert fields["issue-repo"] == "Hortora/soredium"
+
+    def test_handles_empty_values(self, tmp_path):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: test\nissue:\nissue-repo:\n")
+        fields = plan_manager._read_meta_fields(meta)
+        assert fields["branch"] == "test"
+        assert fields["issue"] == ""
+
+
+class TestEmitIssueEvents:
+    def _setup_meta(self, tmp_path):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-42-fix\nissue: 42\nissue-repo: Hortora/soredium\ncovers: 42\n")
+        return meta
+
+    def test_emits_complete_and_activate(self, tmp_path):
+        meta = self._setup_meta(tmp_path)
+        mock_wl = MagicMock()
+        mock_conn = MagicMock()
+        mock_wl.connect.return_value = mock_conn
+        with patch.dict('sys.modules', {'worklog': mock_wl}):
+            plan_manager._emit_issue_events(meta, "/repo", 42, 43)
+        mock_wl.record_issue_complete.assert_called_once_with(
+            mock_conn, "issue-42-fix", "/repo", 42, "Hortora/soredium")
+        mock_wl.record_issue_activate.assert_called_once_with(
+            mock_conn, "issue-42-fix", "/repo", 43, "Hortora/soredium")
+
+    def test_emits_only_complete_when_no_next(self, tmp_path):
+        meta = self._setup_meta(tmp_path)
+        mock_wl = MagicMock()
+        mock_conn = MagicMock()
+        mock_wl.connect.return_value = mock_conn
+        with patch.dict('sys.modules', {'worklog': mock_wl}):
+            plan_manager._emit_issue_events(meta, "/repo", 42, None)
+        mock_wl.record_issue_complete.assert_called_once()
+        mock_wl.record_issue_activate.assert_not_called()
+
+    def test_swallows_errors(self, tmp_path):
+        meta = self._setup_meta(tmp_path)
+        mock_wl = MagicMock()
+        mock_wl.connect.side_effect = Exception("db locked")
+        with patch.dict('sys.modules', {'worklog': mock_wl}):
+            plan_manager._emit_issue_events(meta, "/repo", 42, 43)
+
+
+class TestAdvanceWorklog:
+    def _setup(self, tmp_path, plan_content, covers="42"):
+        design = tmp_path / "design"
+        design.mkdir(exist_ok=True)
+        plan_file = design / ".plan"
+        plan_file.write_text(plan_content)
+        meta = design / ".meta"
+        meta.write_text(f"branch: test-branch\nissue: 42\nissue-repo: Org/repo\ncovers: {covers}\n")
+        return plan_file, meta
+
+    def test_advance_emits_events_when_repo_path_provided(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
+            result = plan_manager.advance(plan_file, meta, repo_path="/project")
+            mock_emit.assert_called_once_with(meta, "/project", 42, 43)
+
+    def test_advance_skips_worklog_when_no_repo_path(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
+            plan_manager.advance(plan_file, meta)
+            mock_emit.assert_not_called()
+
+    def test_advance_emits_none_next_on_queue_exhausted(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
+            plan_manager.advance(plan_file, meta, repo_path="/project")
+            mock_emit.assert_called_once_with(meta, "/project", 43, None)
+
+    def test_advance_worklog_error_does_not_break_advance(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        with patch.object(plan_manager, '_emit_issue_events', side_effect=Exception("boom")):
+            result = plan_manager.advance(plan_file, meta, repo_path="/project")
+            assert result.completed == 42
+            assert result.next_issue == 43
+            tree = plan_manager.parse_plan(plan_file)
+            assert tree.queue[0].completed is True
+
+
+class TestAdvanceIssueWorklog:
+    def test_passes_repo_path_to_plan_advance(self, tmp_path):
+        design = tmp_path / "design"
+        design.mkdir()
+        plan_file = design / ".plan"
+        plan_file.write_text("# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n")
+        meta = design / ".meta"
+        meta.write_text("branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
+        with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
+            result = plan_manager.advance_issue(plan_file, None, meta, repo_path="/project")
+            mock_emit.assert_called_once_with(meta, "/project", 42, 43)
+
+
+class TestCompleteActiveIssue:
+    def _setup(self, tmp_path, plan_content):
+        design = tmp_path / "design"
+        design.mkdir(exist_ok=True)
+        plan_file = design / ".plan"
+        plan_file.write_text(plan_content)
+        meta = design / ".meta"
+        meta.write_text("branch: test-branch\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
+        return plan_file, meta
+
+    def test_emits_complete_for_active_issue(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
+            result = plan_manager.complete_active_issue(plan_file, meta, "/project")
+            assert result == 42
+            mock_emit.assert_called_once_with(meta, "/project", 42, next_issue=None)
+
+    def test_returns_none_when_no_active_issue(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [x] #43 — B\n\n## Session State\nCurrent: none\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
+            result = plan_manager.complete_active_issue(plan_file, meta, "/project")
+            assert result is None
+            mock_emit.assert_not_called()
+
+    def test_does_not_modify_plan_file(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        original_content = plan_file.read_text()
+        with patch.object(plan_manager, '_emit_issue_events'):
+            plan_manager.complete_active_issue(plan_file, meta, "/project")
+        assert plan_file.read_text() == original_content
