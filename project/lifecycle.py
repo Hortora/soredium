@@ -83,10 +83,8 @@ class StateError(Exception):
 # (from_state, event): (new_state, effects, post_commit_effects)
 TRANSITION_TABLE: dict[tuple[str, str], tuple[str, list[str], list[str]]] = {
     # Core lifecycle
-    ('idle', 'work'):                  ('scaffolded',       ['create_branch', 'write_meta'],                                          []),
-    ('idle', 'work_epic'):             ('scaffolded',       ['create_branch', 'write_meta', 'write_epic'],                             []),
-    ('idle', 'slot_create'):           ('scaffolded',       ['create_slot', 'write_meta'],                                             []),
-    ('idle', 'slot_epic'):             ('scaffolded',       ['create_slot', 'write_meta', 'write_slot_epic'],                          []),
+    ('idle', 'work'):                  ('scaffolded',       ['create_branch', 'write_meta', 'build_plan'],                             []),
+    ('idle', 'slot_create'):           ('scaffolded',       ['create_slot', 'write_meta', 'build_plan'],                               []),
     ('scaffolded', 'auto_setup'):      ('active',           ['garden_search', 'load_specs', 'check_protocols', 'check_intellij'],      []),
     ('active', 'work_next'):           ('transitioning',    ['advance_issue', 'update_meta', 'tick_github'],                           []),
     ('transitioning', 'auto_refresh'): ('active',           ['garden_search', 'load_specs', 'check_protocols'],                        []),
@@ -99,7 +97,7 @@ TRANSITION_TABLE: dict[tuple[str, str], tuple[str, list[str], list[str]]] = {
     ('closing:promoted', 'push_pass'):       ('closing:pushed',    [],                                                                 []),
     ('closing:pushed', 'merge_pass'):        ('closing:merged',    ['verify_content_landed'],                                          []),
     ('closing:merged', 'stamp_pass'):        ('closing:stamped',   ['write_stamp'],                                                    []),
-    ('closing:stamped', 'cleanup_pass'):     ('idle',              ['write_epic_closed'],                                               ['return_to_main', 'write_handoff']),
+    ('closing:stamped', 'cleanup_pass'):     ('idle',              ['write_plan_closed'],                                               ['return_to_main', 'write_handoff']),
     # Abort (pre-artifact only)
     ('closing:review', 'abort_close'):       ('active',            ['clear_closing_markers'],                                           []),
     ('closing:verified', 'abort_close'):     ('active',            ['clear_closing_markers'],                                           []),
@@ -114,7 +112,6 @@ INVALID_MESSAGES: dict[tuple[str, str], str] = {
     ('scaffolded', 'work_end'):  "Cannot close — branch hasn't been activated yet.",
     ('scaffolded', 'work_pause'): "Cannot pause — branch hasn't been activated yet.",
     ('active', 'work'):         "Already on an active branch. Use `work end`, `work pause`, or `work next`.",
-    ('active', 'work_epic'):    "Already on an active branch. Close or pause first.",
     ('active', 'work_resume'):  "Branch is active, not paused. Nothing to resume.",
     ('transitioning', 'work_end'):   "Issue transition in progress — context refresh must complete first.",
     ('transitioning', 'work_pause'): "Issue transition in progress — wait for context refresh.",
@@ -174,6 +171,12 @@ def write_state(meta_path: Path, state: str) -> None:
     tmp_path.replace(meta_path)
 
 
+_DEPRECATED_EVENTS = {
+    'work_epic': ('work', "work_epic is deprecated — epic detection is now automatic. Use 'work' instead."),
+    'slot_epic': ('slot_create', "slot_epic is deprecated — epic detection is now automatic. Use 'slot_create' instead."),
+}
+
+
 def transition(
     meta_path: Path,
     event: str,
@@ -183,6 +186,11 @@ def transition(
     """Phase 1: Validate transition and return result. Does NOT write state."""
     raw_state = read_state(meta_path)
     current_state = raw_state or 'idle'
+
+    if event in _DEPRECATED_EVENTS:
+        new_event, warning = _DEPRECATED_EVENTS[event]
+        print(f"WARN=deprecated_event old={event} new={new_event} detail={warning}")
+        event = new_event
 
     key = (current_state, event)
     if key not in TRANSITION_TABLE:

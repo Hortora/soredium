@@ -67,6 +67,8 @@ def commit_scaffold(workspace: str, branch: str) -> int:
     """Commit scaffold files and push."""
     import os
     files_to_add = ["design/JOURNAL.md", "design/.meta"]
+    if os.path.exists(os.path.join(workspace, "design", ".plan")):
+        files_to_add.append("design/.plan")
     if os.path.exists(os.path.join(workspace, "design", ".epic")):
         files_to_add.append("design/.epic")
     ok, _ = run_git(workspace, "add", *files_to_add)

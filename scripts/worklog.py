@@ -364,6 +364,42 @@ def record_slot_archive(conn: sqlite3.Connection, slot_number: int,
     conn.commit()
 
 
+# --- Issue Events ---
+
+@safe
+def record_issue_activate(conn: sqlite3.Connection, branch: str,
+                          repo_path: str, issue_number: int,
+                          issue_repo: str) -> None:
+    wid = _find_work_item(conn, branch, repo_path)
+    if wid is None:
+        return
+    _log_event(conn, "issue-activate", work_item_id=wid,
+               repo_path=repo_path,
+               metadata={"issue_number": issue_number,
+                          "issue_repo": issue_repo})
+    conn.commit()
+
+
+@safe
+def record_issue_complete(conn: sqlite3.Connection, branch: str,
+                          repo_path: str, issue_number: int,
+                          issue_repo: str) -> None:
+    wid = _find_work_item(conn, branch, repo_path)
+    if wid is None:
+        return
+    _log_event(conn, "issue-complete", work_item_id=wid,
+               repo_path=repo_path,
+               metadata={"issue_number": issue_number,
+                          "issue_repo": issue_repo})
+    conn.execute(
+        "INSERT OR IGNORE INTO work_item_issues "
+        "(work_item_id, issue_number, issue_repo, is_primary) "
+        "VALUES (?, ?, ?, 0)",
+        (wid, issue_number, issue_repo),
+    )
+    conn.commit()
+
+
 # --- Queries ---
 
 def active_work(conn: sqlite3.Connection) -> list[dict]:

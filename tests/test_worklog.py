@@ -472,3 +472,57 @@ class TestFailureIsolation:
         assert repos == 2
         conn1.close()
         conn2.close()
+
+
+class TestIssueEvents:
+    def _setup(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.ensure_repo(conn, "/repo/engine")
+        wid = worklog.record_work_start(
+            conn, "issue-42-spi", "/repo/engine",
+            issue_number=42, issue_repo="org/engine",
+        )
+        return conn, wid
+
+    def test_record_issue_activate(self, tmp_path):
+        conn, wid = self._setup(tmp_path)
+        worklog.record_issue_activate(conn, "issue-42-spi", "/repo/engine", 42, "org/engine")
+        events = worklog.event_log(conn, event_type="issue-activate")
+        assert len(events) == 1
+        meta = json.loads(events[0]["metadata"])
+        assert meta["issue_number"] == 42
+        assert meta["issue_repo"] == "org/engine"
+        conn.close()
+
+    def test_record_issue_complete(self, tmp_path):
+        conn, wid = self._setup(tmp_path)
+        worklog.record_issue_complete(conn, "issue-42-spi", "/repo/engine", 42, "org/engine")
+        events = worklog.event_log(conn, event_type="issue-complete")
+        assert len(events) == 1
+        meta = json.loads(events[0]["metadata"])
+        assert meta["issue_number"] == 42
+        conn.close()
+
+    def test_issue_complete_updates_work_item_issues(self, tmp_path):
+        conn, wid = self._setup(tmp_path)
+        worklog.record_issue_complete(conn, "issue-42-spi", "/repo/engine", 108, "org/engine")
+        rows = conn.execute(
+            "SELECT * FROM work_item_issues WHERE issue_number=108"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["is_primary"] == 0
+        conn.close()
+
+    def test_issue_complete_deduplicates_work_item_issues(self, tmp_path):
+        conn, wid = self._setup(tmp_path)
+        worklog.record_issue_complete(conn, "issue-42-spi", "/repo/engine", 42, "org/engine")
+        rows = conn.execute(
+            "SELECT * FROM work_item_issues WHERE issue_number=42"
+        ).fetchall()
+        assert len(rows) == 1  # not duplicated
+
+    def test_issue_activate_on_unknown_branch_is_nonfatal(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        result = worklog.record_issue_activate(conn, "nonexistent", "/repo", 42, "org/r")
+        assert result is None
+        conn.close()
