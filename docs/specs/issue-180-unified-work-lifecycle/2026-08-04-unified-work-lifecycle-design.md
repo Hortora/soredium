@@ -557,10 +557,13 @@ This ensures each individual file write is atomic — no partial file content.
 | After `.plan`, before `.meta` | New (current `[x]`, next `← active`; parent epics may also be `[x]`) | Old (missing current AND any auto-completed parents from `covers:`) | On next `work-next`, step 0 validation sees `← active` on an uncompleted item — proceeds normally. The completed issue AND any auto-completed parent epics are NOT in `covers:`. **Fix:** `work-next` step 0 scans for ALL `[x]` items (leaf AND non-leaf) not in `covers:` and appends them. |
 | After both writes | New | New | Clean. No recovery needed. |
 
-**The reconciliation rule:** Before advancing, `work-next` checks all `[x]` leaf
-items in `.plan` against `covers:` in `.meta`. Any `[x]` item not in `covers:` is
-appended. This makes the post-`.plan`-pre-`.meta` crash window self-healing on the
-next invocation.
+**The reconciliation rule:** Before advancing, `work-next` checks ALL `[x]` items
+in `.plan` — both leaf issues and parent epics — against `covers:` in `.meta`.
+Any `[x]` item not in `covers:` is appended. This covers the case where a child
+completion triggers parent epic auto-completion (§4.2 step 4) and a crash occurs
+before `.meta` is written — both the child and the parent epic are recovered.
+This makes the post-`.plan`-pre-`.meta` crash window self-healing on the next
+invocation.
 
 ---
 
