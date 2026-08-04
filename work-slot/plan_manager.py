@@ -342,6 +342,120 @@ def _find_active_leaf(items: list[QueueItem]) -> QueueItem | None:
     return None
 
 
+class NoQueueFile(Exception):
+    pass
+
+
+def advance(plan_path: Path, meta_path: Path) -> AdvanceResult:
+    tree = parse_plan(plan_path)
+    leaves = flatten_leaves(tree)
+
+    active_idx = None
+    for i, leaf in enumerate(leaves):
+        if leaf.active:
+            active_idx = i
+            break
+
+    if active_idx is None:
+        raise ValueError("No active item in .plan")
+
+    completed_leaf = leaves[active_idx]
+
+    _mark_completed(tree.queue, completed_leaf.issue_number)
+    _mark_parent_epics_if_done(tree.queue)
+
+    _update_meta_covers(meta_path, completed_leaf.issue_number)
+
+    next_leaf = None
+    if active_idx + 1 < len(leaves):
+        next_leaf = leaves[active_idx + 1]
+        _mark_active(tree.queue, next_leaf.issue_number)
+
+    batch_complete = False
+    safe_exit = False
+    if completed_leaf.batch and next_leaf:
+        if next_leaf.batch != completed_leaf.batch:
+            batch_complete = True
+            safe_exit = True
+    if completed_leaf.batch and not next_leaf:
+        batch_complete = True
+        safe_exit = True
+
+    epic_complete = next_leaf is None
+
+    tree.current_issue = next_leaf.issue_number if next_leaf else None
+    rewrite_plan(plan_path, tree)
+
+    return AdvanceResult(
+        completed=completed_leaf.issue_number,
+        next_issue=next_leaf.issue_number if next_leaf else None,
+        next_title=next_leaf.title if next_leaf else None,
+        batch_complete=batch_complete,
+        epic_complete=epic_complete,
+        safe_exit=safe_exit,
+    )
+
+
+def advance_issue(plan_path: Path | None, epic_path: Path | None,
+                  meta_path: Path) -> AdvanceResult:
+    if plan_path and plan_path.exists():
+        return advance(plan_path, meta_path)
+    if epic_path and epic_path.exists():
+        try:
+            import epic_manager
+            return epic_manager.advance(epic_path, meta_path=meta_path)
+        except ImportError:
+            pass
+    raise NoQueueFile("No .plan or .epic found")
+
+
+def _mark_completed(items: list[QueueItem], issue_number: int) -> bool:
+    for item in items:
+        if item.issue_number == issue_number and not item.is_epic:
+            item.completed = True
+            item.active = False
+            return True
+        if item.is_epic and item.children:
+            if _mark_completed(item.children, issue_number):
+                return True
+    return False
+
+
+def _mark_active(items: list[QueueItem], issue_number: int) -> bool:
+    for item in items:
+        if item.issue_number == issue_number and not item.is_epic:
+            item.active = True
+            return True
+        if item.is_epic and item.children:
+            if _mark_active(item.children, issue_number):
+                return True
+    return False
+
+
+def _mark_parent_epics_if_done(items: list[QueueItem]) -> None:
+    for item in items:
+        if item.is_epic and item.children:
+            _mark_parent_epics_if_done(item.children)
+            if all(c.completed for c in item.children):
+                item.completed = True
+
+
+def _update_meta_covers(meta_path: Path, issue_number: int) -> None:
+    content = meta_path.read_text()
+    lines = content.splitlines()
+    new_lines = []
+    for line in lines:
+        if line.startswith("covers:"):
+            existing = line.split(":", 1)[1].strip()
+            nums = [n.strip() for n in existing.split(",") if n.strip()]
+            s = str(issue_number)
+            if s not in nums:
+                nums.append(s)
+            line = f"covers: {','.join(nums)}"
+        new_lines.append(line)
+    meta_path.write_text("\n".join(new_lines) + "\n")
+
+
 def append_to_queue(plan_path: Path, new_items: list[QueueItem]) -> None:
     tree = parse_plan(plan_path)
     tree.queue.extend(new_items)

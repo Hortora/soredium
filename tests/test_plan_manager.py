@@ -282,6 +282,101 @@ class TestAppendToQueue:
         assert len(tree.queue) == 3
 
 
+class TestAdvance:
+    def _setup(self, tmp_path, plan_content, covers="42"):
+        design = tmp_path / "design"
+        design.mkdir(exist_ok=True)
+        plan_file = design / ".plan"
+        plan_file.write_text(plan_content)
+        meta = design / ".meta"
+        meta.write_text(f"branch: test\nissue: 42\ncovers: {covers}\n")
+        return plan_file, meta
+
+    def test_linear_advance(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        result = plan_manager.advance(plan_file, meta)
+        assert result.completed == 42
+        assert result.next_issue == 43
+        assert result.epic_complete is False
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.queue[0].completed is True
+        assert tree.queue[1].active is True
+        assert "42" in meta.read_text()
+
+    def test_epic_child_advance(self, tmp_path):
+        plan_file, meta = self._setup(tmp_path, MULTI_ISSUE_PLAN, covers="42")
+        result = plan_manager.advance(plan_file, meta)
+        assert result.completed == 109
+        assert result.next_issue == 110
+        assert result.batch_complete is False
+
+    def test_epic_last_child_completes_parent(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  - [x] #108 — A\n  - [ ] #109 — B ← active\n- [ ] #32 — C\n\n## Session State\nCurrent: #109 — B\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        result = plan_manager.advance(plan_file, meta)
+        assert result.completed == 109
+        assert result.next_issue == 32
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.queue[0].completed is True
+
+    def test_nested_epic_completes(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  - [ ] #52 — Nested (epic)\n    - [x] #60 — A\n    - [ ] #61 — B ← active\n  - [ ] #53 — C\n\n## Session State\nCurrent: #61 — B\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        result = plan_manager.advance(plan_file, meta)
+        assert result.completed == 61
+        assert result.next_issue == 53
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.queue[0].children[0].completed is True
+
+    def test_queue_exhausted(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        result = plan_manager.advance(plan_file, meta)
+        assert result.completed == 43
+        assert result.next_issue is None
+        assert result.epic_complete is True
+
+    def test_batch_boundary_safe_exit(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  ### Batch 1 — Model\n  - [x] #108 — A\n  - [ ] #109 — B ← active\n  ### Batch 2 — Logic\n  - [ ] #110 — C\n\n## Session State\nCurrent: #109 — B\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        result = plan_manager.advance(plan_file, meta)
+        assert result.batch_complete is True
+        assert result.safe_exit is True
+        assert result.next_issue == 110
+
+    def test_covers_updated(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan)
+        plan_manager.advance(plan_file, meta)
+        covers_line = [l for l in meta.read_text().splitlines() if l.startswith("covers:")][0]
+        assert "42" in covers_line
+
+    def test_covers_deduplication(self, tmp_path):
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan_file, meta = self._setup(tmp_path, plan, covers="42")
+        plan_manager.advance(plan_file, meta)
+        covers_line = [l for l in meta.read_text().splitlines() if l.startswith("covers:")][0]
+        nums = [n.strip() for n in covers_line.split(":")[1].strip().split(",") if n.strip()]
+        assert len(nums) == len(set(nums))
+
+
+class TestAdvanceIssueDispatch:
+    def test_dispatches_to_plan(self, tmp_path):
+        design = tmp_path / "design"
+        design.mkdir()
+        plan_file = design / ".plan"
+        plan_file.write_text("# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n")
+        meta = design / ".meta"
+        meta.write_text("branch: test\nissue: 42\ncovers: 42\n")
+        result = plan_manager.advance_issue(plan_file, None, meta)
+        assert result.completed == 42
+
+    def test_raises_when_no_files(self, tmp_path):
+        with pytest.raises(plan_manager.NoQueueFile):
+            plan_manager.advance_issue(tmp_path / "nope.plan", tmp_path / "nope.epic", tmp_path / ".meta")
+
+
 class TestDetect:
     def test_detects_plan(self, tmp_path):
         design = tmp_path / "design"
