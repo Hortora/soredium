@@ -26,6 +26,24 @@ HOOK_SOURCE = Path(__file__).parent.parent / "hooks" / "check_project_setup.sh"
 HOOK_DEST = Path.home() / ".claude" / "hooks" / "check_project_setup.sh"
 HOOK_COMMAND = "~/.claude/hooks/check_project_setup.sh"
 
+PRETOOL_HOOKS = [
+    {
+        "source": "lifecycle-guard.sh",
+        "matcher": "Bash",
+        "command": "~/.claude/hooks/lifecycle-guard.sh",
+    },
+    {
+        "source": "lifecycle-guard-write.sh",
+        "matcher": "Edit",
+        "command": "~/.claude/hooks/lifecycle-guard-write.sh",
+    },
+    {
+        "source": "lifecycle-guard-write.sh",
+        "matcher": "Write",
+        "command": "~/.claude/hooks/lifecycle-guard-write.sh",
+    },
+]
+
 
 # ---------------------------------------------------------------------------
 # Network helpers
@@ -303,6 +321,82 @@ def sync_hook(
     return status
 
 
+def sync_pretool_hooks(
+    repo_root: Path,
+    settings_path: Path = SETTINGS_PATH,
+) -> list[str]:
+    """
+    Sync PreToolUse hooks from repo hooks/ to ~/.claude/hooks/.
+
+    Copies each hook file and registers it under the correct matcher
+    in settings.json PreToolUse. Returns status messages.
+    """
+    hooks_dir = repo_root / "hooks"
+    dest_dir = Path.home() / ".claude" / "hooks"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    settings: dict = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            pass
+
+    messages = []
+    modified = False
+
+    for hook_def in PRETOOL_HOOKS:
+        source = hooks_dir / hook_def["source"]
+        dest = dest_dir / hook_def["source"]
+        matcher = hook_def["matcher"]
+        command = hook_def["command"]
+
+        if not source.exists():
+            messages.append(f"  ⚠️  {hook_def['source']} missing from repo")
+            continue
+
+        source_content = source.read_text()
+        if not dest.exists():
+            dest.write_text(source_content)
+            dest.chmod(0o755)
+            file_status = "installed"
+        elif dest.read_text() != source_content:
+            dest.write_text(source_content)
+            file_status = "updated"
+        else:
+            file_status = "up-to-date"
+
+        pretool = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
+        matcher_group = None
+        for group in pretool:
+            if group.get("matcher") == matcher:
+                matcher_group = group
+                break
+
+        if matcher_group is None:
+            matcher_group = {"matcher": matcher, "hooks": []}
+            pretool.append(matcher_group)
+
+        hook_entry = {"type": "command", "command": command}
+        already_registered = any(
+            h.get("command") == command
+            for h in matcher_group.get("hooks", [])
+        )
+
+        if not already_registered:
+            matcher_group.setdefault("hooks", []).append(hook_entry)
+            modified = True
+            if file_status == "up-to-date":
+                file_status = "registered"
+
+        messages.append(f"  ✅ {hook_def['source']} → {matcher}: {file_status}")
+
+    if modified:
+        settings_path.write_text(json.dumps(settings, indent=4))
+
+    return messages
+
+
 # ---------------------------------------------------------------------------
 # Local development sync
 # ---------------------------------------------------------------------------
@@ -405,6 +499,12 @@ def cmd_sync_local(args: argparse.Namespace) -> None:
         'no-source':  '⚠️  Hook source missing from repo (hooks/check_project_setup.sh)',
     }
     print(hook_messages[hook_status])
+
+    pretool_messages = sync_pretool_hooks(repo_root)
+    if pretool_messages:
+        print("Lifecycle guards:")
+        for msg in pretool_messages:
+            print(msg)
 
 
 def cmd_list(args: argparse.Namespace) -> None:
