@@ -71,11 +71,17 @@ def detect_state(current_branch: str, project_path: str,
     epic_file_path = ""
     epic_batch = ""
     epic_active_issue = ""
+    has_plan = False
+    plan_path = ""
+    plan_active_issue = ""
+    plan_position = ""
+    plan_batch = ""
 
     _epic_dir = Path(__file__).parent.parent / "work-slot"
     if str(_epic_dir) not in sys.path:
         sys.path.insert(0, str(_epic_dir))
     from epic_manager import detect as _epic_detect
+    from plan_manager import detect as _plan_detect
     from slot_manager import is_slot_path as _is_slot_path
 
     _lifecycle_dir = Path(__file__).parent.parent / "project"
@@ -89,23 +95,45 @@ def detect_state(current_branch: str, project_path: str,
             in_slot = True
             slot_path = str(candidate)
 
-        epic_info = _epic_detect(project.parent) if in_slot else None
-        if epic_info:
-            is_epic = True
-            current = epic_info.get("current_batch", 0)
-            total = len(epic_info.get("batches", []))
-            epic_batch = f"{current} of {total}" if total else ""
-            epic_active_issue = str(epic_info.get("current_issue", ""))
+        plan_info = _plan_detect(project) if in_slot else None
+        if plan_info:
+            has_plan = True
+            plan_path = plan_info["plan_path"]
+            plan_active_issue = str(plan_info["active_issue"] or "")
+            completed = plan_info.get("completed_count", 0)
+            total = plan_info.get("total_count", 0)
+            plan_position = f"{completed}/{total}" if total else ""
+            plan_batch = plan_info.get("current_batch") or ""
+
+        if not has_plan:
+            epic_info = _epic_detect(project.parent) if in_slot else None
+            if epic_info:
+                is_epic = True
+                current = epic_info.get("current_batch", 0)
+                total = len(epic_info.get("batches", []))
+                epic_batch = f"{current} of {total}" if total else ""
+                epic_active_issue = str(epic_info.get("current_issue", ""))
 
     if not in_slot:
-        epic_info = _epic_detect(workspace)
-        if epic_info:
-            is_epic = True
-            epic_file_path = str(epic_info["epic_path"])
-            current = epic_info.get("current_batch", 0)
-            total = len(epic_info.get("batches", []))
-            epic_batch = f"{current} of {total}" if total else ""
-            epic_active_issue = str(epic_info.get("current_issue", ""))
+        plan_info = _plan_detect(workspace)
+        if plan_info:
+            has_plan = True
+            plan_path = plan_info["plan_path"]
+            plan_active_issue = str(plan_info["active_issue"] or "")
+            completed = plan_info.get("completed_count", 0)
+            total = plan_info.get("total_count", 0)
+            plan_position = f"{completed}/{total}" if total else ""
+            plan_batch = plan_info.get("current_batch") or ""
+
+        if not has_plan:
+            epic_info = _epic_detect(workspace)
+            if epic_info:
+                is_epic = True
+                epic_file_path = str(epic_info["epic_path"])
+                current = epic_info.get("current_batch", 0)
+                total = len(epic_info.get("batches", []))
+                epic_batch = f"{current} of {total}" if total else ""
+                epic_active_issue = str(epic_info.get("current_issue", ""))
 
     has_handoff = False
     handoff_path = ""
@@ -146,6 +174,7 @@ def detect_state(current_branch: str, project_path: str,
         "ON_MAIN": "yes" if on_main else "no",
         "CURRENT_BRANCH": current_branch,
         "IN_SLOT": "yes" if in_slot else "no",
+        "HAS_PLAN": "yes" if has_plan else "no",
         "IS_EPIC": "yes" if is_epic else "no",
         "STACK_DEPTH": str(stack_depth),
         "HAS_HANDOFF": "yes" if has_handoff else "no",
@@ -154,6 +183,14 @@ def detect_state(current_branch: str, project_path: str,
     if workspace_dirty:
         result["WORKSPACE_BRANCH"] = current_branch
         result["PROJECT_BRANCH"] = project_branch
+    if plan_path:
+        result["PLAN_PATH"] = plan_path
+    if plan_active_issue:
+        result["PLAN_ACTIVE_ISSUE"] = plan_active_issue
+    if plan_position:
+        result["PLAN_POSITION"] = plan_position
+    if plan_batch:
+        result["PLAN_BATCH"] = plan_batch
     if epic_batch:
         result["EPIC_BATCH"] = epic_batch
     if epic_active_issue:
