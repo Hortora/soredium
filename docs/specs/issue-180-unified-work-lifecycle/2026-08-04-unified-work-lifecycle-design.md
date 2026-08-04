@@ -58,11 +58,18 @@ The unified model reduces the command surface:
 - `work-next` is one command regardless of context — same behavior in branch
   and slot mode
 
-## Scope Principle — Additive, Not Replacement
+## Scope Principle — Unify Routes, Preserve Infrastructure
 
-**This spec adds the `.plan` file, unified queue, auto-epic detection, worklog events,
-and dynamic slot repos. It does NOT replace or simplify any existing work-start,
-work-end, or slot infrastructure.**
+**This spec unifies fragmented entry points into a single flow.** It adds the `.plan`
+file, unified queue, auto-epic detection, worklog events, and dynamic slot repos.
+It removes superseded events and commands (`work_epic`, `slot_epic`, `work-slot merge`,
+`work-slot epic`) and collapses the slot Phase A/B split into a single `work-end`
+sequence.
+
+**What it does NOT change:** the underlying infrastructure that those commands invoked.
+Branch creation, scaffold, slot cloning, Maven isolation, merge verification, artifact
+promotion, squash analysis, pre-push hooks — all preserved as-is. The simplification
+is in the command surface and state machine, not in the mechanisms.
 
 The following are explicitly **unchanged and must be preserved**:
 
@@ -233,8 +240,13 @@ identical in format and semantics for branch work and slot work.
 | Context | Path |
 |---------|------|
 | Branch work | `<WORKSPACE>/design/.plan` |
-| Slot work | `slots/<N>/<primary-workspace>/design/.plan` |
+| Slot work | `slots/<N>/.plan` |
 | Single-repo mode | `<PROJECT>/design/.plan` (WORKSPACE == PROJECT) |
+
+In slot mode, `.plan` lives at the slot root alongside `.slot` — not inside any
+specific repo clone. The queue spans all repos in the slot, so it is a slot-level
+concern. This placement survives `add-repo` / `remove-repo` operations and avoids
+coupling `.plan` lifetime to any individual clone.
 
 ### 2.3 Format
 
@@ -363,11 +375,12 @@ flyway, Step 8 for design routing + hashes). These steps are not modified.
 | `issue:` | Can start **empty** in free text mode. Set when the first issue is created. Once set, never changes. |
 | `covers:` | Grows incrementally. Each `work-next` completion appends the finished issue (with deduplication). At `work-end`, all issues in `covers:` get closed. |
 
-### 3.3 New Field
+### 3.3 No New Fields
 
-| Field | Purpose |
-|-------|---------|
-| `plan: yes` | Signals a `.plan` file exists. Lets ctx.py detect it without filesystem scanning. Absent on legacy branches. |
+`.plan` existence is detected by filesystem check (same as `epic_manager.detect()`
+checks for `.epic`/`.slot` today). No `plan: yes` flag in `.meta` — the filesystem
+is the authoritative source and a cached flag creates consistency hazards (scaffold
+failure leaves flag without file; manual deletion leaves file without flag).
 
 ### 3.4 What `.meta` Does NOT Track
 
@@ -412,7 +425,9 @@ automatically when all their children complete.
 4. Find the next leaf:
    - If the completed item has a next sibling → that's next
    - If no next sibling and parent is an epic → check if all children done;
-     if so, mark parent `[x]`. Recurse up until we find a next sibling or
+     if so, mark parent `[x]` and append the parent epic's issue number to
+     `covers:` in `.meta` (the epic is complete — it should be closed
+     alongside its children). Recurse up until we find a next sibling or
      exhaust the queue.
    - When landing on an epic (not a leaf) → descend to its first child
      (recursively, for nested epics)
@@ -444,6 +459,23 @@ transitions.
 | Single issue queue | `work-next` reports "no next issue" — queue has one item. |
 | Free text, 0-1 issues | `work-next` is not applicable until 2+ issues exist in `.plan`. |
 
+### 4.4 `safe_exit` Semantics
+
+`safe_exit` is defined for all queue shapes, not just batched epics:
+
+| Queue shape | Safe exit points |
+|-------------|-----------------|
+| Single issue | Queue exhausted (the only item is done) |
+| Multiple top-level issues, no epics | After completing any top-level issue |
+| Epic with < 5 children (no batches) | After completing all children of the epic (epic boundary) |
+| Epic with 5+ children (batched) | After completing the last issue in any batch (batch boundary) |
+| Mixed queue | Combination: top-level item boundaries + batch/epic boundaries within epics |
+
+The principle: a safe exit is any point where the user has completed a coherent unit
+of work. For non-batched queues, each top-level item is a coherent unit. For batched
+epics, each batch is a coherent unit. Mid-epic (some children done, more pending) is
+not a safe exit unless it coincides with a batch boundary.
+
 ---
 
 ## 5. Lifecycle State Machine Changes
@@ -459,21 +491,31 @@ transitions.
 
 | # | Before | After |
 |---|--------|-------|
-| T1 | `(idle, work) → scaffolded` effects: `[create_branch, write_meta]` | effects: `[create_branch, write_meta, build_plan]` |
+| T1 | `(idle, work) → scaffolded` effects: `[create_branch, write_meta, write_plan]` | effects: `[create_branch, write_meta, write_plan]` |
 | T2 | `(idle, work_epic) → scaffolded` effects: `[create_branch, write_meta, write_epic]` | **Removed** |
-| T3 | `(idle, slot_create) → scaffolded` effects: `[create_slot, write_meta]` | effects: `[create_slot, write_meta, build_plan]` |
+| T3 | `(idle, slot_create) → scaffolded` effects: `[create_slot, write_meta, write_plan]` | effects: `[create_slot, write_meta, write_plan]` |
 | T4 | `(idle, slot_epic) → scaffolded` effects: `[create_slot, write_meta, write_slot_epic]` | **Removed** |
 | T6 | `(active, work_next) → transitioning` effects: `[advance_issue, update_meta, tick_github]` | Same, but `advance_issue` reads `.plan` instead of `.epic` |
 | Tcleanup | `(closing:stamped, cleanup_pass) → idle` effects: `[write_epic_closed]` | effects: `[write_plan_closed]` — removes `design/.plan` during scaffold cleanup alongside `.meta` and `JOURNAL.md` |
 
-`build_plan` always runs, even for single issues (produces a trivial `.plan`). It is
+`write_plan` always runs, even for single issues (produces a trivial `.plan`). It is
 not conditional.
 
 ### 5.3 New Effect
 
 | Effect | Description |
 |--------|-------------|
-| `build_plan` | Resolve issues from GitHub (via issue-workflow Phase 2 for validation), auto-detect epics (recursive with cycle detection), estimate scale/complexity labels, batch-plan epics with 5+ children (with user approval), write `.plan` file. In free text mode, writes an empty `.plan`. |
+| `write_plan` | Receives resolved plan data (queue tree, batch groupings) and writes the `.plan` file. Mechanical and atomic — no network I/O, no LLM calls, no user interaction. In free text mode, writes an empty `.plan`. |
+
+All interactive work — GitHub API calls for issue resolution, recursive epic
+detection with cycle detection, scale/complexity label estimation, LLM-driven
+batch planning with user approval — happens in the **skill layer** (work-start
+Step 4) BEFORE the `work` transition fires. The resolved plan data is passed to
+the `write_plan` effect as input.
+
+This matches the existing pattern: `write_slot_epic` (the effect) just writes
+the file; `work-slot epic` (the skill, Steps 4-5) does batch planning and user
+approval before firing the `slot_epic` transition.
 
 ### 5.4 No New States
 
@@ -621,11 +663,31 @@ Repos are added when specs name them, not at issue creation time:
 
 Always prompted, never automatic. Some spec references are "do later," not "do now."
 
-### 7.4 `.slot` File
+### 7.4 `.slot` and `.plan` Ownership Boundary
 
-`.slot` remains as the slot identity/config file. Unchanged format, updated repos list
-when repos are added or removed. `.plan` sits alongside it as the issue queue — two
-files with distinct concerns.
+`.slot` and `.plan` sit alongside each other at the slot root (`slots/<N>/`) with
+strictly separated concerns. No state is duplicated between them.
+
+**`.slot` retains (identity and config):**
+- `## Issue` — repo/issue identity, `Type: epic` marker
+- `## What to do` — human-readable context
+- `## Repos` — list of repo clones in the slot (updated by `add-repo`/`remove-repo`)
+- `## Created` — creation date and branch name
+
+**`.slot` loses (moved to `.plan`):**
+- `## Batch Plan` — queue structure with checkboxes and batch headers
+- `## Session State` — current batch/issue position
+- `Covers:` line — completed issue tracking
+
+**Ownership is single-source:**
+- Queue state (what's done, what's next): `.plan` only
+- Completed issues: `.meta` `covers:` is authoritative for issue closure;
+  `.plan` checkboxes are the visual display of the same state
+- Slot identity (which repos, which epic, creation date): `.slot` only
+
+**`parse_slot_md()` update:** stops reading `Covers:` and `## Batch Plan`.
+Callers needing queue state read `.plan` via `plan_manager`. Callers needing
+issue identity read `.slot` via `parse_slot_md()`. No cross-file state sync.
 
 ---
 
@@ -645,9 +707,15 @@ They add `.plan`-aware checks to the existing infrastructure.
   existing `validate_state()` check, preserved as-is
 - Branch alignment: workspace and project on matching branches — existing
   `validate_state()` check
-- `.plan` status acknowledged — uncompleted items flagged, user confirms safe-exit
-  or all-done. Uses `safe_exit` flag from `.plan` advance logic (batch boundary
-  = safe exit, mid-batch = requires `confirm-partial`)
+- `.plan` status check (skill-layer, not `validate_state()`) — if uncompleted
+  items remain, the skill prompts the user BEFORE calling `transition('work_end')`.
+  User options:
+  - **Continue working**: skill does not fire the transition, branch stays `active`.
+    No abort transition needed — the close sequence never started.
+  - **Close at safe exit** (batch boundary): skill fires transition, close proceeds.
+  - **Close mid-batch** (`confirm-partial`): skill fires transition, close proceeds.
+  This check is a skill-layer concern because it requires interactive prompting.
+  `validate_state()` handles mechanical hygiene only (untracked files, branch mismatch).
 - All files saved in IDE (if IntelliJ MCP available)
 
 ### 8.2 Post-Review Invariants (before `closing:verified → closing:promoted`)
@@ -691,12 +759,14 @@ file tracks which repos have been pushed so retry skips completed repos.
 Safety gates are enforced at three layers:
 
 1. **`validate_state()` in lifecycle.py** — called during `transition()`. Currently
-   checks untracked files, branch mismatch, uncommitted changes. Extended to check
-   `.plan` completion status when `plan: yes` is in `.meta`.
+   checks untracked files, branch mismatch, uncommitted changes. Unchanged — no
+   `.plan` checks added here (those are skill-layer, see §8.1).
 2. **Pre-push hook (`pre_push_hook.py`)** — blocks pushes to main outside closing
    states (`closing:pushed`, `closing:merged`, `closing:stamped`). Unchanged.
-3. **Skill-layer checks** — the remaining invariants (IDE files saved, artifact scan,
-   blog scan) remain in the skill layer, enforced by the work-end SKILL.md steps.
+3. **Skill-layer checks** — `.plan` incomplete queue prompting (§8.1), IDE files
+   saved, artifact scan, blog scan — enforced by work-end SKILL.md steps. These
+   run BEFORE the first lifecycle transition, so a "don't close" decision means
+   the transition never fires.
 
 ---
 
@@ -712,9 +782,29 @@ closes everything in `covers:`.
 Uncompleted items remain in `.plan`. They are NOT in `covers:` and don't get closed.
 
 At close time:
-- Batch boundary: "Batch N complete — safe exit point. Close now? (y/confirm-partial)"
+- Batch boundary: "Batch N complete — safe exit point. Close now? (y/n)"
 - Mid-batch: "N items remaining in current batch. Type `confirm-partial` to close anyway."
+- If user declines: branch stays `active`, no transition fires, continue working.
 - Uncompleted items reported in the work-end summary and handover
+
+### 9.2.1 Slot Re-Entry After Safe Exit
+
+When `work-end` completes on a slot with uncompleted queue items, the slot is
+archived (the full close sequence runs: review, promote, push, merge, stamp,
+archive). To continue remaining items, the user creates a new slot:
+
+1. `work-end` reports: "Slot archived. N items remain in the queue."
+2. Handover includes remaining items for the next session.
+3. `work-slot #50` (the original epic) — a new slot is created. Epic detection
+   re-reads the GitHub issue body. Already-completed children (checked off by
+   prior `tick_epic_checkboxes()`) are filtered out. The new `.plan` contains
+   only uncompleted children.
+4. Duplicate epic guard does NOT block this — the prior slot is archived (not
+   active).
+
+This is the same flow as the current epic-driven-slots Phase A → Phase B →
+re-entry pattern, but without the Phase A/B split. Each `work-end` is a
+complete close-and-archive.
 
 ### 9.3 Issue Closure
 
@@ -753,7 +843,7 @@ After existing cross-repo detection (unchanged), issue resolution proceeds as:
 
 - Step 1: accept free text as work description (existing behavior)
 - Step 4: skip issue-workflow Phase 2. `.meta` `issue:` and `issue-repo:` start empty.
-- Step 9: scaffold writes `.meta` with empty `issue:` and `plan: yes`
+- Step 9: scaffold writes `.meta` with empty `issue:`
 - `.plan` created with empty queue
 - During brainstorming (Step 12), issues are created via issue-workflow Phase 2 and
   appended to `.plan`. First issue created becomes the primary — `.meta` `issue:` and
@@ -762,13 +852,13 @@ After existing cross-repo detection (unchanged), issue resolution proceeds as:
 
 ### 10.3 Changes to Step 9 (Scaffold)
 
-`scaffold.py` invocation adds `plan=yes` parameter. Scaffold stages `.plan` alongside
-`.meta` and `JOURNAL.md` in the commit-scaffold step (Step 10).
+Scaffold stages `.plan` alongside `.meta` and `JOURNAL.md` in the commit-scaffold
+step (Step 10). The `write_plan` effect writes the `.plan` file during scaffolding.
 
 ### 10.4 Changes to Step 3d (Epic Overlay — Resume Path)
 
 On resume, the epic overlay reads `.plan` instead of `.epic`:
-- If `plan: yes` in `.meta`: read `.plan` for queue state, display progress
+- If `.plan` exists (filesystem check): read `.plan` for queue state, display progress
 - If `.epic` exists but no `.plan`: fall back to current `.epic` overlay (backward compat)
 - Display: current issue, queue position, completed/total count, batch info
 
@@ -819,36 +909,53 @@ Epic detection is automatic — no separate command needed.
 
 ### 12.1 New ctx.py Output Variables
 
-When `plan: yes` exists in `.meta`, ctx.py reads `.plan` and outputs:
+ctx.py detects `.plan` via filesystem check (same pattern as `epic_manager.detect()`
+checks for `.epic`/`.slot`). When `.plan` exists, ctx.py reads it and outputs:
 
 | Variable | Source | Purpose |
 |----------|--------|---------|
-| `HAS_PLAN` | `.meta` `plan: yes` | Whether a `.plan` file exists |
+| `HAS_PLAN` | Filesystem check for `.plan` | Whether a `.plan` file exists |
 | `PLAN_PATH` | Resolved path to `.plan` | For callers that read the file |
 | `PLAN_ACTIVE_ISSUE` | `← active` marker in `.plan` | Current issue being worked |
 | `PLAN_POSITION` | Queue progress (e.g., "3/7") | For display |
 | `PLAN_BATCH` | Current batch info (if applicable) | For display |
 
-### 12.2 Backward Compatibility with `IS_EPIC`
+Detection path: branch work checks `<workspace>/design/.plan`; slot mode checks
+`<slot-root>/.plan` (using `is_slot_path()` to detect slot context).
 
-The existing `IS_EPIC`, `EPIC_PATH`, `EPIC_BATCH`, `EPIC_ACTIVE_ISSUE` variables
-continue to be output when `.epic` files exist (no `.plan`). When `.plan` exists,
-these variables are populated from `.plan` data for backward compatibility:
+### 12.2 No Backward Compatibility Bridge
 
-- `IS_EPIC` = `yes` if `.plan` contains any epic items
-- `EPIC_PATH` = `PLAN_PATH`
-- `EPIC_BATCH` = `PLAN_BATCH`
-- `EPIC_ACTIVE_ISSUE` = `PLAN_ACTIVE_ISSUE`
+When `.plan` exists, ctx.py outputs only `HAS_PLAN` / `PLAN_*` variables. The legacy
+`IS_EPIC`, `EPIC_PATH`, `EPIC_BATCH`, `EPIC_ACTIVE_ISSUE` variables are NOT
+populated from `.plan` data — no bridge, no dual namespace.
 
-This ensures handover, work-end, and work_router.py continue to work without
-immediate updates. They can migrate to the `PLAN_*` variables incrementally.
+Legacy `.epic` branches (no `.plan`): the existing `IS_EPIC` / `EPIC_*` codepath
+is preserved as-is. When these branches close, the codepath can be removed.
 
-### 12.3 work_router.py Changes
+All consumers — handover, work-end, work_router.py — are updated to read `PLAN_*`
+directly. This is a breaking change for those consumers, but the migration is
+mechanical (check `HAS_PLAN` instead of `IS_EPIC`, read `PLAN_PATH` instead of
+`EPIC_PATH`). The breakage is the point: it forces every consumer to be explicit
+about which file format it supports.
 
-`work_router.py` currently has parallel epic detection logic via `epic_manager.detect()`.
-Updated to also detect `.plan` via the `HAS_PLAN` / `PLAN_*` variables from ctx.py
-(eliminating the duplicate detection). The options menu on resume shows queue progress
-from `.plan` when present.
+### 12.3 Shared Detection via `plan_manager`
+
+Both ctx.py and work_router.py currently import `epic_manager.detect()` directly —
+they call the same library function independently. The same pattern applies to
+`.plan` detection: both scripts import `plan_manager.detect()` directly.
+
+```python
+# plan_manager.py
+def detect(path: Path, is_slot: bool = False) -> dict | None:
+    """Find and parse a .plan file from the given path.
+    Branch work: checks path/design/.plan
+    Slot work: checks path/.plan (is_slot=True)
+    """
+```
+
+ctx.py and work_router.py each call `plan_manager.detect()` independently. There
+is no dependency between the scripts — they remain separate entry points that
+import the same library module.
 
 ---
 
@@ -893,7 +1000,7 @@ Handover reads `IS_EPIC` from ctx.py. If `yes`, reads `## Session State` and
 
 ### 14.2 Updated Behavior
 
-When `HAS_PLAN=yes` (from ctx.py), handover reads `.plan` instead:
+When `HAS_PLAN=yes` (from ctx.py), handover reads `.plan` via `PLAN_PATH`:
 
 - Parses `## Queue` for progress (completed/active/pending counts)
 - Parses `## Session State` for current issue and position
@@ -906,9 +1013,9 @@ When `HAS_PLAN=yes` (from ctx.py), handover reads `.plan` instead:
 - Pending: #110, #53, #32
 ```
 
-The `IS_EPIC` backward-compatibility bridge (section 12.2) ensures handover
-works for `.plan` branches even before the handover skill is updated to read
-`HAS_PLAN` directly.
+Handover is updated to read `HAS_PLAN` / `PLAN_*` directly (no bridge —
+see §12.2). For legacy `.epic` branches, the existing `IS_EPIC` codepath
+remains until all old branches close.
 
 ---
 
@@ -916,8 +1023,8 @@ works for `.plan` branches even before the handover skill is updated to read
 
 ### 15.1 Problem
 
-When `work-slot merge` or `work-slot remove` archives a slot, any Claude session
-whose CWD is inside that slot (e.g., `slots/38/engine/`) finds itself in a
+When `work-end` (in slot context) or `work-slot remove` archives a slot, any Claude
+session whose CWD is inside that slot (e.g., `slots/38/engine/`) finds itself in a
 deleted or moved directory. Git operations fail, file edits fail, the session
 is stranded.
 
@@ -947,7 +1054,7 @@ DIFFERENT session (not the one running archive) is inside the slot.
 
 ## 16. Trellis Integration
 
-### 15.1 Primary Source: worklog.db
+### 16.1 Primary Source: worklog.db
 
 Cross-session, cross-workspace. Trellis reads:
 - `active_work()` — which branches/slots are active, which repo
@@ -959,7 +1066,7 @@ Cross-session, cross-workspace. Trellis reads:
 - New `WorklogReader` class that opens `~/.hortora/worklog.db` read-only
 - REST endpoint exposing active work and current issues
 
-### 15.2 Secondary Source: `.plan` File
+### 16.2 Secondary Source: `.plan` File
 
 Filesystem scan for richer UI:
 - Full queue tree with progress markers
@@ -972,7 +1079,7 @@ update to `scanEpicFile()`. The `.plan` format (`## Queue` with indentation-base
 nesting, `← active` markers) is structurally different from `.epic` (`Current batch:`,
 flat checkbox lines).
 
-### 15.3 Trellis Data Model
+### 16.3 Trellis Data Model
 
 New records added to `WorkspaceModel`:
 
@@ -1009,23 +1116,18 @@ manager instead of `epic_manager.py` when `.plan` is present.
 
 ## 17. Backward Compatibility
 
-### 16.1 In-Progress Epics
+### 17.1 In-Progress Epics
 
 Branches with `.epic` but no `.plan` continue to work. The `advance_issue` effect
 falls back to reading `.epic`. No forced migration.
 
-### 16.2 `.meta` Without `plan:` Field
-
-Legacy branches without `plan: yes` are assumed to have no `.plan` file. ctx.py
-outputs `HAS_PLAN=no` and uses the existing `IS_EPIC` codepath.
-
-### 16.3 `work epic #N` Syntax
+### 17.2 `work epic #N` Syntax
 
 Remains as an alias. Routes to the unified flow — auto-detection confirms what the
-user already told us. The full branch-creation-plus-batch-planning flow runs through
-the unified `build_plan` effect.
+user already told us. The skill-layer issue resolution and batch planning runs
+first, then the `write_plan` effect writes the `.plan` file.
 
-### 16.4 Migration Path
+### 17.3 Migration Path
 
 No active migration needed. New branches get `.plan` automatically. Old branches
 finish under the old format. When all old branches close, `.epic` support can be
@@ -1035,7 +1137,7 @@ removed in a cleanup pass.
 
 ## 18. Epic Auto-Detection
 
-### 17.1 Algorithm
+### 18.1 Algorithm
 
 ```
 detect_epic(issue_number, issue_repo):
@@ -1048,7 +1150,7 @@ detect_epic(issue_number, issue_repo):
     return LeafIssue(issue_number)
 ```
 
-### 17.2 Recursive Detection
+### 18.2 Recursive Detection
 
 After detecting an epic's children, each child is also checked:
 
@@ -1067,7 +1169,7 @@ build_queue(issue_numbers, visited=set()):
     return queue
 ```
 
-### 17.3 Duplicate Epic Guard
+### 18.3 Duplicate Epic Guard
 
 Before building the queue, scan active slots and branches for epics already being
 tracked. Refuse if the same epic is already in progress (same as today's
@@ -1077,7 +1179,7 @@ tracked. Refuse if the same epic is already in progress (same as today's
 
 ## 19. New Infrastructure: `.plan` Parser
 
-### 18.1 Why This Is New Code
+### 19.1 Why This Is New Code
 
 The current `epic_manager._parse_batches()` produces a flat list of issues within
 batches. It uses line-by-line regex matching on a flat file. The `.plan` format
@@ -1092,7 +1194,7 @@ requires:
 This is the largest new-code component. It cannot be built by extending
 `_parse_batches()` — it requires a new parser.
 
-### 18.2 Parser Design
+### 19.2 Parser Design
 
 ```python
 def parse_plan(plan_path: Path) -> PlanTree:
@@ -1108,7 +1210,7 @@ def rewrite_plan(plan_path: Path, tree: PlanTree):
     """Write tree back to .plan format preserving indentation."""
 ```
 
-### 18.3 Backward Compatibility
+### 19.3 Backward Compatibility
 
 ```python
 def advance_issue(plan_path: Path | None, epic_path: Path | None,
@@ -1136,16 +1238,19 @@ def advance_issue(plan_path: Path | None, epic_path: Path | None,
 ### Phase 2 — ctx.py and work_router.py
 
 - ctx.py: `HAS_PLAN`, `PLAN_PATH`, `PLAN_ACTIVE_ISSUE`, `PLAN_POSITION`, `PLAN_BATCH`
-- Backward compat bridge: populate `IS_EPIC` etc. from `.plan` data
-- work_router.py: `.plan` detection, eliminate duplicate epic detection
+  (filesystem detection, no `.meta` flag)
+- No backward compat bridge — consumers updated to `PLAN_*` directly
+- work_router.py: import `plan_manager.detect()` (same pattern as `epic_manager.detect()`)
+- Update handover, work-end consumers to read `HAS_PLAN` / `PLAN_*`
 - Unit tests
 
 ### Phase 3 — Unified `work-start`
 
 - Issue mode: multi-issue queue building with auto-epic detection
 - Free text mode: empty queue, deferred issue creation
-- `build_plan` effect integrated into scaffold flow
-- `.meta` `plan: yes` field, scaffold stages `.plan`
+- Skill-layer issue resolution and batch planning (before transition)
+- `write_plan` effect (mechanical file write) integrated into scaffold flow
+- Scaffold stages `.plan` alongside `.meta`
 - Preserve all existing steps (platform coherence, protocols, garden, specs,
   stacked PRs, fork sync, flyway, design routing, IntelliJ)
 
@@ -1189,7 +1294,7 @@ def advance_issue(plan_path: Path | None, epic_path: Path | None,
 
 ## 21. Test Plan
 
-### 20.1 Unit Tests
+### 21.1 Unit Tests
 
 - `.plan` tree parser: single issue, multi-issue, nested epics, batch plans, empty queue
 - `.plan` tree writer: same variants (round-trip: parse → write → parse = identical)
@@ -1202,7 +1307,7 @@ def advance_issue(plan_path: Path | None, epic_path: Path | None,
 - ctx.py: `HAS_PLAN` / `PLAN_*` output with and without `.plan`
 - Pause stack: `plan_active_issue`, `plan_position` serialization
 
-### 20.2 Integration Tests
+### 21.2 Integration Tests
 
 - `work-start #42` → trivial `.plan` created, all existing steps still run
 - `work-start #42 #50 #32` → multi-issue `.plan` with auto-epic detection
@@ -1214,7 +1319,7 @@ def advance_issue(plan_path: Path | None, epic_path: Path | None,
 - Slot: `add-repo`, `remove-repo`
 - Backward compat: `.epic` without `.plan` still iterates
 
-### 20.3 End-to-End
+### 21.3 End-to-End
 
 - Full lifecycle: `work-start #A #B(epic) #C` → `work-next` through all → `work-end`
 - Trellis: worklog.db query returns correct active issue after each transition
