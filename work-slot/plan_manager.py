@@ -5,7 +5,9 @@ The .plan file is the universal issue queue for the unified work lifecycle.
 It replaces .epic as the source of truth for issue iteration order.
 """
 
+import json
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -492,3 +494,93 @@ def detect(workspace_path: Path) -> dict | None:
         "total_count": total_count,
         "current_batch": batch,
     }
+
+
+# --- Epic auto-detection ---
+
+_SCOPE_CHILD_RE = re.compile(r'^- \[([ x])\]\s+#(\d+)\s*(?:—\s*(.+))?')
+
+
+def _gh_issue_body(issue_number: int, issue_repo: str) -> str:
+    result = subprocess.run(
+        ["gh", "issue", "view", str(issue_number), "--repo", issue_repo,
+         "--json", "body", "--jq", ".body"],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _gh_issue_title(issue_number: int, issue_repo: str) -> str:
+    result = subprocess.run(
+        ["gh", "issue", "view", str(issue_number), "--repo", issue_repo,
+         "--json", "title", "--jq", ".title"],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else f"Issue #{issue_number}"
+
+
+def detect_epic(issue_number: int, issue_repo: str) -> QueueItem:
+    body = _gh_issue_body(issue_number, issue_repo)
+    title = _gh_issue_title(issue_number, issue_repo)
+
+    in_scope = False
+    children: list[QueueItem] = []
+
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped == "## Scope":
+            in_scope = True
+            continue
+        if stripped.startswith("## ") and stripped != "## Scope":
+            in_scope = False
+            continue
+
+        if in_scope:
+            m = _SCOPE_CHILD_RE.match(stripped)
+            if m:
+                checked = m.group(1) == "x"
+                child_num = int(m.group(2))
+                child_title = (m.group(3) or "").strip()
+                if not checked:
+                    if not child_title:
+                        child_title = _gh_issue_title(child_num, issue_repo)
+                    children.append(QueueItem(child_num, child_title))
+
+    if children:
+        return QueueItem(issue_number, title, is_epic=True, children=children)
+    return QueueItem(issue_number, title)
+
+
+def build_queue(issue_numbers: list[int], issue_repo: str,
+                visited: set[int] | None = None) -> list[QueueItem]:
+    if visited is None:
+        visited = set()
+
+    queue: list[QueueItem] = []
+    for n in issue_numbers:
+        if n in visited:
+            continue
+        visited.add(n)
+
+        item = detect_epic(n, issue_repo)
+        if item.is_epic and item.children:
+            child_numbers = [c.issue_number for c in item.children]
+            item.children = build_queue(child_numbers, issue_repo, visited)
+
+        queue.append(item)
+
+    # Set first leaf as active
+    if queue and not any(_find_active_leaf(queue) is not None for _ in [1]):
+        _set_first_leaf_active(queue)
+
+    return queue
+
+
+def _set_first_leaf_active(items: list[QueueItem]) -> bool:
+    for item in items:
+        if not item.is_epic or not item.children:
+            item.active = True
+            return True
+        if _set_first_leaf_active(item.children):
+            return True
+    return False

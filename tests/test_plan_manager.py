@@ -2,6 +2,7 @@
 
 import pytest
 import sys
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "work-slot"))
@@ -375,6 +376,94 @@ class TestAdvanceIssueDispatch:
     def test_raises_when_no_files(self, tmp_path):
         with pytest.raises(plan_manager.NoQueueFile):
             plan_manager.advance_issue(tmp_path / "nope.plan", tmp_path / "nope.epic", tmp_path / ".meta")
+
+
+class TestDetectEpic:
+    def test_detects_epic(self):
+        body = "## Scope\n- [ ] #108 — Add weight\n- [ ] #109 — Update scoring\n"
+        with unittest.mock.patch.object(plan_manager, '_gh_issue_body', return_value=body):
+            with unittest.mock.patch.object(plan_manager, '_gh_issue_title', return_value="Weighted profiles"):
+                result = plan_manager.detect_epic(50, "Org/repo")
+        assert result.is_epic is True
+        assert len(result.children) == 2
+        assert result.children[0].issue_number == 108
+        assert result.children[1].issue_number == 109
+
+    def test_detects_leaf(self):
+        with unittest.mock.patch.object(plan_manager, '_gh_issue_body', return_value="Just a regular issue"):
+            with unittest.mock.patch.object(plan_manager, '_gh_issue_title', return_value="Fix login"):
+                result = plan_manager.detect_epic(42, "Org/repo")
+        assert result.is_epic is False
+        assert result.children == []
+
+    def test_skips_closed_children(self):
+        body = "## Scope\n- [x] #108 — Done\n- [ ] #109 — Todo\n"
+        with unittest.mock.patch.object(plan_manager, '_gh_issue_body', return_value=body):
+            with unittest.mock.patch.object(plan_manager, '_gh_issue_title', return_value="Epic"):
+                result = plan_manager.detect_epic(50, "Org/repo")
+        assert len(result.children) == 1
+        assert result.children[0].issue_number == 109
+
+    def test_no_scope_section_is_leaf(self):
+        body = "## Description\nSome text\n## Tasks\n- [ ] #108 — Something\n"
+        with unittest.mock.patch.object(plan_manager, '_gh_issue_body', return_value=body):
+            with unittest.mock.patch.object(plan_manager, '_gh_issue_title', return_value="Not epic"):
+                result = plan_manager.detect_epic(42, "Org/repo")
+        assert result.is_epic is False
+
+
+class TestBuildQueue:
+    def _mock_detect(self, epics):
+        """Helper: epics is a dict of issue_number -> list of child numbers (or None for leaf)."""
+        def fake_detect(n, repo):
+            if n in epics and epics[n] is not None:
+                children = [plan_manager.QueueItem(c, f"Child {c}") for c in epics[n]]
+                return plan_manager.QueueItem(n, f"Epic {n}", is_epic=True, children=children)
+            return plan_manager.QueueItem(n, f"Issue {n}")
+        return fake_detect
+
+    def test_flat_list(self):
+        with unittest.mock.patch.object(plan_manager, 'detect_epic', side_effect=self._mock_detect({})):
+            queue = plan_manager.build_queue([42, 43, 44], "Org/repo")
+        assert len(queue) == 3
+        assert all(not item.is_epic for item in queue)
+
+    def test_epic_expansion(self):
+        with unittest.mock.patch.object(plan_manager, 'detect_epic', side_effect=self._mock_detect({50: [108, 109]})):
+            queue = plan_manager.build_queue([42, 50, 32], "Org/repo")
+        assert len(queue) == 3
+        assert queue[1].is_epic is True
+        assert len(queue[1].children) == 2
+
+    def test_cycle_detection(self):
+        def cyclic_detect(n, repo):
+            if n == 50:
+                return plan_manager.QueueItem(50, "Epic 50", is_epic=True,
+                    children=[plan_manager.QueueItem(99, "Child 99")])
+            if n == 99:
+                return plan_manager.QueueItem(99, "Epic 99", is_epic=True,
+                    children=[plan_manager.QueueItem(50, "Cycle back")])
+            return plan_manager.QueueItem(n, f"Issue {n}")
+
+        with unittest.mock.patch.object(plan_manager, 'detect_epic', side_effect=cyclic_detect):
+            queue = plan_manager.build_queue([50], "Org/repo")
+        # Should not infinite loop — cycle on 50 is caught
+        assert len(queue) == 1
+
+    def test_sets_first_leaf_active(self):
+        with unittest.mock.patch.object(plan_manager, 'detect_epic', side_effect=self._mock_detect({50: [108, 109]})):
+            queue = plan_manager.build_queue([50, 32], "Org/repo")
+        # First leaf is #108 (child of epic #50)
+        leaves = []
+        def collect(items):
+            for item in items:
+                if item.children:
+                    collect(item.children)
+                else:
+                    leaves.append(item)
+        collect(queue)
+        assert leaves[0].active is True
+        assert leaves[0].issue_number == 108
 
 
 class TestDetect:
