@@ -268,6 +268,20 @@ Started: 2026-08-04
 Last wrap: work-next completed #108
 ```
 
+**Cross-repo issues:** When an issue belongs to a different repo than the primary
+`issue-repo:` in `.meta`, it uses `repo#N` prefix syntax:
+
+```markdown
+- [ ] #42 — Fix login validation ← active
+- [ ] engine#50 — Update scoring engine (epic)
+  - [ ] engine#108 — Add weight field
+- [ ] trellis#32 — Update trellis display
+```
+
+Issues in the primary repo use bare `#N` (no prefix). The repo prefix is stored
+in the `.plan` tree and used by `work-next` to populate the `issue_repo` field
+in worklog events and to target the correct repo for `covers:` issue closure.
+
 ### 2.4 Nested Epics
 
 Epics can contain epics at unlimited depth. Each nested epic is indented further.
@@ -372,8 +386,26 @@ flyway, Step 8 for design routing + hashes). These steps are not modified.
 
 | Field | Change |
 |-------|--------|
-| `issue:` | Can start **empty** in free text mode. Set when the first issue is created. Once set, never changes. |
-| `covers:` | Grows incrementally. Each `work-next` completion appends the finished issue (with deduplication). At `work-end`, all issues in `covers:` get closed. |
+| `issue:` | Can start **empty** in free text mode. Set when the first issue is created. Once set, never changes. See §3.2.1 for downstream impact. |
+| `covers:` | Grows incrementally. Each `work-next` completion appends the finished issue (with deduplication). At `work-end`, all issues in `covers:` get closed. Cross-repo issues use qualified format: `repo#N` for cross-repo, bare `N` for same-repo (matching `.plan` syntax). Deduplication uses `(number, repo)` tuple — `42` and `engine#42` are distinct entries when `issue-repo:` is not `engine`. |
+
+### 3.2.1 Empty `issue:` — Downstream Consumers
+
+When `issue:` is empty (free text mode, no issue created yet), downstream consumers
+handle it as follows:
+
+| Consumer | Behavior with empty `issue:` | Change needed? |
+|----------|------------------------------|----------------|
+| `ctx.py` → `ISSUE_N` | Outputs empty string | No — already handles empty |
+| `ctx.py` → `COVERS` | Falls back to empty (no issues to close) | No |
+| `work_router.py` | Handoff detection uses branch name regex, not `issue:` | No |
+| `branch_recon.py` | Reports empty issue — informational only | No |
+| `close_artifacts.py` | `COVERS` empty → closes nothing | No — intentional for exploration |
+| `pre_push_hook.py` | Checks lifecycle state, not issue number | No |
+
+Free text mode with no issue ever created is pure exploration — `work-end` closes
+no issues and that is correct. If the user creates issues during brainstorming,
+`issue:` is set at that point and all consumers work normally from then on.
 
 ### 3.3 No New Fields
 
@@ -419,8 +451,18 @@ automatically when all their children complete.
 
 ### 4.2 Algorithm
 
-1. Find the `← active` item in `.plan`
-2. Mark it `[x]`, append its issue number to `covers:` in `.meta` (with deduplication)
+0. **Validate `← active` marker** (see §4.5 for recovery rules):
+   - Parse `.plan` and locate all `← active` markers
+   - Exactly one must exist on an uncompleted (`[ ]`) leaf item
+   - If zero: derive from `## Session State` `Current:` line. If that is also
+     missing or inconsistent, prompt user to select the active issue.
+   - If multiple: take the first uncompleted leaf, warn, strip duplicates during
+     rewrite.
+   - If marker is on a `[x]` item: skip to next uncompleted leaf, warn. This
+     handles the crash-between-writes case (§4.6).
+1. Find the validated `← active` item
+2. Mark it `[x]`, append its issue number to `covers:` in `.meta` (with
+   repo-qualified deduplication per §3.2)
 3. Record `issue-complete` in worklog.db
 4. Find the next leaf:
    - If the completed item has a next sibling → that's next
@@ -434,9 +476,9 @@ automatically when all their children complete.
 5. Mark the new item `← active`
 6. Record `issue-activate` in worklog.db
 7. Update `.plan` `## Session State` (current issue, queue position)
-8. Rewrite `.plan` file in-place (handle indentation-based nesting for parent
-   `[x]` marking — this requires a tree parser, not the current flat line-matching)
-9. Return result dict: `{completed, next_issue, batch_complete, epic_complete, safe_exit}`
+8. Write `.plan` atomically (tmp-file + rename, matching `lifecycle.py:write_state()`)
+9. Write `.meta` `covers:` atomically (tmp-file + rename)
+10. Return result dict: `{completed, next_issue, batch_complete, epic_complete, safe_exit}`
 
 **Caller responsibilities** (not part of `advance_issue` effect):
 - Tick the completed issue's checkbox on the GitHub epic body (if child of an epic) —
@@ -475,6 +517,48 @@ The principle: a safe exit is any point where the user has completed a coherent 
 of work. For non-batched queues, each top-level item is a coherent unit. For batched
 epics, each batch is a coherent unit. Mid-epic (some children done, more pending) is
 not a safe exit unless it coincides with a batch boundary.
+
+### 4.5 Marker Validation and Recovery
+
+The `← active` marker is the single pointer that drives `work-next`. Because `.plan`
+is a committed file that passes through git rebase, merge conflict resolution, and
+potential manual editing, the marker can become corrupt. Validation runs at the start
+of every `work-next` call (§4.2 step 0) and on `work-resume` (after branch checkout,
+before any `work-next`).
+
+| Condition | Recovery |
+|-----------|----------|
+| Zero `← active` markers | Derive from `## Session State` `Current:` line. If that names an uncompleted leaf, place the marker. If missing or inconsistent, prompt user. |
+| Multiple `← active` markers | Take the first one on an uncompleted leaf. Strip all others. Warn. |
+| Marker on `[x]` item | Strip marker. Advance to next uncompleted leaf. Warn. (Crash recovery — see §4.6.) |
+| Marker on epic (non-leaf) | Move marker to the epic's first uncompleted child (descend recursively). Warn. |
+
+After recovery, `.plan` is rewritten atomically to persist the corrected state.
+
+### 4.6 Write Atomicity and Crash Recovery
+
+`work-next` writes two files: `.plan` and `.meta`. These writes are not transactional
+across files — no filesystem operation can make two file writes atomic. The design
+handles this by choosing a write order that makes any crash state recoverable.
+
+**Write order:** `.plan` first, then `.meta` `covers:`.
+
+**Atomic writes:** Both files use tmp-file + rename (`plan.tmp` → `.plan`,
+`.meta.tmp` → `.meta`), matching the pattern in `lifecycle.py:write_state()`.
+This ensures each individual file write is atomic — no partial file content.
+
+**Crash scenarios:**
+
+| Crash point | `.plan` state | `.meta` state | Recovery |
+|-------------|--------------|--------------|----------|
+| Before `.plan` write | Old (active on current) | Old | No damage. `work-next` retries normally. |
+| After `.plan`, before `.meta` | New (current `[x]`, next `← active`) | Old (missing current in `covers:`) | On next `work-next`, step 0 validation sees `← active` on an uncompleted item — proceeds normally. The completed issue is NOT in `covers:`. **Fix:** `work-next` step 0 scans for `[x]` items not in `covers:` and appends them. |
+| After both writes | New | New | Clean. No recovery needed. |
+
+**The reconciliation rule:** Before advancing, `work-next` checks all `[x]` leaf
+items in `.plan` against `covers:` in `.meta`. Any `[x]` item not in `covers:` is
+appended. This makes the post-`.plan`-pre-`.meta` crash window self-healing on the
+next invocation.
 
 ---
 
@@ -779,13 +863,21 @@ closes everything in `covers:`.
 
 ### 9.2 Incomplete Queue
 
-Uncompleted items remain in `.plan`. They are NOT in `covers:` and don't get closed.
+Uncompleted items remain in `.plan`. They are NOT in `covers:` and don't get closed
+— unless the user explicitly adds them at close time (see below).
 
-At close time:
-- Batch boundary: "Batch N complete — safe exit point. Close now? (y/n)"
-- Mid-batch: "N items remaining in current batch. Type `confirm-partial` to close anyway."
-- If user declines: branch stays `active`, no transition fires, continue working.
-- Uncompleted items reported in the work-end summary and handover
+At close time, the skill-layer prompt (§8.1) surfaces uncompleted items with options:
+
+- **[C] Continue working** — don't close yet, branch stays `active`
+- **[A] Add all remaining to covers** — append all uncompleted issue numbers to
+  `covers:`, then close. Prevents silent issue loss when the user worked organically
+  on multiple issues without calling `work-next`.
+- **[S] Select** — let the user pick which uncompleted items to add to `covers:`
+- **[X] Close without them** — uncompleted items stay open on GitHub
+
+If the queue has batch structure, additional context is shown (batch boundary
+= safe exit, mid-batch = requires confirmation). Uncompleted items are always
+reported in the work-end summary and handover, regardless of the user's choice.
 
 ### 9.2.1 Slot Re-Entry After Safe Exit
 
@@ -812,12 +904,20 @@ complete close-and-archive.
 This is unchanged from today — `covers:` just grows incrementally via `work-next`
 rather than being set all-at-once at branch creation.
 
-### 9.4 Scaffold Cleanup
+### 9.4 Scaffold Cleanup and EPIC-CLOSED.md
 
-During `cleanup_pass` (the final lifecycle transition `closing:stamped → idle`), the
-`write_plan_closed` effect removes `design/.plan` alongside `design/.meta` and
-`design/JOURNAL.md`. In single-repo mode, `filter-repo` preprocessing strips these
-paths before squash (same as today for `.meta` and `.epic`).
+**`write_plan_closed` (lifecycle effect):** During `cleanup_pass` (the final
+lifecycle transition `closing:stamped → idle`), this effect removes `design/.plan`
+from the working tree alongside `design/.meta` and `design/JOURNAL.md`. In
+single-repo mode, `filter-repo` preprocessing strips these paths before squash
+(same as today for `.meta` and `.epic`).
+
+**EPIC-CLOSED.md (skill-layer, Step 9):** Created by `branch_cleanup.py
+create-epic-closed` during work-end Step 9. This is unchanged — it is a
+skill-layer operation, not a lifecycle effect. `write_plan_closed` does not
+create EPIC-CLOSED.md; they are independent operations at different layers
+(`write_plan_closed` = cleanup effect in lifecycle.py, EPIC-CLOSED.md =
+skill step in work-end SKILL.md).
 
 ---
 
@@ -891,7 +991,18 @@ Epic detection is automatic — no separate command needed.
 |------------|--------|
 | `work-slot list` | Unchanged |
 | `work-slot next` | Delegates to unified `work-next` logic (reads `.plan`) |
-| `work-slot status` | Reads `.plan` for queue progress; includes divergence detection (cross-check `.plan` against GitHub epic body for added/closed issues since batch planning) |
+| `work-slot status` | Reads `.plan` for queue progress; includes divergence detection (see below) |
+
+**Divergence detection** (`work-slot status`): Cross-checks `.plan` against the
+GitHub epic body for children added or closed since batch planning. Behavior:
+
+- **Informational display:** shows added/closed children as warnings, not errors.
+- **Offer to update:** "N new children found on GitHub epic. Add to current batch? (y/n)"
+  If accepted, new children are appended to the end of the current batch in `.plan`.
+- **No automatic re-planning:** batch boundaries are not recalculated. The user can
+  invoke batch re-planning manually if the new children warrant restructuring.
+- **Closed children not in `.plan`:** displayed as informational ("closed outside this
+  slot") — no action needed since they were already filtered at detection time.
 | `work-slot remove <N>` | Unchanged (manual archive/cleanup) |
 | `work-slot add-repo <name>` | **New** (section 7.1) |
 | `work-slot remove-repo <name>` | **New** (section 7.2) |
@@ -998,7 +1109,7 @@ Resuming: issue-42-batch-work
 Handover reads `IS_EPIC` from ctx.py. If `yes`, reads `## Session State` and
 `## Batch Plan` from `EPIC_PATH` and renders an Epic Progress section.
 
-### 14.2 Updated Behavior
+### 14.2 Updated Behavior — Mid-Work Handover
 
 When `HAS_PLAN=yes` (from ctx.py), handover reads `.plan` via `PLAN_PATH`:
 
@@ -1013,9 +1124,19 @@ When `HAS_PLAN=yes` (from ctx.py), handover reads `.plan` via `PLAN_PATH`:
 - Pending: #110, #53, #32
 ```
 
-Handover is updated to read `HAS_PLAN` / `PLAN_*` directly (no bridge —
-see §12.2). For legacy `.epic` branches, the existing `IS_EPIC` codepath
-remains until all old branches close.
+This applies to mid-work handovers only (branch is `active`, `.plan` is in the
+working tree). Handover reads `HAS_PLAN` / `PLAN_*` directly from ctx.py. For
+legacy `.epic` branches, the existing `IS_EPIC` codepath remains until all old
+branches close.
+
+### 14.3 Work-End Handover (Step 12)
+
+During work-end, Step 12 writes HANDOFF.md after returning to main (Step 10).
+At that point, `.plan` is no longer in the working tree (it's on the feature
+branch). The work-end skill caches `.plan` queue state (completed/pending counts,
+uncompleted item list) before the `cleanup_pass` transition and passes it to
+the handover step. No filesystem read of `.plan` is needed at Step 12 — the
+data was collected earlier in the closing sequence.
 
 ---
 
@@ -1123,9 +1244,14 @@ falls back to reading `.epic`. No forced migration.
 
 ### 17.2 `work epic #N` Syntax
 
-Remains as an alias. Routes to the unified flow — auto-detection confirms what the
-user already told us. The skill-layer issue resolution and batch planning runs
-first, then the `write_plan` effect writes the `.plan` file.
+Remains as a skill-layer alias. The alias fires the `work` event (not `work_epic`,
+which is removed from the transition table per §5.1). Auto-detection in the
+skill-layer issue resolution confirms the issue is an epic — the alias is syntactic
+sugar, not a separate routing path.
+
+The `INVALID_MESSAGES` entry for `('active', 'work_epic')` is removed alongside
+the event. Its message ("Already on an active branch. Close or pause first.") is
+already covered by the `('active', 'work')` entry.
 
 ### 17.3 Migration Path
 
@@ -1147,8 +1273,16 @@ detect_epic(issue_number, issue_repo):
         filter out closed children (already done)
         if children is non-empty:
             return Epic(issue_number, children)
+        else:
+            # All children are closed — epic is already complete
+            return CompletedEpic(issue_number)
     return LeafIssue(issue_number)
 ```
+
+**All-children-closed case:** When `detect_epic()` returns `CompletedEpic`, the
+issue is auto-marked `[x]` in `.plan` at queue-build time and its issue number is
+appended to `covers:` immediately (all work is done). It does not appear in the
+flattened leaf list and `work-next` skips it.
 
 ### 18.2 Recursive Detection
 
@@ -1159,15 +1293,24 @@ build_queue(issue_numbers, visited=set()):
     queue = []
     for N in issue_numbers:
         if N in visited:
-            warn("Cycle detected: #{N} already in queue. Skipping.")
+            warn("Duplicate: #{N} already in queue. Skipping redundant entry.")
             continue
         visited.add(N)
         result = detect_epic(N)
         if result is Epic:
             result.children = build_queue(result.children, visited)
+        elif result is CompletedEpic:
+            # auto-mark as done, append to covers
         queue.append(result)
     return queue
 ```
+
+**Duplicate handling:** The `visited` set prevents both true cycles (epic A
+contains epic B contains epic A) and user-provided duplicates (e.g.,
+`work-start #42 #50` where #42 is also a child of epic #50). In both cases,
+the first occurrence wins — the duplicate is skipped at its later position.
+The warning says "Duplicate," not "Cycle," because the latter is misleading
+for the common case of overlapping input.
 
 ### 18.3 Duplicate Epic Guard
 
@@ -1194,7 +1337,58 @@ requires:
 This is the largest new-code component. It cannot be built by extending
 `_parse_batches()` — it requires a new parser.
 
-### 19.2 Parser Design
+### 19.2 Data Structures
+
+```python
+@dataclass
+class QueueItem:
+    issue_number: int
+    issue_repo: str        # "" = primary repo, else "org/repo"
+    title: str
+    completed: bool
+    active: bool
+
+@dataclass
+class LeafItem(QueueItem):
+    pass
+
+@dataclass
+class EpicItem(QueueItem):
+    children: list[QueueItem]
+    batches: list[Batch] | None   # None if < 5 children (no batch planning)
+
+@dataclass
+class CompletedEpicItem(QueueItem):
+    """All children closed at detection time."""
+    pass
+
+@dataclass
+class Batch:
+    number: int
+    name: str
+    items: list[QueueItem]
+
+@dataclass
+class PlanTree:
+    heading: str                  # "# Work Plan — issue-42-batch-work"
+    queue: list[QueueItem]        # top-level items (may contain nested EpicItems)
+    session_state: dict[str, str] # parsed Session State section
+
+@dataclass
+class AdvanceResult:
+    completed: int               # issue number just completed
+    completed_repo: str          # repo of completed issue
+    next_issue: int | None       # next leaf issue, or None if queue exhausted
+    next_issue_title: str
+    next_issue_repo: str
+    batch_complete: bool         # True if the completed issue was last in its batch
+    epic_complete: bool          # True if queue is fully exhausted
+    safe_exit: bool              # True if at a safe exit point (§4.4)
+    epic_number: int | None      # parent epic issue number (for GitHub checkbox ticking)
+    epic_repo: str               # parent epic repo (for GitHub checkbox ticking)
+```
+
+### 19.3 Parser API
 
 ```python
 def parse_plan(plan_path: Path) -> PlanTree:
@@ -1206,11 +1400,21 @@ def flatten_leaves(tree: PlanTree) -> list[LeafItem]:
 def advance(plan_path: Path, meta_path: Path) -> AdvanceResult:
     """Mark current active complete, find next leaf, rewrite .plan."""
 
+def append_to_queue(plan_path: Path, items: list[QueueItem]):
+    """Append items to the end of ## Queue. Used during brainstorming
+    (free text mode) and mid-flight issue addition."""
+
 def rewrite_plan(plan_path: Path, tree: PlanTree):
     """Write tree back to .plan format preserving indentation."""
 ```
 
-### 19.3 Backward Compatibility
+`append_to_queue()` is called by the skill layer when issues are created during
+brainstorming (§2.7, §10.2) or when the user explicitly adds issues mid-work
+("also add #77 to the queue"). It appends to the end of the top-level queue —
+inserting within an epic's children requires editing the `.plan` tree directly
+via `parse_plan` → modify → `rewrite_plan`.
+
+### 19.4 Backward Compatibility
 
 ```python
 def advance_issue(plan_path: Path | None, epic_path: Path | None,
@@ -1277,7 +1481,7 @@ def advance_issue(plan_path: Path | None, epic_path: Path | None,
 
 ### Phase 7 — `work-end` updates
 
-- `.plan`-aware invariant checks in `validate_state()`
+- `.plan`-aware invariant checks in skill layer (§8.1)
 - `write_plan_closed` cleanup effect
 - Scaffold cleanup includes `.plan`
 - Preserve all existing work-end steps
