@@ -49,6 +49,7 @@ def write_progress(progress_path: Path, key: str, value: str) -> None:
     progress = read_progress(progress_path)
     progress[key] = value
     lines = [f"{k}={v}" for k, v in progress.items()]
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
     progress_path.write_text("\n".join(lines) + "\n")
 
 
@@ -111,9 +112,77 @@ def cmd_rebase(opts: dict[str, str]) -> int:
 
 
 def cmd_land(opts: dict[str, str]) -> int:
-    print("ERROR=NOT_IMPLEMENTED")
-    print("ERROR_DETAIL=land subcommand not yet implemented")
-    return 1
+    project = opts.get("project", "")
+    branch = opts.get("branch", "")
+    base_branch = opts.get("base_branch", "main")
+    workspace = opts.get("workspace", "")
+
+    if not project or not branch:
+        print("ERROR=MISSING_ARGS")
+        print("ERROR_DETAIL=project= and branch= are required")
+        return 1
+
+    progress_path = (
+        Path(workspace) / "design" / ".execute-progress"
+        if workspace
+        else Path(project) / ".execute-progress"
+    )
+    progress = read_progress(progress_path)
+
+    repo_name = Path(project).name
+
+    if progress.get(f"{repo_name}") == "stamped":
+        print(f"LANDED=yes")
+        print(f"SKIPPED={repo_name} already stamped")
+        return 0
+
+    # Push main to origin
+    push_result = git(project, "push", "origin", base_branch)
+    if push_result.returncode != 0:
+        print("ERROR=PUSH_FAILED")
+        print(f"ERROR_DETAIL=push {base_branch} failed: {push_result.stderr.strip()}")
+        return 1
+    write_progress(progress_path, f"{repo_name}", "pushed")
+
+    # Stamp the branch
+    stamp_script = Path(__file__).parent / "land_branch.py"
+    stamp_result = subprocess.run(
+        [sys.executable, str(stamp_script), "stamp", project,
+         f"branch={branch}", f"base_branch={base_branch}"],
+        capture_output=True, text=True,
+        timeout=30,
+    )
+
+    stamp_ok = False
+    landed_sha = ""
+    for line in stamp_result.stdout.splitlines():
+        if line.startswith("STAMP=ok"):
+            stamp_ok = True
+        if line.startswith("LANDED_SHA="):
+            landed_sha = line.split("=", 1)[1]
+        print(line)
+
+    if not stamp_ok:
+        print("ERROR=STAMP_FAILED")
+        if stamp_result.stderr.strip():
+            print(stamp_result.stderr.strip(), file=sys.stderr)
+        return 1
+    write_progress(progress_path, f"{repo_name}", "stamped")
+
+    # Stamp workspace branch
+    if workspace:
+        ws_branch_exists = git(workspace, "branch", "--list", branch)
+        if ws_branch_exists.returncode == 0 and ws_branch_exists.stdout.strip():
+            tip_msg = git(workspace, "log", "-1", "--format=%s", branch)
+            if not (tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")):
+                git(workspace, "checkout", branch)
+                git(workspace, "commit", "--allow-empty", "-m",
+                    f"chore: branch closed — landed as {landed_sha} on {base_branch}")
+                git(workspace, "checkout", base_branch)
+
+    print(f"LANDED=yes")
+    print(f"LANDED_SHA={landed_sha}")
+    return 0
 
 
 def main() -> int:

@@ -144,6 +144,111 @@ class TestRebaseSingleRepo:
         assert "ERROR=REBASE_CONFLICT" in result.stdout
 
 
+class TestLandSingleRepo:
+    def test_land_pushes_and_stamps(self, tmp_path: Path) -> None:
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-103-test"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: add feature")
+        _git(project, "push", "origin", branch)
+
+        _git(project, "checkout", "main")
+        _git(project, "merge", "--ff-only", branch)
+
+        _git(workspace, "checkout", "-b", branch)
+        design = workspace / "design"
+        design.mkdir(exist_ok=True)
+        (design / ".meta").write_text(f"branch: {branch}\nstate: active\n")
+        _git(workspace, "add", ".")
+        _git(workspace, "commit", "-m", "scaffold")
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0
+        assert "LANDED=yes" in result.stdout
+
+        last_msg = _git(project, "log", "-1", "--format=%s", branch)
+        assert last_msg.startswith("chore: branch closed")
+
+    def test_land_pushes_main(self, tmp_path: Path) -> None:
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-104-test"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: add feature")
+        _git(project, "push", "origin", branch)
+
+        _git(project, "checkout", "main")
+        _git(project, "merge", "--ff-only", branch)
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0
+
+        unpushed = _git(project, "log", "origin/main..main", "--oneline")
+        assert not unpushed
+
+    def test_land_stamps_workspace(self, tmp_path: Path) -> None:
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-105-test"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+        _git(project, "checkout", "-b", branch)
+        _git(project, "commit", "--allow-empty", "-m", "feat: work")
+        _git(project, "push", "origin", branch)
+        _git(project, "checkout", "main")
+        _git(project, "merge", "--ff-only", branch)
+
+        _git(workspace, "checkout", "-b", branch)
+        design = workspace / "design"
+        design.mkdir(exist_ok=True)
+        (design / ".meta").write_text(f"branch: {branch}\nstate: active\n")
+        _git(workspace, "add", ".")
+        _git(workspace, "commit", "-m", "scaffold")
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0
+
+        ws_tip = _git(workspace, "log", "-1", "--format=%s", branch)
+        assert ws_tip.startswith("chore: branch closed")
+
+
 class TestBadArgs:
     def test_missing_subcommand(self) -> None:
         result = subprocess.run(
