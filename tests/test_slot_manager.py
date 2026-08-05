@@ -152,36 +152,115 @@ class TestWorkspaceNameCollision:
         ), "workspace clone tried to use same path as repo clone"
 
 
+class TestWriteSlotSettings:
+    def test_creates_settings_with_host_fallback(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "82"
+        slot_dir.mkdir(parents=True)
+        settings_path = slot_manager._write_slot_settings(slot_dir)
+        assert settings_path.exists()
+        content = settings_path.read_text()
+        assert "host-m2" in content
+        assert "file://" in content
+        assert ".m2/repository" in content
+        assert "slot-host-fallback" in content
+
+    def test_includes_plugin_repositories(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "82"
+        slot_dir.mkdir(parents=True)
+        settings_path = slot_manager._write_slot_settings(slot_dir)
+        content = settings_path.read_text()
+        assert "host-m2-plugins" in content
+        assert "<pluginRepository>" in content
+
+    def test_snapshots_update_policy_always(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "82"
+        slot_dir.mkdir(parents=True)
+        settings_path = slot_manager._write_slot_settings(slot_dir)
+        content = settings_path.read_text()
+        assert "<updatePolicy>always</updatePolicy>" in content
+
+    def test_idempotent(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "82"
+        slot_dir.mkdir(parents=True)
+        path1 = slot_manager._write_slot_settings(slot_dir)
+        content1 = path1.read_text()
+        path2 = slot_manager._write_slot_settings(slot_dir)
+        content2 = path2.read_text()
+        assert content1 == content2
+
+    def test_settings_path_is_in_slot_dir(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "82"
+        slot_dir.mkdir(parents=True)
+        settings_path = slot_manager._write_slot_settings(slot_dir)
+        assert settings_path.parent == slot_dir
+        assert settings_path.name == "slot-settings.xml"
+
+
 class TestSetupMavenConfig:
-    def test_creates_new_config(self, tmp_path):
-        repo_wt = tmp_path / "engine"
+    def test_creates_new_config_with_repo_local_and_settings(self, tmp_path):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        repo_wt = slot_dir / "engine"
         repo_wt.mkdir()
-        m2 = tmp_path / ".m2"
+        m2 = slot_dir / ".m2"
         slot_manager.setup_maven_config(repo_wt, m2)
         config = (repo_wt / ".mvn" / "maven.config").read_text()
         assert f"-Dmaven.repo.local={m2}" in config
+        assert f"-s {slot_dir}/slot-settings.xml" in config
+
+    def test_generates_slot_settings_xml(self, tmp_path):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        repo_wt = slot_dir / "engine"
+        repo_wt.mkdir()
+        m2 = slot_dir / ".m2"
+        slot_manager.setup_maven_config(repo_wt, m2)
+        assert (slot_dir / "slot-settings.xml").exists()
 
     def test_appends_to_existing_config(self, tmp_path):
-        repo_wt = tmp_path / "engine"
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        repo_wt = slot_dir / "engine"
         mvn_dir = repo_wt / ".mvn"
         mvn_dir.mkdir(parents=True)
         (mvn_dir / "maven.config").write_text(
             "-Dquarkus.bootstrap.application-model.serialization.format=jos\n"
         )
-        m2 = tmp_path / ".m2"
+        m2 = slot_dir / ".m2"
         slot_manager.setup_maven_config(repo_wt, m2)
         config = (mvn_dir / "maven.config").read_text()
         assert "serialization.format=jos" in config
         assert f"-Dmaven.repo.local={m2}" in config
+        assert "-s " in config
 
     def test_idempotent(self, tmp_path):
-        repo_wt = tmp_path / "engine"
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        repo_wt = slot_dir / "engine"
         repo_wt.mkdir()
-        m2 = tmp_path / ".m2"
+        m2 = slot_dir / ".m2"
         slot_manager.setup_maven_config(repo_wt, m2)
         slot_manager.setup_maven_config(repo_wt, m2)
         config = (repo_wt / ".mvn" / "maven.config").read_text()
         assert config.count("-Dmaven.repo.local=") == 1
+        assert config.count("-s ") == 1
+
+    def test_multiple_repos_share_same_settings(self, tmp_path):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        m2 = slot_dir / ".m2"
+        repo_a = slot_dir / "engine"
+        repo_a.mkdir()
+        repo_b = slot_dir / "blocks"
+        repo_b.mkdir()
+        slot_manager.setup_maven_config(repo_a, m2)
+        slot_manager.setup_maven_config(repo_b, m2)
+        config_a = (repo_a / ".mvn" / "maven.config").read_text()
+        config_b = (repo_b / ".mvn" / "maven.config").read_text()
+        settings_ref = f"-s {slot_dir}/slot-settings.xml"
+        assert settings_ref in config_a
+        assert settings_ref in config_b
+        assert (slot_dir / "slot-settings.xml").exists()
 
 
 class TestRepointSymlinks:
