@@ -1129,6 +1129,62 @@ class TestMergeSlotClone:
         assert "branch closed" in log
 
 
+class TestMergeSlotOriginalSafety:
+    def test_fails_when_original_not_on_main(self, tmp_path, capsys):
+        family, originals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
+        subprocess.run(
+            ["git", "-C", str(originals["engine"]), "checkout", "-b", "some-other-branch"],
+            capture_output=True, check=True,
+        )
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code != 0
+        assert not (slot / ".landed").exists()
+        out = capsys.readouterr().out
+        assert "not_on_main" in out.lower()
+
+    def test_fails_when_original_has_dirty_worktree(self, tmp_path, capsys):
+        family, originals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
+        (originals["engine"] / "dirty.txt").write_text("uncommitted change\n")
+        subprocess.run(
+            ["git", "-C", str(originals["engine"]), "add", "dirty.txt"],
+            capture_output=True, check=True,
+        )
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code != 0
+        assert not (slot / ".landed").exists()
+        out = capsys.readouterr().out
+        assert "dirty" in out.lower() or "DIRTY" in out
+
+    def test_checks_all_originals_before_merging_any(self, tmp_path, capsys):
+        family, originals, slot, branch = _create_clone_test_repos(
+            tmp_path, ["engine", "iot"]
+        )
+        # Put iot on the wrong branch — engine is fine
+        subprocess.run(
+            ["git", "-C", str(originals["iot"]), "checkout", "-b", "detour"],
+            capture_output=True, check=True,
+        )
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code != 0
+        assert not (slot / ".landed").exists()
+        # Engine must NOT have been merged even though it was fine
+        rc, log, _ = slot_manager.run_cmd(
+            ["git", "-C", str(originals["engine"]), "log", "--oneline", "-5"]
+        )
+        assert "feat: engine feature" not in log
+
+    def test_fails_when_original_not_on_main_worktree(self, tmp_path, capsys):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        # Worktree-based: detach original from main
+        subprocess.run(
+            ["git", "-C", str(originals["engine"]), "checkout", "-b", "detour"],
+            capture_output=True, check=True,
+        )
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code != 0
+        assert not (slot / ".landed").exists()
+
+
 class TestEnsureCloneLayout:
     def test_migrates_worktree_to_clone(self, tmp_path):
         family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])

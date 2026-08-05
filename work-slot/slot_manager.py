@@ -862,6 +862,32 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         print("ERROR=no_repos_in_slot")
         return 1
 
+    # Pre-flight: verify every original repo is on main with a clean worktree
+    # before touching anything.  If any check fails, stop immediately — the
+    # user needs to fix the original repo state first.
+    print("STAGE=preflight")
+    preflight_ok = True
+    for repo_name in repos:
+        slot_repo = slot_dir / repo_name
+        original = resolve_original_repo(slot_repo)
+        rc, cur_branch, _ = run_cmd(
+            ["git", "-C", str(original), "branch", "--show-current"]
+        )
+        cur_branch = cur_branch.strip() if rc == 0 else ""
+        if cur_branch != "main":
+            print(f"ERROR=not_on_main repo={repo_name} branch={cur_branch} path={original}")
+            preflight_ok = False
+        rc, status_out, _ = run_cmd(
+            ["git", "-C", str(original), "status", "--porcelain"]
+        )
+        if rc == 0 and status_out.strip():
+            print(f"ERROR=dirty_worktree repo={repo_name} path={original}")
+            preflight_ok = False
+    if not preflight_ok:
+        print("STAGE=preflight STATUS=fail")
+        return 1
+    print("STAGE=preflight STATUS=pass")
+
     progress_file = slot_dir / ".merge-progress"
     pushed_repos: set[str] = set()
     if progress_file.exists():
