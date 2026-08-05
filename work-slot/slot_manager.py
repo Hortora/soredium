@@ -212,32 +212,47 @@ def _write_slot_settings(slot_dir: Path) -> Path:
 
 def setup_maven_config(repo_worktree: Path, m2_path: Path) -> None:
     slot_dir = m2_path.parent
-    settings_path = _write_slot_settings(slot_dir)
+    slot_settings = _write_slot_settings(slot_dir)
 
     mvn_dir = repo_worktree / ".mvn"
     mvn_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy slot-settings.xml into .mvn/ so maven.config can use a short relative
+    # path with --settings= (equals form).  Maven 3.9.x mangles "-s <path>" in
+    # .mvn/maven.config by prepending basedir with a space separator — see
+    # GE-20260805-ffef3b.
+    local_settings = mvn_dir / "slot-settings.xml"
+    if not local_settings.exists():
+        shutil.copy2(slot_settings, local_settings)
+
     config_file = mvn_dir / "maven.config"
     repo_line = f"-Dmaven.repo.local={m2_path}"
-    settings_line = f"-s {settings_path}"
+    settings_line = "--settings=.mvn/slot-settings.xml"
     if config_file.exists():
         content = config_file.read_text()
+        # Fix legacy "-s <path>" format (GE-20260805-ffef3b)
+        lines = content.splitlines()
+        fixed = [settings_line if l.strip().startswith("-s ") else l for l in lines]
+        content = "\n".join(fixed) + "\n" if fixed else ""
         lines_to_add = []
         if repo_line not in content:
             lines_to_add.append(repo_line)
         if settings_line not in content:
             lines_to_add.append(settings_line)
         if lines_to_add:
-            config_file.write_text(content.rstrip() + "\n" + "\n".join(lines_to_add) + "\n")
+            content = content.rstrip() + "\n" + "\n".join(lines_to_add) + "\n"
+        config_file.write_text(content)
     else:
         config_file.write_text(repo_line + "\n" + settings_line + "\n")
     gitignore = repo_worktree / ".gitignore"
-    entry = ".mvn/maven.config"
+    gi_entries = [".mvn/maven.config", ".mvn/slot-settings.xml"]
     if gitignore.exists():
         content = gitignore.read_text()
-        if entry not in content:
-            gitignore.write_text(content.rstrip() + "\n" + entry + "\n")
+        to_add = [e for e in gi_entries if e not in content]
+        if to_add:
+            gitignore.write_text(content.rstrip() + "\n" + "\n".join(to_add) + "\n")
     else:
-        gitignore.write_text(entry + "\n")
+        gitignore.write_text("\n".join(gi_entries) + "\n")
 
 
 def _unignore_subdir(ws_clone: Path, subdir_name: str) -> None:
