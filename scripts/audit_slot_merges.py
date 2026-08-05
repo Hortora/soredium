@@ -13,6 +13,7 @@ Usage:
     python3 scripts/audit_slot_merges.py <family-root>
     python3 scripts/audit_slot_merges.py <family-root> --all    # include single-repo
     python3 scripts/audit_slot_merges.py <family-root> --verbose # show all slots
+    python3 scripts/audit_slot_merges.py <family-root> --all --fix  # stamp UNSTAMPED branches
 """
 
 import re
@@ -189,6 +190,74 @@ def classify_status(info: dict) -> str:
     return f"UNMERGED({info['unmerged_count']})"
 
 
+def find_landing_sha(repo_path: Path, branch: str) -> str | None:
+    """Find the SHA on main that corresponds to the branch's content.
+
+    Strategy 1: If branch commits are ancestors of main (ff-merge), use
+    the branch tip SHA directly.
+    Strategy 2: Search main for commits with matching subjects (squash-merge).
+    """
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "merge-base", "--is-ancestor",
+         branch, "main"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if r.returncode == 0:
+        return git(repo_path, "rev-parse", branch)
+
+    unmerged_raw = git(repo_path, "log", "--oneline", f"main..{branch}")
+    if not unmerged_raw:
+        return git(repo_path, "rev-parse", "main")
+
+    for line in unmerged_raw.splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) < 2:
+            continue
+        subject = parts[1]
+        if subject.startswith("chore: branch closed"):
+            continue
+        match = git(repo_path, "log", "--oneline", "-1",
+                     f"--grep={subject[:50]}", "main")
+        if match:
+            return match.split()[0]
+    return None
+
+
+def fix_unstamped(repo_path: Path, branch: str) -> str:
+    """Attempt to stamp an UNSTAMPED branch. Returns disposition string."""
+    landing_sha = find_landing_sha(repo_path, branch)
+    if not landing_sha:
+        return "SKIP_NO_LANDING_SHA"
+
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "checkout", branch],
+        capture_output=True, text=True, timeout=10,
+    )
+    if r.returncode != 0:
+        return f"SKIP_CHECKOUT_FAILED"
+
+    stamp_msg = (
+        f"chore: branch closed — landed as {landing_sha} on main\n\n"
+        f"  no-issue: retroactive stamp from slot audit"
+    )
+    r = subprocess.run(
+        ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", stamp_msg],
+        capture_output=True, text=True, timeout=10,
+    )
+    _git_checkout_main(repo_path)
+
+    if r.returncode != 0:
+        return "SKIP_COMMIT_FAILED"
+    return "STAMPED"
+
+
+def _git_checkout_main(repo_path: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo_path), "checkout", "main"],
+        capture_output=True, text=True, timeout=10,
+    )
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -197,6 +266,7 @@ def main() -> int:
     family_root = Path(sys.argv[1])
     show_all = "--all" in sys.argv
     verbose = "--verbose" in sys.argv
+    fix_mode = "--fix" in sys.argv
 
     slot_dirs = find_slot_dirs(family_root)
     slot_dirs.sort(
@@ -206,6 +276,7 @@ def main() -> int:
     )
 
     problems: list[dict] = []
+    fix_results: list[dict] = []
     total = 0
     multi_repo_count = 0
 
@@ -238,6 +309,28 @@ def main() -> int:
                 if verbose:
                     slot_issues.append(f"  {marker} {repo_name}: {classification}")
                 continue
+
+            fixable = classification == "UNSTAMPED" or (
+                classification.startswith("UNMERGED") and not info.get("is_stamped")
+            )
+
+            if fix_mode and fixable:
+                disposition = fix_unstamped(repo_path, branch)
+                fix_results.append({
+                    "slot_num": slot_num, "repo": repo_name,
+                    "classification": classification, "disposition": disposition,
+                })
+                if disposition == "STAMPED":
+                    slot_issues.append(
+                        f"  {marker} {repo_name}: {classification} → STAMPED"
+                    )
+                    continue
+                else:
+                    slot_issues.append(
+                        f"  {marker} {repo_name}: {classification} → {disposition}"
+                    )
+                    all_ok = False
+                    continue
 
             all_ok = False
 
@@ -299,6 +392,19 @@ def main() -> int:
 
     if not problems:
         print("\nAll slots properly merged and stamped.")
+
+    if fix_results:
+        stamped = [r for r in fix_results if r["disposition"] == "STAMPED"]
+        skipped = [r for r in fix_results if r["disposition"] != "STAMPED"]
+        print(f"\n=== Fix Summary ===")
+        print(f"STAMPED: {len(stamped)}")
+        if stamped:
+            for r in stamped:
+                print(f"  Slot {r['slot_num']} {r['repo']}: {r['classification']} → STAMPED")
+        if skipped:
+            print(f"SKIPPED: {len(skipped)}")
+            for r in skipped:
+                print(f"  Slot {r['slot_num']} {r['repo']}: {r['disposition']}")
 
     return 1 if problems else 0
 
