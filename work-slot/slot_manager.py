@@ -171,17 +171,65 @@ def resolve_workspace_source(repo_path: Path) -> tuple[Path, str] | None:
     return None
 
 
+def _write_slot_settings(slot_dir: Path) -> Path:
+    """Generate a slot-specific settings.xml that adds the global ~/.m2/repository
+    as a file:// fallback remote. This lets Maven resolve artifacts from the host
+    cache without polluting it — writes go to the slot .m2, reads fall through."""
+    settings_path = slot_dir / "slot-settings.xml"
+    if settings_path.exists():
+        return settings_path
+    global_m2 = Path.home() / ".m2" / "repository"
+    settings_path.write_text(f"""\
+<settings>
+  <profiles>
+    <profile>
+      <id>slot-host-fallback</id>
+      <repositories>
+        <repository>
+          <id>host-m2</id>
+          <url>file://{global_m2}</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled><updatePolicy>always</updatePolicy></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>host-m2-plugins</id>
+          <url>file://{global_m2}</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled><updatePolicy>always</updatePolicy></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <activeProfile>slot-host-fallback</activeProfile>
+  </activeProfiles>
+</settings>
+""")
+    return settings_path
+
+
 def setup_maven_config(repo_worktree: Path, m2_path: Path) -> None:
+    slot_dir = m2_path.parent
+    settings_path = _write_slot_settings(slot_dir)
+
     mvn_dir = repo_worktree / ".mvn"
     mvn_dir.mkdir(parents=True, exist_ok=True)
     config_file = mvn_dir / "maven.config"
-    line = f"-Dmaven.repo.local={m2_path}"
+    repo_line = f"-Dmaven.repo.local={m2_path}"
+    settings_line = f"-s {settings_path}"
     if config_file.exists():
         content = config_file.read_text()
-        if line not in content:
-            config_file.write_text(content.rstrip() + "\n" + line + "\n")
+        lines_to_add = []
+        if repo_line not in content:
+            lines_to_add.append(repo_line)
+        if settings_line not in content:
+            lines_to_add.append(settings_line)
+        if lines_to_add:
+            config_file.write_text(content.rstrip() + "\n" + "\n".join(lines_to_add) + "\n")
     else:
-        config_file.write_text(line + "\n")
+        config_file.write_text(repo_line + "\n" + settings_line + "\n")
     gitignore = repo_worktree / ".gitignore"
     entry = ".mvn/maven.config"
     if gitignore.exists():
