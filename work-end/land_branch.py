@@ -167,12 +167,6 @@ def cmd_stamp(project: str, opts: dict[str, str]) -> int:
 
     landed_sha = landed_sha_result.stdout.strip()
 
-    result = git(project, "checkout", branch)
-    if result.returncode != 0:
-        print("ERROR=CHECKOUT_FAILED")
-        print(f"ERROR_DETAIL=cannot checkout {branch}: {result.stderr.strip()}")
-        return 1
-
     tip_msg = git(project, "log", "-1", "--format=%s", branch)
     already_stamped = tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")
 

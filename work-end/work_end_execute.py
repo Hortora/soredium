@@ -81,6 +81,11 @@ def cmd_promote(opts: dict[str, str]) -> int:
     for line in result.stdout.splitlines():
         print(line)
 
+    if result.returncode != 0:
+        print("ERROR=PROMOTE_FAILED")
+        print(f"ERROR_DETAIL=close_artifacts.py exited {result.returncode}")
+        return 1
+
     write_progress(progress_path, "default", "promoted")
     print("PROMOTED=yes")
     return 0
