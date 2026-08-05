@@ -173,21 +173,41 @@ def cmd_stamp(project: str, opts: dict[str, str]) -> int:
         print(f"ERROR_DETAIL=cannot checkout {branch}: {result.stderr.strip()}")
         return 1
 
-    issue_match = re.match(r"issue-(\d+)", branch)
-    issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""
-    result = git(project, "commit", "--allow-empty",
-                 "-m", f"chore: branch closed — landed as {landed_sha} on {base_branch}{issue_ref}")
-    if result.returncode != 0:
-        print("ERROR=STAMP_FAILED")
-        print(f"ERROR_DETAIL={result.stderr.strip()}")
-        return 1
+    tip_msg = git(project, "log", "-1", "--format=%s", branch)
+    already_stamped = tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")
 
-    result = git(project, "checkout", base_branch)
-    if result.returncode != 0:
-        print(f"CHECKOUT_WARNING=could not return to {base_branch}", file=sys.stderr)
+    if already_stamped:
+        print("STAMP=ok")
+        print("STAMP_SKIPPED=already_stamped")
+        print(f"LANDED_SHA={landed_sha}")
+    else:
+        result = git(project, "checkout", branch)
+        if result.returncode != 0:
+            print("ERROR=CHECKOUT_FAILED")
+            print(f"ERROR_DETAIL=cannot checkout {branch}: {result.stderr.strip()}")
+            return 1
 
-    print("STAMP=ok")
-    print(f"LANDED_SHA={landed_sha}")
+        issue_match = re.match(r"issue-(\d+)", branch)
+        issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""
+        result = git(project, "commit", "--allow-empty",
+                     "-m", f"chore: branch closed — landed as {landed_sha} on {base_branch}{issue_ref}")
+        if result.returncode != 0:
+            print("ERROR=STAMP_FAILED")
+            print(f"ERROR_DETAIL={result.stderr.strip()}")
+            return 1
+
+        result = git(project, "checkout", base_branch)
+        if result.returncode != 0:
+            print(f"CHECKOUT_WARNING=could not return to {base_branch}", file=sys.stderr)
+
+        print("STAMP=ok")
+        print(f"LANDED_SHA={landed_sha}")
+
+    fork_remote, _ = detect_topology(project)
+    if fork_remote:
+        push_result = git(project, "push", fork_remote, branch, "--force-with-lease")
+        if push_result.returncode != 0:
+            print(f"STAMP_PUSH_WARNING=push failed: {push_result.stderr.strip()}", file=sys.stderr)
 
     if _wl:
         try:

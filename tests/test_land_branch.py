@@ -164,6 +164,62 @@ class TestCmdStamp:
         )
         assert log.stdout.strip().startswith("chore: branch closed")
 
+    def test_stamp_pushes_to_origin(self, tmp_path):
+        project = tmp_path / "project"
+        _init_git(project)
+
+        remote = tmp_path / "remote.git"
+        _make_bare_remote(remote)
+        subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(remote)], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "push", "origin", "main"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "feature"], capture_output=True)
+        (project / "code.txt").write_text("code")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat: code"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "push", "origin", "feature"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "rebase", "feature"], capture_output=True)
+
+        result = cmd_stamp(str(project), {"branch": "feature", "base_branch": "main"})
+        assert result == 0
+
+        remote_tip = subprocess.run(
+            ["git", "-C", str(remote), "log", "-1", "--format=%s", "feature"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert remote_tip.startswith("chore: branch closed")
+
+    def test_stamp_idempotent_skips_existing(self, tmp_path):
+        project = tmp_path / "project"
+        _init_git(project)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "feature"], capture_output=True)
+        (project / "code.txt").write_text("code")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat: code"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "rebase", "feature"], capture_output=True)
+
+        result1 = cmd_stamp(str(project), {"branch": "feature", "base_branch": "main"})
+        assert result1 == 0
+
+        count_after_first = subprocess.run(
+            ["git", "-C", str(project), "rev-list", "--count", "feature"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        result2 = cmd_stamp(str(project), {"branch": "feature", "base_branch": "main"})
+        assert result2 == 0
+
+        count_after_second = subprocess.run(
+            ["git", "-C", str(project), "rev-list", "--count", "feature"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert count_after_first == count_after_second
+
     def test_missing_branch_arg(self, tmp_path, capsys):
         _init_git(tmp_path)
         result = cmd_stamp(str(tmp_path), {"base_branch": "main"})

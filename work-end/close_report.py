@@ -19,6 +19,7 @@ from pathlib import Path
 STEP_ORDER = [
     "rebase",
     "squash",
+    "build-verify",
     "merge",
     "push-fork",
     "push-blessed",
@@ -36,6 +37,7 @@ STEP_ORDER = [
 STEP_LABELS = {
     "rebase": "Rebased",
     "squash": "Squashed",
+    "build-verify": "Build verified",
     "merge": "Merged",
     "push-fork": "Pushed",
     "push-blessed": "Pushed to blessed",
@@ -109,6 +111,10 @@ def _format_detail(step: str, data: dict) -> str:
         strategy = d.get("strategy", "")
         strat = f", strategy {strategy}" if strategy else ""
         return f" {before} → {after} commits{strat}"
+
+    if step == "build-verify":
+        cmd = d.get("command", "")
+        return f" ({cmd})" if cmd else ""
 
     if step == "merge":
         method = d.get("method", "fast-forward")
