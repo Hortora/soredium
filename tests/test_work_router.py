@@ -653,6 +653,100 @@ class TestWorkspaceDirty:
         assert result["ROUTE"] == "start"
 
 
+class TestHandoffOnMainBranch:
+    """HANDOFF.md committed to workspace main must be found even when workspace
+    is checked out on a feature branch (the working tree won't have the file)."""
+
+    @staticmethod
+    def _init_git(path):
+        subprocess.run(["git", "init", "-b", "main", str(path)], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"],
+            capture_output=True,
+        )
+
+    def test_finds_handoff_on_main_when_workspace_on_feature_branch(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        self._init_git(workspace)
+        (workspace / "HANDOFF.md").write_text("# Handoff\nWorked on #42. Midway.")
+        subprocess.run(["git", "-C", str(workspace), "add", "HANDOFF.md"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "handoff"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-feat"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "rm", "HANDOFF.md"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "branch work"],
+            capture_output=True,
+        )
+        project = tmp_path / "project"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="issue-42-feat",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "yes"
+        assert "HANDOFF_PATH" in result
+
+    def test_finds_project_handoff_on_main_when_workspace_on_feature_branch(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        self._init_git(workspace)
+        (workspace / "HANDOFF-engine.md").write_text("# Handoff\nEngine #42 work.")
+        subprocess.run(["git", "-C", str(workspace), "add", "HANDOFF-engine.md"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "handoff"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-feat"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "rm", "HANDOFF-engine.md"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "branch work"],
+            capture_output=True,
+        )
+        project = tmp_path / "engine"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="issue-42-feat",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "yes"
+        assert "HANDOFF_PATH" in result
+
+    def test_no_handoff_on_main_returns_no(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        self._init_git(workspace)
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-feat"],
+            capture_output=True, check=True,
+        )
+        project = tmp_path / "project"
+        project.mkdir()
+        result = work_router.detect_state(
+            current_branch="issue-42-feat",
+            project_path=str(project),
+            workspace_path=str(workspace),
+        )
+        assert result["HAS_HANDOFF"] == "no"
+
+
 class TestCLI:
     def test_outputs_key_value(self, tmp_path, capsys):
         workspace = tmp_path / "workspace"

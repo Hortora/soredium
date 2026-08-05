@@ -140,8 +140,18 @@ def detect_state(current_branch: str, project_path: str,
     project_name = Path(project_path).name
     project_handoff = workspace / f"HANDOFF-{project_name}.md"
     generic_handoff = workspace / "HANDOFF.md"
-    handoff_candidate = project_handoff if project_handoff.exists() else (
-        generic_handoff if generic_handoff.exists() else None
+
+    def _on_main(filename: str) -> bool:
+        rc = subprocess.run(
+            ["git", "-C", str(workspace), "cat-file", "-e", f"main:{filename}"],
+            capture_output=True,
+        ).returncode
+        return rc == 0
+
+    handoff_candidate = (
+        project_handoff if (_on_main(project_handoff.name) or project_handoff.exists()) else (
+            generic_handoff if (_on_main(generic_handoff.name) or generic_handoff.exists()) else None
+        )
     )
     if handoff_candidate is not None:
         handoff_path = str(handoff_candidate)
