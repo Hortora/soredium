@@ -42,6 +42,9 @@ The pre-push hook blocks diverged pushes, but prevention is better than detectio
 | "CLAUDE.md hasn't changed" | Conventions established during implementation need to be captured. |
 | "I'll promote artifacts to workspace and project manually" | 195 orphaned specs. Run close_artifacts.py. The verification gate catches you. |
 | "close_artifacts.py is overkill for this branch" | The script takes 2 seconds. Skipping it loses specs permanently. |
+| "I'd recommend skipping the sweep" | Present defaults ON. The user decides. You never recommend skipping. |
+| "This was a small change, no sweep needed" | Small changes still have narrative. Run the sweep. |
+| "Session is getting long" | Session length is never a reason to skip session-bound items. |
 
 ---
 
@@ -389,6 +392,26 @@ Type numbers to toggle, "all" to toggle all, or "go" to proceed:
 Defaults: all six on. The user may deselect any that clearly don't apply (e.g. "go"
 immediately if the branch was a one-line typo fix). Do not auto-skip — the point is
 to make the decision explicit.
+
+<NEVER-RECOMMEND-SKIPPING>
+**Present the checklist with all items ON. Do not recommend skipping.**
+
+The #1 failure mode of this step: Claude says "this was a small change,
+I'd recommend toggling all off" or "session is getting long, let's skip
+the sweep." This loses session-bound content permanently. The user can
+decide to skip — that is their choice. Your job is to present the
+defaults and run what's checked, not to talk the user out of running them.
+
+These rationalizations are ALL wrong:
+- "This was a small/mechanical change" — small changes still have narrative
+- "The session is getting long" — session length is never a reason to skip
+- "There's nothing to capture" — you don't know that until you run the sweep
+- "We already covered this during implementation" — the sweep is a systematic check, not a duplicate
+- "Let me recommend toggling off 1-6" — this is the anti-pattern. Stop.
+
+If the user says "go" without toggling anything, run all six. "go" means
+"proceed with current selections" — and the current selections are all ON.
+</NEVER-RECOMMEND-SKIPPING>
 
 <SESSION-BOUND-ITEMS>
 **Items 1, 3, 4 (write-content, protocol sweep, forage sweep) are session-bound.**
