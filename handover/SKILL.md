@@ -57,58 +57,48 @@ If more than a week old, flag it before using the context:
 
 Read the file, then immediately proceed to Step R2b.
 
-### Step R2b — Detect open branch (continue-in-place)
+### Step R2b — Detect open branch and run entry-scope validation
 
-Check whether the previous session left an open branch (mid-work handover, not work-end):
-
+Run `work_health.py` entry-scope validation:
 ```bash
-cat "$WORKSPACE/design/.meta" 2>/dev/null
+python3 ~/.claude/skills/project/work_health.py --scope entry --project "$PROJECT" --workspace "$WORKSPACE"
 ```
 
-If `.meta` exists on the current branch AND `$WORKSPACE/design/EPIC-CLOSED.md` does NOT exist
-on that branch → the previous session paused mid-work. The branch is still open.
+Read the output. If any CHECK has STATUS=warn or STATUS=changed, include the
+findings in the resume output.
 
-**If open branch detected:** present the resume output (Steps R3+) with this Immediate
-Next Step:
+Then check for an open branch. Read the branch name from `$WORKSPACE/design/.meta`
+(if it exists). Use `is_closed()` to determine branch state:
 
-> "Branch `<branch-name>` is still open for #`<issue>`. Run `/work` to continue."
-
-`work-start` will detect the existing `.meta` and resume the branch (Detection state 2).
-Do not start a new branch or suggest picking different work.
-
-**If no `.meta` or EPIC-CLOSED.md exists:** the previous session closed cleanly via work-end.
-Proceed normally — the Immediate Next Step comes from HANDOFF.md content.
-
-### Step R3 — GitHub issue cross-check (always runs)
-
-Runs automatically after reading HANDOFF.md.
-
-**If `OWNER_REPO` is empty (no GitHub repo configured):** skip silently — no prompt.
-
-**Otherwise:**
-
-Scan HANDOFF.md for `#N` patterns in What's Left and What's Next sections. Deduplicate.
-
-Use `OWNER_REPO` from the ctx.py output. If empty, skip silently.
-
-For each `#N` found, run a separate command per issue with the concrete repo value:
-```bash
-gh issue view <N> --repo <OWNER_REPO> --json state,title --jq '"#\(.number) [\(.state)] \(.title)"' 2>/dev/null
+```python
+from lifecycle import is_closed, ClosureState
+state = is_closed(PROJECT, branch, workspace=WORKSPACE)
 ```
 
-If any are CLOSED but still appear as open work: remove them from HANDOFF.md immediately — no prompt. Add `*Updated: #N, #M closed — removed from backlog.*` at the top, then commit to workspace main:
-```bash
-python3 ~/.claude/skills/handover/handover_commit.py commit-to-main <Workspace> branch=<current-branch>
-```
+- If `.meta` exists and `is_closed()` returns `OPEN` or `MERGED_UNSTAMPED` →
+  branch is still open. Present resume output with this Immediate Next Step:
+  > "Branch `<branch-name>` is still open for #`<issue>`. Run `/work` to continue."
+- If `is_closed()` returns `CLOSED` or `DELETED` → previous session closed cleanly.
+  Proceed normally — the Immediate Next Step comes from HANDOFF.md content.
+- If no `.meta` exists → no active branch. Proceed normally.
 
-Report what was removed at the end of the resume output (see structure below).
+### Step R3 — Display .plan queue (replaces issue cross-check)
+
+If `$WORKSPACE/design/.plan` exists, display the human-readable queue
+using `format_resume_display()` from `work_health.py`. The `plan_state`
+check in Step R2b already validated issue state against GitHub — any
+closed issues were marked `[x]` automatically.
+
+Present the queue after the HANDOFF.md session context sections.
+
+If `.plan` doesn't exist, skip — show HANDOFF.md session context only.
 
 Then read the file and present the resume output using this structure:
 
 ---
 
 **## Last Session**
-2–3 lines: what was done and the key outcome.
+2–3 lines: what was done, what was tried, key reasoning.
 
 **## Immediate Next Step**
 Single specific action right now — procedural or unblocking (e.g. "run /work", "delete branches", "fix X in Y").
@@ -127,28 +117,17 @@ Do NOT include static architectural dependencies (e.g., "module X uses SPI Y fro
 **Blocked by** (work in this repo can't proceed because another repo hasn't shipped something — wait or escalate):
 - `<module>` — what we need from them (gates #N) · Scale · Complexity
 
-**## What's Left**
-Trailing obligations from current/recent work — in-flight, filed, or owed. Each item carries tags. Omit if none.
-- `<description>` · Scale · Complexity
+**## Queue**
+If `.plan` exists, display via `format_resume_display()`. Otherwise omit.
 
-**## What's Next**
-Discretionary new work. Items blocked by other modules are flagged in Notes.
-
-| # | Description | Scale | Complexity | Notes |
-|---|-------------|-------|------------|-------|
-| #N | ... | S | Low | ... |
-
-**## Cleaned up**
-Only include if issues were removed during cross-check. Omit entirely if nothing was removed.
-- `#N — <title>` — closed, removed from backlog
+**## work_health findings**
+If `work_health.py --scope entry` reported any warnings or changes, summarise here. Otherwise omit.
 
 ---
 
-**Tag definitions (infer from issue description, HANDOFF.md context, and any referenced specs):**
-- **Scale**: XS (lines) / S (single class) / M (multi-class) / L (substantial feature) / XL (major rework)
-- **Complexity**: Low (clear path, no unknowns) / Med (some design or unknowns) / High (significant unknowns, design required)
-
-Be directionally honest — don't inflate Complexity to seem thorough.
+**No What's Left, What's Next, or Cleaned up sections.** Work tracking
+moved to `.plan` (curated queue) and GitHub issues (source of truth).
+See handover-reference.md for the full routing table.
 
 ### Common Mistake
 
@@ -160,8 +139,8 @@ Generates a concise `HANDOFF.md` — a pointer document that gives the next
 Claude session enough context to resume immediately. References are read on
 demand; the handover itself stays small. Git history is the archive.
 
-**Token budget:** HANDOFF.md should be readable in under 500 tokens. If it's
-longer, trim — it has become a document, not a handover.
+**Token budget:** HANDOFF.md should be readable in under 200 tokens. No work
+tracking, no backlog — session context only.
 
 ---
 
@@ -326,27 +305,24 @@ the diff, not from loading the full previous file.
 ### Step 2 — Recall from context (free)
 
 From the current session, recall:
-- What changed from the last handover? (only write these)
+- What happened this session? (Last Session — 2-3 lines)
 - What decisions were made? What was tried and didn't work?
-- Are there active cross-module blockers? (Not static dependencies — only work gated on another repo shipping something, or vice versa. Each must have a tracked issue.)
-- What's trailing from this session that feels owed (What's Left)?
-- What new discrete work could be picked up next (What's Next)?
-- What's the single most important next action (Immediate Next Step)?
+- Are there active cross-module blockers? (Not static dependencies — only
+  work gated on another repo shipping something, or vice versa. Each must
+  have a tracked issue.)
+- What's the single most important next action? (Immediate Next Step)
 
 Do NOT read any project files to answer these. Work from conversation memory.
 
+**No What's Left or What's Next.** Work tracking moved to `.plan` (curated
+queue) and GitHub issues. Trailing obligations that aren't GitHub issues
+should be filed as issues before this session ends — see spec §Component 3.
+
 **Queue context:** If `HAS_PLAN=yes` from ctx.py output:
-- Read `.plan` at `$PLAN_PATH` for queue state and active issue
 - Update `.plan`'s `## Session State` with current position and today's
   date as the last wrap timestamp
-- Include the `## Queue Progress` section in HANDOFF.md (see
-  handover-reference.md template)
-- Update the `## What to do` section's `Current:` line to reflect
-  the active issue
-
-**Legacy fallback:** If `HAS_PLAN=no` but `IS_EPIC=yes`, read the epic
-file at `$EPIC_PATH` for batch progress. This covers branches created
-before the `.plan` migration.
+- Do NOT include queue progress in HANDOFF.md — the resume path displays
+  it via `format_resume_display()` from live `.plan` state
 
 ### Step 2b — Forage sweep (while context is still full)
 
@@ -500,27 +476,11 @@ Options:
 
 Wait for a decision on each. Apply all decisions before continuing.
 
-**If nothing is flagged** → proceed silently to Step 5b (issue repo cross-check).
+**If nothing is flagged** → proceed silently to Step 5c.
 
-### Step 5b — Issue repo cross-check (always runs)
-
-Before committing, validate that every `#N` issue reference in the draft belongs to this project's repo — not a different repo the session happened to touch.
-
-**If `OWNER_REPO` is empty:** skip silently.
-
-**Otherwise:** scan the draft's What's Left and What's Next sections for `#N` patterns. Deduplicate.
-
-For each `#N` found, verify it exists in the project repo:
-```bash
-gh issue view <N> --repo <OWNER_REPO> --json title --jq '.title' 2>/dev/null
-```
-
-If the issue does not exist in `OWNER_REPO` (command fails or returns nothing), it belongs to a different repo. Remove it from the draft before proceeding — no prompt needed. If the removal empties the What's Next table entirely, replace it with `See \`<OWNER_REPO>\` open issues.`
-
-Log which issues were removed and why:
-> "Removed #N, #M from What's Next — not found in `<OWNER_REPO>` (likely from a cross-repo session)."
-
-**Why this exists:** cross-repo triage sessions recall issues from the repo they were triaging, not the project repo they're writing the handover for. The resume path (Step R3) catches stale issues but only checks state (open/closed) — it doesn't catch wrong-repo issues because it also uses `OWNER_REPO`. This step catches them at write time.
+**Step 5b removed.** Issue repo cross-check is no longer needed — HANDOFF.md
+no longer contains What's Left or What's Next sections with `#N` references.
+Work tracking moved to `.plan` where `plan_state` validation handles it.
 
 ### Step 5c — Suggest and offer to rename the session
 
@@ -659,7 +619,7 @@ flowchart TD
 | Skipping the freshness check | Old handover misleads the next session | `git log -1 --format="%ar" -- HANDOFF.md` before using |
 | Writing "continue work" as next step | Too vague to act on | Be specific — name the file, command, or section |
 | Scanning CLAUDE.md for workspace path when resuming | Multiple CLAUDE.mds are loaded; parent's `**Workspace:**` is found first and points to the wrong repo | Use `git rev-parse --show-toplevel` from CWD — that is always the workspace |
-| Writing cross-repo issue references into What's Next | Triage sessions recall issues from the repo they triaged, not the project repo | Step 5b validates every `#N` against `OWNER_REPO` before committing |
+| Adding work items to HANDOFF.md | Work tracking moved to `.plan` and GitHub issues | HANDOFF.md is session context only — no What's Left, What's Next, or issue references |
 
 ---
 
@@ -680,9 +640,8 @@ Handover is complete when:
 - ✅ Unchanged sections reference git history, not repeated content
 - ✅ Immediate next step is specific enough to act on without asking
 - ✅ Cross-Module section present only for active blockers with tracked issues; omitted if none or if items are just static dependencies
-- ✅ What's Left items carry Scale · Complexity tags
-- ✅ What's Next table carries Scale / Complexity / Notes columns
-- ✅ Issue repo cross-check passed — all `#N` references verified against `OWNER_REPO`
+- ✅ HANDOFF.md under 200 tokens — no work tracking sections
+- ✅ `.plan` queue displayed on resume (if exists)
 - ✅ References table uses paths only — no file content inline
 - ✅ Nothing from CLAUDE.md is duplicated
 - ✅ arc42 stale scan performed (if ARC42STORIES.MD exists) — stale statuses, resolved blockers, and closed-issue forward refs checked and fixed

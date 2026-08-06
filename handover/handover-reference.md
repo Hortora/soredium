@@ -7,57 +7,47 @@ when resuming work. Contains the template, routing table, and git read patterns.
 
 ## HANDOFF.md Template
 
+HANDOFF.md is session context only — no work tracking, no backlog. Work
+state lives in `.plan` (curated queue) and GitHub issues (source of truth).
+
+Target: under 200 tokens. The "why" that connects commits and .plan items
+into a coherent story for the next session.
+
 ```markdown
-# Handover — YYYY-MM-DD
+# HANDOFF — <project>
 
-**Previous handover:** `git show HEAD~1:HANDOFF.md` | diff: `git diff HEAD~1 HEAD -- HANDOFF.md`
+## Last Session
 
-## What Changed This Session
-
-- <only things that changed — not a general summary>
-- <if nothing changed in a section, say so and skip it>
-
-## State Right Now
-
-<Write only if changed from previous handover.>
-<If unchanged: *Unchanged — `git show HEAD~1:HANDOFF.md`*>
+2-3 lines: what was done, what was tried, key reasoning.
 
 ## Immediate Next Step
 
-<Always write this explicitly — it changes every session.>
-<Be specific: not "continue work" but "run X and update section Y".>
+Single specific action.
 
-## Queue Progress
+## Cross-Module
 
-<Include ONLY when HAS_PLAN=yes (from ctx.py output).
- Omit entirely otherwise. Read from .plan at $PLAN_PATH.>
-
-Queue — Position <current>/<total>
-Done: #<list of completed issues>
-Active: #<issue> — <title>
-Next: #<next-issue>
-
-## Open Questions / Blockers
-
-<Write only if changed. If unchanged: *Unchanged — see previous handover.*>
+Only if active cross-repo blockers exist with tracked issues.
+Omit entirely if none.
 
 ## References
 
-Read only what the task requires. Use git show / grep for surgical reads.
-
-| Context | Where | Retrieve with |
-|---------|-------|---------------|
-| Design state | `snapshots/<latest>.md` | `cat` that file |
-| Project narrative | `blog/<latest>.md` | `cat` that file |
-| Technical gotchas | `${HORTORA_GARDEN:-~/.hortora/garden}/` | index only; detail on demand |
-| Open ideas | `IDEAS.md` | `cat` that file |
-| Previous handover | git history | `git show HEAD~1:HANDOFF.md` |
-| Specific section of prev | git history | `git show HEAD~1:HANDOFF.md \| grep -A 10 "## Section"` |
-
-## Environment
-
-<Only if non-obvious and changed since CLAUDE.md. Omit if nothing unusual.>
+Paths only, no content inline.
 ```
+
+**What moved out of HANDOFF.md:**
+
+| Previously in HANDOFF.md | Now in | Mechanism |
+|--------------------------|--------|-----------|
+| What's Left | Main `.plan` or GitHub issues | Trailing items become issues |
+| What's Next | Main `.plan` | Curated queue with priority |
+| Queue Progress | `.plan` Session State | Displayed via format_resume_display() |
+| State Right Now | `.plan` + git + `work_health.py` | Derived, not cached |
+| Open Questions / Blockers | GitHub issues | Filed as issues with labels |
+
+**Resume path:** On resume, the handover skill reads HANDOFF.md for session
+context, then runs `work_health.py --scope entry` and displays the `.plan`
+queue via `format_resume_display()`. The combined output gives the next
+session both narrative context and work state.
 
 ---
 
@@ -65,12 +55,16 @@ Read only what the task requires. Use git show / grep for surgical reads.
 
 | Information | Where it belongs |
 |-------------|-----------------|
-| What changed this session | HANDOFF.md — write in full |
-| What didn't change this session | HANDOFF.md — reference previous via git |
+| Session narrative (what happened, reasoning) | HANDOFF.md |
+| Immediate next action | HANDOFF.md |
+| Cross-repo blockers with tracked issues | HANDOFF.md Cross-Module |
+| Work items, backlog, trailing obligations | Main `.plan` + GitHub issues |
+| Queue progress and priority ordering | `.plan` Session State |
+| Branch/slot state validation | `work_health.py` (derived from git) |
 | Why a design decision was made | write-blog or adr |
 | Current architecture | design-snapshot (reference from handover) |
 | Cross-project technical gotcha | garden (reference from handover) |
-| Undecided possibilities | idea-log (reference from handover) |
+| Undecided possibilities, notes for later | `$WORKSPACE/NOTES.md` |
 | Permanent conventions | CLAUDE.md (auto-loaded, don't repeat) |
 
 ---

@@ -16,6 +16,8 @@ Spec: issue-171-lifecycle-state-machine
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
+import subprocess as _sp
 import sys
 from pathlib import Path
 from typing import Optional
@@ -398,6 +400,85 @@ def is_transient(state: str) -> bool:
 
 def is_closing(state: str) -> bool:
     return state in CLOSING_STATES
+
+
+class ClosureState(Enum):
+    CLOSED = "closed"
+    MERGED_UNSTAMPED = "merged_unstamped"
+    STAMPED_UNMERGED = "stamped_unmerged"
+    OPEN = "open"
+    DELETED = "deleted"
+
+
+_CLOSURE_PRIORITY = [
+    ClosureState.CLOSED,
+    ClosureState.MERGED_UNSTAMPED,
+    ClosureState.OPEN,
+    ClosureState.STAMPED_UNMERGED,
+    ClosureState.DELETED,
+]
+
+
+def is_closed(
+    project: str,
+    branch: str,
+    workspace: str | None = None,
+    base_branch: str = "main",
+) -> ClosureState:
+    """Single predicate answering 'is this branch done?'
+
+    All checks are local git, sub-second. Returns the worst state
+    across project and workspace (if provided).
+    """
+
+    def _check_repo(repo_path: str, branch_name: str) -> ClosureState:
+        exists = _sp.run(
+            ["git", "-C", repo_path, "branch", "--list", branch_name],
+            capture_output=True, text=True, timeout=10,
+        )
+        if not exists.stdout.strip():
+            return ClosureState.DELETED
+
+        ahead = _sp.run(
+            ["git", "-C", repo_path, "log", "--oneline",
+             f"{base_branch}..{branch_name}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        non_stamp_commits = []
+        if ahead.stdout.strip():
+            for line in ahead.stdout.strip().splitlines():
+                parts = line.split(" ", 1)
+                if len(parts) > 1 and parts[1].startswith("chore: branch closed"):
+                    continue
+                non_stamp_commits.append(line)
+
+        last_commit = _sp.run(
+            ["git", "-C", repo_path, "log", "-1", "--format=%s", branch_name],
+            capture_output=True, text=True, timeout=10,
+        )
+        is_stamped = last_commit.stdout.strip().startswith("chore: branch closed")
+
+        merged = len(non_stamp_commits) == 0
+        if merged and is_stamped:
+            return ClosureState.CLOSED
+        if merged and not is_stamped:
+            return ClosureState.MERGED_UNSTAMPED
+        if not merged and is_stamped:
+            return ClosureState.STAMPED_UNMERGED
+        return ClosureState.OPEN
+
+    project_state = _check_repo(project, branch)
+
+    if workspace is None:
+        return project_state
+
+    workspace_state = _check_repo(workspace, branch)
+
+    if workspace_state == ClosureState.DELETED:
+        return project_state
+
+    return max(project_state, workspace_state,
+               key=lambda s: _CLOSURE_PRIORITY.index(s))
 
 
 def can_transition(from_state: str, event: str) -> bool:

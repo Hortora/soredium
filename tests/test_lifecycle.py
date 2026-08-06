@@ -26,6 +26,8 @@ from lifecycle import (
     TransitionResult,
     can_transition,
     commit_transition,
+    ClosureState,
+    is_closed,
     is_closing,
     is_transient,
     migrate_legacy_paused,
@@ -718,3 +720,139 @@ class TestWorklogIntegration:
                 os.environ.pop("WORKLOG_DB", None)
             else:
                 os.environ["WORKLOG_DB"] = old_env
+
+
+# --- is_closed() predicate ---
+
+
+class TestIsClosed:
+    """Tests for is_closed() — single predicate for branch closure state."""
+
+    def _init_repo(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=path, check=True,
+                        capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"],
+                        cwd=path, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"],
+                        cwd=path, check=True, capture_output=True)
+        (path / "README.md").write_text("init")
+        subprocess.run(["git", "add", "."], cwd=path, check=True,
+                        capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True,
+                        capture_output=True)
+        return path
+
+    def _create_branch_with_commit(self, repo, branch, filename="work.txt"):
+        subprocess.run(["git", "checkout", "-b", branch], cwd=repo,
+                        check=True, capture_output=True)
+        (repo / filename).write_text("work")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True,
+                        capture_output=True)
+        subprocess.run(["git", "commit", "-m", f"feat: {filename}"],
+                        cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", "main"], cwd=repo, check=True,
+                        capture_output=True)
+
+    def _rebase_merge_branch(self, repo, branch):
+        subprocess.run(["git", "rebase", branch], cwd=repo, check=True,
+                        capture_output=True)
+
+    def _stamp_branch(self, repo, branch, landing_sha=None):
+        subprocess.run(["git", "checkout", branch], cwd=repo, check=True,
+                        capture_output=True)
+        msg = "chore: branch closed"
+        if landing_sha:
+            msg += f" — landed as {landing_sha} on main"
+        subprocess.run(["git", "commit", "--allow-empty", "-m", msg],
+                        cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", "main"], cwd=repo, check=True,
+                        capture_output=True)
+
+    def _get_sha(self, repo, ref="HEAD"):
+        result = subprocess.run(["git", "rev-parse", ref], cwd=repo,
+                                check=True, capture_output=True, text=True)
+        return result.stdout.strip()
+
+    def test_deleted_branch(self, tmp_path):
+        repo = self._init_repo(tmp_path / "repo")
+        assert is_closed(str(repo), "nonexistent") == ClosureState.DELETED
+
+    def test_open_branch(self, tmp_path):
+        repo = self._init_repo(tmp_path / "repo")
+        self._create_branch_with_commit(repo, "feature-1")
+        assert is_closed(str(repo), "feature-1") == ClosureState.OPEN
+
+    def test_merged_unstamped(self, tmp_path):
+        repo = self._init_repo(tmp_path / "repo")
+        self._create_branch_with_commit(repo, "feature-2")
+        self._rebase_merge_branch(repo, "feature-2")
+        assert is_closed(str(repo), "feature-2") == ClosureState.MERGED_UNSTAMPED
+
+    def test_closed_with_landing_sha(self, tmp_path):
+        repo = self._init_repo(tmp_path / "repo")
+        self._create_branch_with_commit(repo, "feature-3")
+        self._rebase_merge_branch(repo, "feature-3")
+        sha = self._get_sha(repo, "main")
+        self._stamp_branch(repo, "feature-3", sha)
+        assert is_closed(str(repo), "feature-3") == ClosureState.CLOSED
+
+    def test_closed_old_format_stamp(self, tmp_path):
+        repo = self._init_repo(tmp_path / "repo")
+        self._create_branch_with_commit(repo, "feature-4")
+        self._rebase_merge_branch(repo, "feature-4")
+        self._stamp_branch(repo, "feature-4")
+        assert is_closed(str(repo), "feature-4") == ClosureState.CLOSED
+
+    def test_stamped_unmerged(self, tmp_path):
+        repo = self._init_repo(tmp_path / "repo")
+        self._create_branch_with_commit(repo, "feature-5")
+        self._stamp_branch(repo, "feature-5")
+        assert is_closed(str(repo), "feature-5") == ClosureState.STAMPED_UNMERGED
+
+    def test_stamp_only_commit_ahead_is_closed(self, tmp_path):
+        repo = self._init_repo(tmp_path / "repo")
+        self._create_branch_with_commit(repo, "feature-6")
+        self._rebase_merge_branch(repo, "feature-6")
+        sha = self._get_sha(repo, "main")
+        self._stamp_branch(repo, "feature-6", sha)
+        assert is_closed(str(repo), "feature-6") == ClosureState.CLOSED
+
+    def test_workspace_both_closed(self, tmp_path):
+        project = self._init_repo(tmp_path / "proj")
+        workspace = self._init_repo(tmp_path / "wksp")
+        for repo in [project, workspace]:
+            self._create_branch_with_commit(repo, "feature-7")
+            self._rebase_merge_branch(repo, "feature-7")
+            sha = self._get_sha(repo, "main")
+            self._stamp_branch(repo, "feature-7", sha)
+        assert is_closed(str(project), "feature-7",
+                          workspace=str(workspace)) == ClosureState.CLOSED
+
+    def test_workspace_not_closed_downgrades(self, tmp_path):
+        project = self._init_repo(tmp_path / "proj")
+        workspace = self._init_repo(tmp_path / "wksp")
+        self._create_branch_with_commit(project, "feature-8")
+        self._create_branch_with_commit(workspace, "feature-8")
+        self._rebase_merge_branch(project, "feature-8")
+        sha = self._get_sha(project, "main")
+        self._stamp_branch(project, "feature-8", sha)
+        assert is_closed(str(project), "feature-8",
+                          workspace=str(workspace)) == ClosureState.OPEN
+
+    def test_workspace_deleted_uses_project(self, tmp_path):
+        project = self._init_repo(tmp_path / "proj")
+        workspace = self._init_repo(tmp_path / "wksp")
+        self._create_branch_with_commit(project, "feature-9")
+        self._rebase_merge_branch(project, "feature-9")
+        sha = self._get_sha(project, "main")
+        self._stamp_branch(project, "feature-9", sha)
+        assert is_closed(str(project), "feature-9",
+                          workspace=str(workspace)) == ClosureState.CLOSED
+
+    def test_landing_sha_mismatch_still_closed(self, tmp_path):
+        repo = self._init_repo(tmp_path / "repo")
+        self._create_branch_with_commit(repo, "feature-10")
+        self._rebase_merge_branch(repo, "feature-10")
+        self._stamp_branch(repo, "feature-10", "deadbeefdeadbeef")
+        assert is_closed(str(repo), "feature-10") == ClosureState.CLOSED

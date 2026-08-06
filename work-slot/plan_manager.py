@@ -421,6 +421,38 @@ def _mark_completed(items: list[QueueItem], issue_number: int) -> bool:
     return False
 
 
+def mark_completed(plan_path: Path, issue_number: int) -> bool:
+    """Mark an issue as completed [x] in the plan. Public API for work_health.py."""
+    tree = parse_plan(plan_path)
+    changed = _mark_completed(tree.queue, issue_number)
+    if changed:
+        rewrite_plan(plan_path, tree)
+    return changed
+
+
+def create_main_plan(workspace_path: Path, items: list[dict],
+                     project_name: str = "project") -> Path:
+    """Create a main .plan on workspace main with the given issues.
+
+    items: list of {"number": int, "title": str}
+    Returns path to created .plan file.
+    """
+    from datetime import date
+    design = workspace_path / "design"
+    design.mkdir(exist_ok=True)
+    plan_path = design / ".plan"
+    queue_items = []
+    for i, item in enumerate(items):
+        queue_items.append(QueueItem(
+            issue_number=item["number"],
+            title=item["title"],
+            active=(i == 0),
+        ))
+    content = build_plan_content(project_name, queue_items, str(date.today()))
+    plan_path.write_text(content)
+    return plan_path
+
+
 def _mark_active(items: list[QueueItem], issue_number: int) -> bool:
     for item in items:
         if item.issue_number == issue_number and not item.is_epic:

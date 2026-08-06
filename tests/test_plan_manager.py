@@ -734,3 +734,50 @@ class TestReconcileCovers:
         assert "42" in covers
         assert "43" in covers
         assert "183" in covers
+
+
+class TestCreateMainPlan:
+
+    def test_creates_plan_with_items(self, tmp_path):
+        workspace = tmp_path / "wksp"
+        workspace.mkdir()
+        items = [
+            {"number": 170, "title": "pre-merge hook"},
+            {"number": 95, "title": "mechanize LLM ops"},
+        ]
+        plan_path = plan_manager.create_main_plan(workspace, items, "soredium")
+        assert plan_path.exists()
+        content = plan_path.read_text()
+        assert "#170" in content
+        assert "#95" in content
+        assert "← active" in content
+        assert "Work Plan — soredium" in content
+
+    def test_first_item_is_active(self, tmp_path):
+        workspace = tmp_path / "wksp"
+        workspace.mkdir()
+        items = [
+            {"number": 10, "title": "first"},
+            {"number": 20, "title": "second"},
+        ]
+        plan_manager.create_main_plan(workspace, items, "test")
+        tree = plan_manager.parse_plan(workspace / "design" / ".plan")
+        leaves = plan_manager.flatten_leaves(tree)
+        assert leaves[0].active is True
+        assert leaves[1].active is False
+
+    def test_detect_finds_main_plan(self, tmp_path):
+        workspace = tmp_path / "wksp"
+        workspace.mkdir()
+        items = [{"number": 42, "title": "some issue"}]
+        plan_manager.create_main_plan(workspace, items, "test")
+        result = plan_manager.detect(workspace)
+        assert result is not None
+        assert result["active_issue"] == 42
+
+    def test_creates_design_dir_if_missing(self, tmp_path):
+        workspace = tmp_path / "wksp"
+        workspace.mkdir()
+        items = [{"number": 1, "title": "test"}]
+        plan_manager.create_main_plan(workspace, items)
+        assert (workspace / "design" / ".plan").exists()
