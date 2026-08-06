@@ -2,20 +2,24 @@
 name: fix-ci
 description: >
   Use when CI is red and the user asks to fix it, or when a push fails CI
-  and the user asks "is CI green?" after a fix. Ensures all failures are
-  reproduced locally, root-caused, and verified green before any push.
-  Never use CI as a test runner.
+  and the user asks "is CI green?" after a fix. Fixes ALL failures — including
+  pre-existing ones — until CI is green. Reproduces locally, root-causes, and
+  verifies green before any push. Never use CI as a test runner.
 ---
 
 # Fix CI
 
-Local-first, root-cause-first workflow for fixing CI failures. Every failure
-is reproduced, diagnosed, and verified locally before pushing. One push, one
-CI run, done.
+Get CI green. Every failure — whether introduced this session, last week, or
+six months ago — gets reproduced, diagnosed, and fixed. The goal is a green
+build, not blame attribution. Pre-existing failures are not someone else's
+problem; they are failures that block shipping.
 
 **Anti-pattern this replaces:** fix one symptom → push → wait 5 min → check CI
 → find next failure → repeat. This uses CI as a test runner, creates long wait
-cycles, and fixes symptoms instead of root causes.
+cycles, and fixes symptoms instead of root causes. Also replaces: "those tests were already failing" and "this is a CI/workflow
+issue, not a code fix" — if it's preventing green, it's in scope. Workflow
+files, GitHub Actions configs, test infrastructure, flaky tests, missing
+dependencies — all of it.
 
 ---
 
@@ -209,21 +213,6 @@ flowchart TD
     ROOT --> FIX["Step 4: Fix + verify isolated"]
     FIX --> FULL["Step 5: Full local build"]
     FULL --> PUSH
-```
-
----
-
-## Pre-existing failures
-
-If a test was already failing before your changes (verify by checking it against
-the pre-change commit), it is not your responsibility to fix in this cycle.
-File an issue, note it, and exclude it from the green gate.
-
-```bash
-# Verify a test was pre-existing
-git stash
-<run test>  # still fails? pre-existing
-git stash pop
 ```
 
 ---
