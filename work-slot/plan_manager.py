@@ -25,12 +25,22 @@ class QueueItem:
 
 
 @dataclass
+class DeferredItem:
+    title: str
+    scale: str
+    complexity: str
+    repos: list[str]
+    completed: bool = False
+
+
+@dataclass
 class PlanTree:
     heading: str
     queue: list[QueueItem]
     current_issue: int | None
     started: str
     last_wrap: str | None = None
+    deferred: list[DeferredItem] = field(default_factory=list)
 
 
 @dataclass
@@ -51,6 +61,7 @@ class AdvanceResult:
     batch_complete: bool = False
     epic_complete: bool = False
     safe_exit: bool = False
+    has_deferred: bool = False
 
 
 _ITEM_RE = re.compile(
@@ -59,6 +70,9 @@ _ITEM_RE = re.compile(
 _EPIC_MARKER_RE = re.compile(r'\(epic\)')
 _ACTIVE_MARKER_RE = re.compile(r'←\s*active')
 _BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*←\s*current)?$')
+_DEFERRED_RE = re.compile(
+    r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]+)\]$'
+)
 _CURRENT_RE = re.compile(r'^Current:\s*#(\d+)')
 _STARTED_RE = re.compile(r'^Started:\s*(.+)')
 _LAST_WRAP_RE = re.compile(r'^Last wrap:\s*(.+)')
@@ -106,10 +120,12 @@ def parse_plan(plan_path: Path) -> PlanTree:
 
     heading = ""
     queue_lines: list[str] = []
+    deferred_lines: list[str] = []
     current_issue = None
     started = ""
     last_wrap = None
     in_queue = False
+    in_deferred = False
     in_session = False
 
     for line in lines:
@@ -118,14 +134,22 @@ def parse_plan(plan_path: Path) -> PlanTree:
             continue
         if line.strip() == "## Queue":
             in_queue = True
+            in_deferred = False
+            in_session = False
+            continue
+        if line.strip() == "## Deferred":
+            in_queue = False
+            in_deferred = True
             in_session = False
             continue
         if line.strip() == "## Session State":
             in_queue = False
+            in_deferred = False
             in_session = True
             continue
         if line.startswith("## "):
             in_queue = False
+            in_deferred = False
             in_session = False
             continue
 
@@ -143,11 +167,14 @@ def parse_plan(plan_path: Path) -> PlanTree:
 
         if in_queue:
             queue_lines.append(line)
+        if in_deferred:
+            deferred_lines.append(line)
 
     queue = _parse_queue_lines(queue_lines)
+    deferred = _parse_deferred_lines(deferred_lines)
 
     return PlanTree(heading=heading, queue=queue, current_issue=current_issue,
-                    started=started, last_wrap=last_wrap)
+                    started=started, last_wrap=last_wrap, deferred=deferred)
 
 
 def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
@@ -220,6 +247,23 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
     return items
 
 
+def _parse_deferred_lines(lines: list[str]) -> list[DeferredItem]:
+    items: list[DeferredItem] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = _DEFERRED_RE.match(stripped)
+        if m:
+            completed = m.group(1) == "x"
+            title = m.group(2).strip()
+            scale = m.group(3).strip()
+            complexity = m.group(4).strip()
+            repos = [r.strip() for r in m.group(5).split(",")]
+            items.append(DeferredItem(title, scale, complexity, repos, completed))
+    return items
+
+
 def flatten_leaves(tree: PlanTree) -> list[LeafItem]:
     result: list[LeafItem] = []
     _flatten_items(tree.queue, result, parent_epic=None)
@@ -248,12 +292,14 @@ def rewrite_plan(plan_path: Path, tree: PlanTree) -> None:
         tree.queue,
         tree.started,
         last_wrap=tree.last_wrap,
+        deferred=tree.deferred,
     )
     plan_path.write_text(content)
 
 
 def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
-                       last_wrap: str | None = None) -> str:
+                       last_wrap: str | None = None,
+                       deferred: list[DeferredItem] | None = None) -> str:
     lines = [f"# Work Plan — {branch_slug}", "", "## Queue"]
 
     if not items:
@@ -261,6 +307,14 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
     else:
         for item in items:
             _write_item(item, lines, indent=0)
+
+    if deferred:
+        lines.append("")
+        lines.append("## Deferred")
+        for d in deferred:
+            check = "x" if d.completed else " "
+            repos_str = ", ".join(d.repos)
+            lines.append(f"- [{check}] {d.title} ({d.scale} / {d.complexity}) [{repos_str}]")
 
     lines.append("")
     lines.append("## Session State")
@@ -356,6 +410,7 @@ def advance(plan_path: Path, meta_path: Path,
         safe_exit = True
 
     epic_complete = next_leaf is None
+    has_deferred = epic_complete and len(tree.deferred) > 0
 
     tree.current_issue = next_leaf.issue_number if next_leaf else None
     rewrite_plan(plan_path, tree)
@@ -377,6 +432,7 @@ def advance(plan_path: Path, meta_path: Path,
         batch_complete=batch_complete,
         epic_complete=epic_complete,
         safe_exit=safe_exit,
+        has_deferred=has_deferred,
     )
 
 
@@ -473,6 +529,61 @@ def append_to_queue(plan_path: Path, new_items: list[QueueItem]) -> None:
     if active:
         tree.current_issue = active.issue_number
     rewrite_plan(plan_path, tree)
+
+
+def append_deferred(plan_path: Path, title: str, scale: str,
+                    complexity: str, repos: list[str]) -> None:
+    tree = parse_plan(plan_path)
+    tree.deferred.append(DeferredItem(title, scale, complexity, repos))
+    rewrite_plan(plan_path, tree)
+
+
+def list_deferred(plan_path: Path) -> list[DeferredItem]:
+    tree = parse_plan(plan_path)
+    return tree.deferred
+
+
+def promote_deferred(plan_path: Path,
+                     available_repos: list[str]) -> list[DeferredItem]:
+    tree = parse_plan(plan_path)
+    available = set(available_repos)
+    to_promote: list[DeferredItem] = []
+    remaining: list[DeferredItem] = []
+
+    for d in tree.deferred:
+        if all(r in available for r in d.repos):
+            to_promote.append(d)
+        else:
+            remaining.append(d)
+
+    if not to_promote:
+        return []
+
+    next_issue_num = 9000
+    for d in to_promote:
+        tree.queue.append(QueueItem(
+            issue_number=next_issue_num,
+            title=d.title,
+        ))
+        next_issue_num += 1
+
+    if not _find_active_leaf(tree.queue):
+        _set_first_uncompleted_active(tree.queue)
+
+    tree.deferred = remaining
+    rewrite_plan(plan_path, tree)
+    return to_promote
+
+
+def _set_first_uncompleted_active(items: list[QueueItem]) -> bool:
+    for item in items:
+        if not item.completed and not item.is_epic:
+            item.active = True
+            return True
+        if item.is_epic and item.children:
+            if _set_first_uncompleted_active(item.children):
+                return True
+    return False
 
 
 def detect(workspace_path: Path) -> dict | None:

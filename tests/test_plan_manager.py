@@ -712,3 +712,179 @@ class TestCreateMainPlan:
         items = [{"number": 1, "title": "test"}]
         plan_manager.create_main_plan(workspace, items)
         assert (workspace / "design" / ".plan").exists()
+
+
+# ---------------------------------------------------------------------------
+# Deferred items
+# ---------------------------------------------------------------------------
+
+PLAN_WITH_DEFERRED = """\
+# Work Plan — issue-95-mechanize
+
+## Queue
+- [x] #95 — Mechanize inline operations
+- [ ] #83 — Delegate handover subagents ← active
+
+## Deferred
+- [ ] Extract push retry logic (S / Low) [soredium]
+- [ ] Add restore-slot command (M / Med) [soredium]
+- [ ] Fix portal resolutions in blocks-ui (S / Low) [blocks-ui]
+
+## Session State
+Current: #83 — Delegate handover subagents
+Started: 2026-08-06
+"""
+
+PLAN_NO_DEFERRED = """\
+# Work Plan — issue-42-fix
+
+## Queue
+- [ ] #42 — Fix login ← active
+
+## Session State
+Current: #42 — Fix login
+Started: 2026-08-06
+"""
+
+
+class TestDeferredParsing:
+    def test_parses_deferred_items(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        tree = plan_manager.parse_plan(plan)
+        assert len(tree.deferred) == 3
+        assert tree.deferred[0].title == "Extract push retry logic"
+        assert tree.deferred[0].scale == "S"
+        assert tree.deferred[0].complexity == "Low"
+        assert tree.deferred[0].repos == ["soredium"]
+
+    def test_parses_plan_without_deferred(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_NO_DEFERRED)
+        tree = plan_manager.parse_plan(plan)
+        assert tree.deferred == []
+
+    def test_deferred_with_multiple_repos(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan — test\n\n## Queue\n- [ ] #1 — Work ← active\n\n"
+            "## Deferred\n- [ ] Cross-repo fix (M / High) [engine, iot]\n\n"
+            "## Session State\nCurrent: #1 — Work\nStarted: 2026-08-06\n"
+        )
+        tree = plan_manager.parse_plan(plan)
+        assert len(tree.deferred) == 1
+        assert tree.deferred[0].repos == ["engine", "iot"]
+
+
+class TestDeferredRoundTrip:
+    def test_deferred_survives_rewrite(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        tree = plan_manager.parse_plan(plan)
+        plan_manager.rewrite_plan(plan, tree)
+        tree2 = plan_manager.parse_plan(plan)
+        assert len(tree2.deferred) == 3
+        assert tree2.deferred[0].title == "Extract push retry logic"
+        assert tree2.deferred[2].repos == ["blocks-ui"]
+
+    def test_empty_deferred_not_written(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_NO_DEFERRED)
+        tree = plan_manager.parse_plan(plan)
+        plan_manager.rewrite_plan(plan, tree)
+        content = plan.read_text()
+        assert "## Deferred" not in content
+
+
+class TestAppendDeferred:
+    def test_appends_to_existing_deferred(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        plan_manager.append_deferred(
+            plan, "New follow-up task", "M", "Med", ["soredium"]
+        )
+        tree = plan_manager.parse_plan(plan)
+        assert len(tree.deferred) == 4
+        assert tree.deferred[3].title == "New follow-up task"
+
+    def test_appends_to_plan_without_deferred(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_NO_DEFERRED)
+        plan_manager.append_deferred(
+            plan, "Discovered gap", "S", "Low", ["soredium"]
+        )
+        tree = plan_manager.parse_plan(plan)
+        assert len(tree.deferred) == 1
+        assert tree.deferred[0].title == "Discovered gap"
+        assert tree.deferred[0].scale == "S"
+
+
+class TestPromoteDeferred:
+    def test_promotes_matching_repos(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        tree = plan_manager.parse_plan(plan)
+        # Complete the last agreed item so promote makes sense
+        for item in tree.queue:
+            item.completed = True
+            item.active = False
+        plan_manager.rewrite_plan(plan, tree)
+
+        promoted = plan_manager.promote_deferred(plan, available_repos=["soredium"])
+        assert len(promoted) == 2
+        tree2 = plan_manager.parse_plan(plan)
+        # 2 promoted items added to queue
+        leaf_titles = [l.title for l in plan_manager.flatten_leaves(tree2)]
+        assert "Extract push retry logic" in leaf_titles
+        assert "Add restore-slot command" in leaf_titles
+        # blocks-ui item stays in deferred
+        assert len(tree2.deferred) == 1
+        assert tree2.deferred[0].repos == ["blocks-ui"]
+
+    def test_promotes_nothing_when_no_repo_match(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        promoted = plan_manager.promote_deferred(plan, available_repos=["engine"])
+        assert len(promoted) == 0
+        tree = plan_manager.parse_plan(plan)
+        assert len(tree.deferred) == 3
+
+    def test_promotes_all_when_all_match(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        promoted = plan_manager.promote_deferred(
+            plan, available_repos=["soredium", "blocks-ui"]
+        )
+        assert len(promoted) == 3
+        tree = plan_manager.parse_plan(plan)
+        assert tree.deferred == []
+
+
+class TestAdvanceWithDeferred:
+    def test_advance_signals_deferred_when_queue_done(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan — test\n\n## Queue\n- [x] #1 — First\n"
+            "- [ ] #2 — Last ← active\n\n"
+            "## Deferred\n- [ ] Follow-up (S / Low) [soredium]\n\n"
+            "## Session State\nCurrent: #2 — Last\nStarted: 2026-08-06\n"
+        )
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: test\nissue: 1\n")
+        result = plan_manager.advance(plan, meta)
+        assert result.has_deferred is True
+        assert result.next_issue is None
+
+    def test_advance_no_deferred_flag_when_queue_not_done(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan — test\n\n## Queue\n"
+            "- [ ] #1 — First ← active\n- [ ] #2 — Second\n\n"
+            "## Deferred\n- [ ] Follow-up (S / Low) [soredium]\n\n"
+            "## Session State\nCurrent: #1 — First\nStarted: 2026-08-06\n"
+        )
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: test\nissue: 1\n")
+        result = plan_manager.advance(plan, meta)
+        assert result.has_deferred is False
+        assert result.next_issue == 2

@@ -170,14 +170,34 @@ Steps:
    - `tick_github`: Check off the completed issue's checkbox on the
      GitHub epic body (if the completed issue was an epic child).
 4. Call `commit_transition(meta, result)` — writes `state: transitioning`.
-5. If `queue_complete` in the result → report: "All issues done. Run work-end."
-6. If `batch_complete` and not `queue_complete` → log: "Batch N complete.
+5. If `has_deferred` in the result → deferred items exist and the agreed
+   queue is complete. Determine available repos:
+   - **Branch mode:** the project repo name (basename of `$PROJECT`)
+   - **Slot mode:** repo names from `get_slot_repos()` on the slot directory
+   Present the prompt:
+   ```
+   All planned issues complete. N deferred items can be done here:
+     - <title> (<scale> / <complexity>)
+     - ...
+   [N items require repos not available: <list>]   ← only if some don't match
+
+   Options:
+     1. continue — promote matching deferred items and keep working
+     2. new-slot — file issues, create a new slot for the deferred items
+     3. close — run work-end; deferred items stay as GitHub issues for later
+   ```
+   - **continue** → call `plan_manager.promote_deferred(<PLAN_PATH>, available_repos)`,
+     then proceed to step 7 (context refresh) with the first promoted item as active.
+   - **new-slot** → file GitHub issues for each deferred item, then run work-end.
+   - **close** → file GitHub issues for each deferred item, then run work-end.
+6. If `queue_complete` and not `has_deferred` → report: "All issues done. Run work-end."
+7. If `batch_complete` and not `queue_complete` → log: "Batch N complete.
    Safe exit point — run work-end to close, or continue."
-7. **Context refresh (auto-resolve):** Fire `transition(meta, 'auto_refresh')`,
+8. **Context refresh (auto-resolve):** Fire `transition(meta, 'auto_refresh')`,
    execute context refresh effects (garden search with new issue keywords,
    load specs matching new issue, check protocols), then
    `commit_transition(meta, result)`. The branch transitions back to `active`.
-8. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
+9. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
 
 ---
 
