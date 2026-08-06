@@ -272,3 +272,121 @@ def test_commit_scaffold_missing_workspace():
     )
     assert result.returncode == 1
     assert "ERROR=missing_args" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# sync-main subcommand
+# ---------------------------------------------------------------------------
+
+def _init_repo_with_bare(tmp_path, name, remote_name="origin"):
+    """Create a repo cloned from a bare, simulating a remote."""
+    bare = tmp_path / f".{name}-bare.git"
+    bare.mkdir(parents=True)
+    subprocess.run(["git", "init", "--bare", str(bare)], capture_output=True, check=True)
+    repo = tmp_path / name
+    subprocess.run(["git", "clone", str(bare), str(repo)], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@test.com"], capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-b", "main"], capture_output=True)
+    (repo / "README.md").write_text(f"# {name}\n")
+    subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "init"], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(repo), "push", "-u", "origin", "main"], capture_output=True)
+    return repo, bare
+
+
+def test_sync_main_single_remote(tmp_path):
+    """sync-main with no fork: fetch + rebase only."""
+    project, bare = _init_repo_with_bare(tmp_path, "project")
+    workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "sync-main",
+         str(project), str(workspace), "base=main"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "SYNCED=yes" in result.stdout
+
+
+def test_sync_main_with_upstream_remote(tmp_path):
+    """sync-main with upstream remote: fetch upstream, rebase, push origin."""
+    blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
+    fork, fork_bare = _init_repo_with_bare(tmp_path, "fork")
+    subprocess.run(
+        ["git", "-C", str(fork), "remote", "add", "upstream", str(blessed_bare)],
+        capture_output=True, check=True,
+    )
+
+    (blessed / "upstream-change.md").write_text("from upstream")
+    subprocess.run(["git", "-C", str(blessed), "add", "."], capture_output=True)
+    subprocess.run(["git", "-C", str(blessed), "commit", "-m", "upstream work"], capture_output=True)
+    subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"], capture_output=True)
+
+    workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "sync-main",
+         str(fork), str(workspace), "base=main"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "SYNCED=yes" in result.stdout
+    assert "MODEL=upstream" in result.stdout
+    assert (fork / "upstream-change.md").exists()
+
+
+def test_sync_main_with_fork_remote(tmp_path):
+    """sync-main with fork remote: fetch origin (blessed), rebase, push to fork."""
+    blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
+    fork_bare = tmp_path / ".fork-bare.git"
+    fork_bare.mkdir()
+    subprocess.run(["git", "init", "--bare", str(fork_bare)], capture_output=True, check=True)
+    subprocess.run(
+        ["git", "-C", str(blessed), "remote", "add", "fork", str(fork_bare)],
+        capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(blessed), "push", "fork", "main"],
+        capture_output=True,
+    )
+
+    workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "sync-main",
+         str(blessed), str(workspace), "base=main"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "SYNCED=yes" in result.stdout
+    assert "MODEL=fork" in result.stdout
+
+
+def test_sync_main_missing_args():
+    """sync-main without enough args fails."""
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "sync-main"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "ERROR=missing_args" in result.stdout
+
+
+def test_sync_main_network_failure_non_fatal(tmp_path):
+    """sync-main with unreachable remote warns but does not fail."""
+    project, _ = _init_repo_with_bare(tmp_path, "project")
+    workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+    subprocess.run(
+        ["git", "-C", str(project), "remote", "set-url", "origin", "https://unreachable.invalid/repo.git"],
+        capture_output=True,
+    )
+
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "sync-main",
+         str(project), str(workspace), "base=main"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "SYNCED=yes" in result.stdout
+    assert "WARN=" in result.stdout

@@ -1857,3 +1857,138 @@ class TestListSlotsDualPath:
         assert len(slots) == 2
         nums = {s["number"] for s in slots}
         assert nums == {1, 2}
+
+
+class TestSymlinkGitignoredAssets:
+    """Tests for _symlink_gitignored_assets — carries gitignored asset dirs into slot clones."""
+
+    def test_symlinks_gitignored_directory(self, tmp_path):
+        """A gitignored directory present in source should be symlinked into clone."""
+        source = init_repo(tmp_path / "source")
+        (source / ".gitignore").write_text(".casehub-packages\n")
+        subprocess.run(["git", "-C", str(source), "add", ".gitignore"], capture_output=True)
+        subprocess.run(["git", "-C", str(source), "commit", "-m", "add gitignore"], capture_output=True)
+        pkg_dir = source / ".casehub-packages"
+        pkg_dir.mkdir()
+        (pkg_dir / "graph-core").mkdir()
+        (pkg_dir / "graph-core" / "index.js").write_text("module.exports = {}")
+
+        clone = tmp_path / "clone"
+        subprocess.run(["git", "clone", str(source), str(clone)], capture_output=True, check=True)
+
+        linked = slot_manager._symlink_gitignored_assets(source, clone)
+        assert ".casehub-packages" in linked
+        assert (clone / ".casehub-packages").is_symlink()
+        assert (clone / ".casehub-packages" / "graph-core" / "index.js").exists()
+
+    def test_skips_regenerable_directories(self, tmp_path):
+        """node_modules, build, dist, target etc. should NOT be symlinked."""
+        source = init_repo(tmp_path / "source")
+        (source / ".gitignore").write_text("node_modules\nbuild\ndist\ntarget\n.idea\n")
+        subprocess.run(["git", "-C", str(source), "add", ".gitignore"], capture_output=True)
+        subprocess.run(["git", "-C", str(source), "commit", "-m", "add gitignore"], capture_output=True)
+        for name in ["node_modules", "build", "dist", "target", ".idea"]:
+            d = source / name
+            d.mkdir()
+            (d / "file.txt").write_text("content")
+
+        clone = tmp_path / "clone"
+        subprocess.run(["git", "clone", str(source), str(clone)], capture_output=True, check=True)
+
+        linked = slot_manager._symlink_gitignored_assets(source, clone)
+        assert linked == []
+        for name in ["node_modules", "build", "dist", "target", ".idea"]:
+            assert not (clone / name).is_symlink()
+
+    def test_skips_directories_already_in_clone(self, tmp_path):
+        """If the directory already exists in the clone, don't symlink over it."""
+        source = init_repo(tmp_path / "source")
+        (source / ".gitignore").write_text(".cache\n")
+        subprocess.run(["git", "-C", str(source), "add", ".gitignore"], capture_output=True)
+        subprocess.run(["git", "-C", str(source), "commit", "-m", "add gitignore"], capture_output=True)
+        (source / ".cache").mkdir()
+        (source / ".cache" / "data").write_text("cached")
+
+        clone = tmp_path / "clone"
+        subprocess.run(["git", "clone", str(source), str(clone)], capture_output=True, check=True)
+        (clone / ".cache").mkdir()
+        (clone / ".cache" / "local").write_text("clone-local")
+
+        linked = slot_manager._symlink_gitignored_assets(source, clone)
+        assert ".cache" not in linked
+        assert not (clone / ".cache").is_symlink()
+        assert (clone / ".cache" / "local").read_text() == "clone-local"
+
+    def test_skips_non_gitignored_directories(self, tmp_path):
+        """Directories that are tracked (not gitignored) should not be symlinked."""
+        source = init_repo(tmp_path / "source")
+        src_dir = source / "src"
+        src_dir.mkdir()
+        (src_dir / "main.py").write_text("print('hi')")
+        subprocess.run(["git", "-C", str(source), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(source), "commit", "-m", "add src"], capture_output=True)
+
+        clone = tmp_path / "clone"
+        subprocess.run(["git", "clone", str(source), str(clone)], capture_output=True, check=True)
+
+        linked = slot_manager._symlink_gitignored_assets(source, clone)
+        assert linked == []
+
+    def test_skips_files_not_directories(self, tmp_path):
+        """Gitignored files (not directories) should not be symlinked."""
+        source = init_repo(tmp_path / "source")
+        (source / ".gitignore").write_text(".env\n")
+        subprocess.run(["git", "-C", str(source), "add", ".gitignore"], capture_output=True)
+        subprocess.run(["git", "-C", str(source), "commit", "-m", "add gitignore"], capture_output=True)
+        (source / ".env").write_text("SECRET=abc")
+
+        clone = tmp_path / "clone"
+        subprocess.run(["git", "clone", str(source), str(clone)], capture_output=True, check=True)
+
+        linked = slot_manager._symlink_gitignored_assets(source, clone)
+        assert linked == []
+        assert not (clone / ".env").exists()
+
+    def test_create_slot_symlinks_gitignored_assets(self, tmp_path):
+        """Integration: create_slot should automatically symlink gitignored asset dirs."""
+        family = tmp_path / "family"
+        repo = init_repo(family / "blocks-ui")
+        (repo / ".gitignore").write_text(".casehub-packages\n")
+        subprocess.run(["git", "-C", str(repo), "add", ".gitignore"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add gitignore"], capture_output=True)
+        pkg_dir = repo / ".casehub-packages"
+        pkg_dir.mkdir()
+        (pkg_dir / "graph-core").mkdir()
+        (pkg_dir / "graph-core" / "package.json").write_text('{"name": "graph-core"}')
+
+        result = slot_manager.create_slot(
+            family_root=family, repos=["blocks-ui"], branch="issue-107-test",
+            issue="107", issue_repo="org/repo", covers="107", context="test",
+        )
+        clone = family / "slots" / str(result["slot_number"]) / "blocks-ui"
+        assert (clone / ".casehub-packages").is_symlink(), \
+            "create_slot did not symlink gitignored .casehub-packages into clone"
+        assert (clone / ".casehub-packages" / "graph-core" / "package.json").exists()
+
+    def test_add_repo_symlinks_gitignored_assets(self, tmp_path):
+        """Integration: add_repo should also symlink gitignored asset dirs."""
+        family = tmp_path / "family"
+        init_repo(family / "engine")
+        repo2 = init_repo(family / "blocks-ui")
+        (repo2 / ".gitignore").write_text(".casehub-packages\n")
+        subprocess.run(["git", "-C", str(repo2), "add", ".gitignore"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo2), "commit", "-m", "add gitignore"], capture_output=True)
+        pkg_dir = repo2 / ".casehub-packages"
+        pkg_dir.mkdir()
+        (pkg_dir / "pages-component").mkdir()
+        (pkg_dir / "pages-component" / "index.js").write_text("export default {}")
+
+        result = slot_manager.create_slot(
+            family_root=family, repos=["engine"], branch="issue-107-test",
+            issue="107", issue_repo="org/repo", covers="107", context="test",
+        )
+        slot_manager.add_repo(family, result["slot_number"], "blocks-ui", "issue-107-test")
+        clone = family / "slots" / str(result["slot_number"]) / "blocks-ui"
+        assert (clone / ".casehub-packages").is_symlink(), \
+            "add_repo did not symlink gitignored .casehub-packages into clone"
+        assert (clone / ".casehub-packages" / "pages-component" / "index.js").exists()

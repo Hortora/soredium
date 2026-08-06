@@ -35,6 +35,12 @@ except ImportError:
 
 _IDE_ARTIFACTS = {".idea", ".run", ".settings", ".project", ".classpath", ".vscode"}
 
+_REGENERABLE_DIRS = {
+    "node_modules", ".gradle", "build", "dist", "target", "out",
+    ".next", ".nuxt", ".cache", ".parcel-cache", ".turbo",
+    *_IDE_ARTIFACTS,
+}
+
 SLOT_DIR_NAME = "slots"
 LEGACY_SLOT_DIR_NAME = "worktrees"
 
@@ -301,6 +307,25 @@ def _exclude_symlinks(clone_path: Path) -> None:
                 f.write(f"{entry}\n")
 
 
+def _symlink_gitignored_assets(source_repo: Path, clone_dest: Path) -> list[str]:
+    """Symlink gitignored asset directories from source into clone.
+    Skips regenerable directories (node_modules, build output, IDE artifacts)."""
+    linked: list[str] = []
+    for entry in sorted(source_repo.iterdir()):
+        if entry.name == ".git" or not entry.is_dir():
+            continue
+        if entry.name in _REGENERABLE_DIRS:
+            continue
+        clone_entry = clone_dest / entry.name
+        if clone_entry.exists() or clone_entry.is_symlink():
+            continue
+        rc, _, _ = run_cmd(["git", "-C", str(source_repo), "check-ignore", "-q", entry.name])
+        if rc == 0:
+            clone_entry.symlink_to(str(entry.resolve()))
+            linked.append(entry.name)
+    return linked
+
+
 def replicate_claude_md(repo_path: Path, ws_subdir: Path, repo_worktree: Path) -> None:
     orig_wksp = repo_path / "wksp"
     if not orig_wksp.is_symlink():
@@ -396,6 +421,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             print(f"ERROR=branch_create_failed repo={repo_name}")
             sys.exit(1)
         _exclude_symlinks(clone_dest)
+        _symlink_gitignored_assets(repo_path, clone_dest)
 
         setup_maven_config(clone_dest, m2_dir)
 
@@ -516,6 +542,7 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
         sys.exit(1)
 
     _exclude_symlinks(clone_dest)
+    _symlink_gitignored_assets(repo_path, clone_dest)
     setup_maven_config(clone_dest, m2_dir)
 
     ws_info = resolve_workspace_source(repo_path)

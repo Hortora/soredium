@@ -363,11 +363,11 @@ plus all index changes in a single commit. Commit message: `index: integrate <GE
 
 **If no GitHub remote** → integration is complete. `integrate_entry.py` already committed the entry and all index files. Proceed to Step 9.
 
-**If the URL contains `github.com`** → pull and push:
+**If the URL contains `github.com`** → push to remote:
 ```bash
-git -C /concrete/garden pull --rebase origin main
-git -C /concrete/garden push origin main
+python3 /concrete/soredium/forage/garden_commit.py push /concrete/garden
 ```
+Read `PUSHED=yes|no` from output. If `ERROR=` appears, report the conflict to the user.
 
 **Step 9 — Check for other untracked entries**
 
@@ -489,24 +489,19 @@ python3 /concrete/soredium/scripts/integrate_entry.py /concrete/garden/<domain>/
 # substitute actual GE-ID in each path — no variables, no backslash continuations
 ```
 
-Run this sequentially for each entry. Then issue a single batch commit containing all entry
-files and all index updates:
+Run this sequentially for each entry. Then commit all entry files and index updates atomically:
 ```bash
-git -C /concrete/garden add <all written entry files>
-git -C /concrete/garden add _summaries/ _index/ labels/ GARDEN.md
-git -C /concrete/garden add --update
-git -C /concrete/garden commit -m "sweep: <N> entries — <slug1>, <slug2>, ..."
+python3 /concrete/soredium/forage/garden_commit.py commit /concrete/garden files=<comma-sep-entry-paths> message="sweep: <N> entries — <slug1>, <slug2>, ..."
 ```
+Read `COMMITTED=yes|no` from output. The script stages entry files, index directories (`_summaries/`, `_index/`, `labels/`), `GARDEN.md`, `garden.db`, and all tracked changes automatically.
 
-**Note on `garden.db`:** `--update` only stages already-tracked files. If `garden.db` is new (first integration on this garden), add it explicitly: `git -C /concrete/garden add garden.db` before the `--update` line.
-
-**If the URL contains `github.com`** → pull and push:
+**If the URL contains `github.com`** → push to remote:
 ```bash
-git -C /concrete/garden pull --rebase origin main
-git -C /concrete/garden push origin main
+python3 /concrete/soredium/forage/garden_commit.py push /concrete/garden
 ```
+Read `PUSHED=yes|no` from output. If `ERROR=` appears, report the conflict to the user.
 
-**If no GitHub remote** → batch commit above is sufficient. Proceed to Step 6.
+**If no GitHub remote** → commit above is sufficient. Proceed to Step 6.
 
 **Step 6 — Staleness spot-check (domain-filtered)**
 
@@ -665,16 +660,15 @@ python3 /concrete/soredium/scripts/integrate_entry.py /concrete/garden/<domain>/
 
 Commit with the REVISE-specific message:
 ```bash
-git -C /concrete/garden add <domain>/GE-XXXX.md _summaries/ _index/ labels/ GARDEN.md
-git -C /concrete/garden add --update
-git -C /concrete/garden commit -m "revise(GE-XXXX): <revision-kind> — <brief description>"
+python3 /concrete/soredium/forage/garden_commit.py commit /concrete/garden files=<domain>/GE-XXXX.md message="revise(GE-XXXX): <revision-kind> — <brief description>"
 ```
+Read `COMMITTED=yes|no` from output. The script stages the entry file, index directories, and all tracked changes automatically.
 
-**If the URL contains `github.com`** → pull and push:
+**If the URL contains `github.com`** → push to remote:
 ```bash
-git -C /concrete/garden pull --rebase origin main
-git -C /concrete/garden push origin main
+python3 /concrete/soredium/forage/garden_commit.py push /concrete/garden
 ```
+Read `PUSHED=yes|no` from output. If `ERROR=` appears, report the conflict to the user.
 
 **If no GitHub remote** → commit above is sufficient.
 

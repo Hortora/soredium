@@ -315,49 +315,23 @@ must not block branch creation.
 ### Step 4d — Sync main before branch creation
 
 Ensure local main tracks the blessed repo before branching. Also sync the
-personal fork so work-end can push without force. Two fork-naming conventions
-exist — detect which is in use.
+personal fork so work-end can push without force.
 
-**Detect fork model:**
 ```bash
-git -C "$PROJECT" remote get-url upstream 2>/dev/null && echo "has-upstream"
-git -C "$PROJECT" remote get-url fork 2>/dev/null && echo "has-fork"
+python3 ~/.claude/skills/work-start/branch_create.py sync-main "$PROJECT" "$WORKSPACE" base=$PROJECT_BASE_BRANCH
 ```
 
-**If `upstream` remote exists** (origin=personal fork, upstream=blessed):
-```bash
-git -C "$PROJECT" fetch upstream
-git -C "$PROJECT" rebase upstream/$PROJECT_BASE_BRANCH
-git -C "$PROJECT" push origin $PROJECT_BASE_BRANCH --force-with-lease
-```
+Read `SYNCED=yes`, `MODEL=upstream|fork|single`, and any `WARN=` lines from output.
 
-**Else if `fork` remote exists** (origin=blessed, fork=personal):
-```bash
-git -C "$PROJECT" fetch origin
-git -C "$PROJECT" rebase origin/$PROJECT_BASE_BRANCH
-git -C "$PROJECT" push fork origin/$PROJECT_BASE_BRANCH:$PROJECT_BASE_BRANCH --force-with-lease
-```
+The script detects the fork model automatically (upstream remote, fork remote,
+or single remote) and applies the correct fetch/rebase/push sequence. It also
+syncs the workspace repo. All failures are non-fatal — warnings are printed
+but the script always returns success. Stale main is suboptimal but not a
+gate — the branch can still be created and rebased later at merge time.
 
-**Else** (single remote — no fork):
-```bash
-git -C "$PROJECT" fetch origin
-git -C "$PROJECT" rebase origin/$PROJECT_BASE_BRANCH
-```
-
-`--force-with-lease` is required because squash-merged PRs create different
-SHAs on the blessed repo, causing the fork to diverge even though content is
-identical. Without it, the push is rejected and divergence accumulates until
-work-end requires a force push.
-
-Same for workspace repo (always single remote):
-```bash
-git -C "$WORKSPACE" fetch origin
-git -C "$WORKSPACE" rebase origin/main
-```
-
-If fetch, rebase, or push fails (network error, conflicts on main): warn and
-continue. Stale main is suboptimal but not a gate — the branch can
-still be created and rebased later at merge time.
+`--force-with-lease` is used for fork pushes because squash-merged PRs create
+different SHAs on the blessed repo, causing the fork to diverge even though
+content is identical.
 
 ---
 
