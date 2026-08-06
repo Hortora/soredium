@@ -5,6 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
+from lifecycle import ClosureState
+from lifecycle import is_closed as _lifecycle_is_closed
+
 
 def run(*cmd, cwd=None):
     r = subprocess.run(list(cmd), capture_output=True, text=True, cwd=cwd)
@@ -38,14 +42,8 @@ def specs_on_main(ws):
 
 
 def is_closed(ws, branch):
-    """Check if branch has EPIC-CLOSED.md or closure stamp."""
-    rc, _, _ = git("cat-file", "-e", f"{branch}:design/EPIC-CLOSED.md", cwd=ws)
-    if rc == 0:
-        return True
-    rc2, out, _ = git("log", "-1", "--format=%s", branch, cwd=ws)
-    if rc2 == 0 and out.startswith("chore: branch closed"):
-        return True
-    return False
+    state = _lifecycle_is_closed(str(ws), branch)
+    return state in (ClosureState.CLOSED, ClosureState.MERGED_UNSTAMPED)
 
 
 def recover_specs(ws, branch, specs, dry_run=False):

@@ -26,6 +26,7 @@ SKILL_ROOT = SCRIPT_DIR.parent
 ROUTING_DIR = SKILL_ROOT / "project"
 
 sys.path.insert(0, str(ROUTING_DIR))
+from lifecycle import ClosureState, is_closed  # noqa: E402
 from routing import parse_layer2, parse_layer3, resolve  # noqa: E402
 
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -85,10 +86,13 @@ def branch_last_commit_days(workspace: str, branch: str) -> int:
         return -1
 
 
-def check_stale_branches(workspace: str, branches: list[str]) -> list[dict]:
+def check_stale_branches(workspace: str, branches: list[str],
+                         project: str | None = None) -> list[dict]:
     stale = []
     for b in branches:
-        if branch_has_file(workspace, b, "design/EPIC-CLOSED.md"):
+        repo = project or workspace
+        state = is_closed(repo, b, workspace=workspace)
+        if state in (ClosureState.CLOSED, ClosureState.DELETED):
             continue
         days = branch_last_commit_days(workspace, b)
         if days >= 7:
@@ -133,7 +137,9 @@ def check_unrecovered_artifacts(workspace: str, project: str,
                                 routing: dict[str, str]) -> list[dict]:
     unrecovered = []
     for b in branches:
-        if not branch_has_file(workspace, b, "design/EPIC-CLOSED.md"):
+        ws_state = is_closed(workspace, b)
+        if ws_state not in (ClosureState.CLOSED, ClosureState.MERGED_UNSTAMPED,
+                            ClosureState.STAMPED_UNMERGED):
             continue
 
         for artifact_type, ws_directory in [("blog", "blog"), ("specs", "specs")]:
@@ -163,27 +169,18 @@ def check_unstamped_branches(workspace: str, project: str,
                               branches: list[str], single_repo: bool) -> list[dict]:
     unstamped = []
     for b in branches:
-        if not branch_has_file(workspace, b, "design/EPIC-CLOSED.md"):
-            continue
-
-        repo = workspace if single_repo else project
-        result = git(repo, "rev-parse", "--verify", b)
-        project_branch_exists = result.returncode == 0
-
-        if not project_branch_exists:
+        repo = project if not single_repo else workspace
+        state = is_closed(repo, b, workspace=workspace)
+        if state == ClosureState.MERGED_UNSTAMPED:
             unstamped.append({
                 "branch": b,
-                "has_epic_closed": True,
-                "project_branch_exists": False,
+                "closure_state": state.value,
+                "project_branch_exists": True,
             })
-            continue
-
-        result = git(repo, "log", "-1", "--format=%s", b)
-        last_msg = result.stdout.strip() if result.returncode == 0 else ""
-        if not last_msg.startswith("chore: branch closed"):
+        elif state == ClosureState.STAMPED_UNMERGED:
             unstamped.append({
                 "branch": b,
-                "has_epic_closed": True,
+                "closure_state": state.value,
                 "project_branch_exists": True,
             })
     return unstamped
@@ -218,7 +215,7 @@ def main() -> int:
     branches = list_workspace_branches(workspace, branch)
 
     unpublished_blogs = check_unpublished_blogs(workspace, blog_dest)
-    stale_branches = check_stale_branches(workspace, branches)
+    stale_branches = check_stale_branches(workspace, branches, project=project)
     unrecovered = check_unrecovered_artifacts(workspace, project, branches, routing)
     unstamped = check_unstamped_branches(workspace, project, branches, single_repo)
 

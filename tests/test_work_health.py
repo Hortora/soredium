@@ -39,6 +39,11 @@ def _init_repo(path):
     return path
 
 
+def _git(repo, *args):
+    subprocess.run(["git", "-C", str(repo)] + list(args),
+                    check=True, capture_output=True)
+
+
 class TestMetaConsistency:
 
     def test_no_meta_is_ok(self, tmp_path):
@@ -151,12 +156,15 @@ class TestDirtyMain:
 class TestPartialPause:
 
     def test_no_intent_file(self, tmp_path):
+        project = _init_repo(tmp_path / "proj")
         workspace = _init_repo(tmp_path / "wksp")
-        result = check_partial_pause(str(workspace))
+        result = check_partial_pause(str(project), str(workspace))
         assert "STATUS=ok" in result
 
     def test_pausing_detected(self, tmp_path):
+        project = _init_repo(tmp_path / "proj")
         workspace = _init_repo(tmp_path / "wksp")
+        _git(project, "checkout", "-b", "issue-123-foo")
         design = workspace / "design"
         design.mkdir()
         (design / ".pausing").write_text(
@@ -164,32 +172,65 @@ class TestPartialPause:
             "wip_project: done\nwip_workspace: done\n"
             "stack_push: pending\ncheckout_main: pending\n"
         )
-        result = check_partial_pause(str(workspace))
+        result = check_partial_pause(str(project), str(workspace))
         assert "STATUS=warn" in result
         assert "issue-123-foo" in result
         assert "stack_push=pending" in result
+
+    def test_stale_pausing_removed_when_pause_completed(self, tmp_path):
+        project = _init_repo(tmp_path / "proj")
+        workspace = _init_repo(tmp_path / "wksp")
+        design = workspace / "design"
+        design.mkdir()
+        (design / ".pausing").write_text(
+            "branch: issue-123-foo\nstarted: 2026-08-06T14:30:00Z\n"
+            "wip_project: done\nwip_workspace: done\n"
+            "stack_push: done\ncheckout_main: done\n"
+        )
+        (design / ".pause-stack").write_text("- branch: issue-123-foo\n  issue: 123\n")
+        result = check_partial_pause(str(project), str(workspace))
+        assert "STATUS=ok" in result
+        assert not (design / ".pausing").exists()
 
 
 class TestPartialResume:
 
     def test_no_intent_file(self, tmp_path):
+        project = _init_repo(tmp_path / "proj")
         workspace = _init_repo(tmp_path / "wksp")
-        result = check_partial_resume(str(workspace))
+        result = check_partial_resume(str(project), str(workspace))
         assert "STATUS=ok" in result
 
     def test_resuming_detected(self, tmp_path):
+        project = _init_repo(tmp_path / "proj")
         workspace = _init_repo(tmp_path / "wksp")
         design = workspace / "design"
         design.mkdir()
+        (design / ".pause-stack").write_text("- branch: issue-123-foo\n  issue: 123\n")
         (design / ".resuming").write_text(
             "branch: issue-123-foo\nstarted: 2026-08-06T14:30:00Z\n"
             "stack_pop: done\ncheckout: pending\n"
             "rebase: pending\nwip_reset: pending\n"
         )
-        result = check_partial_resume(str(workspace))
+        result = check_partial_resume(str(project), str(workspace))
         assert "STATUS=warn" in result
         assert "issue-123-foo" in result
         assert "checkout=pending" in result
+
+    def test_stale_resuming_removed_when_resume_completed(self, tmp_path):
+        project = _init_repo(tmp_path / "proj")
+        workspace = _init_repo(tmp_path / "wksp")
+        _git(project, "checkout", "-b", "issue-123-foo")
+        design = workspace / "design"
+        design.mkdir()
+        (design / ".resuming").write_text(
+            "branch: issue-123-foo\nstarted: 2026-08-06T14:30:00Z\n"
+            "stack_pop: done\ncheckout: done\n"
+            "rebase: done\nwip_reset: done\n"
+        )
+        result = check_partial_resume(str(project), str(workspace))
+        assert "STATUS=ok" in result
+        assert not (design / ".resuming").exists()
 
 
 class TestBranchClosure:
@@ -345,4 +386,4 @@ class TestRunChecksIntegration:
         assert "FIXED=0" in captured.out
         assert "WARNINGS=0" in captured.out
         assert "ERRORS=0" in captured.out
-        assert captured.out.count("CHECK=") == 8
+        assert captured.out.count("CHECK=") == 9

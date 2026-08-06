@@ -347,20 +347,12 @@ class TestAdvance:
         assert result.safe_exit is True
         assert result.next_issue == 110
 
-    def test_covers_updated(self, tmp_path):
+    def test_advance_does_not_write_covers(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
+        original_meta = meta.read_text()
         plan_manager.advance(plan_file, meta)
-        covers_line = [l for l in meta.read_text().splitlines() if l.startswith("covers:")][0]
-        assert "42" in covers_line
-
-    def test_covers_deduplication(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan, covers="42")
-        plan_manager.advance(plan_file, meta)
-        covers_line = [l for l in meta.read_text().splitlines() if l.startswith("covers:")][0]
-        nums = [n.strip() for n in covers_line.split(":")[1].strip().split(",") if n.strip()]
-        assert len(nums) == len(set(nums))
+        assert meta.read_text() == original_meta
 
 
 class TestAdvanceIssueDispatch:
@@ -673,67 +665,6 @@ class TestCompleteActiveIssue:
         with patch.object(plan_manager, '_emit_issue_events'):
             plan_manager.complete_active_issue(plan_file, meta, "/project")
         assert plan_file.read_text() == original_content
-
-
-class TestReconcileCovers:
-    def _setup(self, tmp_path, plan_content, meta_content):
-        design = tmp_path / "design"
-        design.mkdir(exist_ok=True)
-        plan_file = design / ".plan"
-        plan_file.write_text(plan_content)
-        meta = design / ".meta"
-        meta.write_text(meta_content)
-        return plan_file, meta
-
-    def test_reconciles_missing_completed_issue(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan,
-            "branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
-        reconciled = plan_manager.reconcile_covers(plan_file, meta)
-        assert reconciled == []
-
-    def test_reconciles_crash_leaves_issue_out_of_covers(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan,
-            "branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 183\n")
-        reconciled = plan_manager.reconcile_covers(plan_file, meta)
-        assert reconciled == [42]
-        covers = plan_manager._read_meta_covers(meta)
-        assert "42" in covers
-        assert "183" in covers
-
-    def test_reconciles_completed_epic_parent(self, tmp_path):
-        plan = ("# Work Plan — test\n\n## Queue\n"
-                "- [x] #50 — Epic (epic)\n"
-                "  - [x] #51 — Child A\n"
-                "  - [x] #52 — Child B\n"
-                "- [ ] #60 — Next ← active\n"
-                "\n## Session State\nCurrent: #60 — Next\nStarted: 2026-08-04\n")
-        plan_file, meta = self._setup(tmp_path, plan,
-            "branch: test\nissue: 50\nissue-repo: Org/repo\ncovers: 51\n")
-        reconciled = plan_manager.reconcile_covers(plan_file, meta)
-        assert 50 in reconciled
-        assert 52 in reconciled
-        covers = plan_manager._read_meta_covers(meta)
-        assert {"51", "50", "52"} <= covers
-
-    def test_no_reconciliation_needed(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan,
-            "branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
-        reconciled = plan_manager.reconcile_covers(plan_file, meta)
-        assert reconciled == []
-
-    def test_advance_triggers_reconciliation(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n- [ ] #44 — C\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan,
-            "branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 183\n")
-        with patch.object(plan_manager, '_emit_issue_events'):
-            result = plan_manager.advance(plan_file, meta)
-        covers = plan_manager._read_meta_covers(meta)
-        assert "42" in covers
-        assert "43" in covers
-        assert "183" in covers
 
 
 class TestCreateMainPlan:

@@ -174,9 +174,6 @@ def advance(epic_path: Path, meta_path: Path | None = None) -> dict:
     _rewrite_epic_file(epic_path, current, next_issue, next_title,
                        next_batch_num, plan["batches"])
 
-    if meta_path and meta_path.exists():
-        _update_meta_covers(meta_path, current)
-
     return {
         "completed": current,
         "next_issue": next_issue,
@@ -251,23 +248,6 @@ def _rewrite_epic_file(epic_path: Path, completed: int,
         result.append(line)
 
     epic_path.write_text("\n".join(result))
-
-
-def _update_meta_covers(meta_path: Path, issue_number: int) -> None:
-    """Append issue_number to covers in .meta."""
-    content = meta_path.read_text()
-    lines = content.splitlines()
-    new_lines = []
-    for line in lines:
-        if line.startswith("covers:"):
-            existing = line.split(":", 1)[1].strip()
-            nums = [n.strip() for n in existing.split(",") if n.strip()]
-            s = str(issue_number)
-            if s not in nums:
-                nums.append(s)
-            line = f"covers: {','.join(nums)}"
-        new_lines.append(line)
-    meta_path.write_text("\n".join(new_lines) + "\n")
 
 
 def status(epic_path: Path) -> dict:

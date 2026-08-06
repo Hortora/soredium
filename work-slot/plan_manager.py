@@ -323,10 +323,6 @@ class NoQueueFile(Exception):
 
 def advance(plan_path: Path, meta_path: Path,
             repo_path: str | None = None) -> AdvanceResult:
-    reconciled = reconcile_covers(plan_path, meta_path)
-    if reconciled:
-        print(f"RECONCILED={','.join(str(n) for n in reconciled)}")
-
     tree = parse_plan(plan_path)
     leaves = flatten_leaves(tree)
 
@@ -343,8 +339,6 @@ def advance(plan_path: Path, meta_path: Path,
 
     _mark_completed(tree.queue, completed_leaf.issue_number)
     _mark_parent_epics_if_done(tree.queue)
-
-    _update_meta_covers(meta_path, completed_leaf.issue_number)
 
     next_leaf = None
     if active_idx + 1 < len(leaves):
@@ -470,52 +464,6 @@ def _mark_parent_epics_if_done(items: list[QueueItem]) -> None:
             _mark_parent_epics_if_done(item.children)
             if all(c.completed for c in item.children):
                 item.completed = True
-
-
-def _update_meta_covers(meta_path: Path, issue_number: int) -> None:
-    content = meta_path.read_text()
-    lines = content.splitlines()
-    new_lines = []
-    for line in lines:
-        if line.startswith("covers:"):
-            existing = line.split(":", 1)[1].strip()
-            nums = [n.strip() for n in existing.split(",") if n.strip()]
-            s = str(issue_number)
-            if s not in nums:
-                nums.append(s)
-            line = f"covers: {','.join(nums)}"
-        new_lines.append(line)
-    meta_path.write_text("\n".join(new_lines) + "\n")
-
-
-def _collect_completed_issues(items: list[QueueItem]) -> list[int]:
-    result: list[int] = []
-    for item in items:
-        if item.completed:
-            result.append(item.issue_number)
-        if item.is_epic and item.children:
-            result.extend(_collect_completed_issues(item.children))
-    return result
-
-
-def _read_meta_covers(meta_path: Path) -> set[str]:
-    for line in meta_path.read_text().splitlines():
-        if line.startswith("covers:"):
-            raw = line.split(":", 1)[1].strip()
-            return {n.strip() for n in raw.split(",") if n.strip()}
-    return set()
-
-
-def reconcile_covers(plan_path: Path, meta_path: Path) -> list[int]:
-    """Scan [x] items in .plan against covers: in .meta. Append missing.
-    Returns list of issue numbers that were reconciled."""
-    tree = parse_plan(plan_path)
-    completed = _collect_completed_issues(tree.queue)
-    existing = _read_meta_covers(meta_path)
-    missing = [n for n in completed if str(n) not in existing]
-    for n in missing:
-        _update_meta_covers(meta_path, n)
-    return missing
 
 
 def append_to_queue(plan_path: Path, new_items: list[QueueItem]) -> None:

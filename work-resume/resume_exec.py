@@ -8,8 +8,11 @@ Usage:
   resume_exec.py reset-wip <project> <workspace>
 """
 
+import os
 import subprocess
 import sys
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 _lib = Path.home() / ".claude" / "lib"
@@ -157,6 +160,61 @@ def reset_wip(project: str, workspace: str) -> int:
     return 0
 
 
+RESUME_STEPS = ["stack_pop", "checkout", "rebase", "wip_reset"]
+
+
+def _intent_path(workspace: str) -> Path:
+    return Path(workspace) / "design" / ".resuming"
+
+
+def _write_intent_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".resuming.tmp")
+    closed = False
+    try:
+        os.write(fd, content.encode())
+        os.close(fd)
+        closed = True
+        os.replace(tmp, str(path))
+    except Exception:
+        if not closed:
+            os.close(fd)
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def write_intent(workspace: str, branch: str) -> int:
+    lines = [
+        f"branch: {branch}",
+        f"started: {datetime.now(timezone.utc).isoformat()}",
+    ]
+    for step in RESUME_STEPS:
+        lines.append(f"{step}: pending")
+    _write_intent_atomic(_intent_path(workspace), "\n".join(lines) + "\n")
+    print("INTENT=written")
+    return 0
+
+
+def update_intent(workspace: str, step: str) -> int:
+    path = _intent_path(workspace)
+    if not path.exists():
+        return 0
+    content = path.read_text()
+    updated = content.replace(f"{step}: pending", f"{step}: done")
+    _write_intent_atomic(path, updated)
+    print(f"INTENT_STEP={step}")
+    return 0
+
+
+def clear_intent(workspace: str) -> int:
+    path = _intent_path(workspace)
+    if path.exists():
+        path.unlink()
+    print("INTENT=cleared")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -204,6 +262,36 @@ def main() -> int:
         project = sys.argv[2]
         workspace = sys.argv[3]
         return reset_wip(project, workspace)
+
+    elif cmd == "write-intent":
+        if len(sys.argv) < 3:
+            print("Usage: resume_exec.py write-intent <workspace> branch=<name>")
+            return 1
+        workspace = sys.argv[2]
+        branch_arg = [a for a in sys.argv[3:] if a.startswith("branch=")]
+        if not branch_arg:
+            print("ERROR=missing_branch")
+            return 1
+        branch = branch_arg[0].split("=", 1)[1]
+        return write_intent(workspace, branch)
+
+    elif cmd == "update-intent":
+        if len(sys.argv) < 3:
+            print("Usage: resume_exec.py update-intent <workspace> step=<name>")
+            return 1
+        workspace = sys.argv[2]
+        step_arg = [a for a in sys.argv[3:] if a.startswith("step=")]
+        if not step_arg:
+            print("ERROR=missing_step")
+            return 1
+        step = step_arg[0].split("=", 1)[1]
+        return update_intent(workspace, step)
+
+    elif cmd == "clear-intent":
+        if len(sys.argv) < 3:
+            print("Usage: resume_exec.py clear-intent <workspace>")
+            return 1
+        return clear_intent(sys.argv[2])
 
     else:
         print(f"Unknown command: {cmd}")

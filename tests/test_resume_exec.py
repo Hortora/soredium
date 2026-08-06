@@ -349,3 +349,57 @@ class TestArgParsing:
         exit_code, stdout, stderr = run_script(resume_exec, "reset-wip", "/tmp")
         assert exit_code == 1
         assert "Usage:" in stdout
+
+
+RESUME_EXEC = Path(__file__).parent.parent / "work-resume" / "resume_exec.py"
+
+
+class TestResumeIntent:
+    def test_write_intent_creates_file(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        (workspace / "design").mkdir(parents=True)
+        result = subprocess.run(
+            ["python3", str(RESUME_EXEC), "write-intent",
+             str(workspace), "branch=issue-42-foo"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "INTENT=written" in result.stdout
+        intent = (workspace / "design" / ".resuming").read_text()
+        assert "branch: issue-42-foo" in intent
+        assert "stack_pop: pending" in intent
+        assert "wip_reset: pending" in intent
+
+    def test_update_intent_marks_step_done(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        (workspace / "design").mkdir(parents=True)
+        subprocess.run(
+            ["python3", str(RESUME_EXEC), "write-intent",
+             str(workspace), "branch=issue-42-foo"],
+            capture_output=True, text=True, check=True,
+        )
+        result = subprocess.run(
+            ["python3", str(RESUME_EXEC), "update-intent",
+             str(workspace), "step=stack_pop"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        intent = (workspace / "design" / ".resuming").read_text()
+        assert "stack_pop: done" in intent
+        assert "checkout: pending" in intent
+
+    def test_clear_intent_removes_file(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        (workspace / "design").mkdir(parents=True)
+        subprocess.run(
+            ["python3", str(RESUME_EXEC), "write-intent",
+             str(workspace), "branch=issue-42-foo"],
+            capture_output=True, text=True, check=True,
+        )
+        assert (workspace / "design" / ".resuming").exists()
+        result = subprocess.run(
+            ["python3", str(RESUME_EXEC), "clear-intent", str(workspace)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert not (workspace / "design" / ".resuming").exists()

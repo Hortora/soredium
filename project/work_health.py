@@ -139,23 +139,35 @@ def check_dirty_main(project, workspace):
     return "CHECK=dirty_main STATUS=ok"
 
 
-def check_partial_pause(workspace):
+def check_partial_pause(project, workspace):
     path = Path(workspace) / "design" / ".pausing"
     data = _parse_yaml_intent(path)
     if data is None:
         return "CHECK=partial_pause STATUS=ok"
     branch = data.get("branch", "unknown")
+    current, _ = _git(project, "branch", "--show-current")
+    stack_entries = _parse_pause_stack(workspace)
+    in_stack = any(e.get("branch") == branch for e in stack_entries)
+    if current != branch and in_stack:
+        path.unlink()
+        return "CHECK=partial_pause STATUS=ok DETAIL=stale .pausing removed (pause completed)"
     steps = [f"{k}={v}" for k, v in data.items()
              if k not in ("branch", "started", "_parse_error")]
     return f"CHECK=partial_pause STATUS=warn DETAIL={branch} pause interrupted ({', '.join(steps)})"
 
 
-def check_partial_resume(workspace):
+def check_partial_resume(project, workspace):
     path = Path(workspace) / "design" / ".resuming"
     data = _parse_yaml_intent(path)
     if data is None:
         return "CHECK=partial_resume STATUS=ok"
     branch = data.get("branch", "unknown")
+    current, _ = _git(project, "branch", "--show-current")
+    stack_entries = _parse_pause_stack(workspace)
+    in_stack = any(e.get("branch") == branch for e in stack_entries)
+    if current == branch and not in_stack:
+        path.unlink()
+        return "CHECK=partial_resume STATUS=ok DETAIL=stale .resuming removed (resume completed)"
     steps = [f"{k}={v}" for k, v in data.items()
              if k not in ("branch", "started", "_parse_error")]
     return f"CHECK=partial_resume STATUS=warn DETAIL={branch} resume interrupted ({', '.join(steps)})"
@@ -283,21 +295,102 @@ def format_resume_display(workspace, health_output=""):
     return "\n".join(lines)
 
 
+def check_recent_notes(project, workspace):
+    notes_path = Path(workspace) / "NOTES.md"
+    if not notes_path.exists():
+        return "CHECK=recent_notes STATUS=ok"
+    import time
+    now = time.time()
+    cutoff_days = 7
+    recent = []
+    current_date = None
+    for line in notes_path.read_text().splitlines():
+        if line.startswith("## "):
+            current_date = line[3:].strip()
+            try:
+                from datetime import datetime as _dt
+                d = _dt.strptime(current_date, "%Y-%m-%d")
+                age = (now - d.timestamp()) / 86400
+                if age > cutoff_days:
+                    break
+            except ValueError:
+                continue
+        elif current_date and line.startswith("- "):
+            recent.append(line)
+    if recent:
+        return f"CHECK=recent_notes STATUS=info DETAIL={len(recent)} recent note(s)"
+    return "CHECK=recent_notes STATUS=ok"
+
+
+def check_stale_branches(project, workspace):
+    out, rc = _git(project, "for-each-ref", "--sort=-committerdate",
+                    "--format=%(refname:short) %(committerdate:unix)", "refs/heads/")
+    if rc != 0:
+        return "CHECK=stale_branches STATUS=ok"
+    import time
+    now = time.time()
+    stale = []
+    for line in out.splitlines():
+        parts = line.rsplit(" ", 1)
+        if len(parts) != 2:
+            continue
+        branch, ts = parts[0], parts[1]
+        if branch == "main":
+            continue
+        try:
+            age_days = (now - float(ts)) / 86400
+        except ValueError:
+            continue
+        if age_days > 7:
+            stale.append(f"{branch} ({int(age_days)}d)")
+    if stale:
+        return f"CHECK=stale_branches STATUS=warn DETAIL={'; '.join(stale)}"
+    return "CHECK=stale_branches STATUS=ok"
+
+
+def check_close_gate(project, workspace, branch):
+    if not branch:
+        return "CHECK=close_gate STATUS=error DETAIL=no branch specified"
+    state = is_closed(str(project), branch, workspace=str(workspace))
+    if state == ClosureState.CLOSED:
+        ahead, _ = _git(project, "log", "origin/main..main", "--oneline")
+        if ahead:
+            count = len(ahead.splitlines())
+            return (f"CHECK=close_gate STATUS=fail "
+                    f"DETAIL=branch CLOSED but main {count} commit(s) ahead of origin")
+        return "CHECK=close_gate STATUS=pass VERIFIED=yes"
+    return f"CHECK=close_gate STATUS=fail DETAIL=branch state is {state.value} VERIFIED=no"
+
+
 ENTRY_CHECKS = [
     lambda p, w: check_meta_consistency(p, w),
     lambda p, w: check_pause_stack(p, w),
     lambda p, w: check_workspace_alignment(p, w),
     lambda p, w: check_main_divergence(p, w),
     lambda p, w: check_dirty_main(p, w),
-    lambda p, w: check_partial_pause(w),
-    lambda p, w: check_partial_resume(w),
+    lambda p, w: check_partial_pause(p, w),
+    lambda p, w: check_partial_resume(p, w),
     lambda p, w: check_branch_closure(p, w),
+    lambda p, w: check_recent_notes(p, w),
+]
+
+
+WRAP_CHECKS = ENTRY_CHECKS + [
+    lambda p, w: check_stale_branches(p, w),
 ]
 
 
 def run_checks(scope, project, workspace, branch=None):
     if scope == "entry":
         checks = ENTRY_CHECKS
+    elif scope == "wrap":
+        checks = WRAP_CHECKS
+    elif scope == "close":
+        result = check_close_gate(project, workspace, branch)
+        print(result)
+        verified = "VERIFIED=yes" in result
+        print(f"VERIFIED={'yes' if verified else 'no'}")
+        return
     else:
         print(f"SCOPE={scope} STATUS=not_implemented")
         return
@@ -309,7 +402,7 @@ def run_checks(scope, project, workspace, branch=None):
     for check_fn in checks:
         result = check_fn(project, workspace)
         print(result)
-        if "STATUS=fix" in result:
+        if "STATUS=fix" in result or "STATUS=changed" in result:
             fixed += 1
         elif "STATUS=warn" in result:
             warnings += 1

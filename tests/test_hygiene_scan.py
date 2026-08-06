@@ -117,11 +117,9 @@ class TestCheckStaleBranches:
     def test_skips_closed_branches(self, tmp_path):
         _init_git(tmp_path)
         subprocess.run(["git", "-C", str(tmp_path), "checkout", "-b", "closed-branch"], capture_output=True)
-        (tmp_path / "design").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "design" / "EPIC-CLOSED.md").write_text("closed")
-        subprocess.run(["git", "-C", str(tmp_path), "add", "."], capture_output=True)
         subprocess.run(
-            ["git", "-C", str(tmp_path), "commit", "-m", "close",
+            ["git", "-C", str(tmp_path), "commit", "--allow-empty",
+             "-m", "chore: branch closed — landed as abc123 on main",
              "--date", "2020-01-01T00:00:00"],
             capture_output=True,
             env={**subprocess.os.environ, "GIT_COMMITTER_DATE": "2020-01-01T00:00:00"},
@@ -140,12 +138,12 @@ class TestCheckUnrecoveredArtifacts:
         _init_git(project)
 
         subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "closed-branch"], capture_output=True)
-        (workspace / "design").mkdir(parents=True, exist_ok=True)
-        (workspace / "design" / "EPIC-CLOSED.md").write_text("closed")
         (workspace / "blog").mkdir(parents=True, exist_ok=True)
         (workspace / "blog" / "entry.md").write_text("blog")
         subprocess.run(["git", "-C", str(workspace), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "close"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "add blog"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "--allow-empty",
+                         "-m", "chore: branch closed — landed as abc123 on main"], capture_output=True)
         subprocess.run(["git", "-C", str(workspace), "checkout", "main"], capture_output=True)
 
         routing = {"blog": "workspace", "specs": "project"}
@@ -156,42 +154,27 @@ class TestCheckUnrecoveredArtifacts:
 
 
 class TestCheckUnstampedBranches:
-    def test_detects_unstamped(self, tmp_path):
+    def test_detects_merged_unstamped(self, tmp_path):
         workspace = tmp_path / "workspace"
         project = tmp_path / "project"
         _init_git(workspace)
         _init_git(project)
 
-        # Create a closed workspace branch
-        subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "issue-42"], capture_output=True)
-        (workspace / "design").mkdir(parents=True, exist_ok=True)
-        (workspace / "design" / "EPIC-CLOSED.md").write_text("closed")
-        subprocess.run(["git", "-C", str(workspace), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "close"], capture_output=True)
-        subprocess.run(["git", "-C", str(workspace), "checkout", "main"], capture_output=True)
-
-        # Create matching project branch without stamp
         subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-42"], capture_output=True)
         subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "feat: work"], capture_output=True)
         subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "merge", "--ff-only", "issue-42"], capture_output=True)
 
         result = check_unstamped_branches(str(workspace), str(project), ["issue-42"], False)
         assert len(result) == 1
         assert result[0]["branch"] == "issue-42"
-        assert result[0]["project_branch_exists"] is True
+        assert result[0]["closure_state"] == "merged_unstamped"
 
     def test_stamped_branch_not_reported(self, tmp_path):
         workspace = tmp_path / "workspace"
         project = tmp_path / "project"
         _init_git(workspace)
         _init_git(project)
-
-        subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "issue-42"], capture_output=True)
-        (workspace / "design").mkdir(parents=True, exist_ok=True)
-        (workspace / "design" / "EPIC-CLOSED.md").write_text("closed")
-        subprocess.run(["git", "-C", str(workspace), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "close"], capture_output=True)
-        subprocess.run(["git", "-C", str(workspace), "checkout", "main"], capture_output=True)
 
         subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-42"], capture_output=True)
         subprocess.run(["git", "-C", str(project), "commit", "--allow-empty",

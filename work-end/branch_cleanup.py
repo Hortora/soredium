@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-Handle branch closing operations: EPIC-CLOSED marker, scaffold cleanup, stack
-cleanup, and checkout-main.
+Handle branch closing operations: scaffold cleanup, stack cleanup,
+and checkout-main.
 
 Usage: python3 branch_cleanup.py <subcommand> <args...>
 
 Subcommands:
-    create-epic-closed  <workspace> branch=<name> date=<YYYY-MM-DD>
-                        issues=<csv> [single-repo=<yes/no>]
     cleanup-scaffold    <workspace> [single-repo=<yes/no>]
     cleanup-stack       <workspace> branch=<name>
     checkout-main       <project> <workspace>
 
 Output (KEY=value lines):
-    CREATED=yes         (for create-epic-closed)
     CLEANED=yes         (for cleanup-scaffold)
     REMOVED=yes|no      (for cleanup-stack)
     SWITCHED=yes        (for checkout-main)
@@ -42,78 +39,6 @@ def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:
         ["git", "-C", cwd] + list(cmd),
         capture_output=True, text=True, check=True,
     )
-
-
-def create_epic_closed(workspace: str, params: dict[str, str]) -> int:
-    branch = params.get("branch", "")
-    close_date = params.get("date", "")
-    issues = params.get("issues", "")
-    single_repo = params.get("single-repo", "no")
-
-    if not branch:
-        print("ERROR=missing_branch")
-        print("ERROR_DETAIL=branch= argument required")
-        return 1
-    if not close_date:
-        print("ERROR=missing_date")
-        print("ERROR_DETAIL=date= argument required")
-        return 1
-    if not issues:
-        print("ERROR=missing_issues")
-        print("ERROR_DETAIL=issues= argument required")
-        return 1
-
-    ws = Path(workspace)
-    if not ws.is_dir():
-        print("ERROR=workspace_not_found")
-        print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
-        return 1
-
-    # In single-repo mode, checkout branch first
-    if single_repo == "yes":
-        try:
-            git("checkout", branch, cwd=workspace)
-        except subprocess.CalledProcessError as e:
-            print("ERROR=checkout_failed")
-            print(f"ERROR_DETAIL=Failed to checkout {branch}: {e.stderr.strip()}")
-            return 1
-
-    # Create the EPIC-CLOSED.md file
-    design_dir = ws / "design"
-    design_dir.mkdir(parents=True, exist_ok=True)
-
-    content = f"""# Branch Closed: {branch}
-
-**Date:** {close_date}
-**Issues:** {issues}
-**Status:** merged to main
-"""
-
-    (design_dir / "EPIC-CLOSED.md").write_text(content)
-
-    try:
-        git("add", "design/EPIC-CLOSED.md", cwd=workspace)
-        git("commit", "-m", f"docs({branch}): mark closed", cwd=workspace)
-    except subprocess.CalledProcessError as e:
-        print("ERROR=commit_failed")
-        print(f"ERROR_DETAIL=Failed to commit EPIC-CLOSED.md: {e.stderr.strip()}")
-        return 1
-
-    try:
-        git("push", cwd=workspace)
-    except subprocess.CalledProcessError:
-        # Push failure is non-fatal for marking closed
-        pass
-
-    # In single-repo mode, switch back to main
-    if single_repo == "yes":
-        try:
-            git("checkout", "main", cwd=workspace)
-        except subprocess.CalledProcessError:
-            pass
-
-    print("CREATED=yes")
-    return 0
 
 
 def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
@@ -260,7 +185,6 @@ def checkout_main(project: str, workspace: str) -> int:
 
 
 SUBCOMMANDS = {
-    "create-epic-closed": lambda args: create_epic_closed(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "cleanup-scaffold": lambda args: cleanup_scaffold(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "cleanup-stack": lambda args: cleanup_stack(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "checkout-main": lambda args: checkout_main(args[0], args[1]) if len(args) >= 2 else _usage(),

@@ -85,8 +85,8 @@ Parse the JSON output. Handle preconditions:
 **Queue gate** (if `HAS_PLAN=yes`): Run `plan_manager.py detect` to check
 queue state. If mid-queue, require `confirm-partial` to proceed.
 
-**Issue-complete emission** (if `HAS_PLAN=yes`): Run `reconcile_covers`
-and `complete_active_issue` after confirming close.
+**Issue-complete emission** (if `HAS_PLAN=yes`): Run
+`complete_active_issue` after confirming close.
 
 ---
 
@@ -222,40 +222,34 @@ After success: fire `cleanup_pass` lifecycle transition.
 
 ## Step 5 — Close
 
-### 5.1 EPIC-CLOSED marker
-
-```bash
-python3 work-end/branch_cleanup.py create-epic-closed <WORKSPACE>
-```
-
-### 5.2 Archive slot (slot mode only)
+### 5.1 Archive slot (slot mode only)
 
 Archive slot to `slots/attic/<N>/`.
 
-### 5.3 Return to base branches
+### 5.2 Return to base branches
 
 ```bash
 python3 work-end/branch_cleanup.py checkout-main <WORKSPACE> <PROJECT>
 ```
 
-### 5.4 Stack cleanup
+### 5.3 Stack cleanup
 
 If the closed branch was in `.pause-stack`, remove it.
 
-### 5.5 ARC42 stale scan
+### 5.4 ARC42 stale scan
 
 If `ARC42STORIES.MD` exists, scan for stale statuses and fix.
 
-### 5.6 Write HANDOFF.md
+### 5.5 Write HANDOFF.md
 
 Invoke the handover skill's Steps 2-6 to write HANDOFF.md to workspace
 main with the close summary.
 
-### 5.7 Session rename
+### 5.6 Session rename
 
 Suggest a descriptive session name if auto-generated.
 
-### 5.8 Session close summary
+### 5.7 Session close summary
 
 ```
 Session close complete.

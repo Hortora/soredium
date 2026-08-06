@@ -165,9 +165,8 @@ Steps:
    returns effects `[advance_issue, update_meta, tick_github]`.
 3. Execute effects:
    - `advance_issue`: Call `plan_manager.advance(<PLAN_PATH>, <META_PATH>)`.
-     The function atomically checks off the current issue, appends it to
-     `covers:` in `.meta`, and moves the `← active` marker to the next
-     leaf issue.
+     The function atomically checks off the current issue and moves the
+     `← active` marker to the next leaf issue.
    - `tick_github`: Check off the completed issue's checkbox on the
      GitHub epic body (if the completed issue was an epic child).
 4. Call `commit_transition(meta, result)` — writes `state: transitioning`.

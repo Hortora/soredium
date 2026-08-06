@@ -392,3 +392,64 @@ def test_pause_outside_slot_has_no_slot_field(workspace_with_stack, clean_git_re
     stack_file = workspace / "design" / ".pause-stack"
     content = stack_file.read_text()
     assert "slot:" not in content
+
+
+class TestPauseIntent:
+    def test_write_intent_creates_file(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        (workspace / "design").mkdir(parents=True)
+        result = subprocess.run(
+            ["python3", str(PAUSE_EXEC), "write-intent",
+             str(workspace), "branch=issue-42-foo"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "INTENT=written" in result.stdout
+        intent = (workspace / "design" / ".pausing").read_text()
+        assert "branch: issue-42-foo" in intent
+        assert "wip_project: pending" in intent
+        assert "checkout_main: pending" in intent
+
+    def test_update_intent_marks_step_done(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        (workspace / "design").mkdir(parents=True)
+        subprocess.run(
+            ["python3", str(PAUSE_EXEC), "write-intent",
+             str(workspace), "branch=issue-42-foo"],
+            capture_output=True, text=True, check=True,
+        )
+        result = subprocess.run(
+            ["python3", str(PAUSE_EXEC), "update-intent",
+             str(workspace), "step=wip_project"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        intent = (workspace / "design" / ".pausing").read_text()
+        assert "wip_project: done" in intent
+        assert "wip_workspace: pending" in intent
+
+    def test_clear_intent_removes_file(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        (workspace / "design").mkdir(parents=True)
+        subprocess.run(
+            ["python3", str(PAUSE_EXEC), "write-intent",
+             str(workspace), "branch=issue-42-foo"],
+            capture_output=True, text=True, check=True,
+        )
+        assert (workspace / "design" / ".pausing").exists()
+        result = subprocess.run(
+            ["python3", str(PAUSE_EXEC), "clear-intent", str(workspace)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert not (workspace / "design" / ".pausing").exists()
+
+    def test_update_intent_noop_when_no_file(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        (workspace / "design").mkdir(parents=True)
+        result = subprocess.run(
+            ["python3", str(PAUSE_EXEC), "update-intent",
+             str(workspace), "step=wip_project"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0

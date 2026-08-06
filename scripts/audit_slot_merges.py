@@ -21,6 +21,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
+from lifecycle import ClosureState, is_closed
+
 
 def parse_slot(slot_path: Path) -> tuple[int | None, str | None, list[str], str | None]:
     text = slot_path.read_text()
@@ -60,14 +63,19 @@ def check_repo_branch(repo_path: Path, branch: str) -> dict:
     result: dict = {}
     if not repo_path.exists():
         result["exists"] = False
+        result["closure_state"] = ClosureState.DELETED
         return result
     result["exists"] = True
 
-    branches = git(repo_path, "branch", "--list", branch)
-    result["branch_exists"] = bool(branches)
-    if not result["branch_exists"]:
+    closure = is_closed(str(repo_path), branch)
+    result["closure_state"] = closure
+
+    if closure == ClosureState.DELETED:
+        result["branch_exists"] = False
         result["branch_deleted"] = True
         return result
+
+    result["branch_exists"] = True
 
     unmerged_raw = git(repo_path, "log", "--oneline", f"main..{branch}")
     unmerged_lines = unmerged_raw.splitlines() if unmerged_raw else []
@@ -76,28 +84,23 @@ def check_repo_branch(repo_path: Path, branch: str) -> dict:
 
     last_msg = git(repo_path, "log", "-1", "--format=%s", branch)
     result["last_commit_msg"] = last_msg
-    result["is_stamped"] = last_msg.startswith("chore: branch closed")
+    result["is_stamped"] = closure in (ClosureState.CLOSED, ClosureState.STAMPED_UNMERGED)
 
-    # Check if the only unmerged commit is the stamp itself
     if result["is_stamped"] and result["unmerged_count"] >= 1:
-        # The stamp is always the last commit. Check if it's the ONLY unmerged one.
         if result["unmerged_count"] == 1:
             result["stamp_only"] = True
         else:
             result["stamp_only"] = False
-            # Real unmerged count is total minus the stamp
             result["real_unmerged_count"] = result["unmerged_count"] - 1
 
-    # For new-format stamps, extract and verify landing SHA
     sha_match = re.search(r"landed as ([0-9a-f]+)", last_msg)
     if sha_match:
         landing_sha = sha_match.group(1)
         result["landing_sha"] = landing_sha
-        # Check if stamp references a different repo
         repo_match = re.search(r"on (\S+) main", last_msg)
         if repo_match and repo_match.group(1) != "main":
             result["cross_repo_landing"] = repo_match.group(1)
-            result["landing_verified"] = True  # trust cross-repo stamps
+            result["landing_verified"] = True
         else:
             r = subprocess.run(
                 ["git", "-C", str(repo_path), "merge-base", "--is-ancestor",
@@ -107,7 +110,6 @@ def check_repo_branch(repo_path: Path, branch: str) -> dict:
             if r.returncode == 0:
                 result["landing_verified"] = True
             else:
-                # SHA might have changed due to rebase — check by commit message
                 second_to_last = git(repo_path, "log", "-1", "--skip=1",
                                      "--format=%s", branch) if result["unmerged_count"] > 1 else ""
                 if second_to_last:
@@ -119,7 +121,6 @@ def check_repo_branch(repo_path: Path, branch: str) -> dict:
                 else:
                     result["landing_verified"] = False
 
-    # Check for "superseded" stamps — intentionally not merged
     if "superseded" in last_msg.lower():
         result["superseded"] = True
 
@@ -150,7 +151,7 @@ def find_slot_dirs(family_root: Path) -> list[tuple[Path, str]]:
 
 
 def classify_status(info: dict) -> str:
-    """Classify a repo's branch status.
+    """Classify a repo's branch status using is_closed() as the base.
 
     Returns:
         OK — properly merged and stamped (or stamp-only)
@@ -162,32 +163,30 @@ def classify_status(info: dict) -> str:
             commits expected to differ
         UNMERGED(N) — N real commits not on main, no evidence of landing
     """
+    closure = info.get("closure_state")
+
     if not info.get("exists"):
         return "MISSING_REPO"
-    if info.get("branch_deleted") or not info.get("branch_exists"):
+    if closure == ClosureState.DELETED:
         return "BRANCH_DELETED"
     if info.get("superseded"):
         return "SUPERSEDED"
-    if info.get("stamp_only"):
+    if closure == ClosureState.CLOSED:
+        if info.get("landing_verified"):
+            return "LANDED_VERIFIED"
         return "OK"
-    if info.get("is_stamped") and info.get("landing_verified"):
-        return "LANDED_VERIFIED"
-    if info.get("unmerged_count", 0) == 0:
-        if info.get("is_stamped"):
-            return "OK"
+    if closure == ClosureState.MERGED_UNSTAMPED:
         return "UNSTAMPED"
-    # Stamped with old format (no landing SHA) — can't verify programmatically
-    # but stamp implies work was landed via rebase (pre-rebase commits differ)
-    if info.get("is_stamped") and not info.get("landing_sha"):
-        return "STAMPED_OLD_FORMAT"
-    # Stamped with landing SHA but SHA not on main — possible data loss
-    if info.get("is_stamped") and info.get("landing_sha") and not info.get("landing_verified"):
-        real = info.get("real_unmerged_count", info["unmerged_count"])
+    if closure == ClosureState.STAMPED_UNMERGED:
+        if not info.get("landing_sha"):
+            return "STAMPED_OLD_FORMAT"
+        if info.get("landing_verified"):
+            return "LANDED_VERIFIED"
+        real = info.get("real_unmerged_count", info.get("unmerged_count", 0))
         return f"LANDING_FAILED({real})"
-    if info.get("is_stamped"):
-        real = info.get("real_unmerged_count", info["unmerged_count"])
-        return f"UNMERGED({real})"
-    return f"UNMERGED({info['unmerged_count']})"
+    # OPEN
+    real = info.get("unmerged_count", 0)
+    return f"UNMERGED({real})"
 
 
 def find_landing_sha(repo_path: Path, branch: str) -> str | None:

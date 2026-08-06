@@ -240,6 +240,7 @@ Session wrap — create before writing the handover?
 [?] 5  journal-entry     document any design changes this session not yet in design/JOURNAL.md  ← ON if mid-epic (design/.meta exists), OFF otherwise
 [?] 6  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
 [?] 7  arc42 stale scan  check ARC42STORIES.MD for stale statuses, resolved blockers, closed-issue forward refs  ← ON if ARC42STORIES.MD exists
+[ ] 8  notes             anything to note for later? (appends to $WORKSPACE/NOTES.md)
 
 Type numbers to toggle (e.g. "2 6"), "all" to toggle all on/off, or "go" to proceed:
 ```
@@ -255,6 +256,10 @@ Write-content can write a partial diary draft (the next session can append to it
 
 Items 2, 5, 6, 7 (update-claude-md, journal-entry, epic hygiene, arc42 stale scan)
 work from file state and git history — they can be deferred if needed.
+
+Item 8 (notes) captures persistent scratch items to `$WORKSPACE/NOTES.md` —
+things to come back to later, observations that span sessions, notes not
+actionable enough to be issues. Append-only with date headers. Not a queue.
 </SESSION-BOUND-ITEMS>
 
 - **protocol sweep is on by default** — scans the session for project-specific rules worth formalising. Skip it for sessions that worked purely in universal tools with no project-specific rules established or re-enforced. The protocol skill creates `docs/protocols/` if it does not exist — never skip the sweep because the directory is absent.
@@ -266,8 +271,8 @@ work from file state and git history — they can be deferred if needed.
   4. Mid-epic: journal exists but has no `§Section` anchors (entries will not merge at close)
   5. **Project main working tree dirty** — run `git status --short` on the project base branch; any staged or unstaged changes mean an operation was left incomplete
   6. **Project main diverged from remote** — run `git log origin/main..main --oneline` and `git log main..origin/main --oneline`; local commits not on remote = work invisible to next session; remote ahead of local = next session will conflict
-  7. **Unrecovered artifacts on closed branches** — for every workspace branch that HAS `design/EPIC-CLOSED.md`, check whether blogs and specs reached workspace main. A closed branch with a blog still on it means work-end's artifact promotion failed or was skipped. For each finding: `⚠️ Blog/Spec <filename> on closed branch <branch> never reached workspace main.` Offer to cherry-pick immediately.
-  8. **Unstamped closed branches** — for every workspace branch with `EPIC-CLOSED.md`, check whether the corresponding **project** branch's last commit starts with `chore: branch closed`. Both old (`chore: branch closed`) and new (`chore: branch closed — landed as <SHA> on <branch>`) formats are valid. Flag any that don't match: `⚠️ Branch <branch> has EPIC-CLOSED.md but project branch is not stamped.` Offer to stamp immediately.
+  7. **Unrecovered artifacts on closed branches** — for every workspace branch where `is_closed()` returns CLOSED or MERGED_UNSTAMPED, check whether blogs and specs reached workspace main. A closed branch with a blog still on it means work-end's artifact promotion failed or was skipped. For each finding: `⚠️ Blog/Spec <filename> on closed branch <branch> never reached workspace main.` Offer to cherry-pick immediately.
+  8. **Unstamped closed branches** — for every workspace branch, check `is_closed()`. Flag MERGED_UNSTAMPED: `⚠️ Branch <branch> is merged but not stamped.` Offer to stamp immediately. Flag STAMPED_UNMERGED: `⚠️ Branch <branch> is stamped but content not merged — investigate.`
   Report findings — do not auto-fix, just surface them so they can be addressed or noted in the handover.
 - **arc42 stale scan is ON by default when ARC42STORIES.MD exists** — read `HAS_ARC42STORIES` from ctx.py output (already run in Path Resolution). Catches stale status drift that accumulates from cross-session and cross-repo work — the three failure modes it targets are: (a) layer/chapter status not updated when the issue closed in a different session, (b) external blocker references (cross-repo issues, foundation PRs) that shipped but were never cleared, (c) forward-tense issue references ("will migrate", "#N will...") where the referenced issue is now CLOSED. Run after epic hygiene so any just-surfaced issues are also reflected. See **Step 2c — ARC42STORIES.MD stale scan** below.
 - **"all":** if all are on → turn all off; if any are off → turn all on
@@ -282,6 +287,7 @@ Run checked items **in this order** before continuing:
 5. journal-entry — write any missing JOURNAL.md entries before the handover
 6. arc42 stale scan — run after journal-entry so any layer completions just written are already reflected
 7. write-content (diary) — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
+8. notes — append user-provided items to `$WORKSPACE/NOTES.md` with today's date header
 
 After all checked items complete, continue to Step 1.
 

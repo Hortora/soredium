@@ -578,135 +578,6 @@ class TestArtifactPromoteErrors:
 
 
 # ===========================================================================
-# branch_cleanup.py — create-epic-closed
-# ===========================================================================
-
-class TestCreateEpicClosed:
-
-    def test_creates_epic_closed_file(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        # Create a branch (we need one to be on for the test)
-        subprocess.run(
-            ["git", "-C", str(ws), "checkout", "-b", "issue-42-feature"],
-            capture_output=True, check=True,
-        )
-
-        result = run_cleanup(
-            "create-epic-closed", str(ws),
-            branch="issue-42-feature", date="2026-06-18",
-            issues="42",
-        )
-        assert result.returncode == 0
-        out = parse(result)
-        assert out["CREATED"] == "yes"
-
-        content = (ws / "design" / "EPIC-CLOSED.md").read_text()
-        assert "Branch Closed: issue-42-feature" in content
-        assert "2026-06-18" in content
-        assert "42" in content
-        assert "merged to main" in content
-
-    def test_creates_with_multiple_issues(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        subprocess.run(
-            ["git", "-C", str(ws), "checkout", "-b", "issue-5-multi"],
-            capture_output=True, check=True,
-        )
-
-        result = run_cleanup(
-            "create-epic-closed", str(ws),
-            branch="issue-5-multi", date="2026-06-18",
-            issues="5,19,32",
-        )
-        assert result.returncode == 0
-        content = (ws / "design" / "EPIC-CLOSED.md").read_text()
-        assert "5,19,32" in content
-
-    def test_single_repo_mode_switches_branches(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        # Create the branch
-        subprocess.run(
-            ["git", "-C", str(ws), "checkout", "-b", "issue-7-sr"],
-            capture_output=True, check=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(ws), "checkout", "main"],
-            capture_output=True, check=True,
-        )
-
-        result = run_cleanup(
-            "create-epic-closed", str(ws),
-            branch="issue-7-sr", date="2026-06-18",
-            issues="7", **{"single-repo": "yes"},
-        )
-        assert result.returncode == 0
-
-        # Should end up back on main
-        branch_result = subprocess.run(
-            ["git", "-C", str(ws), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True,
-        )
-        assert branch_result.stdout.strip() == "main"
-
-    def test_missing_branch_arg(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        result = run_cleanup(
-            "create-epic-closed", str(ws),
-            date="2026-06-18", issues="42",
-        )
-        assert result.returncode == 1
-        out = parse(result)
-        assert out["ERROR"] == "missing_branch"
-
-    def test_missing_date_arg(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        result = run_cleanup(
-            "create-epic-closed", str(ws),
-            branch="issue-42", issues="42",
-        )
-        assert result.returncode == 1
-        out = parse(result)
-        assert out["ERROR"] == "missing_date"
-
-    def test_missing_issues_arg(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        init_git(ws)
-
-        result = run_cleanup(
-            "create-epic-closed", str(ws),
-            branch="issue-42", date="2026-06-18",
-        )
-        assert result.returncode == 1
-        out = parse(result)
-        assert out["ERROR"] == "missing_issues"
-
-    def test_nonexistent_workspace(self, tmp_path):
-        result = run_cleanup(
-            "create-epic-closed", str(tmp_path / "nonexistent"),
-            branch="issue-42", date="2026-06-18", issues="42",
-        )
-        assert result.returncode == 1
-        out = parse(result)
-        assert out["ERROR"] == "workspace_not_found"
-
-
-# ===========================================================================
 # branch_cleanup.py — cleanup-scaffold
 # ===========================================================================
 
@@ -984,7 +855,7 @@ class TestBranchCleanupErrors:
         )
         assert result.returncode == 1
 
-    def test_create_epic_closed_no_positional(self):
+    def test_unknown_subcommand(self):
         result = run_cleanup("create-epic-closed")
         assert result.returncode == 1
 
