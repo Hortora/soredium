@@ -224,7 +224,15 @@ After success: fire `cleanup_pass` lifecycle transition.
 
 ### 5.1 Archive slot (slot mode only)
 
-Archive slot to `slots/attic/<N>/`.
+Prompt before archiving:
+
+> Slot `<N>` (`<branch-name>`) landed and verified.
+> Archive to `slots/attic/<N>/`? **(y/n)**
+
+- **y** → archive via `slot_manager.py remove-slot`
+- **n** → leave slot active (user may want to inspect artifacts or continue work)
+
+Do not archive without explicit confirmation.
 
 ### 5.2 Return to base branches
 
