@@ -384,6 +384,57 @@ class TestLandMainSync:
         assert "LANDED=yes" in result.stdout
 
 
+class TestLandRetry:
+    def test_land_retries_on_concurrent_push(self, tmp_path: Path) -> None:
+        """If push fails (concurrent push), fetch+rebase and retry."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-197-retry"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: our work")
+
+        _git(project, "checkout", "main")
+
+        # Simulate concurrent push: clone, commit, push directly to remote
+        other = tmp_path / "other"
+        subprocess.run(["git", "clone", str(remote), str(other)],
+                       capture_output=True, check=True)
+        _git(other, "config", "user.email", "other@test.com")
+        _git(other, "config", "user.name", "Other")
+        (other / "other.txt").write_text("concurrent work\n")
+        _git(other, "add", "other.txt")
+        _git(other, "commit", "-m", "feat: concurrent work")
+        _git(other, "push", "origin", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "PUSH_RETRY=1" in result.stdout
+        assert "LANDED=yes" in result.stdout
+
+        # Both commits should be on remote main
+        remote_log = subprocess.run(
+            ["git", "--git-dir", str(remote), "log", "--oneline", "main"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "feat: our work" in remote_log
+        assert "feat: concurrent work" in remote_log
+
+
 class TestLandPushTopology:
     def test_land_pushes_to_blessed_in_fork_model(self, tmp_path: Path) -> None:
         """In fork model (origin=fork, upstream=blessed), push to upstream."""

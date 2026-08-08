@@ -173,17 +173,29 @@ def cmd_land(opts: dict[str, str]) -> int:
     write_progress(progress_path, f"{repo_name}", "merged")
 
     # Push main to blessed remote
-    push_target = blessed_remote if blessed_remote else fork_remote
     if not push_target:
         print("ERROR=NO_REMOTE")
         print("ERROR_DETAIL=no origin or upstream remote configured")
         return 1
 
-    push_result = git(project, "push", push_target, base_branch)
-    if push_result.returncode != 0:
-        print("ERROR=PUSH_FAILED")
-        print(f"ERROR_DETAIL=push {base_branch} to {push_target} failed: {push_result.stderr.strip()}")
-        return 1
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        push_result = git(project, "push", push_target, base_branch)
+        if push_result.returncode == 0:
+            break
+        if attempt == max_retries:
+            print("ERROR=PUSH_FAILED")
+            print(f"ERROR_DETAIL=push {base_branch} to {push_target} failed after {max_retries} attempts: {push_result.stderr.strip()}")
+            return 1
+        print(f"PUSH_RETRY={attempt}")
+        git(project, "fetch", push_target, base_branch)
+        rebase_result = git(project, "rebase", f"{push_target}/{base_branch}")
+        if rebase_result.returncode != 0:
+            git(project, "rebase", "--abort")
+            print("ERROR=PUSH_RETRY_REBASE_FAILED")
+            print(f"ERROR_DETAIL=rebase onto {push_target}/{base_branch} failed during retry: {rebase_result.stderr.strip()}")
+            return 1
+
     print(f"PUSHED_TO={push_target}/{base_branch}")
     write_progress(progress_path, f"{repo_name}", "pushed")
 
