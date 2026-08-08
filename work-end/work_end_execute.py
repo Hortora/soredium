@@ -141,13 +141,30 @@ def cmd_land(opts: dict[str, str]) -> int:
         print(f"SKIPPED={repo_name} already stamped")
         return 0
 
-    # Merge branch into main (ff-only) before pushing
+    # Detect topology and sync main from blessed before merging
+    fork_remote, blessed_remote = detect_topology(project)
+    push_target = blessed_remote if blessed_remote else fork_remote
+
     checkout_result = git(project, "checkout", base_branch)
     if checkout_result.returncode != 0:
         print("ERROR=CHECKOUT_FAILED")
         print(f"ERROR_DETAIL=cannot checkout {base_branch}: {checkout_result.stderr.strip()}")
         return 1
 
+    # Fetch blessed main and check for local-only commits
+    if push_target:
+        git(project, "fetch", push_target, base_branch)
+        local_only = git(project, "rev-list", f"{push_target}/{base_branch}..{base_branch}")
+        if local_only.returncode == 0 and local_only.stdout.strip():
+            count = len(local_only.stdout.strip().splitlines())
+            print(f"LOCAL_COMMITS={count}")
+            rescue_branch = f"rescue-{branch}"
+            git(project, "branch", rescue_branch, base_branch)
+            git(project, "reset", "--hard", f"{push_target}/{base_branch}")
+            print(f"RESCUED_TO={rescue_branch}")
+            print(f"MAIN_RESET=yes")
+
+    # Merge branch into main (ff-only) before pushing
     merge_result = git(project, "merge", "--ff-only", branch)
     if merge_result.returncode != 0:
         print("ERROR=MERGE_FAILED")
@@ -155,8 +172,7 @@ def cmd_land(opts: dict[str, str]) -> int:
         return 1
     write_progress(progress_path, f"{repo_name}", "merged")
 
-    # Push main to blessed remote (upstream if fork model, origin if direct)
-    fork_remote, blessed_remote = detect_topology(project)
+    # Push main to blessed remote
     push_target = blessed_remote if blessed_remote else fork_remote
     if not push_target:
         print("ERROR=NO_REMOTE")

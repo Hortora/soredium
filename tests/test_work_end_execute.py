@@ -301,6 +301,89 @@ class TestLandMergesBeforePush:
         assert "feat: add feature" in remote_log
 
 
+class TestLandMainSync:
+    def test_land_rescues_local_only_commits(self, tmp_path: Path) -> None:
+        """If main has local-only commits not on blessed, rescue them
+        to a branch and reset main before merging the feature branch."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-197-rescue"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        # Simulate a local-only commit on main (user committed directly)
+        (project / "quickfix.txt").write_text("quick fix\n")
+        _git(project, "add", "quickfix.txt")
+        _git(project, "commit", "-m", "fix: quick fix on main")
+
+        # Create feature branch from the pre-quickfix state
+        _git(project, "checkout", "-b", branch, "origin/main")
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: feature work")
+
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "LOCAL_COMMITS=1" in result.stdout
+        assert "RESCUED_TO=rescue-" in result.stdout
+        assert "MAIN_RESET=yes" in result.stdout
+        assert "LANDED=yes" in result.stdout
+
+        # Feature should be on main
+        main_log = _git(project, "log", "--oneline", "main")
+        assert "feat: feature work" in main_log
+
+        # Quick fix should NOT be on main (it was rescued)
+        assert "fix: quick fix" not in main_log
+
+        # Rescue branch should exist with the quick fix
+        rescue_log = _git(project, "log", "--oneline", f"rescue-{branch}")
+        assert "fix: quick fix" in rescue_log
+
+    def test_land_no_rescue_when_clean(self, tmp_path: Path) -> None:
+        """No rescue when main matches blessed."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-197-clean"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: clean land")
+
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0
+        assert "LOCAL_COMMITS" not in result.stdout
+        assert "RESCUED_TO" not in result.stdout
+        assert "LANDED=yes" in result.stdout
+
+
 class TestLandPushTopology:
     def test_land_pushes_to_blessed_in_fork_model(self, tmp_path: Path) -> None:
         """In fork model (origin=fork, upstream=blessed), push to upstream."""
