@@ -301,6 +301,80 @@ class TestLandMergesBeforePush:
         assert "feat: add feature" in remote_log
 
 
+class TestLandPushTopology:
+    def test_land_pushes_to_blessed_in_fork_model(self, tmp_path: Path) -> None:
+        """In fork model (origin=fork, upstream=blessed), push to upstream."""
+        blessed = _init_bare(tmp_path / "blessed.git")
+        fork = _init_bare(tmp_path / "fork.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-197-topo"
+
+        _git(project, "remote", "add", "origin", str(fork))
+        _git(project, "remote", "add", "upstream", str(blessed))
+        _git(project, "push", "origin", "main")
+        _git(project, "push", "upstream", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: topology test")
+
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "PUSHED_TO=upstream/main" in result.stdout
+
+        # Blessed must have the commit
+        blessed_log = subprocess.run(
+            ["git", "--git-dir", str(blessed), "log", "--oneline", "main"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "feat: topology test" in blessed_log
+
+        # Fork should be mirrored
+        assert "MIRRORED_TO=origin/main" in result.stdout
+
+    def test_land_pushes_to_origin_in_direct_model(self, tmp_path: Path) -> None:
+        """In direct model (origin only, no upstream), push to origin."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-197-direct"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: direct test")
+
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "PUSHED_TO=origin/main" in result.stdout
+        assert "MIRRORED_TO" not in result.stdout
+
+
 class TestBadArgs:
     def test_missing_subcommand(self) -> None:
         result = subprocess.run(

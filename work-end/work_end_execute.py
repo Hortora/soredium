@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import parse_args
+from common import parse_args, detect_topology
 
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -155,13 +155,29 @@ def cmd_land(opts: dict[str, str]) -> int:
         return 1
     write_progress(progress_path, f"{repo_name}", "merged")
 
-    # Push main to origin
-    push_result = git(project, "push", "origin", base_branch)
+    # Push main to blessed remote (upstream if fork model, origin if direct)
+    fork_remote, blessed_remote = detect_topology(project)
+    push_target = blessed_remote if blessed_remote else fork_remote
+    if not push_target:
+        print("ERROR=NO_REMOTE")
+        print("ERROR_DETAIL=no origin or upstream remote configured")
+        return 1
+
+    push_result = git(project, "push", push_target, base_branch)
     if push_result.returncode != 0:
         print("ERROR=PUSH_FAILED")
-        print(f"ERROR_DETAIL=push {base_branch} failed: {push_result.stderr.strip()}")
+        print(f"ERROR_DETAIL=push {base_branch} to {push_target} failed: {push_result.stderr.strip()}")
         return 1
+    print(f"PUSHED_TO={push_target}/{base_branch}")
     write_progress(progress_path, f"{repo_name}", "pushed")
+
+    # Mirror to fork if fork model (fork main tracks blessed)
+    if blessed_remote and fork_remote and fork_remote != blessed_remote:
+        mirror_result = git(project, "push", fork_remote, base_branch, "--force-with-lease")
+        if mirror_result.returncode != 0:
+            print(f"MIRROR_WARN=push to {fork_remote} failed: {mirror_result.stderr.strip()}")
+        else:
+            print(f"MIRRORED_TO={fork_remote}/{base_branch}")
 
     # Stamp the branch
     stamp_script = Path(__file__).parent / "land_branch.py"

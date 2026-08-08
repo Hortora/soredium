@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import parse_args
+from common import parse_args, detect_topology
 
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
@@ -41,17 +41,6 @@ def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
         ["git", "-C", repo, *args],
         capture_output=True, text=True,
     )
-
-
-def detect_topology(project: str) -> tuple[str, str]:
-    """Returns (fork_remote, blessed_remote)."""
-    result = git(project, "remote", "get-url", "upstream")
-    if result.returncode == 0:
-        return "origin", "upstream"
-    result = git(project, "remote", "get-url", "origin")
-    if result.returncode == 0:
-        return "origin", ""
-    return "", ""
 
 
 def cmd_rebase(project: str, opts: dict[str, str]) -> int:
