@@ -249,6 +249,58 @@ class TestLandSingleRepo:
         assert ws_tip.startswith("chore: branch closed")
 
 
+class TestLandMergesBeforePush:
+    def test_land_merges_branch_into_main_before_push(self, tmp_path: Path) -> None:
+        """cmd_land must ff-merge the branch into main before pushing.
+
+        Previously, callers had to merge externally. This caused #196/#197:
+        main pushed without the branch commits, leaving work unlanded.
+        """
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-197-test"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("new feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: add feature")
+
+        # Do NOT merge into main — cmd_land should do this itself
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+        design = workspace / "design"
+        design.mkdir(exist_ok=True)
+        (design / ".meta").write_text(f"branch: {branch}\nstate: active\n")
+        _git(workspace, "add", ".")
+        _git(workspace, "commit", "-m", "scaffold")
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "LANDED=yes" in result.stdout
+
+        # Main must include the branch commit
+        main_log = _git(project, "log", "--oneline", "main")
+        assert "feat: add feature" in main_log
+
+        # Remote must also have it
+        remote_log = subprocess.run(
+            ["git", "--git-dir", str(remote), "log", "--oneline", "main"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "feat: add feature" in remote_log
+
+
 class TestBadArgs:
     def test_missing_subcommand(self) -> None:
         result = subprocess.run(

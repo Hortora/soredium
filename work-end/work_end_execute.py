@@ -141,6 +141,20 @@ def cmd_land(opts: dict[str, str]) -> int:
         print(f"SKIPPED={repo_name} already stamped")
         return 0
 
+    # Merge branch into main (ff-only) before pushing
+    checkout_result = git(project, "checkout", base_branch)
+    if checkout_result.returncode != 0:
+        print("ERROR=CHECKOUT_FAILED")
+        print(f"ERROR_DETAIL=cannot checkout {base_branch}: {checkout_result.stderr.strip()}")
+        return 1
+
+    merge_result = git(project, "merge", "--ff-only", branch)
+    if merge_result.returncode != 0:
+        print("ERROR=MERGE_FAILED")
+        print(f"ERROR_DETAIL=ff-only merge of {branch} into {base_branch} failed: {merge_result.stderr.strip()}")
+        return 1
+    write_progress(progress_path, f"{repo_name}", "merged")
+
     # Push main to origin
     push_result = git(project, "push", "origin", base_branch)
     if push_result.returncode != 0:
