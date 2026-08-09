@@ -460,6 +460,14 @@ python3 scripts/validate_garden.py <garden_path> --freshness  # check entry stal
 # scripts/feature_extractor.py   -- regex-based structural fingerprinting
 # scripts/cluster_pipeline.py    -- cosine similarity clustering
 # scripts/delta_analysis.py      -- new abstractions between git tags
+
+# Enrichment + GitHub cache (worklog DB v2)
+# scripts/enrichment.py upsert  -- write enrichment metadata for an issue
+# scripts/enrichment.py get     -- read enrichment for a single issue
+# scripts/enrichment.py list    -- list all enrichments for a repo
+# scripts/enrichment.py trajectory -- append a trajectory note to an issue
+# scripts/enrichment.py refresh -- refresh GitHub issue cache for a repo
+# scripts/enrichment.py what-next -- query for what-next recommendations
 ```
 
 **After editing any skill:** run `sync-local` so `~/.claude/skills/` has the latest version.

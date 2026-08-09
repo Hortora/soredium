@@ -12,7 +12,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DEFAULT_DB = os.path.expanduser("~/.hortora/worklog.db")
 
@@ -73,6 +73,49 @@ CREATE INDEX IF NOT EXISTS idx_events_slot ON events(slot_id);
 CREATE INDEX IF NOT EXISTS idx_work_items_state ON work_items(state);
 """
 
+SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS issue_enrichment (
+    issue_number   INTEGER NOT NULL,
+    issue_repo     TEXT NOT NULL,
+    strategic_role TEXT,
+    readiness      TEXT,
+    decay          TEXT,
+    blast_radius   TEXT,
+    cohesion       TEXT,
+    updated_at     TEXT NOT NULL,
+    PRIMARY KEY (issue_number, issue_repo)
+);
+
+CREATE TABLE IF NOT EXISTS trajectory_notes (
+    id           INTEGER PRIMARY KEY,
+    issue_number INTEGER NOT NULL,
+    issue_repo   TEXT NOT NULL,
+    note         TEXT NOT NULL,
+    source_branch TEXT,
+    created_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trajectory_issue
+    ON trajectory_notes(issue_number, issue_repo);
+
+CREATE TABLE IF NOT EXISTS github_issue_cache (
+    issue_number INTEGER NOT NULL,
+    issue_repo   TEXT NOT NULL,
+    title        TEXT,
+    state        TEXT,
+    labels       TEXT,
+    body         TEXT,
+    cached_at    TEXT NOT NULL,
+    PRIMARY KEY (issue_number, issue_repo)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cache_repo ON github_issue_cache(issue_repo);
+CREATE INDEX IF NOT EXISTS idx_cache_staleness ON github_issue_cache(issue_repo, cached_at);
+CREATE INDEX IF NOT EXISTS idx_enrichment_role ON issue_enrichment(strategic_role);
+CREATE INDEX IF NOT EXISTS idx_enrichment_decay ON issue_enrichment(decay);
+CREATE INDEX IF NOT EXISTS idx_enrichment_readiness ON issue_enrichment(readiness);
+"""
+
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -86,6 +129,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     current = conn.execute("PRAGMA user_version").fetchone()[0]
     if current < 1:
         conn.executescript(SCHEMA_V1)
+    if current < 2:
+        conn.executescript(SCHEMA_V2)
+    if current < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
 

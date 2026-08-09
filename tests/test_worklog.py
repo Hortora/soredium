@@ -1,6 +1,7 @@
 """Tests for scripts/worklog.py"""
 
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -40,7 +41,7 @@ class TestConnect:
         db = tmp_path / "worklog.db"
         conn = worklog.connect(str(db))
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 1
+        assert ver == 2
         conn.close()
 
     def test_idempotent_connect(self, tmp_path):
@@ -49,7 +50,7 @@ class TestConnect:
         conn1.close()
         conn2 = worklog.connect(str(db))
         ver = conn2.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 1
+        assert ver == 2
         conn2.close()
 
 
@@ -652,4 +653,62 @@ class TestIssueEvents:
         conn = worklog.connect(str(tmp_path / "wl.db"))
         result = worklog.record_issue_activate(conn, "nonexistent", "/repo", 42, "org/r")
         assert result is None
+        conn.close()
+
+
+class TestV2Migration:
+    def test_v2_tables_created(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()]
+        assert "issue_enrichment" in tables
+        assert "trajectory_notes" in tables
+        assert "github_issue_cache" in tables
+        conn.close()
+
+    def test_v2_schema_version(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        ver = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert ver == 2
+        conn.close()
+
+    def test_v1_to_v2_upgrade(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript(worklog.SCHEMA_V1)
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        conn.execute(
+            "INSERT INTO repos (path) VALUES (?)", ("/test/repo",)
+        )
+        conn.commit()
+        conn.close()
+        conn = worklog.connect(str(db))
+        ver = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert ver == 2
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()]
+        assert "issue_enrichment" in tables
+        assert "trajectory_notes" in tables
+        assert "github_issue_cache" in tables
+        row = conn.execute("SELECT path FROM repos").fetchone()
+        assert row[0] == "/test/repo"
+        conn.close()
+
+    def test_v2_indexes_created(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        indexes = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name"
+        ).fetchall()]
+        assert "idx_cache_repo" in indexes
+        assert "idx_cache_staleness" in indexes
+        assert "idx_enrichment_role" in indexes
+        assert "idx_enrichment_decay" in indexes
+        assert "idx_enrichment_readiness" in indexes
+        assert "idx_trajectory_issue" in indexes
         conn.close()

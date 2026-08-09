@@ -49,10 +49,44 @@ this state with additional tool calls.
 
 | `ROUTE` | Action |
 |---------|--------|
-| `start` | → **work-start** — begin new work |
+| `start` | → what-next recommendation (Step 2a), then **work-start** |
 | `resume_stack` | → show stack picker (Step 3), then **work-resume** |
 | `resume_branch` | → contextual options (Step 4) |
 | `workspace_dirty` | → warn and offer to reset (Step 2b) |
+
+**Step 2a — What-next recommendation (when no issue specified)**
+
+If the user invoked `work` without an issue number and `ROUTE=start`:
+
+1. Refresh the GitHub cache:
+   ```bash
+   python3 scripts/enrichment.py refresh --repo $OWNER_REPO
+   ```
+
+2. Query for recommendations:
+   ```bash
+   python3 scripts/enrichment.py what-next --repo $OWNER_REPO --mode general --limit 5
+   ```
+
+3. If results exist and any are enriched, present them:
+   ```
+   Recommended next:
+     1. #42 — Fix caching bug (score: 12, quick-win, ready, compounding)
+     2. #55 — Refactor auth (score: 8, load-bearing, ready, stable)
+     3. #99 — Add tests (score: 0, not enriched)
+
+   Pick a number, type an issue #, or describe what you want to work on.
+   ```
+
+4. If no enrichment data exists yet (all scores are 0), skip silently —
+   the feature bootstraps through work-end trajectory captures over time.
+   Route directly to work-start.
+
+5. If the user specified an issue number in their `work` invocation,
+   skip this step entirely — route directly to work-start with the
+   specified issue.
+
+6. User picks → route to **work-start** with the selected issue number.
 
 **Step 2b — Workspace on stale branch (workspace_dirty)**
 

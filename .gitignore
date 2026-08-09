@@ -34,3 +34,4 @@ wksp
 registry/candidate_report.json
 target/
 .mvn/maven.config
+.mvn/slot-settings.xml

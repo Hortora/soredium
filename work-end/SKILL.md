@@ -172,6 +172,34 @@ deduplicates: each workspace promoted once, not per-repo. Never passes
 
 After success: fire `promote_pass` lifecycle transition.
 
+### 3.2b Trajectory capture (enrichment)
+
+After artifacts are promoted and before the branch is pushed. Non-blocking —
+if this step fails or the user declines, continue to Phase A.
+
+1. **Generate trajectory note** — using the full session context, draft a
+   one-line trajectory note for each completed issue: "This work suggests
+   X next because Y" (e.g., "Schema landed — #192 and #193 are now ready
+   to implement").
+
+2. **Propose enrichment updates** — assess how completed work shifts the
+   strategic landscape for 2-3 sibling/related issues. Present in a table:
+
+   | Issue | Field | Old | New | Reason |
+   |-------|-------|-----|-----|--------|
+   | #192 | readiness | needs-design | ready | Schema it depends on just landed |
+
+3. **User confirms** — present the table. On YES, persist:
+
+   ```bash
+   python3 scripts/enrichment.py trajectory --issue <N> --repo <REPO> --text "<note>" --branch <BRANCH>
+   python3 scripts/enrichment.py upsert --issue <N> --repo <REPO> --readiness ready
+   ```
+
+4. **Failure is non-blocking** — if enrichment.py fails or the user
+   declines, continue to Phase A. Enrichment capture is valuable but
+   never gates branch closure.
+
 ### 3.3 Phase A — Rebase
 
 ```bash

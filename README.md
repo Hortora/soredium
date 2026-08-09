@@ -112,6 +112,17 @@ Soredium includes the garden engine — validators, CI scripts, and an autonomou
 | `scripts/init_garden.py` | Initializes canonical/child/peer gardens |
 | `scripts/garden-agent-install.sh` | Installs the autonomous garden agent into a local clone |
 
+## Worklog & Enrichment
+
+Local work lifecycle tracking and enriched backlog for what-next recommendations.
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/worklog.py` | Cross-repo work lifecycle tracking (SQLite) |
+| `scripts/enrichment.py` | Issue enrichment, GitHub cache, what-next queries (CLI) |
+| `scripts/worklog_mcp_server.py` | MCP server exposing worklog queries |
+| `scripts/query_worklog.py` | Audit tool for inspecting worklog state |
+
 ## Developer Setup
 
 ```bash
