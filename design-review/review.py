@@ -1611,6 +1611,7 @@ def _print_summary(tracker: Tracker, round_num: int, cost: float, spec_path: str
 REVIEW_MODES: Final = (
     "pre-review", "spec-review", "code-review", "final-review",
     "coherence", "structure", "robustness", "crosscutting",
+    "decision",
 )
 
 MODE_DEFAULTS: Final = {
@@ -1622,6 +1623,7 @@ MODE_DEFAULTS: Final = {
     "structure": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 5.0},
     "robustness": {"max_rounds": 6, "min_rounds": 4, "budget_per_session": 5.0},
     "crosscutting": {"max_rounds": 5, "min_rounds": 2, "budget_per_session": 5.0},
+    "decision": {"max_rounds": 3, "min_rounds": 2, "budget_per_session": 5.0},
 }
 
 DEPTH_PRESETS: Final = {
@@ -1630,7 +1632,7 @@ DEPTH_PRESETS: Final = {
     "deep":     {"max_rounds": 5, "min_rounds": 3, "budget_per_session": 8.0},
 }
 
-REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness", "crosscutting")
+REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness", "crosscutting", "decision")
 
 DEGREE_PRESETS: Final = {
     "light":       {"max_rounds": 1,  "min_rounds": 1, "budget_per_session": 1.5},
@@ -1646,6 +1648,7 @@ TYPE_DEFAULTS: Final = {
     "conformance": "standard",
     "readiness": "standard",
     "crosscutting": "standard",
+    "decision": "standard",
 }
 
 TYPE_TO_MODE: Final = {
@@ -1655,6 +1658,7 @@ TYPE_TO_MODE: Final = {
     "conformance": "code-review",
     "readiness": "final-review",
     "crosscutting": "crosscutting",
+    "decision": "decision",
 }
 
 MODE_TO_TYPE: Final = {
@@ -1662,6 +1666,7 @@ MODE_TO_TYPE: Final = {
     "spec-review": ("structure", "adversarial"),
     "code-review": ("conformance", "standard"),
     "final-review": ("readiness", "standard"),
+    "decision": ("decision", "standard"),
 }
 
 

@@ -10,7 +10,7 @@ automatically when 2+ dimensions complete.
 | Lifecycle | When | Dimensions | Emphasis |
 |-----------|------|------------|----------|
 | Post-spec | After spec written and approved | Coherence, Structure, Robustness + cross-cutting | Coherence heavy, Structure heavy, Robustness medium |
-| Post-brainstorming | After approach selected, before spec | *(future — approach fitness, prior art, platform conformance)* | — |
+| Post-brainstorming | After approach selected, before spec | Decision | Approach fitness, prior art, platform conformance |
 | Post-implementation | After code written, before merge | *(future — conformance, robustness, structure, coherence)* | — |
 | Pre-ship | Before release | *(future — robustness, readiness)* | — |
 
@@ -23,6 +23,7 @@ automatically when 2+ dimensions complete.
 | Robustness | Failure modes, concurrency, edge cases, data integrity, error propagation |
 | Cross-cutting | Contradictions, intersection failures, coverage gaps between dimensions |
 | Conformance | Implementation vs spec alignment *(post-implementation only)* |
+| Decision | Rationale soundness, unconsidered alternatives, platform coherence, implicit decisions *(post-brainstorming only)* |
 | Readiness | Ship-worthiness, observability, rollback *(pre-ship only)* |
 
 ## Degrees

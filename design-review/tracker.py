@@ -396,7 +396,12 @@ def verify_against_diff(diff: str, section_ref: str | None) -> VerifyResult:
 
 def _extract_section_number(location: str) -> str | None:
     m = re.search(r"§(\d+(?:\.\d+)*)", location)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    m = re.search(r"\bD(\d+)\b", location)
+    if m:
+        return f"D{m.group(1)}"
+    return None
 
 
 def _find_section_range(content: str, section_ref: str) -> tuple[int, int] | None:
@@ -412,6 +417,8 @@ def _find_section_range(content: str, section_ref: str) -> tuple[int, int] | Non
         level = len(m.group(1))
         title = m.group(2)
         num_match = re.match(r"[§S]?(\d+(?:\.\d+)*)", title)
+        if not num_match:
+            num_match = re.match(r"(D\d+):", title)
         if num_match and num_match.group(1) == section_ref:
             start_line = i
             start_level = level

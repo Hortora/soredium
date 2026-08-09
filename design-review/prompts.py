@@ -46,6 +46,11 @@ def build_reviewer_prompt(
             convergence_override_ids, source_dirs, workspace_root,
             spec_path, resolved_degree, maturity_stage,
         )
+    if mode == "decision":
+        return _build_decision_review_reviewer_prompt(
+            round_num, focus_items, handover_path, convergence_override_ids,
+            source_dirs, workspace_root, spec_path, maturity_stage,
+        )
     if mode == "code-review":
         return _build_code_review_reviewer_prompt(
             round_num, focus_items, handover_path, convergence_override_ids,
@@ -156,6 +161,10 @@ def build_implementor_prompt(
 ) -> str:
     if mode == "pre-review":
         return _build_pre_review_implementor_prompt(
+            round_num, focus_items, source_dirs, workspace_root, spec_path,
+        )
+    if mode == "decision":
+        return _build_decision_review_implementor_prompt(
             round_num, focus_items, source_dirs, workspace_root, spec_path,
         )
     if mode == "code-review":
@@ -504,6 +513,165 @@ def _build_pre_review_implementor_prompt(
         f"in the approach, revise the proposal at {sp}. Where they haven't, defend "
         "your choice with specific reasoning. If the reviewer proposes a better "
         "approach, evaluate it honestly — pivot if it's genuinely better."
+    )
+    parts.append("")
+    parts.append(
+        f"Write your response to {ws}/responses/implementor-{round_num}.md following the "
+        "structured output format described in the review context appended to your system prompt."
+    )
+
+    if focus_items:
+        parts.append("")
+        parts.append(f"Focus items: {', '.join(focus_items)}")
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Decision review prompts — adversarial validation of design decisions
+# ---------------------------------------------------------------------------
+
+def _build_decision_review_reviewer_prompt(
+    round_num: int,
+    focus_items: list[str],
+    handover_path: str | None,
+    convergence_override_ids: list[str] | None = None,
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+    maturity_stage: str = "pre-release",
+) -> str:
+    ws = workspace_root
+    parts: list[str] = []
+
+    parts.append("ultrathink")
+    parts.append("")
+    parts.append(f"This is round {round_num} of a decision review — adversarial validation of design decisions.")
+    parts.append("")
+    parts.append(f"Read the decisions file at {spec_path or ws + '/spec.md'}.")
+    parts.append("Also read SOURCES.md (if inlined in CLAUDE.md or at the project root) for platform coherence context.")
+    if round_num > 1:
+        parts.append(f"Read the tracker at {ws}/tracker.md for issue status and focus items.")
+    parts.append("")
+    if source_dirs:
+        parts.append("Project directories (full read access — explore to verify platform coherence):")
+        for sd in source_dirs:
+            parts.append(f"  - {sd}")
+        parts.append("")
+    parts.append(
+        f"Write your review to {ws}/responses/reviewer-{round_num}.md following the structured "
+        "output format described in the review context appended to your system prompt."
+    )
+    parts.append("")
+    parts.append(
+        "For each decision in the file, evaluate:\n"
+        "1. Challenge the rationale — is the reasoning sound? Logical gaps? Unstated assumptions?\n"
+        "2. Propose unconsidered alternatives — search the codebase, architecture docs, and "
+        "internet for approaches the brainstorm didn't surface\n"
+        "3. Check platform coherence — does this decision duplicate existing capability? "
+        "Violate boundary rules? Create dependency issues? Check SOURCES.md documentation\n"
+        "4. Surface implicit decisions — read the overall design direction and identify "
+        "choices made without explicit debate that have architectural consequences\n"
+        "5. Assess trade-off weighting — are the acknowledged trade-offs correctly prioritised?\n"
+        "6. Check decision dependencies — if D5 depends on D2, does D2's rationale actually "
+        "support D5's assumption?"
+    )
+    parts.append("")
+    parts.append(
+        "CALIBRATION by exploration depth:\n"
+        "- Decisions marked `Exploration: quick` received minimal scrutiny during brainstorming. "
+        "Apply maximum adversarial pressure.\n"
+        "- Decisions marked `Exploration: deep-analysis` were steelmanned and devil's-advocated. "
+        "Focus on what the analysis might have missed.\n"
+        "- Decisions marked `Exploration: multi-agent-debate` were stress-tested by independent "
+        "advocates. Only challenge with NEW evidence or alternatives not raised in the debate."
+    )
+    parts.append("")
+    parts.append("Do NOT update the decisions file. Do NOT implement anything. Review only.")
+
+    if handover_path:
+        parts.append("")
+        parts.append(
+            f"Read the prior reviewer's handover at {ws}/{handover_path} for accumulated "
+            f"insights from previous rounds."
+        )
+
+    if focus_items:
+        parts.append("")
+        parts.append(
+            f"The tracker shows {len(focus_items)} open/contested items. Focus on these: "
+            + ", ".join(focus_items)
+        )
+
+    if round_num >= 2:
+        parts.append("")
+        parts.append(
+            "EVIDENCE REQUIRED for confirmations — bare assertions are not accepted:\n"
+            "- For each ADDRESSED item you confirm as resolved: cite what changed "
+            "in the decisions file that addresses it.\n"
+            "- For each REJECTED item you accept: state why the implementor's "
+            "reasoning is correct, with specific evidence.\n"
+            "- SIGNAL: APPROVED will only be accepted when ALL items are in terminal "
+            "state (VERIFIED or ACCEPTED)."
+        )
+
+    if convergence_override_ids:
+        parts.append("")
+        parts.append(
+            "The following items are NOT in terminal state. You MUST provide evidence "
+            "for each before APPROVED can be accepted: "
+            + ", ".join(convergence_override_ids)
+        )
+
+    if maturity_stage == "released":
+        parts.append("")
+        parts.append(
+            "**This project is RELEASED — it has external consumers.** "
+            "Flag any decision that would break public APIs, config keys, "
+            "serialization formats, or CLI flags without a documented migration path."
+        )
+
+    return "\n".join(parts)
+
+
+def _build_decision_review_implementor_prompt(
+    round_num: int,
+    focus_items: list[str],
+    source_dirs: list[str] | None = None,
+    workspace_root: str = "",
+    spec_path: str = "",
+) -> str:
+    ws = workspace_root
+    parts: list[str] = []
+
+    parts.append(f"This is round {round_num} of a decision review — adversarial validation of design decisions.")
+    parts.append("")
+    parts.append(f"Read the reviewer's challenges at {ws}/responses/reviewer-{round_num}.md.")
+    parts.append(f"Read the tracker at {ws}/tracker.md for focus items and issue statuses.")
+    if source_dirs:
+        parts.append("")
+        parts.append("Project directories (full read access):")
+        for sd in source_dirs:
+            parts.append(f"  - {sd}")
+    parts.append("")
+    sp = spec_path or f"{ws}/spec.md"
+    parts.append(
+        f"Address each challenge. For each decision the reviewer contests:\n"
+        f"- Where the challenge is unfounded: defend with evidence — cite SOURCES.md, "
+        f"platform docs, or prior exploration artifacts\n"
+        f"- Where the reviewer surfaces a genuinely better alternative: update the "
+        f"decision in {sp}, mark its Status as `revised`, and note what changed\n"
+        f"- Where the reviewer surfaces an implicit decision: add a new entry to "
+        f"{sp} with the alternatives now that the choice is visible"
+    )
+    parts.append("")
+    parts.append(
+        "Stand ground on well-explored decisions. A decision that survived "
+        "steelman/devil's advocate or multi-agent debate has already been "
+        "pressure-tested — the reviewer must present NEW evidence or a NEW "
+        "alternative to justify revision.\n\n"
+        "For quick-pick decisions, be more open to revision — these received "
+        "minimal scrutiny and the reviewer's fresh perspective is valuable."
     )
     parts.append("")
     parts.append(
