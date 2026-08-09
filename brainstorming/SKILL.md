@@ -197,6 +197,67 @@ writing-plans.
 - Assess architectural impact and offer exploration at the appropriate
   depth (see Approach Exploration Depth below)
 
+### Approach Exploration Depth
+
+When presenting 2-3 approaches, assess architectural impact and offer
+the appropriate exploration depth. The user can always escalate ("let's
+debate this") or de-escalate ("just go with A") regardless of the
+recommendation.
+
+**Level 1 — Quick pick:** Low impact (config, naming, wiring). Present
+options with recommendation. If user selects immediately, capture with
+`Exploration: quick`.
+
+**Level 2 — Deep analysis:** Moderate impact (new module, API surface).
+When user is uncertain, perform structured analysis of each approach:
+
+1. **Steelman** each option — the strongest possible case
+2. **Devil's advocate** each option — why it might fail, what it can't handle
+3. **Internet search** — prior art, current best practices, industry patterns
+4. **First-principles analysis** — improve on the proposals, potentially
+   surface new options not originally presented
+
+Present a strengthened recommendation with full reasoning. Capture with
+`Exploration: deep-analysis`. Write analysis to
+`$WORKSPACE/specs/<branch>/explorations/D<N>-exploration.md`.
+
+**Level 3 — Multi-agent debate:** High impact (novel architecture,
+cross-repo boundary, data model). When user signals high stakes or
+requests debate:
+
+1. Spawn N parallel agents (one per approach). Each agent's brief:
+   "Make the strongest case for approach X. Explain why it is better
+   than approaches Y and Z. Address weaknesses honestly but argue for
+   your position. Search the internet for supporting evidence and
+   prior art."
+2. Collect all position papers.
+3. Spawn a mediator agent: "Read these N position papers. Determine
+   which approach wins on merit. Identify genuine strengths from the
+   losing approaches that should be incorporated. Propose a hybrid if
+   neither advocate's pure position is optimal."
+4. Present the mediator's synthesis to the user.
+5. User decides — or requests another round of debate on specific points.
+
+**Subsequent debate rounds:** If the user requests another round:
+- Specify which points to debate further (free text)
+- Previous position papers are preserved
+- Only the mediator is re-spawned with updated instructions (advocates
+  are NOT re-spawned — their positions are settled)
+- Max 3 debate rounds total
+
+Capture with `Exploration: multi-agent-debate`. Write artifacts to
+`$WORKSPACE/specs/<branch>/explorations/D<N>-debate/`:
+- `advocate-A.md`, `advocate-B.md`, `advocate-C.md` (position papers)
+- `mediator-synthesis-1.md` (per round)
+
+**Failure handling:**
+- Advocate failure with ≥2 surviving: proceed with survivors
+- Only 1 advocate succeeds: fall back to deep analysis (Level 2)
+- Mediator failure: present raw position papers to user
+
+**Proactive recommendation:** Don't wait for user to ask. Recommend
+deep analysis for moderate-impact decisions, debate for high-impact.
+
 ### Decision Capture
 
 After the user selects an approach (or any sub-decision where 2+ options
