@@ -32,6 +32,39 @@ get approval.
 If no feature branch exists, brainstorming results may not be tracked. Consider
 running work-start first to establish a branch and issue context.
 
+## Pipeline State
+
+Brainstorming manages a pipeline state file at
+`$WORKSPACE/specs/<branch>/pipeline.state`. This file tracks progress
+through the design pipeline and enables crash recovery and external
+tool observation (e.g., drafthouse).
+
+Write the state file at each transition:
+
+```
+format_version: 1
+state: <STATE_NAME>
+entered: <ISO-8601 timestamp>
+decision_count: <N>
+dimensions_completed: 0
+dimensions_total: 0
+ordered: false
+dimensions_done:
+current_dimension:
+workspace_structure:
+workspace_coherence:
+workspace_robustness:
+workspace_crosscutting:
+workspace_decision:
+```
+
+States: `CONTEXT_GATHERING`, `CLARIFYING_QUESTIONS`, `APPROACH_EXPLORATION`,
+`DECISION_CAPTURE`, `DECISION_REVIEW`, `DECISION_REVISION`, `SPEC_WRITING`,
+`SPEC_SELF_REVIEW`, `POST_SPEC_REVIEW`, `PLANNING`.
+
+Overwrite the file at each transition — git history preserves the trail.
+Update `decision_count` each time a decision is captured.
+
 ## Checklist
 
 You MUST create a task for each of these items and complete them in order:
@@ -41,52 +74,64 @@ You MUST create a task for each of these items and complete them in order:
    issue group). Run forage SEARCH and protocol SEARCH with keywords from
    the idea to surface relevant garden entries (gotchas, techniques, prior
    decisions) and project protocols (standing conventions, architectural
-   constraints) before asking design questions.
+   constraints) before asking design questions. Reference SOURCES.md for
+   platform coherence ("does this already exist?").
 2. **Ask clarifying questions** — one at a time, understand purpose,
    constraints, success criteria
-3. **Propose 2-3 approaches** — with trade-offs and your recommendation
-4. **Present design** — in sections scaled to complexity, get user approval
+3. **Propose 2-3 approaches** — with trade-offs and your recommendation.
+   Explore at appropriate depth (quick pick, deep analysis, or
+   multi-agent debate — see Approach Exploration Depth below).
+4. **Capture decision** — write each choice to `decisions.md` (see
+   Decision Capture below). Loop steps 3-4 for sub-decisions.
+5. **Decision review** — after all decisions captured, invoke
+   decision-review for adversarial validation (see Decision Review Gate)
+6. **Present design** — in sections scaled to complexity, get user approval
    after each section
-5. **Write design doc** — save to `$WORKSPACE/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
+7. **Write design doc** — save to `$WORKSPACE/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
    and commit (if no workspace, fall back to `docs/specs/` in the project)
-6. **Spec self-review** — quick inline check for placeholders,
-   contradictions, ambiguity, scope (see below)
-7. **User reviews written spec** — ask user to review before proceeding
-8. **Transition to implementation** — invoke writing-plans
+8. **Spec self-review** — check for placeholders, contradictions, ambiguity,
+   scope, SOURCES.md coherence, and trade-off verification (see below)
+9. **User reviews written spec** — ask user to review before proceeding
+10. **Transition to implementation** — invoke writing-plans
 
 ## Process Flow
 
 ```mermaid
 flowchart TD
-    CONTEXT["Gather context\n(work-start .meta, forage + protocol SEARCH)"]
-    QUESTIONS["Ask clarifying questions"]
-    APPROACHES["Propose 2-3 approaches"]
-    DESIGN["Present design sections"]
-    APPROVE{"User approves design?"}
-    WRITE["Write design doc"]
-    REVIEW["Spec self-review\n(fix inline)"]
-    DEGREE["Review depth prompt\n(includes self-review option)"]
+    CONTEXT["CONTEXT_GATHERING\nLoad SOURCES.md, garden, protocols"]
+    QUESTIONS["CLARIFYING_QUESTIONS\nConstraints, requirements"]
+    EXPLORE["APPROACH_EXPLORATION\nPropose options, explore at depth\n(quick / deep / debate)"]
+    CAPTURE["DECISION_CAPTURE\nWrite to decisions.md"]
+    MORE{"More\nsub-decisions?"}
+    DREVIEW["DECISION_REVIEW\nAdversarial validation"]
+    REVISED{"Decisions\nrevised?"}
+    WRITE["SPEC_WRITING\nWrite spec from validated decisions"]
+    SELFREVIEW["SPEC_SELF_REVIEW\nCoherence + trade-off check"]
+    POSTDEGREE["Post-spec review\ndepth prompt"]
     SELFREV{"Self-review\nselected?"}
     SKIP{"Skip?"}
-    DESIGNREVIEW["Run design-review\n(all dimensions + cross-cutting)"]
-    ESCALATE{"Escalation\nrecommended?"}
-    PLANS(("Invoke writing-plans"))
+    POSTREVIEW["POST_SPEC_REVIEW\nDimensional review\n(ordered or parallel)"]
+    ESCALATE{"Escalation?"}
+    PLANS(("PLANNING\nInvoke writing-plans"))
 
     CONTEXT --> QUESTIONS
-    QUESTIONS --> APPROACHES
-    APPROACHES --> DESIGN
-    DESIGN --> APPROVE
-    APPROVE -->|"no, revise"| DESIGN
-    APPROVE -->|"yes"| WRITE
-    WRITE --> REVIEW
-    REVIEW --> DEGREE
-    DEGREE --> SELFREV
+    QUESTIONS --> EXPLORE
+    EXPLORE --> CAPTURE
+    CAPTURE --> MORE
+    MORE -->|"yes"| EXPLORE
+    MORE -->|"no — user approves\noverall direction"| DREVIEW
+    DREVIEW --> REVISED
+    REVISED -->|"yes — re-evaluate\ndependents"| EXPLORE
+    REVISED -->|"no"| WRITE
+    WRITE --> SELFREVIEW
+    SELFREVIEW --> POSTDEGREE
+    POSTDEGREE --> SELFREV
     SELFREV -->|"yes"| WRITE
     SELFREV -->|"no"| SKIP
     SKIP -->|"yes"| PLANS
-    SKIP -->|"no"| DESIGNREVIEW
-    DESIGNREVIEW --> ESCALATE
-    ESCALATE -->|"yes, escalate"| DEGREE
+    SKIP -->|"no"| POSTREVIEW
+    POSTREVIEW --> ESCALATE
+    ESCALATE -->|"yes, escalate"| POSTDEGREE
     ESCALATE -->|"no"| PLANS
 ```
 
@@ -119,6 +164,11 @@ writing-plans.
   once and continue — provenance recording is never a gate on work.
 - Run protocol SEARCH with keywords from the idea — surface project rules
   and architectural constraints that may shape or constrain the design.
+- **SOURCES.md coherence check:** If SOURCES.md exists (inlined via
+  CLAUDE.md or at the project root), reference it before proposing
+  approaches. Two questions: "Does the platform already have this?"
+  and "Where does this belong?" Check capability docs, boundary rules,
+  and architecture docs listed in SOURCES.md.
 - Use ide-tooling for code navigation when exploring existing architecture
   (`ide_find_class`, `ide_find_symbol`, `ide_type_hierarchy`)
 
@@ -144,6 +194,44 @@ writing-plans.
 - Propose 2-3 different approaches with trade-offs
 - Present options conversationally with your recommendation and reasoning
 - Lead with your recommended option and explain why
+- Assess architectural impact and offer exploration at the appropriate
+  depth (see Approach Exploration Depth below)
+
+### Decision Capture
+
+After the user selects an approach (or any sub-decision where 2+ options
+were presented), write the decision to
+`$WORKSPACE/specs/<branch>/decisions.md`:
+
+```markdown
+## D<N>: <short title>
+
+**Choice:** <what was selected>
+**Alternatives:**
+- <option B> — <one-line trade-off>
+- <option C> — <one-line trade-off>
+**Rationale:** <why this choice>
+**Trade-offs:** <what we're giving up>
+**Exploration:** <quick | deep-analysis | multi-agent-debate>
+**Status:** captured
+```
+
+If a later decision depends on an earlier one, add:
+`**Depends on:** D<N> (<short description>)`
+
+Write each decision incrementally — append to the file as decisions are
+made. Update pipeline.state with incremented `decision_count` and
+transition to `DECISION_CAPTURE` state.
+
+**What is NOT a decision:** Constraints ("Who is the primary user?" →
+"Internal developers"), requirements ("Do you need real-time?" → "Yes"),
+and clarifications that narrow scope without choosing between alternatives.
+
+After writing the decision, check if more sub-decisions are needed in
+the design:
+- Yes → transition back to `APPROACH_EXPLORATION` for the next sub-decision
+- No (user approves overall design direction) → transition to
+  `DECISION_REVIEW` (see Decision Review Gate below)
 
 ### Presenting the Design
 
@@ -211,6 +299,14 @@ After writing the spec document, look at it with fresh eyes:
    plan, or does it need decomposition?
 4. **Ambiguity check:** Could any requirement be interpreted two different
    ways? If so, pick one and make it explicit.
+5. **SOURCES.md coherence check:** Re-read SOURCES.md. Does the spec
+   duplicate existing capability? Violate boundary rules? Fit the
+   module hierarchy?
+6. **Trade-off verification:** For each decision in decisions.md with
+   non-empty Trade-offs, verify the spec acknowledges the limitation.
+   For multi-agent-debate decisions, verify the spec references the
+   strongest counter-argument from the losing positions. Post-spec
+   reviewers do NOT receive decisions.md — the spec must stand alone.
 
 Fix any issues inline. No need to re-review — just fix and move on.
 
