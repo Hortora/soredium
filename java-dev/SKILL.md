@@ -387,9 +387,13 @@ proceeding.
 
 Do not add `@author` tags unless explicitly requested.
 
-## Keep commits focused
+## Commit discipline
 
-Keep each commit scoped to the problem at hand. The goal is reviewability and clean revert history — not avoiding necessary changes.
+**Commit frequently.** Commit after every green test run or significant code change — not at the end when everything is "done." Frequent commits create checkpoints: you can review what went wrong, revert to a known-good state, or bisect to find where a loop started.
+
+Use `wip:` prefix for checkpoint commits (`wip: add schema migration`, `wip: fix retry logic`). At stable milestones — issue complete, batch done, feature working end-to-end — squash the WIP commits into semantic commits via `git-squash`.
+
+**Keep each commit focused.** The goal is reviewability and clean revert history — not avoiding necessary changes.
 
 - Do not reformat lines that don't need changing — respect existing conventions
 - Do not add `final` to existing method signatures (new code only)

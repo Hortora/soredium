@@ -407,6 +407,14 @@ msg = "User {} logged in from {}".format(user.name, ip_address)
 msg = f"User {user.name} logged in from {ip_address}"
 ```
 
+## Commit discipline
+
+**Commit frequently.** Commit after every green test run or significant code change — not at the end when everything is "done." Frequent commits create checkpoints: you can review what went wrong, revert to a known-good state, or bisect to find where a loop started.
+
+Use `wip:` prefix for checkpoint commits (`wip: add schema migration`, `wip: fix retry logic`). At stable milestones — issue complete, batch done, feature working end-to-end — squash the WIP commits into semantic commits via `git-squash`.
+
+**Keep each commit focused.** Isolate refactors from functional changes. A focused refactor commit is a contribution, not scope creep.
+
 ## Refactoring — IntelliJ First
 
 **Prerequisites: `ide-tooling`** — invoke it for the full IntelliJ MCP tool guide.
