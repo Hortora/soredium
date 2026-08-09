@@ -164,6 +164,12 @@ def allocate_slot_number(family_root: Path) -> int:
     return max(existing, default=0) + 1
 
 
+def _get_clone_origin(clone_path: Path) -> str | None:
+    """Get the origin URL of a git clone, or None if not a git repo."""
+    rc, stdout, _ = run_cmd(["git", "-C", str(clone_path), "remote", "get-url", "origin"])
+    return stdout.strip() if rc == 0 else None
+
+
 def resolve_workspace_source(repo_path: Path) -> tuple[Path, str] | None:
     wksp = repo_path / "wksp"
     if not wksp.is_symlink():
@@ -431,6 +437,9 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             if ws_name in repos:
                 ws_name = f"work-{ws_source.name}"
             ws_key = str(ws_source)
+            # Disambiguate when different workspace sources resolve to the same name
+            if ws_key not in ws_created and (slot_dir / ws_name).exists():
+                ws_name = f"work-{ws_source.name}"
             ws_slot_dir = slot_dir / ws_name
 
             if ws_key not in ws_created:
@@ -552,6 +561,12 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
         if ws_name in existing_repos:
             ws_name = f"work-{ws_source.name}"
         ws_slot_dir = slot_dir / ws_name
+        # Disambiguate when directory exists but belongs to a different workspace
+        if ws_slot_dir.exists():
+            existing_origin = _get_clone_origin(ws_slot_dir)
+            if existing_origin and str(ws_source) not in existing_origin:
+                ws_name = f"work-{ws_source.name}"
+                ws_slot_dir = slot_dir / ws_name
         if not ws_slot_dir.exists():
             sync_main(str(ws_source))
             rc, _, _ = run_cmd([

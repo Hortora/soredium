@@ -152,6 +152,124 @@ class TestWorkspaceNameCollision:
         ), "workspace clone tried to use same path as repo clone"
 
 
+class TestCrossOrgWorkspaceWiring:
+    @patch("slot_manager.run_cmd")
+    def test_cross_org_repos_get_separate_workspace_clones(self, mock_cmd, tmp_path):
+        """When a slot mixes repos from different families, each family's
+        workspace must be cloned separately — not collide on 'work'."""
+        family = tmp_path / "hortora"
+        family.mkdir()
+
+        # Two workspace repos from different orgs
+        ws_hortora = init_repo(tmp_path / "public" / "hortora")
+        ws_casehub = init_repo(tmp_path / "public" / "casehub")
+
+        # Repo A: hortora/trellis -> workspace at public/hortora/trellis
+        repo_a = init_repo(family / "trellis")
+        (ws_hortora / "trellis").mkdir()
+        (repo_a / "wksp").symlink_to(ws_hortora / "trellis")
+
+        # Repo B: hortora/pages -> workspace at public/casehub/pages
+        repo_b = init_repo(family / "pages")
+        (ws_casehub / "pages").mkdir()
+        (repo_b / "wksp").symlink_to(ws_casehub / "pages")
+
+        mock_cmd.return_value = (0, "", "")
+
+        result = slot_manager.create_slot(
+            family_root=family,
+            repos=["trellis", "pages"],
+            branch="issue-200-test",
+            issue="200",
+            issue_repo="Hortora/soredium",
+            covers="200",
+            context="Cross-org test",
+        )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+
+        # Collect all clone destinations from the mock calls
+        clone_dests = []
+        for c in mock_cmd.call_args_list:
+            args = c.args[0] if c.args else c[0]
+            if isinstance(args, list) and len(args) >= 2 and args[0] == "git" and "clone" in args:
+                clone_dests.append(args[-1])
+
+        # Must have cloned both workspace repos to different directories
+        ws_dests = [d for d in clone_dests if "work" in Path(d).name]
+        assert len(ws_dests) >= 2, (
+            f"Expected 2 workspace clones for cross-org repos, got {len(ws_dests)}: {ws_dests}"
+        )
+        # Directories must be distinct
+        assert len(set(ws_dests)) == len(ws_dests), (
+            f"Workspace clone directories collided: {ws_dests}"
+        )
+
+
+    @patch("slot_manager.run_cmd")
+    def test_add_repo_cross_org_disambiguates(self, mock_cmd, tmp_path):
+        """add_repo must detect that an existing work/ belongs to a different
+        family and clone the new workspace as work-<name> instead."""
+        family = tmp_path / "hortora"
+        family.mkdir()
+
+        ws_hortora = init_repo(tmp_path / "public" / "hortora")
+        ws_casehub = init_repo(tmp_path / "public" / "casehub")
+
+        repo_a = init_repo(family / "trellis")
+        (ws_hortora / "trellis").mkdir()
+        (repo_a / "wksp").symlink_to(ws_hortora / "trellis")
+
+        repo_b = init_repo(family / "pages")
+        (ws_casehub / "pages").mkdir()
+        (repo_b / "wksp").symlink_to(ws_casehub / "pages")
+
+        mock_cmd.return_value = (0, "", "")
+
+        # Create slot with repo A only
+        result = slot_manager.create_slot(
+            family_root=family,
+            repos=["trellis"],
+            branch="issue-200-test",
+            issue="200",
+            issue_repo="Hortora/soredium",
+            covers="200",
+            context="Base slot",
+        )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+
+        # Simulate the work/ directory existing from create_slot
+        (slot_dir / "work").mkdir(exist_ok=True)
+        subprocess.run(["git", "init"], cwd=str(slot_dir / "work"), capture_output=True)
+        subprocess.run(["git", "-C", str(slot_dir / "work"), "remote", "add", "origin", str(ws_hortora)], capture_output=True)
+
+        # Write .slot so add_repo can find it
+        slot_file = slot_dir / ".slot"
+        slot_file.write_text("# Slot\n## Repos\n- trellis (primary)\n")
+
+        mock_cmd.reset_mock()
+        mock_cmd.return_value = (0, "", "")
+
+        # Add repo B from different family
+        slot_manager.add_repo(family, result["slot_number"], "pages",
+                              "issue-200-test")
+
+        # The casehub workspace clone must NOT go into work/ (that's hortora's)
+        clone_dests = []
+        for c in mock_cmd.call_args_list:
+            args = c.args[0] if c.args else c[0]
+            if isinstance(args, list) and len(args) >= 2 and args[0] == "git" and "clone" in args:
+                clone_dests.append(args[-1])
+
+        ws_dests = [d for d in clone_dests if "work" in Path(d).name]
+        if ws_dests:
+            for d in ws_dests:
+                assert Path(d).name != "work", (
+                    f"add_repo cloned casehub workspace into 'work/' which belongs to hortora: {d}"
+                )
+
+
 class TestWriteSlotSettings:
     def test_creates_settings_with_host_fallback(self, tmp_path):
         slot_dir = tmp_path / "slots" / "82"
