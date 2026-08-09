@@ -327,6 +327,70 @@ the design:
 - Don't propose unrelated refactoring. Stay focused on what serves the
   current goal.
 
+### Decision Review Gate
+
+After all decisions are captured and the user approves the overall design
+direction, present the decision review depth prompt.
+
+Count exploration depths from decisions.md:
+- M decisions with `Exploration: quick`
+- K decisions with `Exploration: deep-analysis`
+- J decisions with `Exploration: multi-agent-debate`
+
+Recommendation: many quick picks → Standard or Adversarial. All
+deep/debate → Light or Skip.
+
+```python
+AskUserQuestion(questions=[{
+    "question": "N decisions captured (M quick, K deep, J debate). Review depth?",
+    "header": "Decision review",
+    "options": [
+        {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
+        {"label": "Skip", "description": "Proceed to spec writing"},
+        {"label": "Light", "description": "~2 min — single pass"},
+        {"label": "Standard", "description": "~5 min — 2-3 rounds"},
+        {"label": "Adversarial", "description": "~12 min — 4-6 rounds"},
+    ],
+    "multiSelect": false,
+}])
+```
+
+If Skip: transition to `SPEC_WRITING`, proceed to "After the Design."
+
+If review selected: launch decision review:
+```bash
+python3 ~/.claude/skills/design-review/review.py \
+  --spec $WORKSPACE/specs/<branch>/decisions.md \
+  --title <branch>-decision \
+  --type decision --degree <selected> \
+  --stage <maturity_stage> \
+  --source-dirs <project-dirs>
+```
+
+Run with `run_in_background: true`. Set up watchdog cron to monitor.
+
+When review completes, read pipeline.state:
+- If `DECISION_REVISION`: enter Revision Cycles
+- If `SPEC_WRITING`: proceed to "After the Design"
+
+### Revision Cycles
+
+When decision-review revises decisions:
+
+1. Read decisions.md — find entries with `Status: revised`
+2. For each revised decision, find direct dependents (`Depends on:`
+   pointing to it)
+3. Re-evaluate each dependent: present the dependency change to the user,
+   ask if the dependent decision still holds
+4. If dependents change, capture updates (loop back to `DECISION_CAPTURE`)
+5. Max 2 revision cycles. If reached with unprocessed dependents,
+   escalate to user with explanation of whether this is:
+   - **Chain propagation** (D1 → D3 → D5, linear chain longer than 2
+     cycles) — user can approve another cycle
+   - **Circular tension** (D2 → D5 → D2, dependency cycle) — requires
+     human judgment to break the loop
+6. Null cycles (no substantive changes) don't count toward the max
+
 ## After the Design
 
 ### Documentation
@@ -387,26 +451,28 @@ step — "Review it yourself" is an option in the prompt itself.
 1. Analyze the spec for complexity signals and present the full
    recommendation with reasoning as text (see `design-review/review-tiers.md`
    for recommendation signals).
-2. Use a single `AskUserQuestion` for **degree only** — no type selection.
-   The post-spec lifecycle automatically runs coherence + structure +
-   robustness + cross-cutting.
+2. Use a single `AskUserQuestion` for degree and ordering.
+
+When the recommendation engine detects cross-module complexity (new
+module boundaries, unclear decomposition, cross-component interactions),
+include ordered mode options:
 
 ```python
 AskUserQuestion(questions=[{
-    "question": "Spec committed to <path>. Review depth?",
+    "question": "Spec committed to <path>. Post-spec review depth?",
     "header": "Review",
     "options": [
         {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
         {"label": "Review it yourself", "description": "Self-review — read and suggest changes before proceeding"},
         {"label": "Skip", "description": "No review needed"},
-        {"label": "Light", "description": "~2 min — single pass per dimension"},
-        {"label": "Standard", "description": "~5 min — 2-3 rounds per dimension"},
-        {"label": "Adversarial", "description": "~12 min — 4-6 rounds per dimension"},
-        {"label": "Deep", "description": "~25 min — 8-10 rounds + ultrathink"},
+        {"label": "Standard, parallel", "description": "All dimensions simultaneous — ~5 min"},
     ],
     "multiSelect": false,
 }])
 ```
+
+When ordering is NOT recommended (clear boundaries, small scope), use
+the standard degree-only prompt without ordering variants.
 
 3. If "Review it yourself": re-read the spec, propose changes, apply
    on confirmation, then re-present this prompt. Loop until the user
