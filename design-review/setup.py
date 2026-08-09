@@ -118,6 +118,74 @@ def annotate_spec_headings(content: str, mode: str = "") -> str:
     return "\n".join(result)
 
 
+_DIMENSION_PREFIXES: dict[str, str] = {
+    "structure": "STR",
+    "coherence": "COH",
+    "robustness": "ROB",
+}
+
+
+def _is_dimension_tracker(arch_file: str) -> bool:
+    ws_dir = Path(arch_file).parent
+    mode_file = ws_dir / ".mode"
+    if not mode_file.exists():
+        return False
+    mode = mode_file.read_text().strip()
+    return mode in _DIMENSION_PREFIXES
+
+
+def _parse_prior_dimension_findings(arch_files: list[str]) -> str:
+    sections: list[str] = []
+    for af in arch_files:
+        af_path = Path(af)
+        ws_dir = af_path.parent
+        mode_file = ws_dir / ".mode"
+        if not mode_file.exists():
+            continue
+        mode = mode_file.read_text().strip()
+        prefix = _DIMENSION_PREFIXES.get(mode)
+        if not prefix:
+            continue
+        if not af_path.exists():
+            continue
+        tracker_content = af_path.read_text()
+        findings = _extract_tracker_summaries(tracker_content, prefix)
+        if findings:
+            sections.append(f"{mode.title()} review found:\n" + "\n".join(findings))
+
+    if not sections:
+        return ""
+
+    return (
+        "\n## Prior dimension findings\n\n"
+        "Read the full trackers for detail:\n\n"
+        + "\n\n".join(sections)
+        + "\n\nConsider these findings when evaluating this dimension. "
+        "Where a prior finding creates a gap in this dimension, cite "
+        "the finding by prefixed ID.\n"
+    )
+
+
+def _extract_tracker_summaries(content: str, prefix: str) -> list[str]:
+    findings: list[str] = []
+    lines = content.split("\n")
+    current_id: str | None = None
+    current_title: str | None = None
+    for line in lines:
+        heading_match = re.match(r"### (R\d+-\d+): (.+)", line)
+        if heading_match:
+            current_id = heading_match.group(1)
+            current_title = heading_match.group(2)
+            continue
+        if current_id and "**Status:**" in line:
+            status_match = re.search(r"\*\*Status:\*\*\s*(\w+)", line)
+            if status_match:
+                findings.append(f"- {prefix}-{current_id}: {current_title} [{status_match.group(1)}]")
+            current_id = None
+            current_title = None
+    return findings
+
+
 def _generate_context_md(
     ws: Path, source_dirs: list[str], spec_path: Path | None = None,
     arch_files: list[str] | None = None,
@@ -143,12 +211,25 @@ def _generate_context_md(
     content += source_lines
 
     if arch_files:
-        arch_lines = "\n## Architectural Files\n\n"
-        arch_lines += "These files are authoritative architectural context. Read them before reviewing:\n\n"
-        for af in arch_files:
-            arch_lines += f"- {af}\n"
-        arch_lines += "\n"
-        content += arch_lines
+        cascading = _parse_prior_dimension_findings(arch_files)
+        if cascading:
+            content += cascading
+
+        non_cascading = [af for af in arch_files if not _is_dimension_tracker(af)]
+        if non_cascading:
+            arch_lines = "\n## Architectural Files\n\n"
+            arch_lines += "These files are authoritative architectural context. Read them before reviewing:\n\n"
+            for af in non_cascading:
+                arch_lines += f"- {af}\n"
+            arch_lines += "\n"
+            content += arch_lines
+        elif not cascading:
+            arch_lines = "\n## Architectural Files\n\n"
+            arch_lines += "These files are authoritative architectural context. Read them before reviewing:\n\n"
+            for af in arch_files:
+                arch_lines += f"- {af}\n"
+            arch_lines += "\n"
+            content += arch_lines
 
     (ws / "context.md").write_text(content)
 

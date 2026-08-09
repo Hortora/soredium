@@ -189,6 +189,76 @@ python3 ~/.claude/skills/design-review/review.py \
   --stage {maturity_stage} --source-dirs {dirs}
 ```
 
+### Ordered mode (opt-in)
+
+When the user selects an ordered review variant (e.g., "Standard, ordered"),
+run dimensions sequentially with cascading findings. Each dimension's
+tracker is passed as `--arch-files` to the next, so later dimensions see
+and build on earlier findings.
+
+**Ordering:** structure → coherence → robustness → cross-cutting
+
+Tell the user BEFORE running:
+> Starting ordered post-spec review of **{title}** at **{degree}** depth.
+>
+> Dimensions will run sequentially:
+> 1. Structure (boundaries, decomposition)
+> 2. Coherence (completeness, with structure findings)
+> 3. Robustness (failure modes, with structure + coherence findings)
+> 4. Cross-cutting (inter-dimension contradictions)
+>
+> Each dimension completes fully before the next starts.
+> You can stop the pipeline between dimensions.
+
+1. Launch structure with `run_in_background: true`:
+   ```bash
+   python3 ~/.claude/skills/design-review/review.py \
+     --spec {spec_path} --title {title}-structure \
+     --type structure --degree {degree} \
+     --stage {maturity_stage} --source-dirs {dirs}
+   ```
+
+2. When structure completes (background task notification):
+   - Read structure's tracker.md for findings summary
+   - Present results to user
+   - Ask: "Continue to coherence? (y/n)"
+   - If no: stop the pipeline, present structure results as final
+   - If yes: launch coherence with structure's tracker:
+   ```bash
+   python3 ~/.claude/skills/design-review/review.py \
+     --spec {spec_path} --title {title}-coherence \
+     --type coherence --degree {degree} \
+     --stage {maturity_stage} --source-dirs {dirs} \
+     --arch-files {structure_workspace}/tracker.md
+   ```
+
+3. When coherence completes:
+   - Present results, ask "Continue to robustness? (y/n)"
+   - If yes: launch robustness with both trackers:
+   ```bash
+   python3 ~/.claude/skills/design-review/review.py \
+     --spec {spec_path} --title {title}-robustness \
+     --type robustness --degree {degree} \
+     --stage {maturity_stage} --source-dirs {dirs} \
+     --arch-files {structure_workspace}/tracker.md \
+                  {coherence_workspace}/tracker.md
+   ```
+
+4. When robustness completes:
+   - Launch cross-cutting with all three trackers
+   - Present unified results when complete
+
+**Workspace path tracking:** Each review.py invocation creates a timestamped
+workspace directory. Track these paths as you receive them (from the
+progress.log first line or background task output) so you can pass the
+correct `--arch-files` paths to subsequent dimensions. Do NOT use glob
+patterns — use the explicit paths.
+
+**Watchdog in ordered mode:** The watchdog monitors a single active
+dimension. Checkpoint 1 (round 1 early-HIL) does not apply — results
+are presented between dimensions. The watchdog's role is health
+monitoring only: stalls, failures, timeouts.
+
 ## Step 5 — Set up HIL watchdog
 
 **Immediately after launching**, create a SINGLE watchdog cron (not three)
