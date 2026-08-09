@@ -798,6 +798,31 @@ workspace: declined
         data = parse(run_ctx(repo))
         assert data["HAS_PROTOCOLS_DIR"] == "no"
 
+    def test_has_sources_yes(self, tmp_path):
+        """HAS_SOURCES=yes when SOURCES.md exists in project root."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (workspace / "proj").symlink_to(project)
+        (project / "SOURCES.md").write_text("# Documentation Sources\n")
+        data = parse(run_ctx(workspace))
+        assert data["HAS_SOURCES"] == "yes"
+        assert data["SOURCES_PATH"] == str(project / "SOURCES.md")
+
+    def test_has_sources_no(self, tmp_path):
+        """HAS_SOURCES=no when SOURCES.md absent."""
+        repo = init_repo(tmp_path / "repo")
+        data = parse(run_ctx(repo))
+        assert data["HAS_SOURCES"] == "no"
+        assert data["SOURCES_PATH"] == ""
+
+    def test_has_sources_single_repo(self, tmp_path):
+        """HAS_SOURCES=yes in single-repo mode."""
+        repo = init_repo(tmp_path / "repo")
+        (repo / "SOURCES.md").write_text("# Documentation Sources\n")
+        data = parse(run_ctx(repo))
+        assert data["HAS_SOURCES"] == "yes"
+        assert data["SOURCES_PATH"] == str(repo / "SOURCES.md")
+
     def test_has_blog_routing_yes_home(self, tmp_path, monkeypatch):
         """HAS_BLOG_ROUTING=yes when ~/.claude/blog-routing.yaml exists."""
         tmp_home = tmp_path / "home"

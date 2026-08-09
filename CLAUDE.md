@@ -17,6 +17,8 @@ No `Co-Authored-By: Claude`, no `Generated-by:`, no `AI-assisted:`, no mention o
 **Marketplace:** `/plugin marketplace add github.com/Hortora/soredium`
 **Status:** Post-merge. 33 skills (workflow + garden), Python tooling, Quarkus/Java engine. Active development on main.
 
+@SOURCES.md
+
 ## Repository Purpose
 
 Soredium is the skills, validators, tooling, and engine repository for professional software development workflows and the [Hortora](https://hortora.github.io) knowledge garden system. It delivers:

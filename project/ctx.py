@@ -251,6 +251,10 @@ has_protocols_dir = check_dir(
     Path(workspace) / "workspace" / "docs" / "protocols",
 )
 
+sources_path_obj = Path(project) / "SOURCES.md"
+has_sources = "yes" if sources_path_obj.exists() else "no"
+sources_path = str(sources_path_obj) if sources_path_obj.exists() else ""
+
 m = re.search(r"\*\*Blog directory:\*\*\s*`([^`]+)`", cwd_claude_text)
 blog_dir = m.group(1) if m else ""
 
@@ -285,6 +289,8 @@ print(f"HAS_PROJECT_ARTIFACTS={has_project_artifacts}")
 print(f"WORKSPACE_DECLINED={workspace_declined}")
 print(f"HAS_PLATFORM_DOC={has_platform_doc}")
 print(f"HAS_PROTOCOLS_DIR={has_protocols_dir}")
+print(f"HAS_SOURCES={has_sources}")
+print(f"SOURCES_PATH={sources_path}")
 print(f"BLOG_DIR={blog_dir}")
 print(f"HAS_BLOG_ROUTING={has_blog_routing}")
 print(f"PROJECT_NAME={project_name}")
