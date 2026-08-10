@@ -794,3 +794,46 @@ class TestHandoffSubstringCollision:
         workspace = tmp_path / "workspace"
         self._init_workspace(workspace, "## Last Session\nFixed #42, deployed.\n")
         assert work_router._handoff_references_branch(workspace, "issue-42-test") is True
+
+
+class TestHandoffOnFeatureBranch:
+    """#206: HANDOFF.md written on feature branch should be detected."""
+
+    def _init_workspace(self, path, main_handoff="", branch_handoff="", branch="issue-85-test"):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "-C", str(path), "init"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "T"], capture_output=True)
+        if main_handoff:
+            (path / "HANDOFF.md").write_text(main_handoff)
+            subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "-b", branch], capture_output=True, check=True)
+        if branch_handoff:
+            (path / "HANDOFF.md").write_text(branch_handoff)
+
+    def test_handoff_on_branch_not_on_main_returns_true(self, tmp_path):
+        """HANDOFF.md exists in working tree with correct issue, not on main."""
+        workspace = tmp_path / "workspace"
+        self._init_workspace(
+            workspace,
+            main_handoff="",
+            branch_handoff="## Last Session\nWorked on #85 feature.\n",
+        )
+        assert work_router._handoff_references_branch(workspace, "issue-85-test") is True
+
+    def test_handoff_on_main_with_wrong_issue_but_branch_has_correct(self, tmp_path):
+        """main has old HANDOFF referencing different issue; branch has correct one."""
+        workspace = tmp_path / "workspace"
+        self._init_workspace(
+            workspace,
+            main_handoff="## Last Session\nWorked on #42.\n",
+            branch_handoff="## Last Session\nWorked on #85.\n",
+        )
+        assert work_router._handoff_references_branch(workspace, "issue-85-test") is True
+
+    def test_no_handoff_anywhere_returns_false(self, tmp_path):
+        """No HANDOFF.md on main or branch."""
+        workspace = tmp_path / "workspace"
+        self._init_workspace(workspace)
+        assert work_router._handoff_references_branch(workspace, "issue-85-test") is False

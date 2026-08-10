@@ -29,18 +29,27 @@ from pathlib import Path
 def _handoff_references_branch(
     workspace: Path, branch_name: str, handoff_filename: str = "HANDOFF.md"
 ) -> bool:
-    """Check if the handoff file on workspace main references the current branch's issue."""
+    """Check if the handoff file references the current branch's issue.
+
+    Checks working tree first (covers feature branch case where HANDOFF.md
+    was written on the branch), then falls back to main.
+    """
     issue_match = re.match(r"issue-(\d+)", branch_name)
     if not issue_match:
         return True  # non-standard branch — can't determine, assume resume
 
     issue_num = issue_match.group(1)
+
+    handoff_file = workspace / handoff_filename
+    if handoff_file.exists():
+        return bool(re.search(rf'#{issue_num}\b', handoff_file.read_text()))
+
     result = subprocess.run(
         ["git", "-C", str(workspace), "show", f"main:{handoff_filename}"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        return False  # can't read — treat as first session
+        return False
 
     return bool(re.search(rf'#{issue_num}\b', result.stdout))
 
