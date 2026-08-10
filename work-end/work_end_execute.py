@@ -136,7 +136,8 @@ def cmd_land(opts: dict[str, str]) -> int:
 
     repo_name = Path(project).name
 
-    if progress.get(f"{repo_name}") == "stamped":
+    progress_key = f"{repo_name}:{branch}"
+    if progress.get(progress_key) == "stamped":
         print(f"LANDED=yes")
         print(f"SKIPPED={repo_name} already stamped")
         return 0
@@ -170,7 +171,7 @@ def cmd_land(opts: dict[str, str]) -> int:
         print("ERROR=MERGE_FAILED")
         print(f"ERROR_DETAIL=ff-only merge of {branch} into {base_branch} failed: {merge_result.stderr.strip()}")
         return 1
-    write_progress(progress_path, f"{repo_name}", "merged")
+    write_progress(progress_path, progress_key,"merged")
 
     # Push main to blessed remote
     if not push_target:
@@ -197,7 +198,7 @@ def cmd_land(opts: dict[str, str]) -> int:
             return 1
 
     print(f"PUSHED_TO={push_target}/{base_branch}")
-    write_progress(progress_path, f"{repo_name}", "pushed")
+    write_progress(progress_path, progress_key,"pushed")
 
     # Mirror to fork if fork model (fork main tracks blessed)
     if blessed_remote and fork_remote and fork_remote != blessed_remote:
@@ -230,7 +231,7 @@ def cmd_land(opts: dict[str, str]) -> int:
         if stamp_result.stderr.strip():
             print(stamp_result.stderr.strip(), file=sys.stderr)
         return 1
-    write_progress(progress_path, f"{repo_name}", "stamped")
+    write_progress(progress_path, progress_key,"stamped")
 
     # Merge and stamp workspace branch
     if workspace:

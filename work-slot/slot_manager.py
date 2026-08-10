@@ -984,10 +984,17 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
             preflight_ok = False
             continue
 
-        # Dirty worktree on main blocks (updateInstead refuses)
+        # Unresolved merge conflicts block everything
         rc, status_out, _ = run_cmd(
             ["git", "-C", str(original), "status", "--porcelain"])
         if rc == 0 and status_out.strip():
+            unmerged = {"UU", "AA", "DD", "AU", "UA", "DU", "UD"}
+            has_unmerged = any(line[:2] in unmerged
+                              for line in status_out.strip().splitlines())
+            if has_unmerged:
+                print(f"ERROR=unmerged_conflict repo={repo_name} path={original}")
+                preflight_ok = False
+                continue
             rc2, cur_branch, _ = run_cmd(
                 ["git", "-C", str(original), "branch", "--show-current"])
             cur_branch = cur_branch.strip() if rc2 == 0 else ""
