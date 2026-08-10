@@ -340,12 +340,15 @@ Count exploration depths from decisions.md:
 Recommendation: many quick picks → Standard or Adversarial. All
 deep/debate → Light or Skip.
 
+**Always show all four options in ascending cost order.** Mark the
+recommendation with "(Recommended)" in its natural position — never
+move it to the top, never omit options.
+
 ```python
 AskUserQuestion(questions=[{
     "question": "N decisions captured (M quick, K deep, J debate). Review depth?",
     "header": "Decision review",
     "options": [
-        {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
         {"label": "Skip", "description": "Proceed to spec writing"},
         {"label": "Light", "description": "~2 min — single pass"},
         {"label": "Standard", "description": "~5 min — 2-3 rounds"},
@@ -353,6 +356,7 @@ AskUserQuestion(questions=[{
     ],
     "multiSelect": false,
 }])
+# Append "(Recommended)" to the label of the recommended option
 ```
 
 If Skip: transition to `SPEC_WRITING`, proceed to "After the Design."
@@ -453,26 +457,28 @@ step — "Review it yourself" is an option in the prompt itself.
    for recommendation signals).
 2. Use a single `AskUserQuestion` for degree and ordering.
 
-When the recommendation engine detects cross-module complexity (new
-module boundaries, unclear decomposition, cross-component interactions),
-include ordered mode options:
+**Always show all options in ascending cost order.** Mark the
+recommendation with "(Recommended)" in its natural position. Never
+omit options — the user decides.
 
 ```python
 AskUserQuestion(questions=[{
     "question": "Spec committed to <path>. Post-spec review depth?",
     "header": "Review",
     "options": [
-        {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
-        {"label": "Review it yourself", "description": "Self-review — read and suggest changes before proceeding"},
         {"label": "Skip", "description": "No review needed"},
-        {"label": "Standard, parallel", "description": "All dimensions simultaneous — ~5 min"},
+        {"label": "Review it yourself", "description": "Self-review — read and suggest changes before proceeding"},
+        {"label": "Light", "description": "~2 min — single pass"},
+        {"label": "Standard", "description": "~5 min — 2-3 rounds"},
+        {"label": "Adversarial", "description": "~12 min — 4-6 rounds"},
     ],
     "multiSelect": false,
 }])
+# Append "(Recommended)" to the label of the recommended option
 ```
 
-When ordering is NOT recommended (clear boundaries, small scope), use
-the standard degree-only prompt without ordering variants.
+When cross-module complexity is detected, add ordered variants as
+additional options (e.g., "Standard, ordered").
 
 3. If "Review it yourself": re-read the spec, propose changes, apply
    on confirmation, then re-present this prompt. Loop until the user

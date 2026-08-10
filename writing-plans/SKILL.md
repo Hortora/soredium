@@ -241,11 +241,14 @@ After the plan is written and approved, assess whether it warrants review.
 Plans are typically lighter than specs — default recommendation is
 Coherence / Light or Skip.
 
-Follow the same three-part flow as brainstorming's Review Depth Prompt
-(see `design-review/review-tiers.md`):
 1. Present full recommendation with reasoning as text.
-2. `AskUserQuestion` for type (Skip as an option).
-3. If not Skip: `AskUserQuestion` for degree.
+2. Single `AskUserQuestion` with all options in ascending cost order.
+   Mark recommendation with "(Recommended)" in its natural position.
+   Never omit options:
+   - Skip
+   - Light (~2 min)
+   - Standard (~5 min)
+   - Adversarial (~12 min)
 
 If a review surfaces issues, revise the plan before proceeding to execution.
 
