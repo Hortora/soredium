@@ -124,11 +124,17 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
         stack_workspace = workspace
 
     # Push project branch (non-fatal)
+    # In slot mode, origin is a local path — do two-hop push
+    original_project = _resolve_clone_origin(project)
     project_push_ok, _ = run_git(project, "push", "origin", branch)
+    if project_push_ok and original_project is not None:
+        run_git(str(original_project), "push", "origin", branch)
     print(f"PROJECT_PUSHED={'yes' if project_push_ok else 'no'}")
 
     # Push workspace branch (non-fatal)
     workspace_push_ok, _ = run_git(workspace, "push", "origin", branch)
+    if workspace_push_ok and original_workspace is not None:
+        run_git(str(original_workspace), "push", "origin", branch)
     print(f"WORKSPACE_PUSHED={'yes' if workspace_push_ok else 'no'}")
 
     # Checkout base in project

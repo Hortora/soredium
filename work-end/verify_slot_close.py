@@ -61,7 +61,7 @@ def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
     msg = result.stdout.strip()
     sha_match = re.search(r"landed as ([0-9a-f]+)", msg)
     if not sha_match:
-        return {"status": "pass", "detail": "no landing SHA in stamp (old format)"}
+        return {"status": "warn", "detail": "no landing SHA in stamp (old format — may indicate skipped squash-merge)"}
     sha = sha_match.group(1)
     verify = git(project, "merge-base", "--is-ancestor", sha, base)
     if verify.returncode == 0:
@@ -83,7 +83,7 @@ def check_main_pushed(project: str, base: str = "main") -> dict:
 def check_workspace_stamped(workspace: str, branch: str) -> dict:
     result = git(workspace, "branch", "--list", branch)
     if result.returncode != 0 or not result.stdout.strip():
-        return {"status": "pass", "detail": "workspace branch not found (may be single-repo)"}
+        return {"status": "warn", "detail": "workspace branch not found — verify single-repo mode or branch deletion"}
     return check_branch_stamped(workspace, branch)
 
 

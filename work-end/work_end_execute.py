@@ -232,15 +232,24 @@ def cmd_land(opts: dict[str, str]) -> int:
         return 1
     write_progress(progress_path, f"{repo_name}", "stamped")
 
-    # Stamp workspace branch
+    # Merge and stamp workspace branch
     if workspace:
         ws_branch_exists = git(workspace, "branch", "--list", branch)
         if ws_branch_exists.returncode == 0 and ws_branch_exists.stdout.strip():
             tip_msg = git(workspace, "log", "-1", "--format=%s", branch)
             if not (tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")):
+                git(workspace, "checkout", base_branch)
+                ws_merge = git(workspace, "merge", "--ff-only", branch)
+                if ws_merge.returncode != 0:
+                    git(workspace, "merge", branch, "--no-edit")
+                ws_landed = git(workspace, "rev-parse", "HEAD")
+                ws_sha = ws_landed.stdout.strip() if ws_landed.returncode == 0 else ""
+                ws_push_target = detect_topology(workspace)[0]
+                if ws_push_target:
+                    git(workspace, "push", ws_push_target, base_branch)
                 git(workspace, "checkout", branch)
                 git(workspace, "commit", "--allow-empty", "-m",
-                    f"chore: branch closed — landed as {landed_sha} on {base_branch}")
+                    f"chore: branch closed — landed as {ws_sha} on {base_branch}")
                 git(workspace, "checkout", base_branch)
 
     print(f"LANDED=yes")

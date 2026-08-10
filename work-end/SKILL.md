@@ -216,16 +216,26 @@ are skipped on restart.
 
 ### 3.5 Phase C — Land
 
+**Branch mode (IN_SLOT=no):**
+
 ```bash
 python3 work-end/work_end_execute.py land project=<PROJ> branch=<BRANCH> base_branch=<BASE> workspace=<WS>
 ```
 
-Pushes main, stamps branch (via `land_branch.py stamp`), stamps workspace
-branch. Progress tracked in `.execute-progress` for crash recovery.
+Pushes main, stamps branch (via `land_branch.py stamp`), merges and
+pushes workspace branch content to workspace main, stamps workspace branch.
+Progress tracked in `.execute-progress` for crash recovery.
 
-**Slot mode:** The script loops through all repos in `.slot`, pushing
-each to its original repo and then to GitHub. Stamps all branches.
-Writes `.phase-a-complete` (compatibility) and `.landed` markers.
+**Slot mode (IN_SLOT=yes):**
+
+```bash
+python3 work-slot/slot_manager.py merge-slot <SLOT_PATH>
+```
+
+Uses the existing `merge_slot()` implementation which correctly handles:
+per-repo rebase loop with retry, two-hop push (slot clone → original repo
+→ GitHub), landing SHA stamps on all project branches, workspace branch
+stamps and push, `.landed` marker with SHA audit trail.
 
 **Lifecycle:** After land returns, fire `push_pass`, `merge_pass`,
 `stamp_pass` in rapid succession.
@@ -266,6 +276,15 @@ Do not archive without explicit confirmation.
 
 ```bash
 python3 work-end/branch_cleanup.py checkout-main <WORKSPACE> <PROJECT>
+```
+
+### 5.2b Scaffold cleanup
+
+Remove `.meta` and `JOURNAL.md` from workspace to prevent stale state
+detection in subsequent sessions.
+
+```bash
+python3 work-end/branch_cleanup.py cleanup-scaffold <WORKSPACE>
 ```
 
 ### 5.3 Stack cleanup
