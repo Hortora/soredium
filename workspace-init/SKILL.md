@@ -474,6 +474,25 @@ Run: `python3 ~/.claude/skills/workspace-init/workspace_create.py create-stubs <
 
 Read `CREATED=<count>` from output. If `ERROR=` appears, stop and report the error.
 
+### Step 4b — Create notes worktree
+
+Persistent scratch notes on an orphan branch — always accessible regardless
+of which branch the workspace is on. Same pattern as gh-pages.
+
+```bash
+# Idempotent — skip if .notes/ already exists
+if [ ! -d "$BASE/.notes" ]; then
+    git -C "$BASE" worktree add --orphan -b notes .notes
+    echo "# Notes" > "$BASE/.notes/NOTES.md"
+    git -C "$BASE/.notes" add NOTES.md
+    git -C "$BASE/.notes" commit -m "init notes"
+    # Exclude from main worktree tracking
+    echo ".notes" >> "$BASE/.git/info/exclude"
+fi
+```
+
+Format: append-only, date headers, optional `[repo]` tags for repo-specific notes.
+
 ### Step 5 — Create workspace CLAUDE.md (routing hub)
 
 Write the workspace CLAUDE.md using the exact content approved in Step 1.5.

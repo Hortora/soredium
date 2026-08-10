@@ -133,11 +133,22 @@ If the user invoked `work` without an issue number and `ROUTE=start`:
       which invokes issue-workflow Phase 2 to create the issue.
    e. If no HANDOFF.md or no What's Next section, route directly to work-start.
 
-5. If the user specified an issue number in their `work` invocation,
+5. **Surface notes (if present):**
+   If `$WORKSPACE/.notes/NOTES.md` exists, read the most recent date
+   section and surface it below the recommendations:
+   ```
+   Notes (2026-08-10):
+     - Remember to check auth token expiry after the migration
+     - [engine] reindex needed after next schema change
+   ```
+   Show only the most recent date section. Skip silently if the file
+   doesn't exist or is empty.
+
+6. If the user specified an issue number in their `work` invocation,
    skip this step entirely — route directly to work-start with the
    specified issue.
 
-6. User picks → route to **work-start** with the selected issue number.
+7. User picks → route to **work-start** with the selected issue number.
 
 **Step 2b — Workspace on stale branch (workspace_dirty)**
 

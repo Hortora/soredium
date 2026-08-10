@@ -247,7 +247,7 @@ Session wrap — create before writing the handover?
 [?] 5  journal-entry     document any design changes this session not yet in design/JOURNAL.md  ← ON if mid-epic (design/.meta exists), OFF otherwise
 [?] 6  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
 [?] 7  arc42 stale scan  check ARC42STORIES.MD for stale statuses, resolved blockers, closed-issue forward refs  ← ON if ARC42STORIES.MD exists
-[ ] 8  notes             anything to note for later? (appends to $WORKSPACE/NOTES.md)
+[x] 8  notes             anything to note for later? (appends to $WORKSPACE/.notes/NOTES.md)
 
 Type numbers to toggle (e.g. "2 6"), "all" to toggle all on/off, or "go" to proceed:
 ```
@@ -264,9 +264,11 @@ Write-content can write a partial diary draft (the next session can append to it
 Items 2, 5, 6, 7 (update-claude-md, journal-entry, epic hygiene, arc42 stale scan)
 work from file state and git history — they can be deferred if needed.
 
-Item 8 (notes) captures persistent scratch items to `$WORKSPACE/NOTES.md` —
-things to come back to later, observations that span sessions, notes not
-actionable enough to be issues. Append-only with date headers. Not a queue.
+Item 8 (notes) captures persistent scratch items to `$WORKSPACE/.notes/NOTES.md` —
+things to come back to later, observations that span sessions and branches, notes
+not actionable enough to be issues. Append-only with date headers and optional
+`[repo]` tags. Committed to the orphan `notes` branch at wrap time. Not session-bound
+— can be deferred, but defaulting ON ensures notes are captured while context is fresh.
 </SESSION-BOUND-ITEMS>
 
 - **protocol sweep is on by default** — scans the session for project-specific rules worth formalising. Skip it for sessions that worked purely in universal tools with no project-specific rules established or re-enforced. The protocol skill creates `docs/protocols/` if it does not exist — never skip the sweep because the directory is absent.
@@ -294,7 +296,11 @@ Run checked items **in this order** before continuing:
 5. journal-entry — write any missing JOURNAL.md entries before the handover
 6. arc42 stale scan — run after journal-entry so any layer completions just written are already reflected
 7. write-content (diary) — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
-8. notes — append user-provided items to `$WORKSPACE/NOTES.md` with today's date header
+8. notes — prompt "anything to note for later?" If yes, append entries to
+   `$WORKSPACE/.notes/NOTES.md` under today's date header. Optional `[repo]`
+   prefix for repo-specific notes (no prefix = primary). Commit to orphan branch:
+   `git -C $WORKSPACE/.notes add NOTES.md && git -C $WORKSPACE/.notes commit -m "notes: wrap"`.
+   If `.notes/` worktree doesn't exist, skip with: "No notes worktree — run workspace-init to set up."
 
 After all checked items complete, continue to Step 1.
 

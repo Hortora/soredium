@@ -323,6 +323,20 @@ Session close complete.
 ✅ Branch closed     <branch-name>
 ```
 
+### 5.8 Surface notes
+
+If `$WORKSPACE/.notes/NOTES.md` exists and has content, surface the most
+recent date section after the close summary:
+
+```
+Notes (2026-08-10):
+  - Remember to check auth token expiry after the migration
+  - [engine] reindex needed after next schema change
+```
+
+Reminds the user of persistent context before they decide what to do next.
+Skip silently if no notes exist or `.notes/` worktree is absent.
+
 ---
 
 ## Common Pitfalls
