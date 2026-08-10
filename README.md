@@ -18,11 +18,13 @@ Development workflow and knowledge garden skills for Claude Code.
 
 | Skill | What it does |
 |-------|-------------|
-| `work` | Unified entry point — detects branch state, routes to start/end/pause/resume/next. Four commands for the full lifecycle |
+| `work` | Unified entry point — detects branch state, routes to start/continue/end/pause/resume/next |
 | `work start` | Begins work — accepts 1..n issues or free text, auto-detects epics, builds `.plan` queue, scaffolds metadata |
+| `work continue` | Keeps working on current branch — auto-loads HANDOFF.md, specs, plan state. Done-detection suggests next/end |
 | `work end` | Closes branch — one command regardless of context (branch or slot). Promotes artifacts, merges to main |
 | `work pause` | Commits WIP, pushes to pause stack, switches to main |
-| `work resume` | Restores a paused branch, rebases onto current main |
+| `work resume` | Restores a paused branch from the pause stack, rebases onto current main |
+| `brief` | Orientation summary — branch, issue, plan progress, recent commits, health status |
 | `work-slot` | Parallel clone-based slots for multi-repo work — create, list, status, add-repo, remove-repo, archive |
 
 ### Design & Planning

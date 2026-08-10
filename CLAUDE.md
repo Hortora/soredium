@@ -607,6 +607,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `work end` -- closes the current branch; one command regardless of context (branch or slot). Workspace-promotes and project-promotes artifacts per routing config; merges `design/JOURNAL.md` into ARC42STORIES.MD with three-way diff preview; posts specs to GitHub issue; closes issue; stamps branch with `chore: branch closed` commit; returns both repos to main. In a slot, runs the full sequence (review, promote, squash, push, merge to original, stamp, archive)
 - `work pause` -- commits all WIP as a `WIP:` commit on the branch; pushes an entry onto `.pause-stack` on workspace main (supports multiple paused branches); switches both repos to main. No stash used -- WIP commit is durable and visible in history
 - `work resume` -- reads `.pause-stack`; shows picker if multiple paused branches; rebases selected branch onto current main (picks up work that landed while paused); resets the WIP commit to restore working state; removes entry from stack
+- `brief` -- orientation summary; composes ctx.resolve(), work_router.detect_state(), work_health.run_checks() into structured KEY=VALUE output showing branch, issue, plan progress, recent commits, health status
 
 **Garden skills:**
 - `forage` -- CAPTURE (GitHub mode + local mode), SWEEP, SEARCH, REVISE -- session-time garden operations

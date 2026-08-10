@@ -8,6 +8,7 @@ import pytest
 
 
 SCRIPT = Path(__file__).parent.parent / "project" / "ctx.py"
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def run_ctx(cwd: Path) -> subprocess.CompletedProcess:
@@ -1243,3 +1244,42 @@ class TestMetaNewFields:
         repo = init_repo(tmp_path / "repo")
         data = parse(run_ctx(repo))
         assert data["META_SECTION_HASHES"] == ""
+
+
+class TestCtxResolve:
+    """Test ctx.resolve() importable function."""
+
+    def test_resolve_returns_dict(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import importlib
+        import ctx
+        importlib.reload(ctx)
+        result = ctx.resolve(cwd=str(PROJECT_ROOT))
+        assert isinstance(result, dict)
+        assert "WORKSPACE" in result
+        assert "PROJECT" in result
+
+    def test_resolve_matches_cli(self):
+        cli_result = run_ctx(PROJECT_ROOT)
+        cli_dict = parse(cli_result)
+
+        sys.path.insert(0, str(SCRIPT.parent))
+        import importlib
+        import ctx
+        importlib.reload(ctx)
+        resolve_dict = ctx.resolve(cwd=str(PROJECT_ROOT))
+
+        for key in ["WORKSPACE", "PROJECT", "CURRENT_BRANCH", "CLAUDE_OK",
+                     "WORKSPACE_OK", "ISSUES_STATUS", "META_STATE"]:
+            assert resolve_dict[key] == cli_dict[key], (
+                f"{key}: resolve={resolve_dict[key]} cli={cli_dict[key]}"
+            )
+
+    def test_resolve_does_not_print(self, capsys):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import importlib
+        import ctx
+        importlib.reload(ctx)
+        ctx.resolve(cwd=str(PROJECT_ROOT))
+        captured = capsys.readouterr()
+        assert captured.out == ""
