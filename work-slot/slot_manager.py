@@ -10,6 +10,7 @@ Subcommands:
   merge-slot <family-root> slot=<N>
   archive-slot <family-root> slot=<N> [--force]
   check-cross-deps <family-root> slot=<N>
+  migrate-remotes <family-root>
 
 Note: remove-slot archives to worktrees/attic/ by default. Only --force-delete permanently removes.
 
@@ -972,9 +973,7 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         print("ERROR=no_repos_in_slot")
         return 1
 
-    # Preflight: check originals for dirty worktree on main.
-    # No "must be on main" requirement — updateInstead handles checked-out main,
-    # and pushing to a non-checked-out branch works by default.
+    # Preflight: check originals and sync their main with GitHub.
     print("STAGE=preflight")
     preflight_ok = True
     for repo_name in all_repos:
@@ -984,6 +983,8 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
             print(f"ERROR=original_not_found repo={repo_name} path={original}")
             preflight_ok = False
             continue
+
+        # Dirty worktree on main blocks (updateInstead refuses)
         rc, status_out, _ = run_cmd(
             ["git", "-C", str(original), "status", "--porcelain"])
         if rc == 0 and status_out.strip():
@@ -993,6 +994,42 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
             if cur_branch == "main":
                 print(f"ERROR=dirty_worktree repo={repo_name} path={original}")
                 preflight_ok = False
+                continue
+
+        # Sync original's main with GitHub — detect ahead/behind
+        rc_has_origin, _, _ = run_cmd(
+            ["git", "-C", str(original), "remote", "get-url", "origin"])
+        if rc_has_origin != 0:
+            continue
+        run_cmd(["git", "-C", str(original), "fetch", "origin", "main"])
+        rc, behind_out, _ = run_cmd(
+            ["git", "-C", str(original), "rev-list", "main..origin/main", "--count"])
+        behind = int(behind_out.strip()) if rc == 0 and behind_out.strip() else 0
+        rc, ahead_out, _ = run_cmd(
+            ["git", "-C", str(original), "rev-list", "origin/main..main", "--count"])
+        ahead = int(ahead_out.strip()) if rc == 0 and ahead_out.strip() else 0
+
+        if behind > 0 and ahead > 0:
+            print(f"ERROR=diverged_main repo={repo_name} path={original} ahead={ahead} behind={behind}")
+            preflight_ok = False
+        elif ahead > 0:
+            rc, _, stderr = run_cmd(
+                ["git", "-C", str(original), "push", "origin", "main"])
+            if rc != 0:
+                print(f"ERROR=cannot_push_original repo={repo_name} err={stderr.strip()}")
+                preflight_ok = False
+            else:
+                print(f"SYNC=pushed repo={repo_name} commits={ahead}")
+        elif behind > 0:
+            rc2, cur_branch, _ = run_cmd(
+                ["git", "-C", str(original), "branch", "--show-current"])
+            cur_branch = cur_branch.strip() if rc2 == 0 else ""
+            if cur_branch == "main":
+                run_cmd(["git", "-C", str(original), "rebase", "origin/main"])
+            else:
+                run_cmd(["git", "-C", str(original), "fetch", "origin", "main:main"])
+            print(f"SYNC=pulled repo={repo_name} commits={behind}")
+
     if not preflight_ok:
         print("STAGE=preflight STATUS=fail")
         return 1
@@ -1055,55 +1092,70 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
             ["git", "-C", str(slot_repo), "rev-parse", "main"])
         slot_sha = sha_out.strip() if rc == 0 else "unknown"
 
-        rc, _, stderr = run_cmd(
-            ["git", "-C", str(slot_repo), "push", "origin", "main"])
-        if rc != 0:
-            results[repo_name] = ("github_failed", slot_sha)
-            print(f"WARN=github_push_failed repo={repo_name} err={stderr.strip()}")
-            continue
-
-        rc, ls_out, _ = run_cmd(
-            ["git", "-C", str(slot_repo), "ls-remote", "origin", "main"])
-        github_sha = ls_out.split()[0] if rc == 0 and ls_out.strip() else ""
-        if github_sha != slot_sha:
-            results[repo_name] = ("github_verify_failed", slot_sha)
-            print(f"WARN=github_verify_failed repo={repo_name} expected={slot_sha} got={github_sha}")
-            continue
-
+        # Push to original — updateInstead handles checked-out main
+        original = resolve_original_repo(slot_repo)
         rc_has_local, _, _ = run_cmd(
             ["git", "-C", str(slot_repo), "remote", "get-url", "local"])
         if rc_has_local == 0:
+            local_push_remote = "local"
+        else:
+            rc_origin, origin_url, _ = run_cmd(
+                ["git", "-C", str(slot_repo), "remote", "get-url", "origin"])
+            if rc_origin == 0 and Path(origin_url.strip()).is_dir():
+                local_push_remote = "origin"
+            else:
+                local_push_remote = None
+
+        if local_push_remote:
             rc, _, stderr = run_cmd(
-                ["git", "-C", str(slot_repo), "push", "local", "main"])
+                ["git", "-C", str(slot_repo), "push", local_push_remote, "main"])
             if rc != 0:
-                results[repo_name] = ("local_failed", slot_sha)
-                print(f"WARN=local_push_failed repo={repo_name} err={stderr.strip()}")
-                landed_shas[repo_name] = slot_sha
+                results[repo_name] = ("local_push_failed", slot_sha)
+                print(f"ERROR=local_push_failed repo={repo_name} err={stderr.strip()}")
                 continue
 
-            original = resolve_original_repo(slot_repo)
             rc, local_sha_out, _ = run_cmd(
                 ["git", "-C", str(original), "rev-parse", "main"])
             local_sha = local_sha_out.strip() if rc == 0 else ""
             if local_sha != slot_sha:
                 results[repo_name] = ("local_verify_failed", slot_sha)
-                print(f"WARN=local_verify_failed repo={repo_name}")
+                print(f"ERROR=local_verify_failed repo={repo_name}")
+                continue
+
+        # Push from original to GitHub — standard push through the original
+        rc_has_origin, _, _ = run_cmd(
+            ["git", "-C", str(original), "remote", "get-url", "origin"])
+        if rc_has_origin == 0:
+            rc, _, stderr = run_cmd(
+                ["git", "-C", str(original), "push", "origin", "main"])
+            if rc != 0:
+                results[repo_name] = ("github_push_failed", slot_sha)
+                print(f"WARN=github_push_failed repo={repo_name} err={stderr.strip()}")
+                landed_shas[repo_name] = slot_sha
+                continue
+
+            rc, ls_out, _ = run_cmd(
+                ["git", "-C", str(original), "ls-remote", "origin", "main"])
+            github_sha = ls_out.split()[0] if rc == 0 and ls_out.strip() else ""
+            if github_sha != slot_sha:
+                results[repo_name] = ("github_verify_failed", slot_sha)
+                print(f"WARN=github_verify_failed repo={repo_name} expected={slot_sha} got={github_sha}")
                 landed_shas[repo_name] = slot_sha
                 continue
 
         results[repo_name] = ("ok", slot_sha)
         landed_shas[repo_name] = slot_sha
 
-    github_failures = [r for r, (status, _) in results.items()
-                       if status in ("github_failed", "github_verify_failed", "merge_failed")]
-    if github_failures:
+    push_failures = [r for r, (status, _) in results.items()
+                     if status in ("local_push_failed", "local_verify_failed", "merge_failed")]
+    if push_failures:
         print("STAGE=push STATUS=fail")
         for repo_name in all_repos:
             status, sha = results.get(repo_name, ("unknown", ""))
-            icon = "FAIL" if status in ("github_failed", "github_verify_failed", "merge_failed") \
-                   else "WARN" if "local" in status else "OK"
+            icon = "FAIL" if status in ("local_push_failed", "local_verify_failed", "merge_failed") \
+                   else "WARN" if "github" in status else "OK"
             print(f"RESULT={repo_name} STATUS={status} SHA={sha} ICON={icon}")
-        print(f"ERROR=github_push_incomplete failed={','.join(github_failures)}")
+        print(f"ERROR=push_incomplete failed={','.join(push_failures)}")
         return 1
 
     shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
@@ -1156,10 +1208,10 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     print("STAGE=push STATUS=pass")
     for repo_name in all_repos:
         status, sha = results.get(repo_name, ("unknown", ""))
-        icon = "OK" if status == "ok" else "WARN" if "local" in status else "FAIL"
+        icon = "OK" if status == "ok" else "WARN" if "github" in status else "FAIL"
         print(f"RESULT={repo_name} STATUS={status} SHA={sha} ICON={icon}")
     ok_count = sum(1 for s, _ in results.values() if s == "ok")
-    warn_count = sum(1 for s, _ in results.values() if "local" in s)
+    warn_count = sum(1 for s, _ in results.values() if "github" in s)
     print(f"SUMMARY=ok:{ok_count} warn:{warn_count} fail:0")
     print(f"LANDED_SHAS={shas_str}")
     return 0
@@ -1593,6 +1645,31 @@ def parse_args() -> dict[str, str]:
     return parsed
 
 
+def migrate_remotes(family_root: Path) -> int:
+    """Add GitHub remotes + updateInstead to all active (non-archived) slots."""
+    migrated = 0
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        slots_dir = family_root / dir_name
+        if not slots_dir.exists():
+            continue
+        for d in sorted(slots_dir.iterdir()):
+            if not d.is_dir() or not d.name.isdigit():
+                continue
+            for repo_name in get_all_slot_repos(d):
+                clone = d / repo_name
+                rc, _, _ = run_cmd(
+                    ["git", "-C", str(clone), "remote", "get-url", "local"])
+                if rc == 0:
+                    continue
+                original = resolve_original_repo(clone)
+                result = configure_slot_remotes(clone, original)
+                if result["origin"]:
+                    migrated += 1
+                configure_update_instead(original)
+    print(f"MIGRATED={migrated}")
+    return migrated
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
@@ -1684,6 +1761,11 @@ def main() -> None:
             print("ERROR=missing_slot_number")
             sys.exit(1)
         sys.exit(check_cross_deps(family_root, slot_num))
+
+    elif subcommand == "migrate-remotes":
+        family_root = Path(args.get("target", "."))
+        count = migrate_remotes(family_root)
+        print(f"COUNT={count}")
 
     else:
         print(f"ERROR=unknown_subcommand subcommand={subcommand}", file=sys.stderr)

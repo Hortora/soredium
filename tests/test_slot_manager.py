@@ -2283,22 +2283,24 @@ class TestMergeSlotRelaxedPreflight:
     def _setup_slot(self, tmp_path):
         family = tmp_path / "family"
         family.mkdir()
-        original = init_repo(family / "engine")
-        subprocess.run(["git", "-C", str(original), "remote", "add", "origin",
-                        "https://github.com/user/engine.git"], capture_output=True)
+        original = _init_repo_with_remote(family / "engine")
         slot_manager.configure_update_instead(original)
 
         slot_dir = family / "slots" / "1"
         slot_dir.mkdir(parents=True)
         clone = slot_dir / "engine"
-        subprocess.run(["git", "clone", "--shared", str(original), str(clone)],
-                       capture_output=True)
+        bare_path = family / ".engine-bare.git"
+        subprocess.run(["git", "clone", "--shared", "--branch", "main",
+                        str(original), str(clone)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(clone), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(clone), "config", "user.email", "test@test.com"], capture_output=True)
         subprocess.run(["git", "-C", str(clone), "checkout", "-b", "feature-1"],
-                       capture_output=True)
+                       capture_output=True, check=True)
         subprocess.run(["git", "-C", str(clone), "remote", "rename", "origin", "local"],
-                       capture_output=True)
+                       capture_output=True, check=True)
         subprocess.run(["git", "-C", str(clone), "remote", "add", "origin",
-                        "https://github.com/user/engine.git"], capture_output=True)
+                        str(bare_path)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(clone), "fetch", "origin"], capture_output=True)
 
         (clone / "feature.txt").write_text("new feature")
         subprocess.run(["git", "-C", str(clone), "add", "."], capture_output=True)
@@ -2332,6 +2334,24 @@ class TestMergeSlotRelaxedPreflight:
         assert result == 1
         assert "dirty_worktree" in captured.getvalue()
 
+    def test_unpushed_commits_auto_pushed_in_preflight(self, tmp_path):
+        """Original has unpushed commits on main — preflight pushes them."""
+        family, slot_dir, original, clone = self._setup_slot(tmp_path)
+        (original / "local-work.txt").write_text("local work")
+        subprocess.run(["git", "-C", str(original), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(original), "commit", "-m", "local work"], capture_output=True)
+
+        import io
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            result = slot_manager.merge_slot(family, 1)
+
+        assert "SYNC=pushed" in captured.getvalue()
+        bare_path = family / ".engine-bare.git"
+        rc, bare_log, _ = slot_manager.run_cmd(
+            ["git", "-C", str(bare_path), "log", "--oneline", "main"])
+        assert "local work" in bare_log
+
     def test_dirty_worktree_on_feature_branch_passes(self, tmp_path):
         family, slot_dir, original, clone = self._setup_slot(tmp_path)
         subprocess.run(["git", "-C", str(original), "checkout", "-b", "other-work"],
@@ -2347,51 +2367,38 @@ class TestMergeSlotRelaxedPreflight:
 
 class TestMergeSlotDualPush:
     def _setup_full_slot(self, tmp_path):
+        """Create a slot with project + workspace, using real bare repos."""
         family = tmp_path / "family"
         family.mkdir()
 
-        proj_orig = init_repo(family / "engine")
-        subprocess.run(["git", "-C", str(proj_orig), "remote", "add", "origin",
-                        "https://github.com/user/engine.git"], capture_output=True)
+        proj_orig = _init_repo_with_remote(family / "engine")
         slot_manager.configure_update_instead(proj_orig)
 
-        ws_orig = init_repo(family / "work-hub")
-        subprocess.run(["git", "-C", str(ws_orig), "remote", "add", "origin",
-                        "https://github.com/user/work-hub.git"], capture_output=True)
+        ws_orig = _init_repo_with_remote(family / "work-hub")
         slot_manager.configure_update_instead(ws_orig)
 
         slot_dir = family / "slots" / "1"
         slot_dir.mkdir(parents=True)
 
-        proj_clone = slot_dir / "engine"
-        subprocess.run(["git", "clone", "--shared", str(proj_orig), str(proj_clone)],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(proj_clone), "checkout", "-b", "feature-1"],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(proj_clone), "remote", "rename", "origin", "local"],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(proj_clone), "remote", "add", "origin",
-                        "https://github.com/user/engine.git"], capture_output=True)
+        for name, orig in [("engine", proj_orig), ("work-hub", ws_orig)]:
+            clone = slot_dir / name
+            bare_path = family / f".{name}-bare.git"
+            subprocess.run(["git", "clone", "--shared", "--branch", "main",
+                            str(orig), str(clone)], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(clone), "config", "user.name", "Test"], capture_output=True)
+            subprocess.run(["git", "-C", str(clone), "config", "user.email", "test@test.com"], capture_output=True)
+            subprocess.run(["git", "-C", str(clone), "checkout", "-b", "feature-1"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(clone), "remote", "rename", "origin", "local"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(clone), "remote", "add", "origin", str(bare_path)], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(clone), "fetch", "origin"], capture_output=True)
 
-        ws_clone = slot_dir / "work-hub"
-        subprocess.run(["git", "clone", "--shared", str(ws_orig), str(ws_clone)],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(ws_clone), "checkout", "-b", "feature-1"],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(ws_clone), "remote", "rename", "origin", "local"],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(ws_clone), "remote", "add", "origin",
-                        "https://github.com/user/work-hub.git"], capture_output=True)
+        (slot_dir / "engine" / "feature.txt").write_text("feature work")
+        subprocess.run(["git", "-C", str(slot_dir / "engine"), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(slot_dir / "engine"), "commit", "-m", "feat: add feature"], capture_output=True)
 
-        (proj_clone / "feature.txt").write_text("feature work")
-        subprocess.run(["git", "-C", str(proj_clone), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(proj_clone), "commit", "-m", "feat: add feature"],
-                       capture_output=True)
-
-        (ws_clone / "journal.md").write_text("# Journal")
-        subprocess.run(["git", "-C", str(ws_clone), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(ws_clone), "commit", "-m", "docs: journal"],
-                       capture_output=True)
+        (slot_dir / "work-hub" / "journal.md").write_text("# Journal")
+        subprocess.run(["git", "-C", str(slot_dir / "work-hub"), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(slot_dir / "work-hub"), "commit", "-m", "docs: journal"], capture_output=True)
 
         (slot_dir / ".phase-a-complete").write_text("branch=feature-1\n")
         (slot_dir / ".slot").write_text(
@@ -2399,59 +2406,55 @@ class TestMergeSlotDualPush:
 
         return family, slot_dir, proj_orig, ws_orig
 
-    @staticmethod
-    def _make_mock(original_run_cmd, local_push_fail=False):
-        def mock_cmd(args, cwd=None):
-            if "fetch" in args and len(args) >= 5:
-                if args[4] in ("origin", "upstream"):
-                    redirected = list(args)
-                    redirected[4] = "local"
-                    return original_run_cmd(redirected, cwd)
-            if "rebase" in args and len(args) >= 5:
-                for i, a in enumerate(args):
-                    if "origin/" in a or "upstream/" in a:
-                        redirected = list(args)
-                        redirected[i] = a.replace("origin/", "local/").replace("upstream/", "local/")
-                        return original_run_cmd(redirected, cwd)
-            if "merge" in args and any("origin/main" in a for a in args):
-                redirected = [a.replace("origin/main", "local/main") for a in args]
-                return original_run_cmd(redirected, cwd)
-            if "push" in args and "origin" in args:
-                return (0, "", "")
-            if "push" in args and "local" in args and "main" in args:
-                if local_push_fail:
-                    return (1, "", "rejected")
-                return original_run_cmd(args, cwd)
-            if "ls-remote" in args:
-                repo_path = args[2] if len(args) > 2 else "."
-                rc, sha, _ = original_run_cmd(
-                    ["git", "-C", repo_path, "rev-parse", "main"])
-                return (0, f"{sha.strip()}\trefs/heads/main\n", "")
-            if "remote" in args and "get-url" in args and "upstream" in args:
-                return (1, "", "not found")
-            return original_run_cmd(args, cwd)
-        return mock_cmd
-
     def test_workspace_repo_included_in_push_loop(self, tmp_path):
+        """Workspace repos are merged, pushed to original, and synced to GitHub."""
         family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
-        original_run_cmd = slot_manager.run_cmd
-
-        with patch("slot_manager.run_cmd", side_effect=self._make_mock(original_run_cmd)):
-            result = slot_manager.merge_slot(family, 1)
+        result = slot_manager.merge_slot(family, 1)
 
         assert result == 0
-        rc, ws_log, _ = original_run_cmd(
+        rc, ws_log, _ = slot_manager.run_cmd(
             ["git", "-C", str(ws_orig), "log", "--oneline"])
         assert "journal" in ws_log.lower()
 
-    def test_local_push_failure_is_warning_not_error(self, tmp_path):
+        bare_path = family / ".work-hub-bare.git"
+        rc, bare_log, _ = slot_manager.run_cmd(
+            ["git", "-C", str(bare_path), "log", "--oneline", "main"])
+        assert "journal" in bare_log.lower()
+
+    def test_github_push_failure_is_warning_not_error(self, tmp_path):
+        """If original can't push to GitHub, local push succeeded — warn, don't block."""
         family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
         original_run_cmd = slot_manager.run_cmd
 
-        with patch("slot_manager.run_cmd", side_effect=self._make_mock(original_run_cmd, local_push_fail=True)):
+        def mock_github_fail(args, cwd=None):
+            if "push" in args and "origin" in args and "main" in args:
+                path = args[2] if len(args) > 2 else ""
+                if str(family / "engine") in path or str(family / "work-hub") in path:
+                    return (1, "", "network error")
+            return original_run_cmd(args, cwd)
+
+        with patch("slot_manager.run_cmd", side_effect=mock_github_fail):
             result = slot_manager.merge_slot(family, 1)
 
         assert result == 0
+        rc, log, _ = original_run_cmd(
+            ["git", "-C", str(proj_orig), "log", "--oneline"])
+        assert "feature" in log.lower()
+
+    def test_local_push_failure_blocks(self, tmp_path):
+        """If slot can't push to original, hard stop — work not landed."""
+        family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
+        original_run_cmd = slot_manager.run_cmd
+
+        def mock_local_fail(args, cwd=None):
+            if "push" in args and "local" in args and "main" in args:
+                return (1, "", "rejected")
+            return original_run_cmd(args, cwd)
+
+        with patch("slot_manager.run_cmd", side_effect=mock_local_fail):
+            result = slot_manager.merge_slot(family, 1)
+
+        assert result == 1
 
 
 class TestCreateSlotRemoteConfig:
@@ -2480,3 +2483,61 @@ class TestCreateSlotRemoteConfig:
             ["git", "-C", str(repo), "config", "receive.denyCurrentBranch"])
         assert rc == 0
         assert value.strip() == "updateInstead"
+
+
+class TestMigrateRemotes:
+    def test_migrates_active_slot(self, tmp_path):
+        family = tmp_path / "family"
+        family.mkdir()
+        original = _init_repo_with_remote(family / "engine")
+
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        clone = slot_dir / "engine"
+        subprocess.run(["git", "clone", "--shared", str(original), str(clone)],
+                       capture_output=True, check=True)
+        (slot_dir / ".slot").write_text("# Slot 1\n## Repos\n- engine\n")
+
+        count = slot_manager.migrate_remotes(family)
+        assert count > 0
+
+        rc, _, _ = slot_manager.run_cmd(
+            ["git", "-C", str(clone), "remote", "get-url", "local"])
+        assert rc == 0
+
+        bare_path = family / ".engine-bare.git"
+        rc, url, _ = slot_manager.run_cmd(
+            ["git", "-C", str(clone), "remote", "get-url", "origin"])
+        assert rc == 0
+        assert str(bare_path) in url.strip()
+
+    def test_skips_archived_slots(self, tmp_path):
+        family = tmp_path / "family"
+        family.mkdir()
+        original = _init_repo_with_remote(family / "engine")
+
+        attic = family / "slots" / "attic" / "1"
+        attic.mkdir(parents=True)
+        clone = attic / "engine"
+        subprocess.run(["git", "clone", "--shared", str(original), str(clone)],
+                       capture_output=True, check=True)
+
+        count = slot_manager.migrate_remotes(family)
+        assert count == 0
+
+    def test_idempotent(self, tmp_path):
+        family = tmp_path / "family"
+        family.mkdir()
+        original = _init_repo_with_remote(family / "engine")
+
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        clone = slot_dir / "engine"
+        subprocess.run(["git", "clone", "--shared", str(original), str(clone)],
+                       capture_output=True, check=True)
+        (slot_dir / ".slot").write_text("# Slot 1\n## Repos\n- engine\n")
+
+        count1 = slot_manager.migrate_remotes(family)
+        count2 = slot_manager.migrate_remotes(family)
+        assert count1 > 0
+        assert count2 == 0
