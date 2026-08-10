@@ -127,17 +127,24 @@ def _cleanup_remnant_dir(path: Path) -> bool:
         return False
 
 
-def _escape_slot_cwd(slot_dir: Path, escape_to: Path) -> bool:
-    """If CWD is inside slot_dir, chdir to escape_to. Returns True if moved."""
+def _escape_slot_cwd(slot_dir: Path, escape_to: Path) -> tuple[bool, Path | None]:
+    """If CWD is inside slot_dir, chdir to escape_to.
+
+    Returns (escaped, relative_offset) where relative_offset is the path
+    from slot_dir to the original CWD (e.g. Path('platform') if CWD was
+    slots/98/platform). Callers use this to compute the equivalent path
+    in the archive destination.
+    """
     try:
         cwd = Path.cwd().resolve()
         slot_resolved = slot_dir.resolve()
         if cwd == slot_resolved or slot_resolved in cwd.parents:
+            relative = cwd.relative_to(slot_resolved)
             os.chdir(escape_to)
-            return True
+            return True, relative
     except OSError:
         pass
-    return False
+    return False, None
 
 
 def run_cmd(args: list[str], cwd: str | None = None) -> tuple[int, str, str]:
@@ -1226,13 +1233,20 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
         print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
         sys.exit(1)
     moved = relocate_claude_projects(slot_dir, dest)
-    escaped = _escape_slot_cwd(slot_dir, family_root)
+    escaped, cwd_offset = _escape_slot_cwd(slot_dir, family_root)
     if escaped:
         print(f"CWD_ESCAPED={family_root}")
     shutil.move(str(slot_dir), str(dest))
     if slot_dir.exists():
         if not _cleanup_remnant_dir(slot_dir):
             print(f"WARN=remnant_dir_persists path={slot_dir}")
+    if escaped and cwd_offset is not None:
+        relocated = dest / cwd_offset
+        if relocated.exists():
+            os.chdir(relocated)
+            print(f"CWD_RELOCATED={relocated}")
+        else:
+            print(f"CWD_RELOCATED={dest}")
     if moved:
         print(f"CLAUDE_PROJECTS_MOVED={moved}")
 
@@ -1335,7 +1349,7 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
         print("HINT=pass --force-delete to override, or run work-end first")
         sys.exit(1)
 
-    escaped = _escape_slot_cwd(slot_dir, family_root)
+    escaped, cwd_offset = _escape_slot_cwd(slot_dir, family_root)
     if escaped:
         print(f"CWD_ESCAPED={family_root}")
 
@@ -1376,6 +1390,13 @@ def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) ->
         if slot_dir.exists():
             if not _cleanup_remnant_dir(slot_dir):
                 print(f"WARN=remnant_dir_persists path={slot_dir}")
+        if escaped and cwd_offset is not None:
+            relocated = dest / cwd_offset
+            if relocated.exists():
+                os.chdir(relocated)
+                print(f"CWD_RELOCATED={relocated}")
+            else:
+                print(f"CWD_RELOCATED={dest}")
         if moved:
             print(f"CLAUDE_PROJECTS_MOVED={moved}")
         if _wl:
