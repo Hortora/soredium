@@ -39,7 +39,10 @@ file is always created, even for single issues.
 Ask the user for:
 - **Issues or description:** issue numbers (e.g., `#42 #50`) or free text
   (e.g., "improve the scoring engine")
-- **Repos:** which repos in the family to include (e.g., "engine", "engine and iot")
+- **Repos:** which repos in the family to **write to** (e.g., "engine", "engine and iot").
+  Only clone repos that will receive commits. Repos needed for reading
+  (checking an API, referencing code) are already available at their
+  original local path — don't clone them into the slot.
 - **Context:** what needs doing and any background
 
 The user may provide all of this in one sentence or you may need to ask.
