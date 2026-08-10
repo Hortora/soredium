@@ -20,6 +20,11 @@ default to ON in the Sweep. They catch convention drift.
 
 **Main-branch mutations go through work-end only.** Never run
 `git checkout main && git merge <branch>` manually.
+
+**Never suggest deferring work-end to another session.** Session-bound items
+(forage SWEEP, write-content) are permanently lost if the session ends without
+them. All other steps are Python scripts that consume no meaningful context.
+Execute the full sequence every time. Session length is not a factor.
 </HARD-GATE>
 
 ### Red Flags — thoughts that mean STOP
