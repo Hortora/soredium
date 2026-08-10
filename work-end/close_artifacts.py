@@ -154,7 +154,7 @@ def main() -> int:
     proj_artifacts: list[str] = []
     proj_docs_artifacts: list[str] = []
 
-    _docs_categories = {"specs", "adr"}
+    _docs_categories = {"specs", "adr", "blog"}
 
     for category, paths in artifacts.items():
         if category == "plans":
@@ -165,7 +165,11 @@ def main() -> int:
         if dest == "workspace":
             ws_artifacts.extend(paths)
         elif category in _docs_categories:
-            proj_docs_artifacts.extend(paths)
+            for p in paths:
+                if p.startswith("docs/"):
+                    proj_artifacts.append(p)
+                else:
+                    proj_docs_artifacts.append(p)
         else:
             proj_artifacts.extend(paths)
 
@@ -260,7 +264,8 @@ def main() -> int:
 
     # Publish blog
     if artifacts["blog"]:
-        blog_dir = scan_source / "blog"
+        first_blog = artifacts["blog"][0]
+        blog_dir = scan_source / Path(first_blog).parent
         rc, out = run_script("blog_dest.py", [str(blog_dir), branch])
         unpublished = [x for x in out.get("UNPUBLISHED", "").split(",") if x.strip()]
         results["blog_published"] = str(len(unpublished))

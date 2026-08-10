@@ -1020,3 +1020,85 @@ class TestPromoteUpdatedFiles:
         # Should succeed even though nothing to commit
         assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
         assert "PROMOTED=1" in result.stdout
+
+
+class TestBlogDocsPrefix:
+    """Blog entries must land at project/docs/blog/, not project/blog/."""
+
+    SCRIPT = Path(__file__).parent.parent / "work-end" / "close_artifacts.py"
+
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_blog_promoted_to_docs_blog(self, tmp_path):
+        """Blog promoted to project lands at docs/blog/, not blog/.
+        Default routing (no CLAUDE.md) routes blog to project."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+        (workspace / "blog").mkdir()
+        (workspace / "blog" / "entry.md").write_text("# Blog\n")
+
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-test"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(["git", "-C", str(workspace), "add", "-A"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "add blog"],
+            capture_output=True, check=True,
+        )
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-42-test"],
+            capture_output=True, text=True,
+        )
+
+        assert (project / "docs" / "blog" / "entry.md").is_file(), (
+            f"Blog should be at docs/blog/, not blog/.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert not (project / "blog" / "entry.md").exists(), (
+            "Blog should NOT be at root blog/"
+        )
+
+    def test_no_double_docs_prefix_for_alt_path_entries(self, tmp_path):
+        """Entries found via docs/blog/ alt_path must NOT get a second docs/ prefix."""
+        workspace = tmp_path / "workspace"
+        project = tmp_path / "project"
+        self._init_git(workspace)
+        self._init_git(project)
+        (workspace / "design").mkdir()
+        (workspace / "docs" / "blog").mkdir(parents=True)
+        (workspace / "docs" / "blog" / "entry.md").write_text("# Blog\n")
+
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-99-test"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(["git", "-C", str(workspace), "add", "-A"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "add blog"],
+            capture_output=True, check=True,
+        )
+
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT),
+             str(workspace), str(project), "issue-99-test"],
+            capture_output=True, text=True,
+        )
+
+        assert (project / "docs" / "blog" / "entry.md").is_file(), (
+            f"Blog should be at docs/blog/.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert not (project / "docs" / "docs" / "blog" / "entry.md").exists(), (
+            "Double docs/ prefix — docs/docs/blog/ should NOT exist"
+        )

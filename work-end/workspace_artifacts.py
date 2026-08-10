@@ -17,10 +17,12 @@ import sys
 from pathlib import Path
 
 CATEGORIES: dict[str, dict] = {
-    "specs":     {"ext": ".md",  "exclude_names": {"INDEX.md"}, "exclude_dirs": set()},
+    "specs":     {"ext": ".md",  "exclude_names": {"INDEX.md"}, "exclude_dirs": set(),
+                  "alt_paths": ["docs/specs"]},
     "adr":       {"ext": ".md",  "exclude_names": {"INDEX.md"}, "exclude_dirs": set(),
                   "alt_paths": ["docs/adr"]},
-    "blog":      {"ext": ".md",  "exclude_names": {"INDEX.md"}, "exclude_dirs": set()},
+    "blog":      {"ext": ".md",  "exclude_names": {"INDEX.md"}, "exclude_dirs": set(),
+                  "alt_paths": ["docs/blog"]},
     "plans":     {"ext": ".md",  "exclude_names": {"INDEX.md"}, "exclude_dirs": {"attic"}},
     "snapshots": {"ext": None,   "exclude_names": {"INDEX.md"}, "exclude_dirs": set()},
 }
