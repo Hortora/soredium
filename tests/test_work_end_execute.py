@@ -509,6 +509,239 @@ class TestLandPushTopology:
         assert "MIRRORED_TO" not in result.stdout
 
 
+class TestLandWorkspacePush:
+    def test_land_pushes_workspace_branch_stamp(self, tmp_path: Path) -> None:
+        """Workspace branch stamp must be pushed to origin."""
+        remote = _init_bare(tmp_path / "remote.git")
+        ws_remote = _init_bare(tmp_path / "ws-remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-204-test"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+        _git(workspace, "remote", "add", "origin", str(ws_remote))
+        _git(workspace, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: work")
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+        design = workspace / "design"
+        design.mkdir(exist_ok=True)
+        (design / ".meta").write_text(f"branch: {branch}\nstate: active\n")
+        _git(workspace, "add", ".")
+        _git(workspace, "commit", "-m", "scaffold")
+        _git(workspace, "push", "origin", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0
+
+        ws_remote_tip = subprocess.run(
+            ["git", "--git-dir", str(ws_remote), "log", "-1", "--format=%s", branch],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert ws_remote_tip.startswith("chore: branch closed"), \
+            f"workspace stamp not pushed to remote: {ws_remote_tip}"
+
+
+class TestLandSlotMode:
+    """Tests for slot-aware cmd_land — two-hop push (slot → original → GitHub)."""
+
+    @staticmethod
+    def _create_slot_layout(tmp_path: Path, branch: str = "issue-50-feature",
+                            repo_names: list[str] | None = None) -> dict:
+        """Create a slot layout with original repos, bare remotes, and clone-based slot.
+
+        Layout:
+          tmp_path/
+            family/
+              engine/             <- original project repo
+              iot/                <- second original project repo (optional)
+              slots/
+                3/
+                  engine/         <- git clone of family/engine
+                  iot/            <- git clone of family/iot
+                  work/           <- git clone of workspace
+            workspace/            <- original workspace repo
+            engine-remote.git/    <- bare remote (simulates GitHub) for engine
+            iot-remote.git/       <- bare remote for iot
+            ws-remote.git/        <- bare remote for workspace
+        """
+        if repo_names is None:
+            repo_names = ["engine"]
+
+        family = tmp_path / "family"
+        family.mkdir()
+        remotes: dict[str, Path] = {}
+        originals: dict[str, Path] = {}
+
+        for name in repo_names:
+            remote = _init_bare(tmp_path / f"{name}-remote.git")
+            remotes[name] = remote
+            orig = _init_repo(family / name)
+            _git(orig, "remote", "add", "origin", str(remote))
+            _git(orig, "push", "origin", "main")
+            originals[name] = orig
+
+        ws_remote = _init_bare(tmp_path / "ws-remote.git")
+        orig_workspace = _init_repo(tmp_path / "workspace")
+        _git(orig_workspace, "remote", "add", "origin", str(ws_remote))
+        _git(orig_workspace, "push", "origin", "main")
+
+        slot_dir = family / "slots" / "3"
+        slot_dir.mkdir(parents=True)
+
+        slot_repos: dict[str, Path] = {}
+        for name in repo_names:
+            slot_repo = slot_dir / name
+            subprocess.run(
+                ["git", "clone", str(originals[name]), str(slot_repo)],
+                capture_output=True, check=True,
+            )
+            _git(slot_repo, "config", "user.email", "test@test.com")
+            _git(slot_repo, "config", "user.name", "Test")
+            _git(slot_repo, "checkout", "-b", branch)
+            (slot_repo / "feature.txt").write_text(f"work in {name}\n")
+            _git(slot_repo, "add", "feature.txt")
+            _git(slot_repo, "commit", "-m", f"feat: work in {name}")
+            slot_repos[name] = slot_repo
+
+        slot_ws = slot_dir / "work"
+        subprocess.run(
+            ["git", "clone", str(orig_workspace), str(slot_ws)],
+            capture_output=True, check=True,
+        )
+        _git(slot_ws, "config", "user.email", "test@test.com")
+        _git(slot_ws, "config", "user.name", "Test")
+        _git(slot_ws, "checkout", "-b", branch)
+        design = slot_ws / "design"
+        design.mkdir(exist_ok=True)
+        (design / ".meta").write_text(f"branch: {branch}\nstate: active\n")
+        _git(slot_ws, "add", ".")
+        _git(slot_ws, "commit", "-m", "scaffold")
+
+        return {
+            "family": family,
+            "originals": originals,
+            "remotes": remotes,
+            "orig_workspace": orig_workspace,
+            "ws_remote": ws_remote,
+            "slot_dir": slot_dir,
+            "slot_repos": slot_repos,
+            "slot_ws": slot_ws,
+            "branch": branch,
+        }
+
+    def test_slot_land_single_repo_pushes_to_github(self, tmp_path: Path) -> None:
+        """In slot mode, content must reach the bare remote (GitHub) via two-hop."""
+        s = self._create_slot_layout(tmp_path)
+        result = _run_execute(
+            "land",
+            f"project={s['slot_repos']['engine']}",
+            f"branch={s['branch']}",
+            "base_branch=main",
+            f"workspace={s['slot_ws']}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "LANDED=yes" in result.stdout
+
+        remote_log = subprocess.run(
+            ["git", "--git-dir", str(s['remotes']['engine']), "log", "--oneline", "main"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "feat: work in engine" in remote_log
+
+    def test_slot_land_multi_repo_pushes_all(self, tmp_path: Path) -> None:
+        """Multi-repo slot: all repos pushed to their respective GitHub remotes."""
+        s = self._create_slot_layout(tmp_path, repo_names=["engine", "iot"])
+        result = _run_execute(
+            "land",
+            f"project={s['slot_repos']['engine']}",
+            f"branch={s['branch']}",
+            "base_branch=main",
+            f"workspace={s['slot_ws']}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "LANDED=yes" in result.stdout
+
+        for name in ("engine", "iot"):
+            remote_log = subprocess.run(
+                ["git", "--git-dir", str(s['remotes'][name]), "log", "--oneline", "main"],
+                capture_output=True, text=True,
+            ).stdout
+            assert f"feat: work in {name}" in remote_log, f"{name} not on remote"
+
+    def test_slot_land_stamps_all_project_branches(self, tmp_path: Path) -> None:
+        """All project branches in the slot must be stamped."""
+        s = self._create_slot_layout(tmp_path, repo_names=["engine", "iot"])
+        _run_execute(
+            "land",
+            f"project={s['slot_repos']['engine']}",
+            f"branch={s['branch']}",
+            "base_branch=main",
+            f"workspace={s['slot_ws']}",
+        )
+        for name in ("engine", "iot"):
+            tip = _git(s['slot_repos'][name], "log", "-1", "--format=%s", s['branch'])
+            assert tip.startswith("chore: branch closed"), f"{name} not stamped: {tip}"
+            assert "landed as" in tip, f"{name} stamp missing SHA"
+
+    def test_slot_land_stamps_workspace_with_sha(self, tmp_path: Path) -> None:
+        """Workspace branch must be stamped with a landing SHA."""
+        s = self._create_slot_layout(tmp_path)
+        _run_execute(
+            "land",
+            f"project={s['slot_repos']['engine']}",
+            f"branch={s['branch']}",
+            "base_branch=main",
+            f"workspace={s['slot_ws']}",
+        )
+        ws_tip = _git(s['slot_ws'], "log", "-1", "--format=%s", s['branch'])
+        assert ws_tip.startswith("chore: branch closed"), f"workspace not stamped: {ws_tip}"
+        assert "landed as" in ws_tip, "workspace stamp missing SHA"
+
+    def test_slot_land_writes_landed_marker(self, tmp_path: Path) -> None:
+        """Slot mode must write .landed marker with SHAs."""
+        s = self._create_slot_layout(tmp_path, repo_names=["engine", "iot"])
+        _run_execute(
+            "land",
+            f"project={s['slot_repos']['engine']}",
+            f"branch={s['branch']}",
+            "base_branch=main",
+            f"workspace={s['slot_ws']}",
+        )
+        landed = s['slot_dir'] / ".landed"
+        assert landed.exists(), ".landed marker not written"
+        content = landed.read_text()
+        assert "engine:" in content
+        assert "iot:" in content
+        assert f"branch={s['branch']}" in content
+
+    def test_slot_land_originals_remain_on_main(self, tmp_path: Path) -> None:
+        """After landing, original repos must still be on main."""
+        s = self._create_slot_layout(tmp_path, repo_names=["engine", "iot"])
+        _run_execute(
+            "land",
+            f"project={s['slot_repos']['engine']}",
+            f"branch={s['branch']}",
+            "base_branch=main",
+            f"workspace={s['slot_ws']}",
+        )
+        for name in ("engine", "iot"):
+            branch = _git(s['originals'][name], "branch", "--show-current")
+            assert branch == "main", f"{name} not on main: {branch}"
+
+
 class TestBadArgs:
     def test_missing_subcommand(self) -> None:
         result = subprocess.run(

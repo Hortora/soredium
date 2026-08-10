@@ -144,6 +144,53 @@ class TestVerifyUnpushedMain:
         assert "UNPUSHED" in result.stdout
 
 
+class TestVerifyOldFormatStampWarns:
+    def test_old_format_stamp_warns(self, tmp_path: Path) -> None:
+        """Stamps without landing SHA should warn, not silently pass."""
+        branch = "issue-200-test"
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "f.txt").write_text("work\n")
+        _git(project, "add", "f.txt")
+        _git(project, "commit", "-m", "feat: work")
+        _git(project, "push", "origin", branch)
+
+        _git(project, "checkout", "main")
+        _git(project, "merge", "--ff-only", branch)
+        _git(project, "push", "origin", "main")
+
+        # Old format stamp: no SHA
+        _git(project, "checkout", branch)
+        _git(project, "commit", "--allow-empty", "-m", "chore: branch closed")
+        _git(project, "checkout", "main")
+
+        workspace = _init_repo(tmp_path / "workspace")
+        _git(workspace, "checkout", "-b", branch)
+        _git(workspace, "commit", "--allow-empty", "-m", "chore: branch closed")
+        _git(workspace, "checkout", "main")
+
+        result = _run_verify(project, workspace, branch=branch)
+        assert result.returncode == 0
+        assert "⚠️" in result.stdout or "warn" in result.stdout.lower()
+        assert "old format" in result.stdout.lower()
+
+
+class TestVerifyMissingWorkspaceBranchWarns:
+    def test_missing_workspace_branch_warns(self, tmp_path: Path) -> None:
+        """Missing workspace branch should warn, not silently pass."""
+        branch = "issue-201-test"
+        project, _ = _create_clean_single_repo(tmp_path, branch=branch)
+        workspace = _init_repo(tmp_path / "ws-no-branch")
+
+        result = _run_verify(project, workspace, branch=branch)
+        assert result.returncode == 0
+        assert "⚠️" in result.stdout or "warn" in result.stdout.lower()
+
+
 class TestVerifyBadArgs:
     def test_missing_args(self) -> None:
         result = subprocess.run(

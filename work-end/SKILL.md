@@ -220,12 +220,16 @@ are skipped on restart.
 python3 work-end/work_end_execute.py land project=<PROJ> branch=<BRANCH> base_branch=<BASE> workspace=<WS>
 ```
 
-Pushes main, stamps branch (via `land_branch.py stamp`), stamps workspace
-branch. Progress tracked in `.execute-progress` for crash recovery.
+Pushes main, stamps branch (via `land_branch.py stamp`), stamps and
+pushes workspace branch. Progress tracked in `.execute-progress` for
+crash recovery.
 
-**Slot mode:** The script loops through all repos in `.slot`, pushing
-each to its original repo and then to GitHub. Stamps all branches.
-Writes `.phase-a-complete` (compatibility) and `.landed` markers.
+**Slot mode:** The script detects slot context automatically (origin
+points to a local directory). It discovers all project repos in the
+slot, runs preflight checks on all originals, then executes a two-hop
+push per repo: slot clone → original repo → GitHub. Stamps all project
+and workspace branches with landing SHAs. Writes `.landed` marker.
+Retries up to 3 times on push failure.
 
 **Lifecycle:** After land returns, fire `push_pass`, `merge_pass`,
 `stamp_pass` in rapid succession.
@@ -266,6 +270,16 @@ Do not archive without explicit confirmation.
 
 ```bash
 python3 work-end/branch_cleanup.py checkout-main <WORKSPACE> <PROJECT>
+```
+
+### 5.2b Scaffold cleanup
+
+Remove `.meta`, `JOURNAL.md`, and `.epic` from the workspace to prevent
+stale scaffold files from confusing `ctx.py` state detection in subsequent
+sessions.
+
+```bash
+python3 work-end/branch_cleanup.py cleanup-scaffold <WORKSPACE>
 ```
 
 ### 5.3 Stack cleanup

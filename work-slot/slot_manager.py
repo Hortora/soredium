@@ -1032,13 +1032,14 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
             if not is_worktree(slot_repo):
                 run_cmd(["git", "-C", str(slot_repo), "push", "origin", branch, "--force-with-lease"])
 
+        primary_sha = landed_shas.get(repos[0], "unknown") if repos else "unknown"
         for sub in slot_dir.iterdir():
             if not sub.is_dir() or not (sub / ".git").exists():
                 continue
             if sub.name.startswith("work") or sub.name.startswith("work-"):
                 run_cmd([
                     "git", "-C", str(sub), "commit", "--allow-empty",
-                    "-m", f"chore: branch closed — landed on main",
+                    "-m", f"chore: branch closed — landed as {primary_sha} on main",
                 ])
                 if not is_worktree(sub):
                     run_cmd(["git", "-C", str(sub), "push", "origin", branch, "--force-with-lease"])

@@ -371,6 +371,95 @@ def test_pause_in_slot_includes_slot_path(slot_clone_setup):
     assert f"slot: {s['slot_dir']}" in orig_content
 
 
+def test_pause_in_slot_pushes_to_github_via_original(tmp_path):
+    """When pausing from a slot, branches must be pushed to GitHub via original repo (two-hop)."""
+    family = tmp_path / "family"
+    family.mkdir()
+
+    # Create bare remote (simulates GitHub)
+    proj_remote = tmp_path / "proj-remote.git"
+    proj_remote.mkdir(parents=True)
+    subprocess.run(["git", "init", "--bare", str(proj_remote)], capture_output=True, check=True)
+
+    ws_remote = tmp_path / "ws-remote.git"
+    ws_remote.mkdir(parents=True)
+    subprocess.run(["git", "init", "--bare", str(ws_remote)], capture_output=True, check=True)
+
+    # Original project with GitHub remote
+    orig_project = family / "project"
+    orig_project.mkdir()
+    subprocess.run(["git", "init"], cwd=orig_project, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=orig_project, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=orig_project, check=True)
+    (orig_project / "README.md").write_text("project")
+    subprocess.run(["git", "add", "."], cwd=orig_project, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=orig_project, check=True)
+    subprocess.run(["git", "branch", "-M", "main"], cwd=orig_project, check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(orig_project), "remote", "add", "origin", str(proj_remote)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(orig_project), "push", "origin", "main"],
+                   check=True, capture_output=True)
+
+    # Original workspace with GitHub remote
+    orig_workspace = tmp_path / "workspace"
+    orig_workspace.mkdir()
+    subprocess.run(["git", "init"], cwd=orig_workspace, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=orig_workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=orig_workspace, check=True)
+    design = orig_workspace / "design"
+    design.mkdir()
+    (design / ".pause-stack").write_text("")
+    subprocess.run(["git", "add", "."], cwd=orig_workspace, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=orig_workspace, check=True)
+    subprocess.run(["git", "branch", "-M", "main"], cwd=orig_workspace, check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(orig_workspace), "remote", "add", "origin", str(ws_remote)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(orig_workspace), "push", "-u", "origin", "main"],
+                   check=True, capture_output=True)
+
+    # Slot clone
+    slot_dir = family / "slots" / "5"
+    slot_dir.mkdir(parents=True)
+
+    slot_project = slot_dir / "project"
+    subprocess.run(["git", "clone", str(orig_project), str(slot_project)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=slot_project, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=slot_project, check=True)
+    subprocess.run(["git", "-C", str(slot_project), "checkout", "-b", "issue-60-feature"],
+                   check=True, capture_output=True)
+    (slot_project / "feature.txt").write_text("wip")
+    subprocess.run(["git", "-C", str(slot_project), "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(slot_project), "commit", "-m", "WIP: feature"],
+                   check=True, capture_output=True)
+
+    slot_workspace = slot_dir / "work"
+    subprocess.run(["git", "clone", str(orig_workspace), str(slot_workspace)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=slot_workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=slot_workspace, check=True)
+    subprocess.run(["git", "-C", str(slot_workspace), "checkout", "-b", "issue-60-feature"],
+                   check=True, capture_output=True)
+    (slot_workspace / "design").mkdir(exist_ok=True)
+
+    result = subprocess.run(
+        ["python3", str(PAUSE_EXEC), "push-and-stack",
+         str(slot_workspace), str(slot_project),
+         "branch=issue-60-feature", "issue=60", "base-branch=main"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "STACKED=yes" in result.stdout
+
+    # The branch must reach the bare remote (GitHub) via the original
+    github_branches = subprocess.run(
+        ["git", "--git-dir", str(proj_remote), "branch", "--list", "issue-60-feature"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert "issue-60-feature" in github_branches, \
+        "Branch not pushed to GitHub remote — two-hop push missing"
+
+
 def test_pause_outside_slot_has_no_slot_field(workspace_with_stack, clean_git_repo):
     """When pausing from a normal (non-slot) repo, no slot field should appear."""
     workspace = workspace_with_stack
