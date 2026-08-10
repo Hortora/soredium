@@ -201,16 +201,31 @@ def _land_slot(slot_dir: Path, repos: list[str], branch: str,
     max_attempts = 3
 
     for attempt in range(1, max_attempts + 1):
+        progress = read_progress(progress_path)
         push_failed = False
 
+        # Stage 1: Re-rebase all un-completed repos in slot clones.
+        # On retry after concurrent push, the slot clone's branch must be
+        # rebased onto the new origin/main. Safe for already-pushed repos
+        # (git skips already-applied patches).
         for repo_name in repos:
-            if progress.get(repo_name) == "stamped":
-                sha_line = [
-                    line for line in progress_path.read_text().splitlines()
-                    if line.startswith(f"{repo_name}=pushed:")
-                ]
-                if sha_line:
-                    landed_shas[repo_name] = sha_line[0].split(":", 1)[1].strip()
+            repo_progress = progress.get(repo_name, "")
+            if repo_progress.startswith("stamped:"):
+                continue
+            slot_repo = str(slot_dir / repo_name)
+            git(slot_repo, "fetch", "origin", base_branch)
+            rebase_r = git(slot_repo, "rebase", f"origin/{base_branch}")
+            if rebase_r.returncode != 0:
+                git(slot_repo, "rebase", "--abort")
+                print("ERROR=REBASE_CONFLICT")
+                print(f"ERROR_DETAIL=rebase conflict in {repo_name}")
+                return 1
+
+        # Stage 2: Push, merge, stamp per repo.
+        for repo_name in repos:
+            repo_progress = progress.get(repo_name, "")
+            if repo_progress.startswith("stamped:"):
+                landed_shas[repo_name] = repo_progress.split(":", 1)[1].strip()
                 continue
 
             slot_repo = str(slot_dir / repo_name)
@@ -251,7 +266,7 @@ def _land_slot(slot_dir: Path, repos: list[str], branch: str,
                 git(slot_repo, "commit", "--allow-empty", "-m",
                     f"chore: branch closed — landed as {sha} on {base_branch}")
                 git(slot_repo, "push", "origin", branch, "--force-with-lease")
-            write_progress(progress_path, repo_name, "stamped")
+            write_progress(progress_path, repo_name, f"stamped:{sha}")
 
         if push_failed:
             if attempt < max_attempts:

@@ -727,6 +727,96 @@ class TestLandSlotMode:
         assert "iot:" in content
         assert f"branch={s['branch']}" in content
 
+    def test_slot_land_retries_on_concurrent_push(self, tmp_path: Path) -> None:
+        """If GitHub main advances after rebase but before land, retry must
+        re-rebase the slot clone's branch and succeed."""
+        s = self._create_slot_layout(tmp_path)
+
+        # Simulate a concurrent push to GitHub: clone from the bare remote,
+        # commit, push — advancing origin/main beyond what the slot knows.
+        other = tmp_path / "other"
+        subprocess.run(
+            ["git", "clone", str(s['remotes']['engine']), str(other)],
+            capture_output=True, check=True,
+        )
+        _git(other, "config", "user.email", "other@test.com")
+        _git(other, "config", "user.name", "Other")
+        (other / "concurrent.txt").write_text("concurrent work\n")
+        _git(other, "add", "concurrent.txt")
+        _git(other, "commit", "-m", "feat: concurrent work")
+        _git(other, "push", "origin", "main")
+
+        result = _run_execute(
+            "land",
+            f"project={s['slot_repos']['engine']}",
+            f"branch={s['branch']}",
+            "base_branch=main",
+            f"workspace={s['slot_ws']}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "LANDED=yes" in result.stdout
+        assert "PUSH_RETRY" in result.stdout, "Expected retry due to concurrent push"
+
+        # Both commits must be on GitHub main
+        remote_log = subprocess.run(
+            ["git", "--git-dir", str(s['remotes']['engine']), "log", "--oneline", "main"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "feat: work in engine" in remote_log
+        assert "feat: concurrent work" in remote_log
+
+    def test_slot_land_crash_recovery_preserves_shas(self, tmp_path: Path) -> None:
+        """If progress has stamped repos from a prior run, their SHAs must
+        appear in the .landed marker."""
+        s = self._create_slot_layout(tmp_path, repo_names=["engine", "iot"])
+
+        # Simulate a prior partial run: engine was fully processed
+        slot_engine = str(s['slot_repos']['engine'])
+        orig_engine = str(s['originals']['engine'])
+        subprocess.run(
+            ["git", "-C", slot_engine, "push", "origin", s['branch'], "--force-with-lease"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", orig_engine, "fetch", "origin"],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", orig_engine, "merge", "--ff-only", s['branch']],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", orig_engine, "push", "origin", "main"],
+            capture_output=True, check=True,
+        )
+        engine_sha = _git(Path(orig_engine), "rev-parse", "HEAD")
+
+        # Stamp in slot clone
+        _git(Path(slot_engine), "commit", "--allow-empty", "-m",
+             f"chore: branch closed — landed as {engine_sha} on main")
+        _git(Path(slot_engine), "push", "origin", s['branch'], "--force-with-lease")
+
+        # Write progress as if a prior run stamped engine (with SHA preserved)
+        progress_path = s['slot_dir'] / ".execute-progress"
+        progress_path.write_text(f"engine=stamped:{engine_sha}\n")
+
+        result = _run_execute(
+            "land",
+            f"project={s['slot_repos']['iot']}",
+            f"branch={s['branch']}",
+            "base_branch=main",
+            f"workspace={s['slot_ws']}",
+        )
+        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert "LANDED=yes" in result.stdout
+
+        landed = s['slot_dir'] / ".landed"
+        assert landed.exists()
+        content = landed.read_text()
+        assert f"engine:{engine_sha}" in content, \
+            f"engine SHA not recovered in .landed marker: {content}"
+        assert "iot:" in content
+
     def test_slot_land_originals_remain_on_main(self, tmp_path: Path) -> None:
         """After landing, original repos must still be on main."""
         s = self._create_slot_layout(tmp_path, repo_names=["engine", "iot"])
