@@ -479,3 +479,36 @@ class TestScanImageRefs:
 
         result = scan(tmp_path)
         assert result["specs"].count("specs/shared.png") == 1
+
+
+class TestDocsAltPaths:
+    """All docs-prefix artifact types are discoverable via alt_paths."""
+
+    def test_finds_blog_in_docs_blog(self, tmp_path):
+        (tmp_path / "docs" / "blog").mkdir(parents=True)
+        (tmp_path / "docs" / "blog" / "entry.md").write_text("# Blog\n")
+        result = scan(tmp_path)
+        assert "docs/blog/entry.md" in result["blog"]
+
+    def test_finds_specs_in_docs_specs(self, tmp_path):
+        (tmp_path / "docs" / "specs").mkdir(parents=True)
+        (tmp_path / "docs" / "specs" / "design.md").write_text("# Spec\n")
+        result = scan(tmp_path)
+        assert "docs/specs/design.md" in result["specs"]
+
+    def test_finds_adr_in_docs_adr(self, tmp_path):
+        """ADR alt_path already existed — regression guard."""
+        (tmp_path / "docs" / "adr").mkdir(parents=True)
+        (tmp_path / "docs" / "adr" / "0001-test.md").write_text("# ADR\n")
+        result = scan(tmp_path)
+        assert "docs/adr/0001-test.md" in result["adr"]
+
+    def test_merges_root_and_docs_entries(self, tmp_path):
+        """Entries from both root and docs/ locations are merged."""
+        (tmp_path / "blog").mkdir()
+        (tmp_path / "blog" / "root-entry.md").write_text("# Root\n")
+        (tmp_path / "docs" / "blog").mkdir(parents=True)
+        (tmp_path / "docs" / "blog" / "docs-entry.md").write_text("# Docs\n")
+        result = scan(tmp_path)
+        assert "blog/root-entry.md" in result["blog"]
+        assert "docs/blog/docs-entry.md" in result["blog"]

@@ -27,27 +27,32 @@ using the MADR (Markdown Any Decision Records) format. ADRs live in
 
 ### Step 1 — Resolve write destination
 
-Before checking existing ADRs, resolve where to write using the three-layer routing cascade:
+Resolve paths and routing:
 
-```bash
-# Layer 3: workspace CLAUDE.md per-artifact override
-grep -A 20 "^## Routing$" CLAUDE.md 2>/dev/null | grep "^| adr"
-
-# Layer 2: global default
-grep -A 5 "^## Routing$" "$HOME/.claude/CLAUDE.md" 2>/dev/null | grep "Default destination"
-
-# Layer 1: built-in default → project (docs/adr/)
-```
-
-Resolve paths — run the bundled context script:
 ```bash
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-Use `WORKSPACE` and `PROJECT` from the output as concrete strings in all subsequent commands.
+Use `WORKSPACE` and `PROJECT` from the output as concrete strings.
 
-| Resolved destination | Write to | git -C path |
-|----------------------|----------|-------------|
+Resolve routing (workspace vs project):
+
+```bash
+python3 ~/.claude/skills/project/routing.py ~/.claude/CLAUDE.md <WORKSPACE>/CLAUDE.md adr
+```
+
+Read `DESTINATION` from output (`workspace` or `project`).
+
+Resolve authoring directory:
+
+```bash
+python3 ~/.claude/skills/write-content/resolve_artifact_dir.py adr <WORKSPACE> <WORKSPACE>/CLAUDE.md
+```
+
+Read `ARTIFACT_DIR` from output.
+
+| Routing destination | Write to | git -C path |
+|---------------------|----------|-------------|
 | `workspace` | `$WORKSPACE/adr/` | `$WORKSPACE` |
 | `project` (default) | `$PROJECT/docs/adr/` | `$PROJECT` |
 

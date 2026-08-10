@@ -199,3 +199,22 @@ class TestBadArguments:
         f.write_text("---\ntitle: A\ndate: 2026-01-01\n---\n")
         result = _run([str(f), "extra_arg"])
         assert result.returncode != 0
+
+
+class TestDocsSubdirectory:
+    """Verify update_blog_index works when blog is under docs/blog/."""
+
+    def test_creates_index_in_docs_blog(self, tmp_path):
+        blog_dir = tmp_path / "docs" / "blog"
+        blog_dir.mkdir(parents=True)
+        blog = _make_blog_file(
+            blog_dir, "2026-08-10-mdp01-test.md", "Docs Blog Test", "2026-08-10"
+        )
+
+        result = _run([str(blog), "--summary", "Test in docs/blog"])
+        assert result.returncode == 0
+
+        index = blog_dir / "INDEX.md"
+        assert index.exists()
+        assert "2026-08-10-mdp01-test.md" in index.read_text()
+        assert not (tmp_path / "INDEX.md").exists()

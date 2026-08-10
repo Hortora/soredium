@@ -80,10 +80,10 @@ Don't cap it; don't pad it. End when the point is made.
 **Resolve blog directory:**
 
 ```bash
-python3 ~/.claude/skills/write-content/resolve_blog_dir.py <WORKSPACE> <CLAUDE_MD_PATH> [slot_root=<SLOT_ROOT>]
+python3 ~/.claude/skills/write-content/resolve_artifact_dir.py blog <WORKSPACE> <CLAUDE_MD_PATH> [slot_root=<SLOT_ROOT>]
 ```
 
-Read `BLOG_DIR` from output. Resolve to an absolute path.
+Read `ARTIFACT_DIR` from output. Resolve to an absolute path.
 
 **Load voice:** check `~/claude-workspace/writing-styles/` for personal
 style files. Load personal style or fall back to `voice/common-voice.md`.

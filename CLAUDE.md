@@ -794,6 +794,8 @@ filtering or dropping commits that touch these paths.
 |------|------------|
 | `CLAUDE.md` | Project conventions (build, test, naming) |
 | `docs/adr/` | Architecture decision records |
+| `docs/blog/` | Project diary / blog entries |
+| `docs/specs/` | Design specifications |
 | `docs/protocols/` | Standing rules for taxonomy and conventions |
 | `engine/` | Quarkus/Java garden engine |
 | `registry/` | Ecosystem mining project registry |
