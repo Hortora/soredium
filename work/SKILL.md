@@ -96,9 +96,22 @@ If the user invoked `work` without an issue number and `ROUTE=start`:
    Pick a number, type an issue #, or describe what you want to work on.
    ```
 
-4. If no enrichment data exists yet (all scores are 0), skip silently —
-   the feature bootstraps through work-end trajectory captures over time.
-   Route directly to work-start.
+4. If no enrichment data exists yet (all scores are 0) or what-next
+   returns no results, check HANDOFF.md for a What's Next section:
+
+   a. Read `$HANDOFF_PATH` (from router output) or `$WORKSPACE/HANDOFF.md`
+   b. Parse the What's Next table (if present)
+   c. If items found, present them:
+      ```
+      From last session's handover:
+        1. Layer 4a: Trust & routing (M / Med)
+        2. Layer 4b: CBR & incident lifecycle (M / High)
+
+      Pick a number, type an issue #, or describe what you want to work on.
+      ```
+   d. If the user picks an item without an issue number, route to work-start
+      which invokes issue-workflow Phase 2 to create the issue.
+   e. If no HANDOFF.md or no What's Next section, route directly to work-start.
 
 5. If the user specified an issue number in their `work` invocation,
    skip this step entirely — route directly to work-start with the
