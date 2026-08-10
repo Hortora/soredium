@@ -76,6 +76,26 @@ this state with additional tool calls.
 
 If the user invoked `work` without an issue number and `ROUTE=start`:
 
+0. **Active branch detection from HANDOFF.md:**
+   Read HANDOFF.md from the workspace (check working tree, then
+   `git show main:HANDOFF.md`). If the Last Session or Immediate Next
+   Step section references a branch name (e.g. `Branch: issue-NNN-slug`
+   or `run /work to continue #NNN`), check if that branch exists locally:
+   ```bash
+   git -C $PROJECT branch --list <branch-name>
+   ```
+   If the branch exists and is not stamped closed:
+   ```
+   HANDOFF.md references active branch: <branch-name> (#NNN)
+     1. switch — check out and continue on that branch
+     2. new — start something else
+
+   Default: switch
+   ```
+   - **switch** → checkout both repos to `<branch-name>`, route to
+     Step 4 `continue` action
+   - **new** → proceed to step 1 below (what-next / start new work)
+
 1. Refresh the GitHub cache:
    ```bash
    python3 scripts/enrichment.py refresh --repo $OWNER_REPO
