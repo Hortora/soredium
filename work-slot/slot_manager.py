@@ -32,6 +32,14 @@ try:
 except ImportError:
     _wl = None
 
+_work_end = Path(__file__).parent.parent / "work-end"
+if _work_end.exists():
+    sys.path.insert(0, str(_work_end))
+try:
+    from common import detect_topology as _detect_topology
+except ImportError:
+    _detect_topology = None
+
 
 _IDE_ARTIFACTS = {".idea", ".run", ".settings", ".project", ".classpath", ".vscode"}
 
@@ -435,6 +443,8 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             sys.exit(1)
         _exclude_symlinks(clone_dest)
         _symlink_gitignored_assets(repo_path, clone_dest)
+        configure_slot_remotes(clone_dest, repo_path)
+        configure_update_instead(repo_path)
 
         setup_maven_config(clone_dest, m2_dir)
 
@@ -463,6 +473,8 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                     print(f"ERROR=workspace_branch_failed ws={ws_name}")
                     sys.exit(1)
                 _exclude_symlinks(ws_slot_dir)
+                configure_slot_remotes(ws_slot_dir, ws_source)
+                configure_update_instead(ws_source)
                 ws_created[ws_key] = ws_slot_dir
 
             wksp_target = repo_path / "wksp"
@@ -676,6 +688,54 @@ def get_slot_repos(slot_dir: Path) -> list[str]:
     ]
 
 
+def get_all_slot_repos(slot_dir: Path) -> list[str]:
+    """All git repos in the slot — project + workspace."""
+    return [
+        d.name for d in sorted(slot_dir.iterdir())
+        if d.is_dir() and (d / ".git").exists()
+        and d.name not in (".m2", "attic")
+    ]
+
+
+def configure_slot_remotes(clone_path: Path, original_path: Path) -> dict[str, str]:
+    """Reconfigure clone remotes: local=clone-source, origin=fork, upstream=blessed."""
+    if _detect_topology is None:
+        return {"origin": "", "upstream": "", "local": str(original_path)}
+
+    fork_remote, blessed_remote = _detect_topology(str(original_path))
+    if not fork_remote:
+        return {"origin": "", "upstream": "", "local": str(original_path)}
+
+    rc, fork_url, _ = run_cmd(
+        ["git", "-C", str(original_path), "remote", "get-url", fork_remote])
+    if rc != 0:
+        return {"origin": "", "upstream": "", "local": str(original_path)}
+    fork_url = fork_url.strip()
+
+    run_cmd(["git", "-C", str(clone_path), "remote", "rename", "origin", "local"])
+    run_cmd(["git", "-C", str(clone_path), "remote", "add", "origin", fork_url])
+    run_cmd(["git", "-C", str(clone_path), "fetch", "origin"])
+    run_cmd(["git", "-C", str(clone_path), "branch",
+             "--set-upstream-to=origin/main", "main"])
+
+    upstream_url = ""
+    if blessed_remote:
+        rc, blessed_url, _ = run_cmd(
+            ["git", "-C", str(original_path), "remote", "get-url", blessed_remote])
+        if rc == 0:
+            upstream_url = blessed_url.strip()
+            run_cmd(["git", "-C", str(clone_path), "remote", "add",
+                     "upstream", upstream_url])
+
+    return {"origin": fork_url, "upstream": upstream_url, "local": str(original_path)}
+
+
+def configure_update_instead(original_path: Path) -> None:
+    """Set receive.denyCurrentBranch=updateInstead on original repo."""
+    run_cmd(["git", "-C", str(original_path), "config",
+             "receive.denyCurrentBranch", "updateInstead"])
+
+
 def parse_slot_md(slot_dir: Path) -> dict:
     slot_md = slot_dir / ".slot"
     if not slot_md.exists():
@@ -790,13 +850,14 @@ def resolve_original_repo(repo_path: Path) -> Path:
                 common = (repo_path / common).resolve()
             return common.parent
 
-    rc, url, _ = run_cmd(
-        ["git", "-C", str(repo_path), "remote", "get-url", "origin"]
-    )
-    if rc == 0:
-        origin_path = Path(url.strip())
-        if origin_path.is_dir():
-            return origin_path.resolve()
+    for remote in ("local", "origin"):
+        rc, url, _ = run_cmd(
+            ["git", "-C", str(repo_path), "remote", "get-url", remote]
+        )
+        if rc == 0:
+            origin_path = Path(url.strip())
+            if origin_path.is_dir():
+                return origin_path.resolve()
 
     return repo_path
 
@@ -906,178 +967,202 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         print("ERROR=no_branch_in_marker")
         return 1
 
-    repos = get_slot_repos(slot_dir)
-    if not repos:
+    all_repos = get_all_slot_repos(slot_dir)
+    if not all_repos:
         print("ERROR=no_repos_in_slot")
         return 1
 
-    # Pre-flight: verify every original repo is on main with a clean worktree
-    # before touching anything.  If any check fails, stop immediately — the
-    # user needs to fix the original repo state first.
+    # Preflight: check originals for dirty worktree on main.
+    # No "must be on main" requirement — updateInstead handles checked-out main,
+    # and pushing to a non-checked-out branch works by default.
     print("STAGE=preflight")
     preflight_ok = True
-    for repo_name in repos:
+    for repo_name in all_repos:
         slot_repo = slot_dir / repo_name
         original = resolve_original_repo(slot_repo)
-        rc, cur_branch, _ = run_cmd(
-            ["git", "-C", str(original), "branch", "--show-current"]
-        )
-        cur_branch = cur_branch.strip() if rc == 0 else ""
-        if cur_branch != "main":
-            print(f"ERROR=not_on_main repo={repo_name} branch={cur_branch} path={original}")
+        if not original.is_dir():
+            print(f"ERROR=original_not_found repo={repo_name} path={original}")
             preflight_ok = False
+            continue
         rc, status_out, _ = run_cmd(
-            ["git", "-C", str(original), "status", "--porcelain"]
-        )
+            ["git", "-C", str(original), "status", "--porcelain"])
         if rc == 0 and status_out.strip():
-            print(f"ERROR=dirty_worktree repo={repo_name} path={original}")
-            preflight_ok = False
+            rc2, cur_branch, _ = run_cmd(
+                ["git", "-C", str(original), "branch", "--show-current"])
+            cur_branch = cur_branch.strip() if rc2 == 0 else ""
+            if cur_branch == "main":
+                print(f"ERROR=dirty_worktree repo={repo_name} path={original}")
+                preflight_ok = False
     if not preflight_ok:
         print("STAGE=preflight STATUS=fail")
         return 1
     print("STAGE=preflight STATUS=pass")
 
-    progress_file = slot_dir / ".merge-progress"
-    pushed_repos: set[str] = set()
-    if progress_file.exists():
-        for line in progress_file.read_text().splitlines():
-            if "=pushed:" in line:
-                pushed_repos.add(line.split("=")[0])
-
+    # Phase 1: Rebase all feature branches
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
         print(f"STAGE=rebase ATTEMPT={attempt}")
-        for repo_name in repos:
+        rebase_failed = False
+        for repo_name in all_repos:
             slot_repo = slot_dir / repo_name
-            run_cmd(["git", "-C", str(slot_repo), "fetch", "origin", "main"])
-            rc, _, _ = run_cmd(["git", "-C", str(slot_repo), "rebase", "origin/main"])
+            rc, _, _ = run_cmd(
+                ["git", "-C", str(slot_repo), "remote", "get-url", "upstream"])
+            rebase_remote = "upstream" if rc == 0 else "origin"
+            run_cmd(["git", "-C", str(slot_repo), "fetch", rebase_remote, "main"])
+            rc, _, _ = run_cmd(
+                ["git", "-C", str(slot_repo), "rebase", f"{rebase_remote}/main"])
             if rc != 0:
                 run_cmd(["git", "-C", str(slot_repo), "rebase", "--abort"])
-                print("STAGE=rebase STATUS=fail")
                 print(f"ERROR=conflict repo={repo_name}")
-                return 1
-        print("STAGE=rebase STATUS=pass")
-
-        print(f"STAGE=push ATTEMPT={attempt}")
-        push_failed = False
-        landed_shas: dict[str, str] = {}
-
-        for repo_name in repos:
-            if repo_name in pushed_repos:
-                for line in progress_file.read_text().splitlines():
-                    if line.startswith(f"{repo_name}=pushed:"):
-                        parts = line.split(":", 1)
-                        if len(parts) == 2:
-                            landed_shas[repo_name] = parts[1]
-                continue
-
-            slot_repo = slot_dir / repo_name
-            original = resolve_original_repo(slot_repo)
-            if not is_worktree(slot_repo):
-                run_cmd(["git", "-C", str(slot_repo), "push", "origin", branch, "--force-with-lease"])
-            rc, _, _ = run_cmd(["git", "-C", str(original), "fetch", "origin", "main"])
-            if rc != 0:
-                push_failed = True
-                print(f"WARN=fetch_failed repo={repo_name} attempt={attempt}")
+                rebase_failed = True
                 break
-            rc, _, _ = run_cmd(["git", "-C", str(original), "rebase", "origin/main"])
-            if rc != 0:
-                push_failed = True
-                print(f"WARN=rebase_failed repo={repo_name} attempt={attempt}")
-                break
-            rc, _, _ = run_cmd(["git", "-C", str(original), "merge", "--ff-only", branch])
-            if rc != 0:
-                push_failed = True
-                print(f"WARN=ff_only_failed repo={repo_name} attempt={attempt}")
-                break
-            rc, _, _ = run_cmd(["git", "-C", str(original), "push", "origin", "main"])
-            if rc != 0:
-                push_failed = True
-                print(f"WARN=push_failed repo={repo_name} attempt={attempt}")
-                break
-
-            rc, sha, _ = run_cmd(["git", "-C", str(original), "rev-parse", "HEAD"])
-            sha = sha.strip() if rc == 0 else "unknown"
-            landed_shas[repo_name] = sha
-            with open(progress_file, "a") as f:
-                f.write(f"{repo_name}=pushed:{sha}\n")
-            pushed_repos.add(repo_name)
-
-        if push_failed:
+        if rebase_failed:
             if attempt < max_attempts:
                 continue
-            print("STAGE=push STATUS=fail")
-            print("ERROR=retry_exhausted")
+            print("STAGE=rebase STATUS=fail")
             return 1
+        print("STAGE=rebase STATUS=pass")
+        break
 
-        if progress_file.exists():
-            progress_file.unlink()
-        shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
-        (slot_dir / ".landed").write_text(
-            f"branch={branch}\n"
-            f"repos={','.join(repos)}\n"
-            f"landed_shas={shas_str}\n"
-            f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
-        )
+    # Phase 2: Merge, push, verify (per repo)
+    print("STAGE=push")
+    results: dict[str, tuple[str, str]] = {}
+    landed_shas: dict[str, str] = {}
 
-        for repo_name in repos:
-            sha = landed_shas.get(repo_name, "unknown")
-            slot_repo = slot_dir / repo_name
-            if not slot_repo.is_dir() or not (slot_repo / ".git").exists():
+    for repo_name in all_repos:
+        slot_repo = slot_dir / repo_name
+
+        run_cmd(["git", "-C", str(slot_repo), "checkout", "main"])
+        rc, _, _ = run_cmd(
+            ["git", "-C", str(slot_repo), "fetch", "origin", "main"])
+        if rc == 0:
+            rc_ff, _, _ = run_cmd(
+                ["git", "-C", str(slot_repo), "merge", "--ff-only", "origin/main"])
+            if rc_ff != 0:
+                run_cmd(["git", "-C", str(slot_repo), "merge", "origin/main", "--no-edit"])
+
+        rc, _, _ = run_cmd(
+            ["git", "-C", str(slot_repo), "merge", "--ff-only", branch])
+        if rc != 0:
+            rc2, _, stderr = run_cmd(
+                ["git", "-C", str(slot_repo), "merge", branch, "--no-edit"])
+            if rc2 != 0:
+                results[repo_name] = ("merge_failed", "")
+                print(f"ERROR=merge_failed repo={repo_name} stderr={stderr.strip()}")
                 continue
-            run_cmd([
-                "git", "-C", str(slot_repo), "commit", "--allow-empty",
-                "-m", f"chore: branch closed — landed as {sha} on main",
-            ])
-            if not is_worktree(slot_repo):
-                run_cmd(["git", "-C", str(slot_repo), "push", "origin", branch, "--force-with-lease"])
 
-        for sub in slot_dir.iterdir():
-            if not sub.is_dir() or not (sub / ".git").exists():
+        rc, sha_out, _ = run_cmd(
+            ["git", "-C", str(slot_repo), "rev-parse", "main"])
+        slot_sha = sha_out.strip() if rc == 0 else "unknown"
+
+        rc, _, stderr = run_cmd(
+            ["git", "-C", str(slot_repo), "push", "origin", "main"])
+        if rc != 0:
+            results[repo_name] = ("github_failed", slot_sha)
+            print(f"WARN=github_push_failed repo={repo_name} err={stderr.strip()}")
+            continue
+
+        rc, ls_out, _ = run_cmd(
+            ["git", "-C", str(slot_repo), "ls-remote", "origin", "main"])
+        github_sha = ls_out.split()[0] if rc == 0 and ls_out.strip() else ""
+        if github_sha != slot_sha:
+            results[repo_name] = ("github_verify_failed", slot_sha)
+            print(f"WARN=github_verify_failed repo={repo_name} expected={slot_sha} got={github_sha}")
+            continue
+
+        rc_has_local, _, _ = run_cmd(
+            ["git", "-C", str(slot_repo), "remote", "get-url", "local"])
+        if rc_has_local == 0:
+            rc, _, stderr = run_cmd(
+                ["git", "-C", str(slot_repo), "push", "local", "main"])
+            if rc != 0:
+                results[repo_name] = ("local_failed", slot_sha)
+                print(f"WARN=local_push_failed repo={repo_name} err={stderr.strip()}")
+                landed_shas[repo_name] = slot_sha
                 continue
-            if sub.name.startswith("work") or sub.name.startswith("work-"):
-                ws_sha_result = subprocess.run(
-                    ["git", "-C", str(sub), "rev-parse", "HEAD"],
-                    capture_output=True, text=True, timeout=10,
-                )
-                ws_sha = ws_sha_result.stdout.strip() if ws_sha_result.returncode == 0 else "unknown"
-                run_cmd([
-                    "git", "-C", str(sub), "commit", "--allow-empty",
-                    "-m", f"chore: branch closed — landed as {ws_sha} on main",
-                ])
-                if not is_worktree(sub):
-                    run_cmd(["git", "-C", str(sub), "push", "origin", branch, "--force-with-lease"])
 
-        if _wl:
+            original = resolve_original_repo(slot_repo)
+            rc, local_sha_out, _ = run_cmd(
+                ["git", "-C", str(original), "rev-parse", "main"])
+            local_sha = local_sha_out.strip() if rc == 0 else ""
+            if local_sha != slot_sha:
+                results[repo_name] = ("local_verify_failed", slot_sha)
+                print(f"WARN=local_verify_failed repo={repo_name}")
+                landed_shas[repo_name] = slot_sha
+                continue
+
+        results[repo_name] = ("ok", slot_sha)
+        landed_shas[repo_name] = slot_sha
+
+    github_failures = [r for r, (status, _) in results.items()
+                       if status in ("github_failed", "github_verify_failed", "merge_failed")]
+    if github_failures:
+        print("STAGE=push STATUS=fail")
+        for repo_name in all_repos:
+            status, sha = results.get(repo_name, ("unknown", ""))
+            icon = "FAIL" if status in ("github_failed", "github_verify_failed", "merge_failed") \
+                   else "WARN" if "local" in status else "OK"
+            print(f"RESULT={repo_name} STATUS={status} SHA={sha} ICON={icon}")
+        print(f"ERROR=github_push_incomplete failed={','.join(github_failures)}")
+        return 1
+
+    shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
+    (slot_dir / ".landed").write_text(
+        f"branch={branch}\n"
+        f"repos={','.join(all_repos)}\n"
+        f"landed_shas={shas_str}\n"
+        f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+    )
+
+    # Phase 3: Stamp all feature branches
+    for repo_name in all_repos:
+        slot_repo = slot_dir / repo_name
+        if not slot_repo.is_dir() or not (slot_repo / ".git").exists():
+            continue
+        sha = landed_shas.get(repo_name, "unknown")
+        run_cmd(["git", "-C", str(slot_repo), "checkout", branch])
+        run_cmd([
+            "git", "-C", str(slot_repo), "commit", "--allow-empty",
+            "-m", f"chore: branch closed — landed as {sha} on main",
+        ])
+        run_cmd(["git", "-C", str(slot_repo), "push", "origin", branch, "--force-with-lease"])
+
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            _wl.record_slot_merge(
+                _conn, slot_num, str(family_root),
+                landed_shas=landed_shas,
+            )
+            _conn.close()
+        except Exception:
+            pass
+
+    if _slot_is_epic:
+        epic_num = int(slot_info.get("issue", "0"))
+        epic_repo = slot_info.get("issue_repo", "")
+        covers_str = slot_info.get("covers", "")
+        completed = [int(x) for x in covers_str.split(",") if x.strip()]
+        if epic_num and epic_repo and completed:
             try:
-                _conn = _wl.connect()
-                _wl.record_slot_merge(
-                    _conn, slot_num, str(family_root),
-                    landed_shas=landed_shas,
-                )
-                _conn.close()
-            except Exception:
-                pass
-
-        if _slot_is_epic:
-            epic_num = int(slot_info.get("issue", "0"))
-            epic_repo = slot_info.get("issue_repo", "")
-            covers_str = slot_info.get("covers", "")
-            completed = [int(x) for x in covers_str.split(",") if x.strip()]
-            if epic_num and epic_repo and completed:
-                try:
-                    from epic_manager import tick_epic_checkboxes
-                    ok = tick_epic_checkboxes(epic_repo, epic_num, completed)
-                    if not ok:
-                        print("WARN=epic_tick_failed")
-                except Exception:
+                from epic_manager import tick_epic_checkboxes
+                ok = tick_epic_checkboxes(epic_repo, epic_num, completed)
+                if not ok:
                     print("WARN=epic_tick_failed")
+            except Exception:
+                print("WARN=epic_tick_failed")
 
-        print("STAGE=push STATUS=pass")
-        print(f"LANDED_SHAS={shas_str}")
-        return 0
-
-    return 1
+    # Phase 4: Report propagation summary
+    print("STAGE=push STATUS=pass")
+    for repo_name in all_repos:
+        status, sha = results.get(repo_name, ("unknown", ""))
+        icon = "OK" if status == "ok" else "WARN" if "local" in status else "FAIL"
+        print(f"RESULT={repo_name} STATUS={status} SHA={sha} ICON={icon}")
+    ok_count = sum(1 for s, _ in results.values() if s == "ok")
+    warn_count = sum(1 for s, _ in results.values() if "local" in s)
+    print(f"SUMMARY=ok:{ok_count} warn:{warn_count} fail:0")
+    print(f"LANDED_SHAS={shas_str}")
+    return 0
 
 
 def _claude_project_matches(proj_name: str, slot_path_encoded: str) -> bool:
