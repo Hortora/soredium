@@ -761,3 +761,36 @@ class TestCLI:
         sys.argv = ["work_router.py"]
         rc = work_router.main()
         assert rc == 1
+
+
+class TestHandoffSubstringCollision:
+    """Verify word-boundary matching prevents #42 matching #421."""
+
+    def _init_workspace(self, path, handoff_content):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "-C", str(path), "init"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "T"], capture_output=True)
+        (path / "HANDOFF.md").write_text(handoff_content)
+        subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-m", "init"], capture_output=True)
+
+    def test_issue_42_does_not_match_421(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        self._init_workspace(workspace, "## Last Session\nWorked on #421 feature.\n")
+        assert work_router._handoff_references_branch(workspace, "issue-42-test") is False
+
+    def test_issue_42_matches_42(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        self._init_workspace(workspace, "## Last Session\nWorked on #42 feature.\n")
+        assert work_router._handoff_references_branch(workspace, "issue-42-test") is True
+
+    def test_issue_42_matches_42_at_end_of_line(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        self._init_workspace(workspace, "## Last Session\nClosed #42\n")
+        assert work_router._handoff_references_branch(workspace, "issue-42-test") is True
+
+    def test_issue_42_matches_42_with_punctuation(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        self._init_workspace(workspace, "## Last Session\nFixed #42, deployed.\n")
+        assert work_router._handoff_references_branch(workspace, "issue-42-test") is True

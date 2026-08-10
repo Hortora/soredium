@@ -1,9 +1,11 @@
 ---
 name: work-resume
 description: >
-  Use when returning to a paused branch — user says "work-resume", "resume",
-  or "go back to that branch". Invoked from main to restore a previously
-  paused work session. Handles multiple paused branches via stack.
+  Use when returning to a paused branch from the pause stack — user says
+  "work-resume", "resume", or "go back to that branch". Pause-stack
+  restoration only, not general branch continuation (use "work continue"
+  for that). Invoked from main to restore a previously paused work session.
+  Handles multiple paused branches via stack.
 ---
 
 # work-resume

@@ -20,7 +20,8 @@ description: >
 |-----------|-------|
 | Branch is **done** — closing, merging, pushing | `work-end` (includes full wrap + HANDOFF.md) |
 | Branch is **not done** — pausing mid-work, ending session | `handover` (this skill) |
-| **Resuming** from a previous session | `resume handover` (this skill, resume path) |
+| **Continuing** work on a branch | `work continue` (auto-reads HANDOFF.md) |
+| **Interrogating** the handover document directly | `resume handover` (this skill, resume path) |
 
 **work-end already writes HANDOFF.md** as its final step (Step 12). If you just ran
 work-end, do NOT invoke this skill — everything is already done.
@@ -28,6 +29,12 @@ work-end, do NOT invoke this skill — everything is already done.
 ---
 
 ## Resuming a Handover
+
+**Note:** `work continue` now auto-reads HANDOFF.md as part of its
+context loading. The explicit `resume handover` invocation below is
+for when you want to interrogate the handover document directly —
+ask questions about it, review past sessions, etc. — rather than
+simply continuing work.
 
 When the user says "resume handover" (or similar), the job is to **locate and read** HANDOFF.md, not create one.
 

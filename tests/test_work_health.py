@@ -387,3 +387,17 @@ class TestRunChecksIntegration:
         assert "WARNINGS=0" in captured.out
         assert "ERRORS=0" in captured.out
         assert captured.out.count("CHECK=") == 9
+
+    def test_entry_scope_includes_plan_state_when_owner_repo_provided(self, tmp_path, capsys):
+        project = _init_repo(tmp_path / "proj")
+        workspace = _init_repo(tmp_path / "wksp")
+        run_checks("entry", str(project), str(workspace), owner_repo="Hortora/soredium")
+        captured = capsys.readouterr()
+        assert "CHECK=plan_state" in captured.out
+
+    def test_entry_scope_excludes_plan_state_without_owner_repo(self, tmp_path, capsys):
+        project = _init_repo(tmp_path / "proj")
+        workspace = _init_repo(tmp_path / "wksp")
+        run_checks("entry", str(project), str(workspace))
+        captured = capsys.readouterr()
+        assert "CHECK=plan_state" not in captured.out

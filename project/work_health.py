@@ -380,11 +380,15 @@ WRAP_CHECKS = ENTRY_CHECKS + [
 ]
 
 
-def run_checks(scope, project, workspace, branch=None):
+def run_checks(scope, project, workspace, branch=None, owner_repo=None):
     if scope == "entry":
-        checks = ENTRY_CHECKS
+        checks = list(ENTRY_CHECKS)
+        if owner_repo:
+            checks.append(lambda p, w: check_plan_state(p, w, owner_repo))
     elif scope == "wrap":
-        checks = WRAP_CHECKS
+        checks = list(WRAP_CHECKS)
+        if owner_repo:
+            checks.append(lambda p, w: check_plan_state(p, w, owner_repo))
     elif scope == "close":
         result = check_close_gate(project, workspace, branch)
         print(result)
@@ -418,8 +422,10 @@ def main():
     parser.add_argument("--project", required=True)
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--branch", default=None)
+    parser.add_argument("--owner-repo", default=None)
     args = parser.parse_args()
-    run_checks(args.scope, args.project, args.workspace, args.branch)
+    run_checks(args.scope, args.project, args.workspace, args.branch,
+               owner_repo=args.owner_repo)
 
 
 if __name__ == "__main__":

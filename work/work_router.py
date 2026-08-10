@@ -42,7 +42,7 @@ def _handoff_references_branch(
     if result.returncode != 0:
         return False  # can't read — treat as first session
 
-    return f"#{issue_num}" in result.stdout
+    return bool(re.search(rf'#{issue_num}\b', result.stdout))
 
 
 def detect_state(current_branch: str, project_path: str,

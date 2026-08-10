@@ -287,6 +287,48 @@ class TestInvalidTransitions:
             transition(tmp_meta, "nonexistent_event")
 
 
+class TestWorkContinueTransition:
+    def test_active_work_continue_is_self_transition(self, tmp_path):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-1-test\nstate: active\n")
+        result = transition(meta, 'work_continue')
+        assert result.from_state == 'active'
+        assert result.new_state == 'active'
+        assert result.effects == []
+        assert result.post_commit_effects == []
+
+    def test_idle_work_continue_raises(self, tmp_path):
+        meta = tmp_path / ".meta"
+        with pytest.raises(InvalidTransition) as exc_info:
+            transition(meta, 'work_continue')
+        assert 'continue' in str(exc_info.value).lower()
+
+    def test_scaffolded_work_continue_raises(self, tmp_path):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-1-test\nstate: scaffolded\n")
+        with pytest.raises(InvalidTransition):
+            transition(meta, 'work_continue')
+
+    def test_paused_work_continue_raises(self, tmp_path):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-1-test\nstate: paused\n")
+        with pytest.raises(InvalidTransition) as exc_info:
+            transition(meta, 'work_continue')
+        assert 'resume' in str(exc_info.value).lower()
+
+    def test_transitioning_work_continue_raises(self, tmp_path):
+        meta = tmp_path / ".meta"
+        meta.write_text("branch: issue-1-test\nstate: transitioning\n")
+        with pytest.raises(InvalidTransition):
+            transition(meta, 'work_continue')
+
+    def test_can_transition_active_work_continue(self):
+        assert can_transition('active', 'work_continue') is True
+
+    def test_cannot_transition_idle_work_continue(self):
+        assert can_transition('idle', 'work_continue') is False
+
+
 # --- commit_transition ---
 
 

@@ -2,10 +2,11 @@
 name: work
 description: >
   Use when the user says "work", "work end", "work pause", "work resume",
-  or "work next" — detects current branch state and routes to the correct
-  work lifecycle skill automatically. "work" alone starts new work or
-  shows the pause stack. "work end" closes the branch. "work pause" saves
-  state. "work resume" shows the stack and returns to a paused branch.
+  "work continue", or "work next" — detects current branch state and routes
+  to the correct work lifecycle skill automatically. "work" alone starts new
+  work or shows the pause stack. "work end" closes the branch. "work pause"
+  saves state. "work continue" keeps working on the current branch.
+  "work resume" restores a paused branch from the stack.
   "work next" advances to the next issue in the .plan queue.
 ---
 
@@ -26,10 +27,27 @@ correct skill — developer says `work` to begin, `work-end` to close,
 | `work end` | → **work-end** immediately (no router needed) |
 | `work pause` | → **work-pause** immediately (no router needed) |
 | `work next` | → advance to next issue in `.plan` queue (Step 5) |
-| `work` / `work start` / `work resume` / `resume handover` / `resume` / `continue` | → run the router (Step 1b) |
+| `work resume` / `resume` | → **work-resume** (pause-stack only; error if on active branch — see Step 1c) |
+| `work continue` / `continue` | → run router → Step 4 `continue` action directly (error if on main — see Step 1c) |
+| `work` / `work start` | → run router (Step 1b) |
+| `resume handover` | → handover skill directly (manual invocation) |
 
 For `work end` and `work pause`, route immediately — no state
 detection needed.
+
+**Step 1c — Wrong-context error handling (D4)**
+
+Before dispatching to a sub-skill or executing an internal action,
+check for wrong-context invocations:
+
+| Invocation | Condition | Action |
+|------------|-----------|--------|
+| `work resume` | `ON_MAIN=no` (on feature branch, not paused) | Error: "Not paused — use `continue` to keep working, or `work pause` first." |
+| `work resume` | `ON_MAIN=yes` + `STACK_DEPTH=0` | Error: "Nothing to resume — pause stack is empty. Use `work` to start new work." |
+| `work continue` | `ON_MAIN=yes` + `STACK_DEPTH=0` | Error: "No active branch — use `work` to start new work." |
+| `work continue` | `ON_MAIN=yes` + `STACK_DEPTH>0` | Error: "No active branch — use `work` to start new work or `work resume` to return to a paused branch." |
+| `work continue` | `ROUTE=workspace_dirty` | Error: "Workspace is on a stale branch — run `work` to clean up." |
+| `work start` | `ROUTE=resume_branch` | Redirect → `continue` + note: "Already on `<branch>` — continuing." |
 
 **Step 1b — Run the router**
 
@@ -130,17 +148,13 @@ Present options based on the router output. The router has already
 determined slot context, queue state, pause stack depth, and handoff
 existence — do NOT re-derive these.
 
-If `HAS_HANDOFF=yes`:
-> 1. **resume** — read the last handover and continue where I left off
-
-If `HAS_HANDOFF=no`:
-> 1. **start** — begin working (first session on this branch)
+> 1. **continue** — keep working (loads context automatically)
 
 If `STACK_DEPTH > 0`:
-> 2. **switch** — you have <N> paused branch(es) — resume one instead
+> 2. **switch** — you have <N> paused branch(es) — restore one from stack
 
 If `HAS_PLAN=yes`:
-> N. **next** — mark current issue done, advance to next in `.plan` queue
+> N. **next** — mark current issue done, advance to next in queue
 
 Always present:
 > N+1. **end** — close this branch, merge, push, return to main
@@ -151,32 +165,38 @@ If `HAS_PLAN=yes` and queue has remaining items, annotate the end option:
 > N+2. **pause** — commit WIP, push to stack, switch to main
 > N+3. **wrap** — end session but keep branch open (write handover)
 
-**On resume (option 1 when `HAS_HANDOFF=yes`):**
+**On continue (option 1):**
 
-Read `$HANDOFF_PATH`.
-If `HAS_PLAN=yes`: read `.plan` at `$PLAN_PATH` for queue progress and
-active issue. Display:
-```
-Queue — Position $PLAN_POSITION
-Active issue: #$PLAN_ACTIVE_ISSUE
-```
-Set active issue for commit linkage (`Refs #$PLAN_ACTIVE_ISSUE`).
+**Lifecycle:** Fire `transition(meta_path, 'work_continue')` — validates
+branch is `active`, emits worklog event. No state change (self-transition).
 
-If `IN_SLOT=yes` and `HAS_PLAN=no`: read .slot for issue context.
+When `HAS_HANDOFF=yes` (subsequent session):
+1. Read `$HANDOFF_PATH` — summarise last session's narrative
+2. Run `work_health.py --scope entry --owner-repo $OWNER_REPO` — syncs `.plan` with GitHub, validates workspace state
+3. If `HAS_PLAN=yes`: read `.plan` at `$PLAN_PATH` for queue progress and
+   active issue. Display:
+   ```
+   Queue — Position $PLAN_POSITION
+   Active issue: #$PLAN_ACTIVE_ISSUE
+   ```
+   Set active issue for commit linkage (`Refs #$PLAN_ACTIVE_ISSUE`).
+4. If `IN_SLOT=yes` and `HAS_PLAN=no`: read .slot for issue context
+5. **Load design specs (mandatory):** Run work-start Step 3c — scan workspace
+   and project for specs, read them all
+6. **Done-detection auto-suggest (D3):** If `PLAN_ACTIVE_ISSUE` is empty after
+   health sync (issue was marked complete), suggest next action:
+   - If remaining items in queue: "Current issue complete. `next` (N remaining) or `end`?"
+   - If queue is empty: "Current issue complete. `end` to close the branch?"
+7. Summarise what the last session accomplished and continue working.
+   Do NOT invoke work-start — the branch and scaffold already exist.
 
-**Load design specs (mandatory):** Run work-start Step 3c — scan workspace
-and project for specs, read them all. These are the design decisions for
-this branch. Do not begin implementation without them.
-
-Summarise what the last session accomplished and continue working.
-Do NOT invoke work-start — the branch and scaffold already exist.
-
-**On start (option 1 when `HAS_HANDOFF=no`):**
-
-No handover to read. Run work-start resume path (Steps 0, 2, 3, 3b, 3c, 11)
-for platform coherence, protocols, spec loading, and IntelliJ pre-checks.
-If `HAS_PLAN=yes` or `IN_SLOT=yes`: read .plan/slot context as above.
-Then begin working — the branch and scaffold already exist.
+When `HAS_HANDOFF=no` (first session, or HANDOFF.md missing):
+1. Run work-start resume path (Steps 0, 2, 3, 3b, 3c, 11)
+   for platform coherence, protocols, spec loading, and IntelliJ pre-checks
+2. Run `work_health.py --scope entry --owner-repo $OWNER_REPO`
+3. If `HAS_PLAN=yes` or `IN_SLOT=yes`: read .plan/slot context as above
+4. Done-detection auto-suggest (D3)
+5. Begin working — the branch and scaffold already exist.
 
 **On switch (option 2):**
 Route to **work-pause** (saves current branch), then **work-resume**
