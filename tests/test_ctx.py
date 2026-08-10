@@ -1246,6 +1246,57 @@ class TestMetaNewFields:
         assert data["META_SECTION_HASHES"] == ""
 
 
+class TestSymlinkTargetValidation:
+    """#207: wksp symlink pointing to non-git-root subdirectory should be rejected."""
+
+    def test_symlink_to_git_root_accepted(self, tmp_path):
+        """Symlink to a proper git root is accepted."""
+        target = tmp_path / "real-workspace"
+        target.mkdir()
+        (target / ".git").mkdir()
+        symlink = tmp_path / "wksp"
+        symlink.symlink_to(target)
+
+        sys.path.insert(0, str(SCRIPT.parent))
+        import importlib
+        import ctx
+        importlib.reload(ctx)
+        result = ctx._resolve_symlink_target(symlink)
+        assert result == str(target.resolve())
+
+    def test_symlink_to_subdirectory_of_repo_rejected(self, tmp_path):
+        """Symlink to subdirectory inside another repo should return None."""
+        repo = tmp_path / "other-repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        subdir = repo / "some" / "subdir"
+        subdir.mkdir(parents=True)
+        symlink = tmp_path / "wksp"
+        symlink.symlink_to(subdir)
+
+        sys.path.insert(0, str(SCRIPT.parent))
+        import importlib
+        import ctx
+        importlib.reload(ctx)
+        result = ctx._resolve_symlink_target(symlink)
+        assert result is None
+
+    def test_symlink_to_nonexistent_walks_up_to_git_root(self, tmp_path):
+        """Broken symlink with git root ancestor still resolves via walk-up."""
+        repo = tmp_path / "real-repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        symlink = tmp_path / "wksp"
+        symlink.symlink_to(repo / "nonexistent" / "deep")
+
+        sys.path.insert(0, str(SCRIPT.parent))
+        import importlib
+        import ctx
+        importlib.reload(ctx)
+        result = ctx._resolve_symlink_target(symlink)
+        assert result == str(repo)
+
+
 class TestCtxResolve:
     """Test ctx.resolve() importable function."""
 

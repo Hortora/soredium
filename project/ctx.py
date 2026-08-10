@@ -23,9 +23,16 @@ def check_dir(*paths):
     return "yes" if any(p.is_dir() for p in paths) else "no"
 
 def _resolve_symlink_target(symlink: Path) -> str | None:
-    """Resolve a symlink, walking up to find the nearest git root if target doesn't exist."""
+    """Resolve a symlink, validating the target is a git root.
+
+    If the target exists but is not a git root (e.g. a subdirectory of
+    another repo), returns None to fall back to single-repo mode.
+    """
     if symlink.exists():
-        return str(symlink.resolve())
+        resolved = symlink.resolve()
+        if (resolved / ".git").exists() or (resolved / ".git").is_file():
+            return str(resolved)
+        return None
     if not symlink.is_symlink():
         return None
     raw_target = Path(os.readlink(symlink))
