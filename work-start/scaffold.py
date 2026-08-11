@@ -16,7 +16,8 @@ Usage:
         [covers=<N,M,...>] \\
         [flyway-next-v=<N|none|unknown>] \\
         [design-repo=<workspace|project|cross-repo:name>] \\
-        [design-section-hashes=<pipe-sep-pairs>]
+        [design-section-hashes=<pipe-sep-pairs>] \\
+        [force=yes]
 
 Output (KEY=value lines):
     META_PATH=/abs/path/to/design/.meta
@@ -76,8 +77,8 @@ def main() -> int:
     meta_path = design_dir / ".meta"
     journal_path = design_dir / "JOURNAL.md"
 
-    # Don't overwrite if already exists (idempotent)
-    if meta_path.exists() and journal_path.exists():
+    force = params.get("force", "") == "yes"
+    if not force and meta_path.exists() and journal_path.exists():
         print(f"META_PATH={meta_path}")
         print(f"JOURNAL_PATH={journal_path}")
         print("CREATED=no")

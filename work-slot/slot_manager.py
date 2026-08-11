@@ -508,6 +508,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 f"issue={issue}",
                 f"issue-repo={issue_repo}",
                 f"covers={covers}",
+                "force=yes",
             ])
 
     write_slot_md(slot_dir, slot_num, repos, branch, issue,

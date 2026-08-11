@@ -379,7 +379,6 @@ third-party and excluded.
 
 ## Blog
 
-**Blog directory:** Blog entries are published via [hortora.github.io](https://hortora.github.io). Posts are Jekyll entries in the hortora.github.io repository. Each post needs frontmatter: `layout: post`, `title`, `date`, `type`, `entry`.
 
 ## Writing Style Guide -- Mandatory for Blog Content
 
