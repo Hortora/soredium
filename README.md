@@ -66,6 +66,7 @@ Development workflow and knowledge garden skills for Claude Code.
 |-------|-------------|
 | `git-commit` | Conventional commits with project-type routing and doc sync |
 | `git-squash` | Branch history compaction with review gate and backup |
+| `quick-fix` | Land small changes on main via ephemeral branch — rescue for unpushed commits |
 | `update-claude-md` | CLAUDE.md sync on convention changes |
 | `update-design` | ARC42STORIES.MD sync on architecture changes |
 | `implementation-doc-sync` | Session-scoped doc sweep after implementation |

@@ -159,13 +159,17 @@ Do not push until the full local build is green.
 
 ---
 
-## Step 6 — Push
+## Step 6 — Land via quick-fix
 
-One push. One CI run.
+Use `quick-fix` to land changes on main via an ephemeral branch instead of
+committing and pushing directly. This keeps main tracking the blessed repo.
 
 ```bash
-git push
+python3 ~/.claude/skills/quick-fix/quick_fix.py <project> message="fix(ci): <description>"
 ```
+
+Read the KEY=value output. If `LANDED=yes` and `PUSHED=yes`, proceed to Step 7.
+If `ERROR=REBASE_CONFLICT`, resolve the conflict and retry.
 
 ---
 
@@ -227,7 +231,7 @@ navigation and reference search when investigating failures.
 **Invoked by:** User saying "fix CI", "CI is red", "is CI green?" after
 a push, or when a pre-push hook or CI check fails.
 
-**Invokes:** Nothing — standalone diagnostic and fix workflow.
+**Invokes:** `quick-fix` — lands CI fixes on main via ephemeral branch (Step 6).
 
 **Complements:** `java-dev`, `ts-dev`, `python-dev` for the actual code
 fixes; `git-commit` for committing the fixes;

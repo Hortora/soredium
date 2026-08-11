@@ -1,0 +1,14 @@
+#!/bin/bash
+# Advisory warning when committing directly to main.
+# Install: git config core.hooksPath .githooks/
+# Bypass: git commit --no-verify
+
+branch=$(git branch --show-current 2>/dev/null)
+
+if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
+    echo ""
+    echo "⚠️  Committing directly to main."
+    echo "   Consider using /quick-fix instead — it lands via an ephemeral branch"
+    echo "   and keeps main tracking the blessed remote."
+    echo ""
+fi
