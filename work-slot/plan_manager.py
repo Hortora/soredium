@@ -606,6 +606,8 @@ def _set_first_uncompleted_active(items: list[QueueItem]) -> bool:
 def detect(workspace_path: Path) -> dict | None:
     plan_path = workspace_path / "design" / ".plan"
     if not plan_path.exists():
+        plan_path = workspace_path / ".plan"
+    if not plan_path.exists():
         return None
 
     tree = parse_plan(plan_path)

@@ -233,6 +233,40 @@ class TestSlotWorkspaceResolution:
         assert data["SINGLE_REPO"] == "no"
 
 
+class TestSlotRootPlanDetection:
+    """Plan at slot root (slots/N/.plan) must be found from any repo in the slot."""
+
+    def test_plan_at_slot_root_found_from_project(self, tmp_path):
+        """slots/N/.plan detected when CWD is slots/N/engine."""
+        slot_dir = tmp_path / "slots" / "110"
+        slot_dir.mkdir(parents=True)
+        project = init_repo(slot_dir / "engine")
+        workspace = init_repo(slot_dir / "work")
+        subdir = workspace / "engine"
+        subdir.mkdir()
+        (project / "wksp").symlink_to("../work/engine")
+        (slot_dir / ".slot").write_text(
+            "# Slot 110 — test\n\n## Issue\norg/repo#1\n\n"
+            "## Repos\n- engine (primary)\n"
+        )
+        (slot_dir / ".plan").write_text(
+            "# Work Plan — test\n\n## Queue\n"
+            "- [ ] #10 — First ← active\n- [ ] #11 — Second\n\n"
+            "## Session State\nCurrent: #10\nStarted: 2026-01-01\n"
+        )
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", "issue-1-test"],
+            capture_output=True,
+        )
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["HAS_PLAN"] == "yes", "plan at slot root must be found from project repo"
+        assert data["PLAN_ACTIVE_ISSUE"] == "10"
+
+
 class TestClaudeMdParsing:
     """Test CLAUDE.md field extraction."""
 

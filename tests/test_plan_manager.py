@@ -347,12 +347,14 @@ class TestAdvance:
         assert result.safe_exit is True
         assert result.next_issue == 110
 
-    def test_advance_does_not_write_covers(self, tmp_path):
+    def test_advance_updates_meta_issue_but_not_covers(self, tmp_path):
+        """advance() updates .meta issue: to next active but leaves covers: unchanged."""
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
-        original_meta = meta.read_text()
         plan_manager.advance(plan_file, meta)
-        assert meta.read_text() == original_meta
+        meta_text = meta.read_text()
+        assert "issue: 43" in meta_text, ".meta issue: must update to next active"
+        assert "covers: 42" in meta_text, ".meta covers: must not change"
 
 
 class TestAdvanceIssueDispatch:
@@ -482,6 +484,25 @@ class TestDetect:
         assert result["active_issue"] == 109
         assert result["completed_count"] == 2
         assert result["total_count"] == 5
+
+
+class TestDetectRootLevelPlan:
+    def test_detect_finds_plan_at_root_not_just_design(self, tmp_path):
+        """Slot-root .plan lives at <path>/.plan, not <path>/design/.plan."""
+        (tmp_path / ".plan").write_text(SINGLE_ISSUE_PLAN)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None, "detect() must find .plan at the given path root, not only design/"
+        assert result["active_issue"] == 42
+
+    def test_design_subdir_takes_precedence_over_root(self, tmp_path):
+        """If both <path>/design/.plan and <path>/.plan exist, prefer design/."""
+        design = tmp_path / "design"
+        design.mkdir()
+        (design / ".plan").write_text(MULTI_ISSUE_PLAN)
+        (tmp_path / ".plan").write_text(SINGLE_ISSUE_PLAN)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None
+        assert result["active_issue"] == 109, "design/.plan should take precedence"
 
 
 class TestDetectSlotMode:

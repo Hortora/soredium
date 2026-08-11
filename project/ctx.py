@@ -242,6 +242,8 @@ def resolve(cwd=None) -> dict[str, str]:
         _plan_info = _plan_detect(Path(project))
     if _plan_info is None and _is_slot_path(str(project)):
         _plan_info = _detect_slot_primary_plan(Path(project), _plan_detect)
+    if _plan_info is None and _is_slot_path(str(project)):
+        _plan_info = _plan_detect(Path(project).parent)
 
     _has_plan = _plan_info is not None
     _plan_path = _plan_info["plan_path"] if _plan_info else ""
