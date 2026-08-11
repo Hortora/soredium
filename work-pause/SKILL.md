@@ -2,7 +2,7 @@
 name: work-pause
 description: >
   Use when interrupting current branch work to switch to something else — user
-  says "work-pause", "pause this work", or "switch to a different issue".
+  says "work pause", "pause this work", or "switch to a different issue".
   Supports a stack of paused branches. Pair with work-resume to restore.
 ---
 

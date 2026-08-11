@@ -2,7 +2,7 @@
 name: work-end
 description: >
   Use when the current branch is complete and ready to close — user says
-  "work-end", "close this branch", or "wrap up this issue". Must be invoked
+  "work end", "close this branch", or "wrap up this issue". Must be invoked
   from the working branch, not main. Replaces "epic close".
 ---
 

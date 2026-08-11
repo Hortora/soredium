@@ -2,7 +2,7 @@
 name: work-resume
 description: >
   Use when returning to a paused branch from the pause stack — user says
-  "work-resume", "resume", or "go back to that branch". Pause-stack
+  "work resume", "resume", or "go back to that branch". Pause-stack
   restoration only, not general branch continuation (use "work continue"
   for that). Invoked from main to restore a previously paused work session.
   Handles multiple paused branches via stack.
@@ -151,7 +151,7 @@ if echo "$OUTPUT" | grep -q "ERROR=rebase_conflict"; then
   git -C "$PROJECT" diff --name-only --diff-filter=U
   echo ""
   echo "**Stop. Do not proceed.**"
-  echo "Resolve conflicts, run 'git -C $PROJECT rebase --continue', then run work-resume again."
+  echo "Resolve conflicts, run 'git -C $PROJECT rebase --continue', then run work resume again."
   exit 1
 fi
 

@@ -13,8 +13,8 @@ description: >
 # work
 
 Unified entry point for the work lifecycle. Detects state and routes to the
-correct skill — developer says `work` to begin, `work-end` to close,
-`work-pause` to save and switch, `work-resume` to return to paused work.
+correct skill — developer says `work` to begin, `work end` to close,
+`work pause` to save and switch, `work resume` to return to paused work.
 
 ---
 
@@ -280,15 +280,15 @@ Steps:
    Options:
      1. continue — promote matching deferred items and keep working
      2. new-slot — file issues, create a new slot for the deferred items
-     3. close — run work-end; deferred items stay as GitHub issues for later
+     3. close — run work end; deferred items stay as GitHub issues for later
    ```
    - **continue** → call `plan_manager.promote_deferred(<PLAN_PATH>, available_repos)`,
      then proceed to step 7 (context refresh) with the first promoted item as active.
    - **new-slot** → file GitHub issues for each deferred item, then run work-end.
    - **close** → file GitHub issues for each deferred item, then run work-end.
-6. If `queue_complete` and not `has_deferred` → report: "All issues done. Run work-end."
+6. If `queue_complete` and not `has_deferred` → report: "All issues done. Run work end."
 7. If `batch_complete` and not `queue_complete` → log: "Batch N complete.
-   Safe exit point — run work-end to close, or continue."
+   Safe exit point — run work end to close, or continue."
 8. **Context refresh (auto-resolve):** Fire `transition(meta, 'auto_refresh')`,
    execute context refresh effects (garden search with new issue keywords,
    load specs matching new issue, check protocols), then
