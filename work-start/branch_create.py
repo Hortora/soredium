@@ -29,6 +29,7 @@ Exit codes:
 
 import subprocess
 import sys
+from dataclasses import dataclass
 
 
 def run_git(repo: str, *args: str) -> tuple[bool, str]:
@@ -45,27 +46,48 @@ def run_git(repo: str, *args: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def create_branches(project: str, workspace: str, branch: str, base: str | None) -> int:
-    """Create branches in project and workspace atomically."""
-    # Create project branch
+# ---------------------------------------------------------------------------
+# Library API — typed interface for command layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CreateResult:
+    branch: str
+    project_created: bool
+    workspace_created: bool
+    error: str | None = None
+
+
+def create_branches_typed(project: str, workspace: str, branch: str,
+                          base: str | None = None) -> CreateResult:
+    """Create branches in project and workspace atomically. Returns typed result."""
     if base:
         ok, err = run_git(project, "checkout", "-b", branch, base)
     else:
         ok, err = run_git(project, "checkout", "-b", branch)
 
     if not ok:
-        print(f"ERROR=project_branch_failed:{err}")
-        return 1
+        return CreateResult(branch, False, False, f"project_branch_failed:{err}")
 
-    # Create workspace branch
     ok, err = run_git(workspace, "checkout", "-b", branch)
     if not ok:
-        # Rollback: return project to previous branch, then delete
         run_git(project, "checkout", "-")
         run_git(project, "branch", "-D", branch)
-        print(f"ERROR=workspace_branch_failed:{err}")
-        return 1
+        return CreateResult(branch, False, False, f"workspace_branch_failed:{err}")
 
+    return CreateResult(branch, True, True)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry points (print KEY=value output)
+# ---------------------------------------------------------------------------
+
+def create_branches(project: str, workspace: str, branch: str, base: str | None) -> int:
+    """Create branches in project and workspace atomically."""
+    result = create_branches_typed(project, workspace, branch, base)
+    if result.error:
+        print(f"ERROR={result.error}")
+        return 1
     print("CREATED=yes")
     return 0
 

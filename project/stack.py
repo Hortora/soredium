@@ -29,6 +29,7 @@ Exit codes:
 
 import sys
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -80,7 +81,65 @@ def _read_entries(stack_file: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Commands
+# Library API — typed dataclass interface for command layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StackEntry:
+    branch: str
+    issue: int
+    paused: str
+    wip_project: bool
+    wip_workspace: bool
+
+
+def _entry_to_dict(entry: StackEntry) -> dict:
+    return {
+        "branch": entry.branch,
+        "issue": str(entry.issue),
+        "paused": entry.paused,
+        "wip_project": "yes" if entry.wip_project else "no",
+        "wip_workspace": "yes" if entry.wip_workspace else "no",
+    }
+
+
+def _dict_to_entry(d: dict) -> StackEntry:
+    return StackEntry(
+        branch=d.get("branch", ""),
+        issue=int(d.get("issue", 0)),
+        paused=d.get("paused", ""),
+        wip_project=d.get("wip_project", "no") == "yes",
+        wip_workspace=d.get("wip_workspace", "no") == "yes",
+    )
+
+
+def read_entries(stack_path: Path) -> list[StackEntry]:
+    """Read pause stack entries. Returns empty list if file missing."""
+    return [_dict_to_entry(d) for d in _read_entries(stack_path)]
+
+
+def push_entry(stack_path: Path, entry: StackEntry) -> int:
+    """Push entry onto stack (appends — most recent is last). Returns new depth."""
+    raw = _read_entries(stack_path)
+    raw = [e for e in raw if e.get("branch") != entry.branch]
+    raw.append(_entry_to_dict(entry))
+    stack_path.parent.mkdir(parents=True, exist_ok=True)
+    stack_path.write_text(_entries_to_text(raw))
+    return len(raw)
+
+
+def pop_entry(stack_path: Path, branch: str) -> tuple[bool, int]:
+    """Remove entry by branch name. Returns (removed, new_depth)."""
+    raw = _read_entries(stack_path)
+    before = len(raw)
+    raw = [e for e in raw if e.get("branch") != branch]
+    if len(raw) < before:
+        stack_path.write_text(_entries_to_text(raw))
+    return before != len(raw), len(raw)
+
+
+# ---------------------------------------------------------------------------
+# Commands (CLI entry points — print KEY=value output)
 # ---------------------------------------------------------------------------
 
 def cmd_depth(stack_file: Path) -> int:
