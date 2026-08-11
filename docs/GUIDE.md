@@ -20,12 +20,14 @@ command, subcommands for each verb.
 
 | Command | What it does |
 |---------|-------------|
-| `/work` | Start new work or resume an existing branch |
+| `/work` | Start new work or continue an existing branch |
+| `work continue` | Keep working on the current branch — loads context automatically |
 | `work end` | Close the branch — full sequence, one command |
 | `work pause` | Save state, switch to main |
-| `work resume` | Return to a paused branch |
+| `work resume` | Return to a paused branch from the pause stack |
 | `work next` | Advance to the next issue in the queue |
 | `work slot` | Create a multi-repo slot (see Slots below) |
+| `quick-fix` | Land a small change on main via ephemeral branch |
 
 ---
 
@@ -77,9 +79,10 @@ What you see:
 4. Platform checks run — protocols, garden search, IDE verification
 5. You're offered a brainstorm to explore the problem before coding
 
-On resume (branch already exists), `/work` reads the last session's
-handover notes, loads any design specs written during brainstorming,
-and picks up where the previous session left off.
+On resume (branch already exists), `work continue` loads context
+automatically — HANDOFF.md from the last session, design specs from
+brainstorming, health sync against GitHub — and picks up where the
+previous session left off. See "Between Sessions" below.
 
 ### Specs and brainstorming
 
@@ -210,6 +213,93 @@ work next
 
 Checks off the current issue, moves the active marker, and ticks
 the checkbox on the GitHub epic.
+
+---
+
+## Between Sessions
+
+A session is one Claude Code conversation. When you start a new session
+on an existing branch, you need orientation — what happened last time,
+where you are in the queue, what's left.
+
+### `work continue`
+
+`work continue` is the verb for picking up where you left off. It loads:
+
+- **HANDOFF.md** — the previous session's narrative (see below)
+- **`.plan` position** — which issue is active, how many are done, what
+  batch you're in
+- **Design specs** — loaded from both workspace and project so settled
+  decisions aren't re-proposed
+- **Health sync** — validates `.plan` state against GitHub, marks any
+  issues that were closed externally
+
+If the active issue was completed (by another session or externally),
+`continue` detects this and suggests `work next` or `work end`.
+
+### `/brief`
+
+`/brief` gives orientation without starting work:
+
+```
+Branch: issue-190-enriched-backlog
+Issue:  #192 (active)
+Queue:  2/4 complete
+Recent: 3 commits (schema migration, enrichment API, trajectory capture)
+Health: plan_state=ok, github_sync=ok
+```
+
+Works from any state — on a feature branch, on main with paused
+branches, or on main with no work. Adapts output to context. On main
+with no active work, it shows recently closed branches and open issues
+instead.
+
+### HANDOFF.md — the session bridge
+
+HANDOFF.md is the only record of *why* decisions were made. Git log
+tells you what changed. Specs tell you what was designed. HANDOFF.md
+tells you what was tried and rejected, what reasoning drove a choice,
+and what the next session should do first.
+
+It spans the `.plan` queue — a branch might have 8 issues across 3
+sessions. Each session's handover carries forward the narrative thread:
+what was learned in session 1 that affects session 2's approach to a
+different issue. Without it, each session re-derives context from code
+and commits, missing the reasoning that didn't make it into either.
+
+Written automatically at `wrap` and `work end`. Read automatically
+by `work continue` at the start of the next session.
+
+### Notes — the persistent notebook
+
+`.notes/NOTES.md` is a worktree-global file — any branch can write to
+it, and it persists across branches because it lives in a separate git
+worktree that tracks main. Use it for things that aren't tied to the
+current issue but need to survive session boundaries:
+
+- Reminders ("check auth token expiry after the migration")
+- Cross-branch context ("engine reindex needed after next schema change")
+- Observations that don't have a home yet
+
+Notes are surfaced after `work end` — a final reminder before you
+decide what to do next. They can also be read on demand at any point.
+
+Unlike HANDOFF.md (which is per-session and overwritten each time),
+notes accumulate. They're organized by date section and persist until
+you remove them.
+
+### `continue` vs `resume`
+
+Two verbs, non-overlapping:
+
+| Verb | Meaning |
+|------|---------|
+| `work continue` | Keep working on the current branch |
+| `work resume` | Restore a paused branch from the pause stack |
+
+`continue` is for picking up where you left off on the branch you're
+already on. `resume` is specifically for the pause stack — you paused
+a branch, switched to something else, and now you want to go back.
 
 ---
 
@@ -429,17 +519,76 @@ work slot remove <N>            # archive a slot
 
 ---
 
-## The Worklog
+## The Worklog and What-Next
 
 Every lifecycle event is recorded in a SQLite database (`worklog.db`
 in the workspace). Start, end, pause, resume, issue transitions, slot
 creation, slot archive — all logged with timestamps, branch names,
 issue numbers, and metadata.
 
-This isn't something you interact with directly. It's the data layer
-that tools like trellis read to understand what's happening across
-sessions and repos — which issues are active, how long work takes,
-which branches are paused, what was closed when.
+### What it feeds
+
+The worklog isn't something you interact with directly. It's the data
+layer behind two things you do interact with:
+
+**`/brief`** — orientation at any point. Branch, issue, queue position,
+health status. All derived from the worklog and `.plan` state, no
+GitHub API calls needed.
+
+**`what-next` recommendations** — when you say `work` on main with no
+issue number, the system queries the enriched backlog:
+
+```
+Recommended next:
+  1. #42 — Fix caching bug (score: 12, quick-win, ready, compounding)
+  2. #55 — Refactor auth (score: 8, load-bearing, ready, stable)
+
+Pick a number, type an issue #, or describe what you want to work on.
+```
+
+### Enrichment
+
+Each issue can carry local metadata that GitHub doesn't track:
+
+| Field | Values | Purpose |
+|-------|--------|---------|
+| Strategic role | quick-win, load-bearing, parallelizable, dependency-unlocker | Sequencing |
+| Readiness | ready, needs-design, needs-spike, needs-decision | Can we start now? |
+| Decay | stable, compounding, perishable | Does waiting make it worse? |
+| Blast radius | isolated, local, cross-cutting, foundational | Safe to parallelize? |
+| Trajectory | free-text | "What this implies for next steps" |
+
+Enrichment is updated at `work end` — after closing an issue, you
+capture trajectory notes ("schema landed — #192 and #193 are now
+ready") and update sibling issues' readiness. This is optional but
+compounds over time — the more issues are enriched, the better
+`what-next` recommendations become.
+
+---
+
+## The Typical Shape
+
+Most work follows this pattern:
+
+1. **`work`** on main — picks an issue (what-next recommends, or you specify)
+2. **Brainstorm** → spec → design review (if non-trivial)
+3. **Implement** → test → commit (`Refs #N`)
+4. **`work next`** — advance to the next issue
+5. **Implement** → commit → **`work next`** → implement → commit → ...
+6. At a batch boundary: **`wrap`** → end session
+7. New session: **`work continue`** → reads HANDOFF.md → picks up at new batch
+8. Continue iterating through **`work next`**
+9. Queue empty → **`work end`** → sweep → review → squash → push → done
+
+The branch stays open across sessions. Each session wraps cleanly.
+The queue tracks progress. The DB records history. The garden captures
+knowledge. Nothing learned during a session is lost when the session
+ends.
+
+For small fixes that don't need a feature branch — typos, config
+tweaks, CI fixes — use **`quick-fix "message"`** instead. It creates
+an ephemeral branch, commits, rebases onto upstream, and lands on main
+in one step.
 
 ---
 
@@ -449,7 +598,9 @@ which branches are paused, what was closed when.
 
 | You say | What happens |
 |---------|-------------|
-| `/work` | Start or resume — detects state automatically |
+| `/work` | Start new work or continue an existing branch |
+| `work continue` | Keep working on the current branch — loads context |
+| `/brief` | Orientation summary — branch, issue, queue, health |
 | `wrap` | End session, keep branch open — runs sweep, writes HANDOFF.md |
 
 ### Closing
@@ -489,3 +640,4 @@ only when you want to capture something mid-session.
 | `/design-review` | Adversarial review of a design spec |
 | `/code-review` | Review staged changes |
 | `/brainstorming` | Explore a problem before implementing |
+| `quick-fix "msg"` | Land a small change on main via ephemeral branch |
