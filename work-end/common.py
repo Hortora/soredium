@@ -14,6 +14,20 @@ def parse_args(args: list[str]) -> dict[str, str]:
     return result
 
 
+def subdir_prefix(cwd: str) -> str:
+    """Get path from git repo root to cwd, for correcting <rev>:<path> lookups.
+
+    Returns empty string when cwd IS the repo root.
+    """
+    result = subprocess.run(
+        ["git", "-C", cwd, "rev-parse", "--show-prefix"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return ""
+
+
 def detect_topology(project: str) -> tuple[str, str]:
     """Returns (fork_remote, blessed_remote).
 

@@ -33,8 +33,8 @@ def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def check_clean_tree(workspace: str, project: str) -> dict:
-    ws_status = git(workspace, "status", "--porcelain")
-    proj_status = git(project, "status", "--porcelain")
+    ws_status = git(workspace, "status", "--porcelain", "--", ".")
+    proj_status = git(project, "status", "--porcelain", "--", ".")
 
     ws_dirty = bool(ws_status.stdout.strip()) if ws_status.returncode == 0 else False
     proj_dirty = bool(proj_status.stdout.strip()) if proj_status.returncode == 0 else False

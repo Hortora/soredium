@@ -119,6 +119,59 @@ class TestContextNoMeta:
         assert data["preconditions"]["meta_exists"]["status"] == "needs_input"
 
 
+class TestSubdirectoryDirtyTree:
+    """git status must be scoped to the workspace subdir, not the whole repo."""
+
+    def test_sibling_dir_dirty_does_not_affect_workspace(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _git(repo, "init")
+        _git(repo, "config", "user.email", "t@t.com")
+        _git(repo, "config", "user.name", "Test")
+
+        ws = repo / "workspace"
+        sibling = repo / "sibling"
+        ws.mkdir()
+        sibling.mkdir()
+        (ws / "README.md").write_text("ws\n")
+        (sibling / "README.md").write_text("sibling\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "init")
+
+        project = _init_repo(tmp_path / "project")
+
+        # Make sibling dirty — should NOT affect workspace status
+        (sibling / "dirty.txt").write_text("uncommitted\n")
+
+        result = _run_context(ws, project)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["preconditions"]["clean_tree"]["status"] == "pass"
+
+    def test_workspace_subdir_dirty_is_detected(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _git(repo, "init")
+        _git(repo, "config", "user.email", "t@t.com")
+        _git(repo, "config", "user.name", "Test")
+
+        ws = repo / "workspace"
+        ws.mkdir()
+        (ws / "README.md").write_text("ws\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "init")
+
+        project = _init_repo(tmp_path / "project")
+
+        # Make workspace itself dirty — should be detected
+        (ws / "dirty.txt").write_text("uncommitted\n")
+
+        result = _run_context(ws, project)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["preconditions"]["clean_tree"]["status"] == "fail"
+
+
 class TestContextBadArgs:
     def test_missing_args(self) -> None:
         result = subprocess.run(

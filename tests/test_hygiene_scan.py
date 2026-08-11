@@ -11,10 +11,13 @@ script_dir = Path(__file__).parent.parent / "work-end"
 sys.path.insert(0, str(script_dir))
 
 from hygiene_scan import (
+    branch_has_file,
     check_unpublished_blogs,
     check_stale_branches,
     check_unrecovered_artifacts,
     check_unstamped_branches,
+    list_branch_files,
+    list_branch_files_recursive,
     list_workspace_branches,
 )
 
@@ -183,6 +186,67 @@ class TestCheckUnstampedBranches:
 
         result = check_unstamped_branches(str(workspace), str(project), ["issue-42"], False)
         assert result == []
+
+
+class TestSubdirectoryWorkspace:
+    """Tree-path lookups must prepend the subdir prefix when workspace is not the repo root."""
+
+    def _init_repo_with_subdir(self, tmp_path):
+        repo = tmp_path / "repo"
+        _init_git(repo)
+        subdir = repo / "subdir"
+        subdir.mkdir()
+        return repo, subdir
+
+    def test_branch_has_file_in_subdir(self, tmp_path):
+        repo, subdir = self._init_repo_with_subdir(tmp_path)
+        (subdir / "design").mkdir()
+        (subdir / "design" / ".meta").write_text("branch: test\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add meta"],
+                       capture_output=True)
+
+        assert branch_has_file(str(subdir), "main", "design/.meta") is True
+
+    def test_branch_has_file_false_for_missing(self, tmp_path):
+        repo, subdir = self._init_repo_with_subdir(tmp_path)
+        assert branch_has_file(str(subdir), "main", "design/.meta") is False
+
+    def test_list_branch_files_in_subdir(self, tmp_path):
+        repo, subdir = self._init_repo_with_subdir(tmp_path)
+        (subdir / "blog").mkdir()
+        (subdir / "blog" / "entry.md").write_text("# Blog\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add blog"],
+                       capture_output=True)
+
+        files = list_branch_files(str(subdir), "main", "blog")
+        assert "entry.md" in files
+
+    def test_list_branch_files_recursive_in_subdir(self, tmp_path):
+        repo, subdir = self._init_repo_with_subdir(tmp_path)
+        (subdir / "specs" / "issue-42").mkdir(parents=True)
+        (subdir / "specs" / "issue-42" / "design.md").write_text("# Spec\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add spec"],
+                       capture_output=True)
+
+        files = list_branch_files_recursive(str(subdir), "main", "specs")
+        assert "design.md" in files
+
+    def test_at_repo_root_still_works(self, tmp_path):
+        """Existing behavior: when workspace IS the repo root, prefix is empty."""
+        repo = tmp_path / "repo"
+        _init_git(repo)
+        (repo / "blog").mkdir()
+        (repo / "blog" / "entry.md").write_text("# Blog\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add blog"],
+                       capture_output=True)
+
+        assert branch_has_file(str(repo), "main", "blog/entry.md") is True
+        files = list_branch_files(str(repo), "main", "blog")
+        assert "entry.md" in files
 
 
 class TestIntegration:

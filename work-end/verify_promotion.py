@@ -35,6 +35,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from workspace_artifacts import scan  # noqa: E402
 from close_artifacts import resolve_routing  # noqa: E402
+from common import subdir_prefix  # noqa: E402
 
 _DOCS_CATEGORIES = {"specs", "adr"}
 
@@ -55,8 +56,9 @@ def _expected_project_path(category: str, artifact: str) -> str:
 
 
 def _check_on_workspace_main(workspace: str, artifact: str) -> bool:
+    prefix = subdir_prefix(workspace)
     r = subprocess.run(
-        ["git", "-C", workspace, "cat-file", "-e", f"main:{artifact}"],
+        ["git", "-C", workspace, "cat-file", "-e", f"main:{prefix}{artifact}"],
         capture_output=True,
     )
     return r.returncode == 0

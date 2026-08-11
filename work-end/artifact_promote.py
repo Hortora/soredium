@@ -30,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import parse_args
+from common import parse_args, subdir_prefix
 
 
 def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:
@@ -67,10 +67,11 @@ def _push_or_report(cwd: str, verify_paths: list[str] | None = None) -> None:
             print("PUSH_VERIFIED=failed")
             print("PUSH_VERIFY_DETAIL=fetch origin/main failed after push")
             return
+        prefix = subdir_prefix(cwd)
         missing = []
         for path in verify_paths:
             try:
-                git("cat-file", "-e", f"origin/main:{path}", cwd=cwd)
+                git("cat-file", "-e", f"origin/main:{prefix}{path}", cwd=cwd)
             except subprocess.CalledProcessError:
                 missing.append(path)
         if missing:

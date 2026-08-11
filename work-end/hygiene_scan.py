@@ -30,7 +30,7 @@ from lifecycle import ClosureState, is_closed  # noqa: E402
 from routing import parse_layer2, parse_layer3, resolve  # noqa: E402
 
 sys.path.insert(0, str(SCRIPT_DIR))
-from common import parse_args  # noqa: E402
+from common import parse_args, subdir_prefix  # noqa: E402
 
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -68,7 +68,8 @@ def list_workspace_branches(workspace: str, skip_branch: str) -> list[str]:
 
 
 def branch_has_file(workspace: str, branch: str, file_path: str) -> bool:
-    result = git(workspace, "cat-file", "-e", f"{branch}:{file_path}")
+    prefix = subdir_prefix(workspace)
+    result = git(workspace, "cat-file", "-e", f"{branch}:{prefix}{file_path}")
     return result.returncode == 0
 
 
@@ -104,7 +105,9 @@ def check_stale_branches(workspace: str, branches: list[str],
 
 
 def list_branch_files(workspace: str, branch: str, directory: str) -> list[str]:
-    result = git(workspace, "ls-tree", "--name-only", f"{branch}:{directory}")
+    prefix = subdir_prefix(workspace)
+    result = git(workspace, "ls-tree", "--full-tree", "--name-only",
+                 f"{branch}:{prefix}{directory}")
     if result.returncode != 0:
         return []
     return [f for f in result.stdout.strip().split("\n") if f]
@@ -119,8 +122,9 @@ def list_project_files(project: str, directory: str) -> list[str]:
 
 def list_branch_files_recursive(workspace: str, branch: str,
                                 directory: str) -> list[str]:
-    result = git(workspace, "ls-tree", "-r", "--name-only",
-                 f"{branch}:{directory}")
+    prefix = subdir_prefix(workspace)
+    result = git(workspace, "ls-tree", "--full-tree", "-r", "--name-only",
+                 f"{branch}:{prefix}{directory}")
     if result.returncode != 0:
         return []
     files = []
