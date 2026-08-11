@@ -149,6 +149,12 @@ def resolve(cwd=None) -> dict[str, str]:
     base_branch = m.group(1) if m else "main"
 
     meta_path = Path(workspace) / "design" / ".meta"
+    if not meta_path.exists():
+        _meta_ws_root = run("git", "-C", workspace, "rev-parse", "--show-toplevel")
+        if _meta_ws_root and _meta_ws_root != workspace:
+            candidate = Path(_meta_ws_root) / "design" / ".meta"
+            if candidate.exists():
+                meta_path = candidate
     meta = {}
     if meta_path.exists():
         for line in meta_path.read_text().splitlines():

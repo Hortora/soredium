@@ -233,6 +233,33 @@ class TestSlotWorkspaceResolution:
         assert data["SINGLE_REPO"] == "no"
 
 
+class TestSlotMetaDetectionViaGitRoot:
+    """When workspace is a subdir, .meta at the git root must be found."""
+
+    def test_meta_at_workspace_git_root_found_from_subdir(self, tmp_path):
+        """wksp → ../work/platform but .meta at work/design/.meta, not work/platform/design/.meta."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "work")
+        subdir = workspace / "platform"
+        subdir.mkdir()
+        (workspace / "design").mkdir()
+        (workspace / "design" / ".meta").write_text(
+            "branch: issue-99-test\nissue: 99\n"
+        )
+        (project / "wksp").symlink_to("../work/platform")
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", "issue-99-test"],
+            capture_output=True,
+        )
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["HAS_META"] == "yes", ".meta at workspace git root must be found when workspace is a subdir"
+        assert data["ISSUE_N"] == "99"
+
+
 class TestSlotRootPlanDetection:
     """Plan at slot root (slots/N/.plan) must be found from any repo in the slot."""
 
