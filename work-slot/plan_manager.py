@@ -87,6 +87,20 @@ def _read_meta_fields(meta_path: Path) -> dict[str, str]:
     return fields
 
 
+def _update_meta_issue(meta_path: Path, issue_number: int) -> None:
+    """Update the active issue number in .meta without touching other fields."""
+    if not meta_path.exists():
+        return
+    lines = meta_path.read_text().splitlines()
+    result = []
+    for line in lines:
+        if line.startswith("issue:"):
+            result.append(f"issue: {issue_number}")
+        else:
+            result.append(line)
+    meta_path.write_text("\n".join(result) + "\n")
+
+
 def _emit_issue_events(meta_path: Path, repo_path: str,
                        completed: int, next_issue: int | None) -> None:
     try:
@@ -414,6 +428,9 @@ def advance(plan_path: Path, meta_path: Path,
 
     tree.current_issue = next_leaf.issue_number if next_leaf else None
     rewrite_plan(plan_path, tree)
+
+    if next_leaf:
+        _update_meta_issue(meta_path, next_leaf.issue_number)
 
     if repo_path:
         try:
