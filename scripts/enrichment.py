@@ -12,7 +12,53 @@ import os
 import sqlite3
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Library API — typed interface for command layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class WhatNextItem:
+    issue_number: int
+    title: str
+    score: float
+    strategic_role: str | None
+    readiness: str | None
+    reason: str | None
+
+
+def what_next_typed(repo: str, mode: str = "general",
+                    limit: int = 5) -> list[WhatNextItem]:
+    """High-level library API — opens connection, queries, returns typed results."""
+    try:
+        db_path = os.environ.get("WORKLOG_DB")
+        conn = worklog.connect(db_path) if db_path else worklog.connect()
+        raw = what_next(conn, repo, mode=mode, limit=limit)
+        conn.close()
+        return [WhatNextItem(
+            issue_number=r["issue_number"],
+            title=r["title"],
+            score=r.get("score", 0),
+            strategic_role=r.get("strategic_role"),
+            readiness=r.get("readiness"),
+            reason=_format_reason(r),
+        ) for r in raw]
+    except Exception:
+        return []
+
+
+def _format_reason(r: dict) -> str | None:
+    parts = []
+    if r.get("strategic_role"):
+        parts.append(r["strategic_role"])
+    if r.get("readiness"):
+        parts.append(r["readiness"])
+    if r.get("decay"):
+        parts.append(r["decay"])
+    return ", ".join(parts) if parts else None
 
 sys.path.insert(0, str(Path(__file__).parent))
 import worklog

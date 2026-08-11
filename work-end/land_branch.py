@@ -22,10 +22,23 @@ Output: KEY=value lines (stdout). Errors on stderr, exit code 1.
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from common import parse_args, detect_topology
+
+
+# ---------------------------------------------------------------------------
+# Library API — typed interface for command layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StampResult:
+    success: bool
+    landed_sha: str | None = None
+    already_stamped: bool = False
+    error: str | None = None
 
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():

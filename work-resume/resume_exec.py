@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +45,97 @@ def run(
         )
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
+
+# ---------------------------------------------------------------------------
+# Library API — typed interface for command layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ResumeCheckoutResult:
+    success: bool
+    branch: str
+    error: str | None = None
+
+
+@dataclass
+class ResumeRebaseResult:
+    success: bool
+    skipped: bool = False
+    error: str | None = None
+
+
+@dataclass
+class ResumeResetResult:
+    reset: bool
+    reset_count: int = 0
+
+
+def checkout_branches_typed(project: str, workspace: str, branch: str) -> ResumeCheckoutResult:
+    """Checkout branch in both repos and verify. Returns typed result."""
+    project_path = Path(project)
+    workspace_path = Path(workspace)
+
+    exit_code, _, _ = run(["git", "rev-parse", "--verify", branch], cwd=project_path, check=False)
+    if exit_code != 0:
+        return ResumeCheckoutResult(False, branch, "branch_not_found_in_project")
+
+    exit_code, _, _ = run(["git", "rev-parse", "--verify", branch], cwd=workspace_path, check=False)
+    if exit_code != 0:
+        return ResumeCheckoutResult(False, branch, "branch_not_found_in_workspace")
+
+    run(["git", "checkout", branch], cwd=project_path)
+    run(["git", "checkout", branch], cwd=workspace_path)
+
+    _, project_branch, _ = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=project_path)
+    _, workspace_branch, _ = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=workspace_path)
+
+    if project_branch != workspace_branch:
+        return ResumeCheckoutResult(False, branch, f"branch_mismatch:{project_branch}!={workspace_branch}")
+
+    return ResumeCheckoutResult(True, branch)
+
+
+def rebase_typed(project: str, workspace: str, base_branch: str) -> ResumeRebaseResult:
+    """Rebase project onto base branch. Returns typed result."""
+    project_path = Path(project)
+    workspace_path = Path(workspace)
+
+    exit_code, merge_base, _ = run(["git", "merge-base", "HEAD", base_branch], cwd=project_path, check=False)
+    _, base_sha, _ = run(["git", "rev-parse", base_branch], cwd=project_path, check=False)
+
+    if merge_base == base_sha:
+        return ResumeRebaseResult(True, skipped=True)
+
+    exit_code, _, stderr = run(["git", "rebase", base_branch], cwd=project_path, check=False)
+    if exit_code != 0:
+        return ResumeRebaseResult(False, error="rebase_conflict")
+
+    run(["git", "rebase", "main"], cwd=workspace_path, check=False)
+    return ResumeRebaseResult(True)
+
+
+def reset_wip_typed(project: str, workspace: str) -> ResumeResetResult:
+    """Reset WIP commits if present. Returns typed result."""
+    project_path = Path(project)
+    workspace_path = Path(workspace)
+    reset_count = 0
+
+    _, project_subject, _ = run(["git", "log", "-1", "--format=%s"], cwd=project_path)
+    if project_subject.startswith("WIP:"):
+        run(["git", "reset", "HEAD~1"], cwd=project_path)
+        reset_count += 1
+
+    _, workspace_subject, _ = run(["git", "log", "-1", "--format=%s"], cwd=workspace_path)
+    if workspace_subject.startswith("WIP:"):
+        run(["git", "reset", "HEAD~1"], cwd=workspace_path)
+        reset_count += 1
+
+    return ResumeResetResult(reset_count > 0, reset_count)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry points
+# ---------------------------------------------------------------------------
 
 def checkout_branches(project: str, workspace: str, branch: str) -> int:
     """Checkout branch in both repos and verify."""

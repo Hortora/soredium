@@ -32,6 +32,7 @@ Exit codes:
 
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -69,6 +70,24 @@ def _commits_ahead(project: str, remote: str, base: str) -> int:
 def _make_branch_name() -> str:
     return f"quick-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
+
+# ---------------------------------------------------------------------------
+# Library API — typed interface for command layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class QuickFixResult:
+    success: bool
+    branch: str | None = None
+    message: str | None = None
+    mode: str | None = None
+    landed_sha: str | None = None
+    error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
 
 def run(project: str, message: str, base_branch: str = "main") -> int:
     branch = _current_branch(project)

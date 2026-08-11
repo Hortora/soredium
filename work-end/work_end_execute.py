@@ -20,10 +20,69 @@ Output: KEY=value lines (stdout). Errors on stderr, exit code 1.
 
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from common import parse_args, detect_topology
+
+
+# ---------------------------------------------------------------------------
+# Library API — typed interface for command layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RebaseResult:
+    success: bool
+    branch: str | None = None
+    base: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class MergeResult:
+    success: bool
+    error: str | None = None
+
+
+@dataclass
+class PushResult:
+    success: bool
+    attempts: int = 1
+    error: str | None = None
+
+
+def rebase_onto_base(project: str, branch: str, base_branch: str = "main") -> RebaseResult:
+    """Rebase branch onto base branch."""
+    result = git(project, "fetch", "origin", base_branch)
+
+    result = git(project, "rebase", base_branch)
+    if result.returncode != 0:
+        git(project, "rebase", "--abort")
+        return RebaseResult(False, branch, base_branch, result.stderr.strip())
+    return RebaseResult(True, branch, base_branch)
+
+
+def merge_to_main(project: str, branch: str, base_branch: str = "main") -> MergeResult:
+    """FF-only merge branch into local main."""
+    result = git(project, "checkout", base_branch)
+    if result.returncode != 0:
+        return MergeResult(False, f"checkout_{base_branch}_failed:{result.stderr.strip()}")
+
+    result = git(project, "merge", "--ff-only", branch)
+    if result.returncode != 0:
+        return MergeResult(False, f"merge_failed:{result.stderr.strip()}")
+    return MergeResult(True)
+
+
+def push_to_remote(project: str, base_branch: str = "main",
+                   max_retries: int = 3) -> PushResult:
+    """Push base branch to remote with retries."""
+    for attempt in range(1, max_retries + 1):
+        result = git(project, "push", "origin", base_branch)
+        if result.returncode == 0:
+            return PushResult(True, attempt)
+    return PushResult(False, max_retries, f"push_failed_after_{max_retries}_retries")
 
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:

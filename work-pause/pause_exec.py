@@ -17,6 +17,7 @@ import os
 import sys
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +43,42 @@ def run_git(repo: str, *args: str) -> tuple[bool, str]:
     except Exception as e:
         return False, str(e)
 
+
+# ---------------------------------------------------------------------------
+# Library API — typed interface for command layer
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PauseWipResult:
+    committed: bool
+    repo: str
+    message: str | None = None
+    error: str | None = None
+
+
+def commit_wip_typed(repo: str, message: str) -> PauseWipResult:
+    """Check if repo has uncommitted changes. If dirty, commit as WIP."""
+    success, status_out = run_git(repo, "status", "--short")
+    if not success:
+        return PauseWipResult(False, repo, error="git_status_failed")
+
+    if not status_out.strip():
+        return PauseWipResult(False, repo)
+
+    add_ok, _ = run_git(repo, "add", "-A")
+    if not add_ok:
+        return PauseWipResult(False, repo, error="git_add_failed")
+
+    commit_ok, _ = run_git(repo, "commit", "-m", message)
+    if not commit_ok:
+        return PauseWipResult(False, repo, error="commit_failed")
+
+    return PauseWipResult(True, repo, message)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry points
+# ---------------------------------------------------------------------------
 
 def commit_wip(repo: str, message: str) -> int:
     """
