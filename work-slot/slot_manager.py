@@ -83,6 +83,28 @@ def is_slot_path(path: str) -> bool:
     return False
 
 
+def _build_epic_plan(branch: str, issue_repo: str, cover_list: list[str],
+                     date: str) -> str | None:
+    """Build a .plan from the epic's child issue list. Fetches titles from GitHub."""
+    from plan_manager import QueueItem, build_plan_content
+    items: list[QueueItem] = []
+    for num_str in cover_list:
+        try:
+            num = int(num_str)
+        except ValueError:
+            continue
+        rc, title_out, _ = run_cmd([
+            "gh", "issue", "view", str(num), "--repo", issue_repo,
+            "--json", "title", "--jq", ".title",
+        ])
+        title = title_out.strip() if rc == 0 and title_out.strip() else f"Issue #{num}"
+        items.append(QueueItem(issue_number=num, title=title))
+    if not items:
+        return None
+    items[0].active = True
+    return build_plan_content(branch, items, date)
+
+
 def _read_promotion_stamp(slot_dir: Path) -> tuple[list[str], list[str], str]:
     """Read artifact promotion data from .artifacts-promoted stamps in the slot.
     Returns (promoted_files, published_blogs, publish_dest)."""
@@ -500,7 +522,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         ws_path = primary_wksp.resolve()
         scaffold_script = Path.home() / ".claude" / "skills" / "work-start" / "scaffold.py"
         if scaffold_script.exists():
-            run_cmd([
+            scaffold_args = [
                 sys.executable, str(scaffold_script), str(ws_path),
                 f"branch={branch}",
                 f"project-sha=slot-creation",
@@ -509,7 +531,17 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 f"issue-repo={issue_repo}",
                 f"covers={covers}",
                 "force=yes",
-            ])
+            ]
+            cover_list = [c.strip() for c in covers.split(",") if c.strip()]
+            if len(cover_list) > 1:
+                plan_content = _build_epic_plan(
+                    branch, issue_repo, cover_list,
+                    datetime.date.today().isoformat(),
+                )
+                if plan_content:
+                    scaffold_args.append("plan=yes")
+                    scaffold_args.append(f"plan-content={plan_content}")
+            run_cmd(scaffold_args)
 
     write_slot_md(slot_dir, slot_num, repos, branch, issue,
                   issue_repo, covers, context)
