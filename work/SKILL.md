@@ -53,13 +53,11 @@ check for wrong-context invocations:
 
 ```bash
 python3 ~/.claude/skills/project/ctx.py
-# Read PROJECT, WORKSPACE, CURRENT_BRANCH from output
-
-python3 ~/.claude/skills/work/work_router.py \
-  $CURRENT_BRANCH $PROJECT $WORKSPACE
+# Read all fields from output — ctx.py includes both topology and
+# routing fields (ROUTE, ON_MAIN, STACK_DEPTH, HAS_HANDOFF, etc.)
 ```
 
-The router outputs KEY=VALUE lines. Read them all — they determine
+ctx.py outputs all KEY=VALUE lines. Read them all — they determine
 the route AND provide context for the options menu. Do NOT re-derive
 this state with additional tool calls.
 

@@ -1367,7 +1367,8 @@ class TestMetaNewFields:
 
 
 class TestSymlinkTargetValidation:
-    """Symlink resolution: git root, subdir, dangling, and non-git targets."""
+    """Symlink resolution: git root, subdir, dangling, and non-git targets.
+    Tests now target topology._resolve_symlink_target (moved from ctx.py in #220)."""
 
     def test_symlink_to_git_root_accepted(self, tmp_path):
         """Symlink to a proper git root is accepted."""
@@ -1379,9 +1380,9 @@ class TestSymlinkTargetValidation:
 
         sys.path.insert(0, str(SCRIPT.parent))
         import importlib
-        import ctx
-        importlib.reload(ctx)
-        result = ctx._resolve_symlink_target(symlink)
+        import topology
+        importlib.reload(topology)
+        result = topology._resolve_symlink_target(symlink)
         assert result == str(target.resolve())
 
     def test_symlink_to_subdirectory_of_repo_returns_subdir(self, tmp_path):
@@ -1396,9 +1397,9 @@ class TestSymlinkTargetValidation:
 
         sys.path.insert(0, str(SCRIPT.parent))
         import importlib
-        import ctx
-        importlib.reload(ctx)
-        result = ctx._resolve_symlink_target(symlink)
+        import topology
+        importlib.reload(topology)
+        result = topology._resolve_symlink_target(symlink)
         assert result == str(subdir.resolve())
 
     def test_symlink_to_nonexistent_walks_up_to_git_root(self, tmp_path):
@@ -1411,9 +1412,9 @@ class TestSymlinkTargetValidation:
 
         sys.path.insert(0, str(SCRIPT.parent))
         import importlib
-        import ctx
-        importlib.reload(ctx)
-        result = ctx._resolve_symlink_target(symlink)
+        import topology
+        importlib.reload(topology)
+        result = topology._resolve_symlink_target(symlink)
         assert result == str(repo)
 
     def test_symlink_to_path_outside_git_repo_rejected(self, tmp_path):
@@ -1425,10 +1426,60 @@ class TestSymlinkTargetValidation:
 
         sys.path.insert(0, str(SCRIPT.parent))
         import importlib
-        import ctx
-        importlib.reload(ctx)
-        result = ctx._resolve_symlink_target(symlink)
+        import topology
+        importlib.reload(topology)
+        result = topology._resolve_symlink_target(symlink)
         assert result is None
+
+
+class TestAuditFixes:
+    """Tests for audit findings F1-F14."""
+
+    def test_route_field_in_ctx_output(self, tmp_path):
+        """F1/F3: WorkState ROUTE field must appear in ctx.py output."""
+        repo = init_repo(tmp_path / "repo")
+        data = parse(run_ctx(repo))
+        assert "ROUTE" in data, "ROUTE must be in ctx.py output (F1 — work/SKILL.md reads it)"
+        assert data["ROUTE"] == "start"
+
+    def test_on_main_field_in_ctx_output(self, tmp_path):
+        """F3: ON_MAIN must appear in ctx.py output."""
+        repo = init_repo(tmp_path / "repo")
+        data = parse(run_ctx(repo))
+        assert data.get("ON_MAIN") == "yes"
+
+    def test_stack_depth_in_ctx_output(self, tmp_path):
+        """F3: STACK_DEPTH must appear in ctx.py output."""
+        repo = init_repo(tmp_path / "repo")
+        data = parse(run_ctx(repo))
+        assert data.get("STACK_DEPTH") == "0"
+
+    def test_in_slot_field_exposed(self, tmp_path):
+        """F14: IN_SLOT field in output."""
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot\n\n## Repos\n- engine (primary)\n")
+        project = init_repo(slot_dir / "engine")
+        data = parse(run_ctx(project))
+        assert data.get("IN_SLOT") == "yes"
+
+    def test_in_slot_no_outside_slot(self, tmp_path):
+        repo = init_repo(tmp_path / "repo")
+        data = parse(run_ctx(repo))
+        assert data.get("IN_SLOT") == "no"
+
+    def test_all_claude_md_fields_from_project(self, tmp_path):
+        """F2/F5: OWNER_REPO and PROJECT_TYPE from same CLAUDE.md (project's)."""
+        project = init_repo(
+            tmp_path / "project",
+            "## Project Type\n\n**Type:** java\n**GitHub repo:** Org/Proj\n"
+        )
+        workspace = init_repo(tmp_path / "workspace")
+        (workspace / "proj").symlink_to(project)
+        data = parse(run_ctx(workspace))
+        assert data["OWNER_REPO"] == "Org/Proj"
+        assert data["PROJECT_TYPE"] == "java"
+        assert data["CLAUDE_OK"] == "yes"
 
 
 class TestCtxResolve:

@@ -21,15 +21,11 @@ from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).parent
 _PROJECT_DIR = _SCRIPT_DIR.parent / "project"
-_WORK_DIR = _SCRIPT_DIR.parent / "work"
 
 if str(_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(_PROJECT_DIR))
-if str(_WORK_DIR) not in sys.path:
-    sys.path.insert(0, str(_WORK_DIR))
 
 from ctx import resolve as ctx_resolve
-from work_router import detect_state
 from work_health import run_checks
 from lifecycle import is_closed, ClosureState
 
@@ -134,13 +130,11 @@ def resolve(cwd: str | None = None) -> dict:
     owner_repo = ctx.get("OWNER_REPO", "")
     base_branch = ctx.get("BASE_BRANCH", "main")
 
-    router = detect_state(current_branch, project, workspace)
-
-    on_main = router.get("ON_MAIN") == "yes"
-    stack_depth = int(router.get("STACK_DEPTH", "0"))
-    has_plan = router.get("HAS_PLAN", "no")
-    has_handoff = router.get("HAS_HANDOFF", "no")
-    handoff_path = router.get("HANDOFF_PATH", "")
+    on_main = ctx.get("ON_MAIN") == "yes"
+    stack_depth = int(ctx.get("STACK_DEPTH", "0"))
+    has_plan = ctx.get("HAS_PLAN", "no")
+    has_handoff = ctx.get("HAS_HANDOFF", "no")
+    handoff_path = ctx.get("HANDOFF_PATH", "")
     issue = ctx.get("ISSUE_N", "")
 
     if on_main:
@@ -158,9 +152,9 @@ def resolve(cwd: str | None = None) -> dict:
     }
 
     if has_plan == "yes":
-        result["PLAN_POSITION"] = router.get("PLAN_POSITION", "")
-        result["PLAN_ACTIVE_ISSUE"] = router.get("PLAN_ACTIVE_ISSUE", "")
-        result["PLAN_BATCH"] = router.get("PLAN_BATCH", "")
+        result["PLAN_POSITION"] = ctx.get("PLAN_POSITION", "")
+        result["PLAN_ACTIVE_ISSUE"] = ctx.get("PLAN_ACTIVE_ISSUE", "")
+        result["PLAN_BATCH"] = ctx.get("PLAN_BATCH", "")
 
     handoff_summary = ""
     if handoff_path:
