@@ -22,6 +22,36 @@ def check_file(*paths):
 def check_dir(*paths):
     return "yes" if any(p.is_dir() for p in paths) else "no"
 
+def _detect_slot_primary_plan(project_path: Path, plan_detect_fn) -> dict | None:
+    """In a multi-repo slot, find .plan via the primary repo's workspace."""
+    slot_dir = project_path.parent
+    slot_file = slot_dir / ".slot"
+    if not slot_file.exists():
+        return None
+    primary = None
+    in_repos = False
+    for line in slot_file.read_text().splitlines():
+        if line.strip() == "## Repos":
+            in_repos = True
+            continue
+        if in_repos and line.strip().startswith("- "):
+            primary = line.strip().lstrip("- ").split(" ")[0].split("(")[0].strip()
+            break
+    if not primary:
+        return None
+    primary_wksp = slot_dir / primary / "wksp"
+    if not primary_wksp.is_symlink():
+        return None
+    ws_target = primary_wksp.resolve()
+    result = plan_detect_fn(ws_target)
+    if result:
+        return result
+    ws_root = run("git", "-C", str(ws_target), "rev-parse", "--show-toplevel")
+    if ws_root and ws_root != str(ws_target):
+        return plan_detect_fn(Path(ws_root))
+    return None
+
+
 def _resolve_symlink_target(symlink: Path) -> str | None:
     """Resolve a symlink to a path inside a git repository.
 
@@ -202,9 +232,16 @@ def resolve(cwd=None) -> dict[str, str]:
     from slot_manager import is_slot_path as _is_slot_path
     from plan_manager import detect as _plan_detect
 
+    _ws_git_root = run("git", "-C", workspace, "rev-parse", "--show-toplevel")
+    _ws_is_subdir = bool(_ws_git_root and _ws_git_root != workspace)
+
     _plan_info = _plan_detect(Path(workspace))
+    if _plan_info is None and _ws_is_subdir:
+        _plan_info = _plan_detect(Path(_ws_git_root))
     if _plan_info is None and _is_slot_path(str(project)):
         _plan_info = _plan_detect(Path(project))
+    if _plan_info is None and _is_slot_path(str(project)):
+        _plan_info = _detect_slot_primary_plan(Path(project), _plan_detect)
 
     _has_plan = _plan_info is not None
     _plan_path = _plan_info["plan_path"] if _plan_info else ""
@@ -218,6 +255,8 @@ def resolve(cwd=None) -> dict[str, str]:
         _plan_batch = _plan_info.get("current_batch") or ""
 
     _epic_info = _epic_detect(Path(workspace))
+    if _epic_info is None and _ws_is_subdir:
+        _epic_info = _epic_detect(Path(_ws_git_root))
     if _epic_info is None and _is_slot_path(str(project)):
         _epic_info = _epic_detect(Path(project))
 
