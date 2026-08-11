@@ -270,9 +270,9 @@ python3 ~/.claude/skills/work-slot/slot_manager.py remove-slot <family-root> slo
 moves to `slots/attic/<N>/` preserving .slot, `.plan`, and any other
 metadata for auditing and branch hygiene.
 
-**Never pass `--force-delete`** unless the user explicitly says "permanently
-delete" or "destroy". Archived slots cost nothing and enable branch hygiene
-scans, blog recovery, and stamp verification.
+**`--force` skips the .landed check** but still archives to attic. There is
+no permanent deletion flag — slots are always preserved. Archived slots cost
+nothing and enable branch hygiene scans, blog recovery, and stamp verification.
 
 ---
 
@@ -300,9 +300,9 @@ scans, blog recovery, and stamp verification.
 - Does not run work-start — the human runs `work` in the new session (scaffold.py writes `state: scaffolded`, auto-resolved on first `work` invocation)
 - Does not coordinate between slots — the human sequences merges
 - **Does not delete slots** — all cleanup paths archive to
-  `slots/attic/<N>/`. Deletion requires explicit `--force-delete`
-  from the user. An archived slot costs nothing; a deleted slot loses
-  branch hygiene data, blog entries, and audit trail permanently.
+  `slots/attic/<N>/`. There is no permanent deletion path.
+  An archived slot costs nothing; a deleted slot loses branch hygiene
+  data, blog entries, and audit trail permanently.
 
 ---
 

@@ -174,6 +174,65 @@ class TestBrokenSymlinkResolution:
         assert data["SINGLE_REPO"] == "no"
 
 
+class TestSlotWorkspaceResolution:
+    """#215: wksp symlink inside a slot clone points to a workspace subdir."""
+
+    def test_wksp_to_existing_subdir_returns_subdir(self, tmp_path):
+        """wksp → ../work/engine where work/ is a git repo and engine/ exists.
+        WORKSPACE should be the subdir, not the git root, so .meta resolves."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "work")
+        subdir = workspace / "engine"
+        subdir.mkdir()
+        (project / "wksp").symlink_to("../work/engine")
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["WORKSPACE"] == str(subdir.resolve())
+        assert data["PROJECT"] == str(project)
+        assert data["SINGLE_REPO"] == "no"
+
+    def test_slot_meta_found_via_subdir_workspace(self, tmp_path):
+        """Scaffold at work/engine/design/.meta is found when wksp → work/engine."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "work")
+        subdir = workspace / "engine"
+        subdir.mkdir()
+        (subdir / "design").mkdir()
+        (subdir / "design" / ".meta").write_text(
+            "branch: issue-215-test\nissue: 215\n"
+        )
+        (project / "wksp").symlink_to("../work/engine")
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", "issue-215-test"],
+            capture_output=True,
+        )
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["SINGLE_REPO"] == "no"
+        assert data["HAS_META"] == "yes"
+        assert data["ISSUE_N"] == "215"
+        assert data["BRANCH_NAME"] == "issue-215-test"
+
+    def test_dangling_subdir_still_walks_up(self, tmp_path):
+        """wksp → ../work/engine where engine/ does NOT exist — walks up to git root."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "work")
+        (project / "wksp").symlink_to("../work/engine")
+
+        result = run_ctx(project)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["WORKSPACE"] == str(workspace)
+        assert data["SINGLE_REPO"] == "no"
+
+
 class TestClaudeMdParsing:
     """Test CLAUDE.md field extraction."""
 
@@ -1247,7 +1306,7 @@ class TestMetaNewFields:
 
 
 class TestSymlinkTargetValidation:
-    """#207: wksp symlink pointing to non-git-root subdirectory should be rejected."""
+    """Symlink resolution: git root, subdir, dangling, and non-git targets."""
 
     def test_symlink_to_git_root_accepted(self, tmp_path):
         """Symlink to a proper git root is accepted."""
@@ -1264,8 +1323,8 @@ class TestSymlinkTargetValidation:
         result = ctx._resolve_symlink_target(symlink)
         assert result == str(target.resolve())
 
-    def test_symlink_to_subdirectory_of_repo_rejected(self, tmp_path):
-        """Symlink to subdirectory inside another repo should return None."""
+    def test_symlink_to_subdirectory_of_repo_returns_subdir(self, tmp_path):
+        """#215: Symlink to subdirectory inside a repo returns the subdir path."""
         repo = tmp_path / "other-repo"
         repo.mkdir()
         (repo / ".git").mkdir()
@@ -1279,7 +1338,7 @@ class TestSymlinkTargetValidation:
         import ctx
         importlib.reload(ctx)
         result = ctx._resolve_symlink_target(symlink)
-        assert result is None
+        assert result == str(subdir.resolve())
 
     def test_symlink_to_nonexistent_walks_up_to_git_root(self, tmp_path):
         """Broken symlink with git root ancestor still resolves via walk-up."""
@@ -1295,6 +1354,20 @@ class TestSymlinkTargetValidation:
         importlib.reload(ctx)
         result = ctx._resolve_symlink_target(symlink)
         assert result == str(repo)
+
+    def test_symlink_to_path_outside_git_repo_rejected(self, tmp_path):
+        """Symlink to a path not inside any git repo returns None."""
+        target = tmp_path / "not-a-repo" / "some" / "path"
+        target.mkdir(parents=True)
+        symlink = tmp_path / "wksp"
+        symlink.symlink_to(target)
+
+        sys.path.insert(0, str(SCRIPT.parent))
+        import importlib
+        import ctx
+        importlib.reload(ctx)
+        result = ctx._resolve_symlink_target(symlink)
+        assert result is None
 
 
 class TestCtxResolve:

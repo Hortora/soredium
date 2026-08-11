@@ -5,14 +5,14 @@ slot_manager.py — Clone-based slot operations for multi-repo families
 Subcommands:
   create-slot <family-root> repos=<csv> branch=<name> issue=<N> issue-repo=<o/r> [covers=<csv>] [context=<text>]
   list-slots <family-root> [--all]
-  remove-slot <family-root> slot=<N> [--force-delete]
+  remove-slot <family-root> slot=<N> [--force]
   scan-ready <family-root>
   merge-slot <family-root> slot=<N>
   archive-slot <family-root> slot=<N> [--force]
   check-cross-deps <family-root> slot=<N>
   migrate-remotes <family-root>
 
-Note: remove-slot archives to worktrees/attic/ by default. Only --force-delete permanently removes.
+Note: remove-slot always archives to slots/attic/. --force skips the .landed check.
 
 All commands output KEY=VALUE pairs on stdout for easy parsing.
 """
@@ -1487,81 +1487,61 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
     return slots
 
 
-def remove_slot(family_root: Path, slot_num: int, force_delete: bool = False) -> None:
+def remove_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
+    """Archive a slot to attic.  Always archives — never deletes.
+
+    --force / --force-delete both skip the .landed check but still
+    archive to slots/attic/<N>/.  There is no permanent deletion path.
+    """
     slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
-    if not force_delete and not is_slot_landed(slot_dir):
+    if not force and not is_slot_landed(slot_dir):
         print(f"ERROR=slot_not_landed slot={slot_num}")
-        print("ERROR_DETAIL=slot has no .landed marker and no branch-closed stamp — work may be in progress")
-        print("HINT=pass --force-delete to override, or run work-end first")
+        print("ERROR_DETAIL=slot has no .landed marker — work may be in progress")
+        print("HINT=run work-end first, or pass --force to archive without .landed check")
         sys.exit(1)
 
     escaped, cwd_offset = _escape_slot_cwd(slot_dir, family_root)
     if escaped:
         print(f"CWD_ESCAPED={family_root}")
 
-    if force_delete:
-        removed = remove_claude_projects(slot_dir)
-        if removed:
-            print(f"CLAUDE_PROJECTS_REMOVED={removed}")
-        for sub in slot_dir.iterdir():
-            if sub.is_dir() and (sub / ".git").exists():
-                if is_worktree(sub):
-                    run_cmd(["git", "worktree", "remove", "--force", str(sub)])
-                else:
-                    shutil.rmtree(str(sub), ignore_errors=True)
-        shutil.rmtree(slot_dir, ignore_errors=True)
-        if slot_dir.exists():
-            _cleanup_remnant_dir(slot_dir)
-        if _wl:
-            try:
-                _conn = _wl.connect()
-                _wl.record_slot_archive(
-                    _conn, slot_num, str(family_root),
-                    archived_from=str(slot_dir), archived_to="deleted",
-                )
-                _conn.close()
-            except Exception:
-                pass
-        print(f"DELETED={slot_num}")
-    else:
-        attic_dir = slot_dir.parent / "attic"
-        attic_dir.mkdir(exist_ok=True)
-        dest = attic_dir / str(slot_num)
-        if dest.exists():
-            print(f"ERROR=attic_slot_exists slot={slot_num}")
-            print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
-            sys.exit(1)
-        moved = relocate_claude_projects(slot_dir, dest)
-        shutil.move(str(slot_dir), str(dest))
-        if slot_dir.exists():
-            if not _cleanup_remnant_dir(slot_dir):
-                print(f"WARN=remnant_dir_persists path={slot_dir}")
-        if escaped and cwd_offset is not None:
-            relocated = dest / cwd_offset
-            if relocated.exists():
-                os.chdir(relocated)
-                print(f"CWD_RELOCATED={relocated}")
-            else:
-                print(f"CWD_RELOCATED={dest}")
-        if moved:
-            print(f"CLAUDE_PROJECTS_MOVED={moved}")
-        if _wl:
-            try:
-                _conn = _wl.connect()
-                promoted, published, pub_dest = _read_promotion_stamp(dest)
-                _wl.record_slot_archive(
-                    _conn, slot_num, str(family_root),
-                    promoted=promoted, published=published,
-                    publish_dest=pub_dest,
-                    archived_from=str(slot_dir), archived_to=str(dest),
-                )
-                _conn.close()
-            except Exception:
-                pass
-        print(f"ARCHIVED={slot_num}")
+    attic_dir = slot_dir.parent / "attic"
+    attic_dir.mkdir(exist_ok=True)
+    dest = attic_dir / str(slot_num)
+    if dest.exists():
+        print(f"ERROR=attic_slot_exists slot={slot_num}")
+        print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
+        sys.exit(1)
+    moved = relocate_claude_projects(slot_dir, dest)
+    shutil.move(str(slot_dir), str(dest))
+    if slot_dir.exists():
+        if not _cleanup_remnant_dir(slot_dir):
+            print(f"WARN=remnant_dir_persists path={slot_dir}")
+    if escaped and cwd_offset is not None:
+        relocated = dest / cwd_offset
+        if relocated.exists():
+            os.chdir(relocated)
+            print(f"CWD_RELOCATED={relocated}")
+        else:
+            print(f"CWD_RELOCATED={dest}")
+    if moved:
+        print(f"CLAUDE_PROJECTS_MOVED={moved}")
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            promoted, published, pub_dest = _read_promotion_stamp(dest)
+            _wl.record_slot_archive(
+                _conn, slot_num, str(family_root),
+                promoted=promoted, published=published,
+                publish_dest=pub_dest,
+                archived_from=str(slot_dir), archived_to=str(dest),
+            )
+            _conn.close()
+        except Exception:
+            pass
+    print(f"ARCHIVED={slot_num}")
 
 
 def check_cross_deps(family_root: Path, slot_num: int) -> int:
@@ -1723,8 +1703,8 @@ def main() -> None:
         if slot_num == 0:
             print("ERROR=missing_slot_number")
             sys.exit(1)
-        force_delete = "--force-delete" in sys.argv
-        remove_slot(family_root, slot_num, force_delete=force_delete)
+        force = "--force" in sys.argv or "--force-delete" in sys.argv
+        remove_slot(family_root, slot_num, force=force)
 
     elif subcommand == "scan-ready":
         family_root = Path(args.get("target", "."))

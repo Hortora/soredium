@@ -632,7 +632,8 @@ class TestRemoveSlot:
         attic = family / "slots" / "attic" / "1"
         assert (attic / "myrepo" / "src.java").exists(), "repo deleted during archive — attic is useless without it"
 
-    def test_force_delete_permanently_removes(self, tmp_path):
+    def test_force_archives_without_landed_check(self, tmp_path):
+        """--force skips .landed check but still archives to attic."""
         family = tmp_path / "casehub"
         slot = family / "slots" / "1"
         slot.mkdir(parents=True)
@@ -640,10 +641,12 @@ class TestRemoveSlot:
 
         with patch("slot_manager.run_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "", "")
-            slot_manager.remove_slot(family, 1, force_delete=True)
+            slot_manager.remove_slot(family, 1, force=True)
 
         assert not slot.exists()
-        assert not (family / "slots" / "attic" / "1").exists()
+        attic = family / "slots" / "attic" / "1"
+        assert attic.exists(), "force must archive to attic, never delete"
+        assert (attic / ".slot").exists()
 
     def test_nonexistent_slot_errors(self, tmp_path, capsys):
         family = tmp_path / "casehub"
@@ -1634,9 +1637,9 @@ class TestIsProjectRepo:
         assert slot_manager.is_project_repo("attic") is False
 
 
-class TestRemoveSlotForceDeleteClaude:
-    def test_force_delete_removes_claude_projects(self, tmp_path, monkeypatch):
-        """force-delete must remove Claude session dirs for the destroyed slot."""
+class TestRemoveSlotForceArchiveClaude:
+    def test_force_relocates_claude_projects_to_attic(self, tmp_path, monkeypatch):
+        """--force archives to attic and relocates Claude session dirs."""
         family = tmp_path / "casehub"
         slot = family / "slots" / "1"
         slot.mkdir(parents=True)
@@ -1657,9 +1660,12 @@ class TestRemoveSlotForceDeleteClaude:
 
         with patch("slot_manager.run_cmd") as mock_cmd:
             mock_cmd.return_value = (0, "", "")
-            slot_manager.remove_slot(family, 1, force_delete=True)
+            slot_manager.remove_slot(family, 1, force=True)
 
-        assert not proj_dir.exists(), "Claude session dir was not removed during force-delete"
+        attic = family / "slots" / "attic" / "1"
+        assert attic.exists(), "force must archive to attic, never delete"
+        assert (attic / ".slot").exists()
+        assert not proj_dir.exists(), "Claude session dir should be relocated"
 
 
 class TestReadPromotionStamp:

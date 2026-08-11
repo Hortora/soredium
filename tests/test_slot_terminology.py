@@ -9,7 +9,7 @@ Allowed contexts for "worktree" in slot files:
 - References to using-git-worktrees (a different skill)
 - The is_worktree() detection function (distinguishes clones from worktrees)
 - ensure_clone_layout() migration context (converts worktrees TO clones)
-- remove_slot --force-delete worktree handling (legacy cleanup)
+- remove_slot worktree detection (legacy cleanup)
 - Code comments explaining the worktree→clone migration
 """
 

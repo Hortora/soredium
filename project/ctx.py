@@ -23,15 +23,28 @@ def check_dir(*paths):
     return "yes" if any(p.is_dir() for p in paths) else "no"
 
 def _resolve_symlink_target(symlink: Path) -> str | None:
-    """Resolve a symlink, validating the target is a git root.
+    """Resolve a symlink to a path inside a git repository.
 
-    If the target exists but is not a git root (e.g. a subdirectory of
-    another repo), returns None to fall back to single-repo mode.
+    When the target exists: returns the target path itself (even if it is
+    a subdirectory, not the git root).  This preserves correct artifact
+    paths — e.g. slot workspace clones where wksp → ../work/engine and
+    .meta lives at work/engine/design/.meta, not work/design/.meta.
+
+    When the target is dangling: walks up to find the nearest git root
+    (the target path does not exist, so the git root is the best we can
+    return).
+
+    Returns None when the path is not inside any git repository.
     """
     if symlink.exists():
         resolved = symlink.resolve()
         if (resolved / ".git").exists() or (resolved / ".git").is_file():
             return str(resolved)
+        candidate = resolved.parent
+        while candidate != candidate.parent:
+            if (candidate / ".git").exists() or (candidate / ".git").is_file():
+                return str(resolved)
+            candidate = candidate.parent
         return None
     if not symlink.is_symlink():
         return None
