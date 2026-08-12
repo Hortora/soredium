@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from contextlib import contextmanager
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -143,3 +144,87 @@ async def test_input_modal_dismiss_on_escape():
             await pilot.press("escape")
             await pilot.pause()
             assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Session SPI integration
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_session_action_routes_to_provider():
+    with patch("tui.python.app.refresh", side_effect=_mock_refresh), \
+         patch("tui.python.app.resolve_context", side_effect=_mock_resolve_context):
+        from tui.python.app import SorediumApp
+
+        mock_provider = MagicMock()
+
+        @contextmanager
+        def noop_suspend():
+            yield
+
+        app = SorediumApp(cwd="/tmp/test", session_provider=mock_provider)
+        async with app.run_test() as pilot:
+            with patch.object(app, "suspend", noop_suspend):
+                app._start_session()
+
+            mock_provider.start.assert_called_once()
+            ctx = mock_provider.start.call_args[0][0]
+            assert ctx.issue == 42
+            assert ctx.project_path == "/tmp/test-project"
+            assert ctx.branch == "issue-42-fix"
+            mock_provider.run.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_session_action_refreshes_state_after():
+    call_order = []
+
+    def tracking_refresh(cwd=None):
+        call_order.append("refresh")
+        return _mock_refresh(cwd)
+
+    with patch("tui.python.app.refresh", side_effect=tracking_refresh), \
+         patch("tui.python.app.resolve_context", side_effect=_mock_resolve_context):
+        from tui.python.app import SorediumApp
+
+        mock_provider = MagicMock()
+
+        @contextmanager
+        def noop_suspend():
+            call_order.append("suspend")
+            yield
+
+        app = SorediumApp(cwd="/tmp/test", session_provider=mock_provider)
+        async with app.run_test() as pilot:
+            call_order.clear()
+            with patch.object(app, "suspend", noop_suspend):
+                app._start_session()
+
+            assert "suspend" in call_order
+            assert "refresh" in call_order
+            assert call_order.index("suspend") < call_order.index("refresh")
+
+
+@pytest.mark.asyncio
+async def test_session_action_not_in_handle_when_idle():
+    """Session action isn't available in idle state — verify action derivation."""
+    from commands.registry import derive_actions
+    actions, _ = derive_actions("idle", stack_depth=0)
+    assert "session" not in actions
+
+
+@pytest.mark.asyncio
+async def test_build_issue_context_from_registry_context():
+    with patch("tui.python.app.refresh", side_effect=_mock_refresh), \
+         patch("tui.python.app.resolve_context", side_effect=_mock_resolve_context):
+        from tui.python.app import SorediumApp, _build_issue_context
+        from commands.events import IssueContext
+
+        ctx = _mock_context()
+        issue_ctx = _build_issue_context(ctx)
+        assert isinstance(issue_ctx, IssueContext)
+        assert issue_ctx.issue == 42
+        assert issue_ctx.project_path == "/tmp/test-project"
+        assert issue_ctx.workspace_path == "/tmp/test-workspace"
+        assert issue_ctx.branch == "issue-42-fix"
+        assert issue_ctx.plan_position == "1/3"

@@ -14,8 +14,20 @@ from tui.python.ui.content import ContentArea
 from tui.python.ui.footer import FooterBar
 from tui.python.ui.home import HomeView, RepoSelected
 from tui.python.ui.modals import InputModal
+from tui.python.session import SessionProvider
 from commands import events
-from commands.registry import resolve_context, refresh, derive_actions
+from commands.registry import Context, resolve_context, refresh, derive_actions
+
+
+def _build_issue_context(ctx: Context) -> events.IssueContext:
+    return events.IssueContext(
+        issue=ctx.issue or 0,
+        title=f"Issue #{ctx.issue}" if ctx.issue else "",
+        branch=ctx.branch,
+        plan_position=ctx.plan_position,
+        project_path=ctx.project_path,
+        workspace_path=ctx.workspace_path,
+    )
 
 
 class SorediumApp(App):
@@ -27,10 +39,13 @@ class SorediumApp(App):
     ]
 
     def __init__(self, cwd: str | None = None,
-                 scan_paths: list[str] | None = None, **kwargs) -> None:
+                 scan_paths: list[str] | None = None,
+                 session_provider: SessionProvider | None = None,
+                 **kwargs) -> None:
         super().__init__(**kwargs)
         self.cwd = cwd
         self.scan_paths = scan_paths or ["~/claude/"]
+        self._session_provider = session_provider
         self._running_command = False
         self._view = "project" if cwd else "home"
 
@@ -139,7 +154,9 @@ class SorediumApp(App):
             self._handle_action(message.action)
 
     def _handle_action(self, action: str) -> None:
-        if action == "start":
+        if action == "session":
+            self._start_session()
+        elif action == "start":
             self.push_screen(
                 InputModal("Issue numbers (space-separated):", "#42 #43"),
                 callback=self._on_start_input,
@@ -151,6 +168,27 @@ class SorediumApp(App):
             )
         else:
             self._run_command(action)
+
+    def _start_session(self) -> None:
+        if self._session_provider is None:
+            self._session_provider = self._auto_detect_provider()
+
+        ctx = resolve_context(self.cwd)
+        issue_ctx = _build_issue_context(ctx)
+        self._session_provider.start(issue_ctx)
+
+        with self.suspend():
+            self._session_provider.run()
+
+        self._refresh_state()
+
+    def _auto_detect_provider(self) -> SessionProvider:
+        import shutil
+        if shutil.which("tmux"):
+            from tui.python.session.tmux import TmuxProvider
+            return TmuxProvider()
+        from tui.python.session.suspend import SuspendingProvider
+        return SuspendingProvider()
 
     def _on_start_input(self, value: str | None) -> None:
         if value:
