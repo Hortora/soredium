@@ -43,6 +43,10 @@ Ask the user for:
   Only clone repos that will receive commits. Repos needed for reading
   (checking an API, referencing code) are already available at their
   original local path — don't clone them into the slot.
+- **`--isx`:** create with ISX container isolation. If specified, run
+  `isx templates list`, present available templates for selection.
+  Optional instance name override (defaults to branch name, truncated
+  to 63 chars).
 - **Context:** what needs doing and any background
 
 The user may provide all of this in one sentence or you may need to ask.
@@ -81,6 +85,11 @@ python3 ~/.claude/skills/work-slot/slot_manager.py create-slot <family-root> \
   covers=<csv> context=<text>
 ```
 
+If `--isx` was specified, pass `isx=yes template=<name>` to `create-slot`.
+The script handles pre-flight (`isx` on PATH), instance creation
+(`isx branch`), remote wiring (`isx://` per repo), and `.slot`
+isolation metadata.
+
 Read output: `SLOT_NUMBER`, `SLOT_DIR`, `BRANCH`. If `ERROR=`, report
 and stop.
 
@@ -117,21 +126,21 @@ on GitHub with the batch-grouped checklist.
 - Show a diff preview before writing. User confirms explicitly.
 - Preserve all content outside the Scope section.
 
-### Step 8 — Offer iTerm2 tab
+### Step 8 — Offer shell access
+
+For non-ISX slots:
 
 > "Open an iTerm2 tab in the slot? (y/n)"
 
-If yes:
-```bash
-osascript -e 'tell application "iTerm2"
-    tell current window
-        create tab with default profile
-        tell current session
-            write text "cd <slot-dir>/<primary-repo>"
-        end tell
-    end tell
-end tell'
-```
+If yes, open iTerm2 tab with `cd <slot-dir>/<primary-repo>`.
+
+For ISX slots (`.slot` has `type: isx`), offer both:
+
+> "Open iTerm tab for host ops? (y/n)"
+> "Open ISX shell for container work? (y/n)"
+
+Host tab: `cd <slot-dir>/<primary-repo>` (for sync, work-end).
+Container shell: `isx shell <instance>` (for implementation, testing).
 
 Warn and continue if iTerm2 is unavailable.
 
@@ -161,10 +170,10 @@ python3 ~/.claude/skills/work-slot/slot_manager.py list-slots <family-root>
 
 Format output as a table:
 
-| Slot | Branch | Repos | State |
-|------|--------|-------|-------|
-| 1 | issue-42-spi | engine | active |
-| 2 | issue-55-ledger | engine, iot | active |
+| Slot | Branch | Repos | State | Isolation |
+|------|--------|-------|-------|-----------|
+| 1 | issue-42-spi | engine | active | none |
+| 2 | issue-55-ledger | engine, iot | active | isx |
 
 ---
 
@@ -226,6 +235,39 @@ Cross-check `.plan` against the GitHub epic body. Report if:
 
 ---
 
+## `work-slot sync`
+
+Fetch committed work from an ISX container into local slot clones.
+
+### Usage
+
+`work-slot sync <N>` (by slot number) or
+`work-slot sync` (from inside an ISX slot clone, auto-detected).
+
+```bash
+python3 ~/.claude/skills/work-slot/slot_manager.py sync-isx <slot-dir>
+```
+
+### What it does
+
+For each project repo in the slot:
+1. `git fetch isx <branch>` — fetch from ISX container
+2. `git merge --ff-only isx/<branch>` — fast-forward local clone
+
+### Error handling
+
+- Non-ISX slot → error: "This slot has no ISX isolation."
+- Diverged histories → stops, reports which repo diverged
+- No `isx` remote on a repo → skips with warning
+
+### When to run
+
+After finishing work inside the ISX container (`isx shell`), before
+running `work end` on the host. `work end` includes a staleness
+pre-flight that warns if you forget.
+
+---
+
 ## `work-slot add-repo <repo-name>`
 
 Add a repository to an existing slot. Run from inside a slot.
@@ -269,6 +311,10 @@ python3 ~/.claude/skills/work-slot/slot_manager.py remove-slot <family-root> slo
 **Default behaviour is archive to attic, not delete.** The slot directory
 moves to `slots/attic/<N>/` preserving .slot, `.plan`, and any other
 metadata for auditing and branch hygiene.
+
+For ISX slots, `isx destroy <instance>` runs before archiving to
+clean up the container. Warns and continues if destroy fails
+(instance may already be gone).
 
 **`--force` skips the .landed check** but still archives to attic. There is
 no permanent deletion flag — slots are always preserved. Archived slots cost
@@ -316,6 +362,8 @@ nothing and enable branch hygiene scans, blog recovery, and stamp verification.
 **Complements:**
 - `work-start` — runs inside the slot after creation (resume path).
   For slots with a `.plan`, work-start displays queue context on resume.
+  On resume for ISX slots, offers `isx shell` for container access
+  (same offering as creation Step 8).
 - `work-end` — runs the full close sequence inside the slot (review,
   promote, squash, push, merge to original, stamp, archive). One command,
   no separate merge step.
