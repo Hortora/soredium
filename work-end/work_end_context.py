@@ -71,10 +71,51 @@ def get_branch(repo: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def check_isx_staleness(workspace: str, project: str) -> dict:
+    slot_dir = Path(project).parent
+    slot_file = slot_dir / ".slot"
+    if not slot_file.exists():
+        return {"status": "skip"}
+
+    slot_skill = Path(__file__).parent.parent / "work-slot"
+    sys.path.insert(0, str(slot_skill))
+    try:
+        from slot_manager import parse_slot_md, get_slot_repos
+    except ImportError:
+        return {"status": "skip"}
+
+    info = parse_slot_md(slot_dir)
+    if info.get("isolation_type") != "isx":
+        return {"status": "skip"}
+
+    stale_repos = []
+    for repo_name in get_slot_repos(slot_dir):
+        clone_path = slot_dir / repo_name
+        if not clone_path.is_dir():
+            continue
+        local_head = git(str(clone_path), "rev-parse", "HEAD")
+        remote = git(str(clone_path), "ls-remote", "isx", "HEAD")
+        if local_head.returncode != 0 or remote.returncode != 0:
+            continue
+        local_sha = local_head.stdout.strip()
+        remote_sha = remote.stdout.split()[0] if remote.stdout.strip() else ""
+        if remote_sha and local_sha != remote_sha:
+            stale_repos.append(repo_name)
+
+    if stale_repos:
+        return {
+            "status": "needs_input",
+            "detail": "isx-stale",
+            "repos": stale_repos,
+        }
+    return {"status": "pass"}
+
+
 def gather_context(workspace: str, project: str) -> dict:
     preconditions: dict[str, dict] = {}
 
     preconditions["clean_tree"] = check_clean_tree(workspace, project)
+    preconditions["isx_staleness"] = check_isx_staleness(workspace, project)
     meta_result = check_meta_exists(workspace)
     preconditions["meta_exists"] = {
         k: v for k, v in meta_result.items() if k != "meta"

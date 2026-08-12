@@ -4,8 +4,13 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 SCRIPT = Path(__file__).parent.parent / "work-end" / "work_end_context.py"
+
+work_end_dir = Path(__file__).parent.parent / "work-end"
+sys.path.insert(0, str(work_end_dir))
+import work_end_context
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -179,3 +184,100 @@ class TestContextBadArgs:
             capture_output=True, text=True,
         )
         assert result.returncode == 1
+
+
+class TestIsxStaleness:
+    def test_non_slot_skipped(self, tmp_path: Path) -> None:
+        ws = _init_repo(tmp_path / "workspace")
+        proj = _init_repo(tmp_path / "project")
+        result = work_end_context.check_isx_staleness(str(ws), str(proj))
+        assert result["status"] == "skip"
+
+    def test_non_isx_slot_skipped(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        proj = _init_repo(slot_dir / "engine")
+        ws = _init_repo(slot_dir / "workspace")
+        (slot_dir / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Created\n2026-08-12, branch: test\n"
+        )
+        result = work_end_context.check_isx_staleness(str(ws), str(proj))
+        assert result["status"] == "skip"
+
+    def test_isx_in_sync(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        proj = _init_repo(slot_dir / "engine")
+        ws = _init_repo(slot_dir / "workspace")
+        (slot_dir / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Isolation\ntype: isx\ninstance: test-inst\n"
+            "template: tpl-java\n\n"
+            "## Created\n2026-08-12, branch: test\n"
+        )
+        sha = "abc123def456"
+        def mock_git(repo, *args):
+            r = MagicMock()
+            r.returncode = 0
+            if "rev-parse" in args:
+                r.stdout = sha
+            elif "ls-remote" in args:
+                r.stdout = f"{sha}\tHEAD"
+            return r
+        with patch.object(work_end_context, "git", side_effect=mock_git):
+            result = work_end_context.check_isx_staleness(str(ws), str(proj))
+        assert result["status"] == "pass"
+
+    def test_isx_stale_detected(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        proj = _init_repo(slot_dir / "engine")
+        ws = _init_repo(slot_dir / "workspace")
+        (slot_dir / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Isolation\ntype: isx\ninstance: test-inst\n"
+            "template: tpl-java\n\n"
+            "## Created\n2026-08-12, branch: test\n"
+        )
+        def mock_git(repo, *args):
+            r = MagicMock()
+            r.returncode = 0
+            if "rev-parse" in args:
+                r.stdout = "local111"
+            elif "ls-remote" in args:
+                r.stdout = "remote222\tHEAD"
+            return r
+        with patch.object(work_end_context, "git", side_effect=mock_git):
+            result = work_end_context.check_isx_staleness(str(ws), str(proj))
+        assert result["status"] == "needs_input"
+        assert result["detail"] == "isx-stale"
+        assert "engine" in result["repos"]
+
+    def test_isx_remote_unreachable_skips(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        proj = _init_repo(slot_dir / "engine")
+        ws = _init_repo(slot_dir / "workspace")
+        (slot_dir / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Isolation\ntype: isx\ninstance: test-inst\n"
+            "template: tpl-java\n\n"
+            "## Created\n2026-08-12, branch: test\n"
+        )
+        def mock_git(repo, *args):
+            r = MagicMock()
+            if "rev-parse" in args:
+                r.returncode = 0
+                r.stdout = "local111"
+            elif "ls-remote" in args:
+                r.returncode = 1
+                r.stdout = ""
+            return r
+        with patch.object(work_end_context, "git", side_effect=mock_git):
+            result = work_end_context.check_isx_staleness(str(ws), str(proj))
+        assert result["status"] == "pass"
