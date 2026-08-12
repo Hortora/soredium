@@ -137,6 +137,23 @@ def _parse_batches(content: str) -> list[dict]:
     return batches
 
 
+def _update_meta_covers(meta_path: Path, completed_issue: int) -> None:
+    """Append completed issue number to .meta covers line."""
+    content = meta_path.read_text()
+    lines = content.splitlines()
+    out = []
+    for line in lines:
+        if line.startswith("covers:"):
+            existing = line.split(":", 1)[1].strip()
+            nums = [n.strip() for n in existing.split(",") if n.strip()]
+            s = str(completed_issue)
+            if s not in nums:
+                nums.append(s)
+            line = f"covers: {','.join(nums)}"
+        out.append(line)
+    meta_path.write_text("\n".join(out) + "\n")
+
+
 def advance(epic_path: Path, meta_path: Path | None = None) -> dict:
     """Advance to the next issue. Updates epic file and .meta COVERS."""
     plan = parse_batch_plan(epic_path)
@@ -173,6 +190,9 @@ def advance(epic_path: Path, meta_path: Path | None = None) -> dict:
 
     _rewrite_epic_file(epic_path, current, next_issue, next_title,
                        next_batch_num, plan["batches"])
+
+    if meta_path is not None and meta_path.exists():
+        _update_meta_covers(meta_path, current)
 
     return {
         "completed": current,

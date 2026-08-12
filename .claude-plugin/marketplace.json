@@ -7,12 +7,6 @@
   },
   "plugins": [
     {
-      "name": "adr",
-      "source": "./adr",
-      "description": "Use when recording architectural decisions: user says \"create an ADR\", \"document why we chose X\", significant technic...",
-      "version": "1.0.0"
-    },
-    {
       "name": "code-review",
       "source": "./code-review",
       "description": "Use when the user says \"review the code\", \"check these changes\", \"review this\", \"look at staged changes\", or invokes ...",
@@ -171,7 +165,7 @@
     {
       "name": "work-resume",
       "source": "./work-resume",
-      "description": "Use when returning to a paused branch — user says \"work-resume\", \"resume\", or \"go back to that branch\". Reads the pau...",
+      "description": "Use when returning to a paused branch from the pause stack — user says \"work resume\", \"resume\", or \"go back to that branch\". Pause-stack restoration only, not general branch continuation (use \"work continue\" for that). Invoked from main to restore a previously paused work session. Handles multiple paused branches via stack.",
       "version": "1.0.0"
     },
     {
@@ -280,6 +274,18 @@
       "name": "design-review",
       "source": "./design-review",
       "description": "Use when a design spec needs adversarial review — user says \"review this design\", \"design review\", \"tear this spec apart\", \"pre-review this\", or invokes /design-review. Orchestrates two independent Claude sessions (reviewer + implementor) with a Python PM tracking every issue to evidence-based resolution.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "brief",
+      "source": "./brief",
+      "description": "Use when the user says \"/brief\", \"give a brief\", \"what's the state\", \"where are we\", or \"orient\" — provides an orientation summary of the current work state, branch, issue, plan progress, and health status.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "quick-fix",
+      "source": "./quick-fix",
+      "description": "Use when landing a small change directly on main without a feature branch — user says \"quick-fix\", \"land this on main\", \"commit to main\", or invokes /quick-fix. Not for feature work (use work start for that).",
       "version": "1.0.0"
     },
     {
