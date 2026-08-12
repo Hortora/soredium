@@ -473,6 +473,42 @@ class TestWriteSlotMd:
         assert "55,56" in content
 
 
+class TestWriteSlotMdIsolation:
+    def test_write_with_isolation(self, tmp_path):
+        slot_manager.write_slot_md(
+            tmp_path, 7, ["soredium"], "issue-42-fix", "42",
+            "Hortora/soredium", "42", "Fix scoring",
+            isolation_type="isx", isx_instance="issue-42-fix",
+            isx_template="tpl-java",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert "## Isolation" in content
+        assert "type: isx" in content
+        assert "instance: issue-42-fix" in content
+        assert "template: tpl-java" in content
+
+    def test_write_without_isolation(self, tmp_path):
+        slot_manager.write_slot_md(
+            tmp_path, 7, ["soredium"], "issue-42-fix", "42",
+            "Hortora/soredium", "42", "Fix scoring",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert "## Isolation" not in content
+
+    def test_write_isolation_roundtrip(self, tmp_path):
+        slot_manager.write_slot_md(
+            tmp_path, 7, ["soredium"], "issue-42-fix", "42",
+            "Hortora/soredium", "42", "Fix scoring",
+            isolation_type="isx", isx_instance="issue-42-fix",
+            isx_template="tpl-java",
+        )
+        result = slot_manager.parse_slot_md(tmp_path)
+        assert result["isolation_type"] == "isx"
+        assert result["isx_instance"] == "issue-42-fix"
+        assert result["isx_template"] == "tpl-java"
+        assert result["repos"] == ["soredium"]
+
+
 class TestCreateSlot:
     @patch("slot_manager.run_cmd")
     def test_creates_single_repo_slot(self, mock_cmd, tmp_path):
@@ -695,6 +731,51 @@ class TestParseSlotMd:
 
     def test_missing_slot_md(self, tmp_path):
         assert slot_manager.parse_slot_md(tmp_path) == {}
+
+
+class TestParseSlotMdIsolation:
+    def test_parse_with_isolation_section(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 7 — issue-42-fix\n\n"
+            "## Issue\nHortora/soredium#42\nCovers: 42\n\n"
+            "## What to do\nFix scoring\n\n"
+            "## Repos\n- soredium (primary)\n\n"
+            "## Isolation\ntype: isx\ninstance: issue-42-fix\n"
+            "template: tpl-java\n\n"
+            "## Created\n2026-08-12, branch: issue-42-fix\n"
+        )
+        result = slot_manager.parse_slot_md(tmp_path)
+        assert result["isolation_type"] == "isx"
+        assert result["isx_instance"] == "issue-42-fix"
+        assert result["isx_template"] == "tpl-java"
+
+    def test_parse_without_isolation_section(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 7 — issue-42-fix\n\n"
+            "## Issue\nHortora/soredium#42\nCovers: 42\n\n"
+            "## Repos\n- soredium (primary)\n\n"
+            "## Created\n2026-08-12, branch: issue-42-fix\n"
+        )
+        result = slot_manager.parse_slot_md(tmp_path)
+        assert result["isolation_type"] == ""
+        assert result["isx_instance"] == ""
+        assert result["isx_template"] == ""
+
+    def test_parse_isolation_preserves_existing_fields(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 7 — issue-42-fix\n\n"
+            "## Issue\nHortora/soredium#42\nCovers: 42\n\n"
+            "## What to do\nFix scoring\n\n"
+            "## Repos\n- soredium (primary)\n\n"
+            "## Isolation\ntype: isx\ninstance: issue-42-fix\n"
+            "template: tpl-java\n\n"
+            "## Created\n2026-08-12, branch: issue-42-fix\n"
+        )
+        result = slot_manager.parse_slot_md(tmp_path)
+        assert result["repos"] == ["soredium"]
+        assert result["issue"] == "42"
+        assert result["covers"] == "42"
+        assert result["context"] == "Fix scoring"
 
 
 class TestScanReady:

@@ -412,7 +412,9 @@ def sync_main(repo_path: str) -> None:
 
 def write_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
                   branch: str, issue: str, issue_repo: str,
-                  covers: str, context: str) -> None:
+                  covers: str, context: str,
+                  isolation_type: str = "", isx_instance: str = "",
+                  isx_template: str = "") -> None:
     content = f"""# Slot {slot_number} — {branch}
 
 ## Issue
@@ -427,6 +429,8 @@ Covers: {covers}
     for i, repo in enumerate(repos):
         primary = " (primary)" if i == 0 else ""
         content += f"- {repo}{primary}\n"
+    if isolation_type:
+        content += f"\n## Isolation\ntype: {isolation_type}\ninstance: {isx_instance}\ntemplate: {isx_template}\n"
     content += f"\n## Created\n{datetime.date.today().isoformat()}, branch: {branch}\n"
     (slot_dir / ".slot").write_text(content)
 
@@ -775,11 +779,12 @@ def parse_slot_md(slot_dir: Path) -> dict:
     if not slot_md.exists():
         return {}
     content = slot_md.read_text()
-    result: dict = {"repos": [], "context": "", "issue": "", "issue_repo": "", "covers": "", "is_epic": False}
+    result: dict = {"repos": [], "context": "", "issue": "", "issue_repo": "", "covers": "", "is_epic": False, "isolation_type": "", "isx_instance": "", "isx_template": ""}
 
     in_issue = False
     in_what = False
     in_repos = False
+    in_isolation = False
     context_lines: list[str] = []
     for line in content.splitlines():
         if line.startswith("# Slot") and "—" in line:
@@ -787,16 +792,19 @@ def parse_slot_md(slot_dir: Path) -> dict:
         if line.startswith("Covers:"):
             result["covers"] = line.split(":", 1)[1].strip()
         if line.startswith("## Issue"):
-            in_issue, in_what, in_repos = True, False, False
+            in_issue, in_what, in_repos, in_isolation = True, False, False, False
             continue
         if line.startswith("## What to do"):
-            in_issue, in_what, in_repos = False, True, False
+            in_issue, in_what, in_repos, in_isolation = False, True, False, False
             continue
         if line.startswith("## Repos"):
-            in_issue, in_what, in_repos = False, False, True
+            in_issue, in_what, in_repos, in_isolation = False, False, True, False
+            continue
+        if line.startswith("## Isolation"):
+            in_issue, in_what, in_repos, in_isolation = False, False, False, True
             continue
         if line.startswith("## "):
-            in_issue, in_what, in_repos = False, False, False
+            in_issue, in_what, in_repos, in_isolation = False, False, False, False
             continue
         if in_issue and line.strip().startswith("Type:"):
             result["is_epic"] = line.strip().split(":", 1)[1].strip() == "epic"
@@ -811,6 +819,14 @@ def parse_slot_md(slot_dir: Path) -> dict:
             repo_name = line.strip().lstrip("- ").split(" ")[0].strip()
             if repo_name:
                 result["repos"].append(repo_name)
+        if in_isolation:
+            stripped = line.strip()
+            if stripped.startswith("type:"):
+                result["isolation_type"] = stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("instance:"):
+                result["isx_instance"] = stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("template:"):
+                result["isx_template"] = stripped.split(":", 1)[1].strip()
 
     result["context"] = " ".join(l for l in context_lines if l).strip()
     return result
