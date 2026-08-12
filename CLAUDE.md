@@ -27,6 +27,7 @@ Soredium is the skills, validators, tooling, and engine repository for professio
 - **Garden skills** -- `forage` (capture, sweep, search, revise) and `harvest` (merge, dedupe) for the Hortora knowledge garden
 - **Garden tooling** -- ecosystem mining pipeline, schema validation, garden federation
 - **Engine** -- Quarkus/Java 21 CLI application for garden deduplication and pattern detection (`engine/`)
+- **TUI/CLI** -- Textual-based terminal UI and JSON Lines CLI for mechanical lifecycle operations without an LLM (`tui/`, `cli/`, `commands/`)
 - **Protocol rules** -- standing conventions for taxonomy, validation boundaries, and script requirements
 
 Named after the lichen's dispersal unit: a self-contained bundle that carries everything needed to establish a new colony wherever it lands.
@@ -417,6 +418,18 @@ python3 scripts/validate_all.py --tier commit
 # Run lifecycle state machine tests
 python3 -m pytest tests/test_lifecycle.py tests/test_pre_push_hook.py -v
 
+# Run TUI tests (Textual widget + app integration)
+python3 -m pytest tests/test_tui_project_view.py tests/test_tui_home_view.py tests/test_tui_app.py tests/test_session_spi.py -v
+
+# Run CLI and command layer tests
+python3 -m pytest tests/test_cli.py tests/test_events.py tests/test_commands.py tests/test_discover.py -v
+
+# Launch TUI (requires textual)
+python3 -m tui.python
+
+# Run CLI command (JSON Lines output)
+python3 -m cli status
+
 # Generate missing slash command files after adding a new skill
 python3 scripts/generate_commands.py
 
@@ -798,6 +811,9 @@ filtering or dropping commits that touch these paths.
 | `docs/specs/` | Design specifications |
 | `docs/protocols/` | Standing rules for taxonomy and conventions |
 | `engine/` | Quarkus/Java garden engine |
+| `tui/` | Textual TUI application |
+| `cli/` | CLI entry point (JSON Lines) |
+| `commands/` | Portable command layer (events, registry, command modules) |
 | `registry/` | Ecosystem mining project registry |
 
 ---
