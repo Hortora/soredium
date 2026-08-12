@@ -1,1 +1,5 @@
-Land a small change on main via an ephemeral branch
+---
+description: "Use when landing a small change directly on main without a feature branch — user says "quick-fix"..."
+---
+
+Invoke the `quick-fix` skill.

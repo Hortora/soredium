@@ -1,5 +1,5 @@
 ---
-description: "Use when returning to a paused branch — user says "work-resume", "resume", or "go back to that br..."
+description: "Use when returning to a paused branch from the pause stack — user says "work resume", "resume", o..."
 ---
 
 Invoke the `work-resume` skill.

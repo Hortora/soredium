@@ -93,6 +93,7 @@ Invoke Branch Switch Helper. If it fails → hard stop.
 
 **Pause stack**: if `.pause-stack` has entries AND on main, route to
 `work` skill for stack picker before starting a new branch.
+Stack depth 1+: always show picker — never auto-resume a single entry.
 
 ---
 

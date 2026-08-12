@@ -335,7 +335,7 @@ Notes (2026-08-10):
 ```
 
 Reminds the user of persistent context before they decide what to do next.
-Skip silently if no notes exist or `.notes/` worktree is absent.
+Skip silently if no notes exist or `.notes/` directory is absent.
 
 ---
 
@@ -377,6 +377,10 @@ Skip silently if no notes exist or `.notes/` worktree is absent.
 - `handover` — work-end includes the full wrap (Step 5.6)
 - `work-start` — opens branches; work-end closes them
 - `work-slot` — slot detection triggers per-repo loop in Execute
+- `using-git-worktrees` — worktree isolation before plan execution;
+  work-end closes the branch regardless of isolation method
+- `verification-before-completion` — verification gate before claiming
+  work is done; work-end runs the full close sequence after verification
 
 **Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, `.execute-progress`,
 `.squash-plan-*.json`, `verify_slot_close.py` output

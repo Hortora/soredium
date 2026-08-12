@@ -409,6 +409,8 @@ Commit is complete when:
   git-commit captures the fix
 - `implementation-doc-sync` — doc-sync handles session-scoped documentation
   updates; git-commit chains to `update-design` for design journal
+- `quick-fix` — quick-fix lands small changes on main via ephemeral branch;
+  git-commit handles the commit within that flow
 
 **Interactive setup:** If CLAUDE.md missing or no Project Type declared, guides user through setup and creates CLAUDE.md
 

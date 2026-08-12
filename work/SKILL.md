@@ -306,5 +306,9 @@ Steps:
 - `work-pause` — when saving state to switch to something else
 - `handover` — when ending the session but keeping the branch open (mid-work wrap)
 
+**Complements:**
+- `quick-fix` — lands small changes on main without a feature branch;
+  work routes to work-start for branch-based work
+
 **This skill does not implement the lifecycle itself** — it detects state and
 delegates. All logic lives in the individual lifecycle skills.
