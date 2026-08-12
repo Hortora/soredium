@@ -42,9 +42,11 @@ def execute(cwd: str | None = None, **_kwargs) -> list:
             events.append(WipCommitted(ctx.project_path, message))
 
         # WIP commit workspace
+        ws_committed = False
         if ctx.workspace_path:
             ws_result = commit_wip_typed(ctx.workspace_path, message)
-            if ws_result.committed:
+            ws_committed = ws_result.committed
+            if ws_committed:
                 events.append(WipCommitted(ctx.workspace_path, message))
 
         # Push to stack
@@ -55,7 +57,7 @@ def execute(cwd: str | None = None, **_kwargs) -> list:
             issue=ctx.issue or 0,
             paused=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             wip_project=proj_result.committed,
-            wip_workspace=ws_result.committed if ctx.workspace_path else False,
+            wip_workspace=ws_committed,
         )
         depth = push_entry(stack_path, entry)
 
