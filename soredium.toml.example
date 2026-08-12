@@ -1,0 +1,12 @@
+# soredium.toml — TUI and CLI configuration
+#
+# Copy to ~/.config/soredium/soredium.toml or ./soredium.toml
+
+[workspace]
+scan_paths = ["~/claude/"]
+
+[session]
+# "tmux" (default if tmux available) or "suspend" (inline)
+provider = "tmux"
+# CLI command to launch in sessions
+cli = "claude"
