@@ -1010,6 +1010,91 @@ class TestSyncIsx:
         assert result == 0
 
 
+class TestAddRepoIsx:
+    @patch("slot_manager.run_cmd")
+    def test_add_repo_wires_isx_remote(self, mock_cmd, tmp_path):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        init_repo(family / "iot")
+        slot_manager.write_slot_md(
+            slot_dir, 1, ["engine"], "test-branch", "42",
+            "Org/repo", "42", "test",
+            isolation_type="isx", isx_instance="test-inst",
+            isx_template="tpl-java",
+        )
+        mock_cmd.return_value = (0, "", "")
+        slot_manager.add_repo(family, 1, "iot", "test-branch")
+        isx_calls = [c for c in mock_cmd.call_args_list
+                    if len(c[0][0]) > 5 and "isx://" in str(c[0][0])]
+        assert len(isx_calls) >= 1
+
+    @patch("slot_manager.run_cmd")
+    def test_add_repo_non_isx_no_remote(self, mock_cmd, tmp_path):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        init_repo(family / "iot")
+        slot_manager.write_slot_md(
+            slot_dir, 1, ["engine"], "test-branch", "42",
+            "Org/repo", "42", "test",
+        )
+        mock_cmd.return_value = (0, "", "")
+        slot_manager.add_repo(family, 1, "iot", "test-branch")
+        isx_calls = [c for c in mock_cmd.call_args_list
+                    if any("isx://" in str(a) for a in c[0][0])]
+        assert len(isx_calls) == 0
+
+
+class TestRemoveSlotIsx:
+    def test_remove_destroys_isx(self, tmp_path):
+        family = tmp_path / "casehub"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        slot_manager.write_slot_md(
+            slot_dir, 1, ["engine"], "test-branch", "42",
+            "Org/repo", "42", "test",
+            isolation_type="isx", isx_instance="test-inst",
+            isx_template="tpl-java",
+        )
+        (slot_dir / ".landed").write_text("landed")
+        with patch("slot_manager.run_cmd", return_value=(0, "", "")):
+            with patch("slot_manager._teardown_isx") as mock_teardown:
+                slot_manager.remove_slot(family, 1)
+                mock_teardown.assert_called_once()
+
+
+class TestListSlotsIsolation:
+    def test_list_shows_isx_isolation(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        slot_manager.write_slot_md(
+            slot_dir, 1, ["engine"], "test-branch", "42",
+            "Org/repo", "42", "test",
+            isolation_type="isx", isx_instance="test-inst",
+            isx_template="tpl-java",
+        )
+        slots = slot_manager.list_slots(tmp_path)
+        assert slots[0]["isolation"] == "isx"
+
+    def test_list_shows_none_isolation(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        slot_manager.write_slot_md(
+            slot_dir, 1, ["engine"], "test-branch", "42",
+            "Org/repo", "42", "test",
+        )
+        slots = slot_manager.list_slots(tmp_path)
+        assert slots[0]["isolation"] == "none"
+
+
 class TestScanReady:
     def test_finds_phase_a_complete_slots(self, tmp_path):
         worktrees = tmp_path / "slots"

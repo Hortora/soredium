@@ -696,6 +696,12 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
     _symlink_gitignored_assets(repo_path, clone_dest)
     setup_maven_config(clone_dest, m2_dir)
 
+    slot_info = parse_slot_md(slot_dir)
+    if slot_info.get("isolation_type") == "isx":
+        instance = slot_info.get("isx_instance", "")
+        if instance:
+            _wire_isx_remotes(slot_dir, [repo_name], instance)
+
     ws_info = resolve_workspace_source(repo_path)
     if ws_info:
         ws_source, ws_name = ws_info
@@ -1508,6 +1514,8 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
                 except Exception:
                     print("WARN=github_unreachable_for_checkbox_verify")
 
+    _teardown_isx(slot_dir)
+
     attic_dir = slot_dir.parent / "attic"
     attic_dir.mkdir(exist_ok=True)
     dest = attic_dir / str(slot_num)
@@ -1595,11 +1603,17 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
             else:
                 state = "active"
 
+            isolation = "none"
+            if slot_md.exists():
+                md = parse_slot_md(d)
+                isolation = md.get("isolation_type", "") or "none"
+
             slots.append({
                 "number": num,
                 "branch": branch,
                 "repos": repos,
                 "state": state,
+                "isolation": isolation,
             })
 
         if include_archived and attic_dir.exists():
@@ -1616,6 +1630,7 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
                     "branch": md.get("branch", ""),
                     "repos": md.get("repos", []),
                     "state": "archived",
+                    "isolation": md.get("isolation_type", "") or "none",
                 })
 
     return slots
@@ -1636,6 +1651,8 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
         print("ERROR_DETAIL=slot has no .landed marker — work may be in progress")
         print("HINT=run work-end first, or pass --force to archive without .landed check")
         sys.exit(1)
+
+    _teardown_isx(slot_dir)
 
     escaped, cwd_offset = _escape_slot_cwd(slot_dir, family_root)
     if escaped:
@@ -1831,7 +1848,7 @@ def main() -> None:
         slots = list_slots(family_root, include_archived=include_archived)
         for s in slots:
             repos_str = ",".join(s["repos"]) if isinstance(s["repos"], list) else s["repos"]
-            print(f"SLOT={s['number']} BRANCH={s['branch']} REPOS={repos_str} STATE={s['state']}")
+            print(f"SLOT={s['number']} BRANCH={s['branch']} REPOS={repos_str} STATE={s['state']} ISOLATION={s.get('isolation', 'none')}")
         print(f"COUNT={len(slots)}")
 
     elif subcommand == "remove-slot":
