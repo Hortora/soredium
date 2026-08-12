@@ -468,7 +468,14 @@ Covers: {covers}
 
 def create_slot(family_root: Path, repos: list[str], branch: str,
                 issue: str, issue_repo: str, covers: str,
-                context: str) -> dict:
+                context: str,
+                isx: bool = False, isx_template: str = "",
+                isx_instance: str = "") -> dict:
+    if isx and not _check_isx_available():
+        print("ERROR=isx_not_found")
+        print("ERROR_DETAIL=isx is not on PATH. Install with: brew install sanne/tap/incus-spawn")
+        sys.exit(1)
+
     slots_dir = family_root / SLOT_DIR_NAME
     slots_dir.mkdir(exist_ok=True)
     slot_num = allocate_slot_number(family_root)
@@ -578,8 +585,22 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                     scaffold_args.append(f"plan-content={plan_content}")
             run_cmd(scaffold_args)
 
+    instance_name = ""
+    if isx:
+        instance_name = isx_instance or _truncate_instance_name(branch)
+        rc, _, stderr = run_cmd(["isx", "branch", instance_name, "--from", isx_template])
+        if rc != 0:
+            print(f"ERROR=isx_branch_failed instance={instance_name} err={stderr.strip()}")
+            sys.exit(1)
+
     write_slot_md(slot_dir, slot_num, repos, branch, issue,
-                  issue_repo, covers, context)
+                  issue_repo, covers, context,
+                  isolation_type="isx" if isx else "",
+                  isx_instance=instance_name if isx else "",
+                  isx_template=isx_template if isx else "")
+
+    if isx:
+        _wire_isx_remotes(slot_dir, repos, instance_name)
 
     if _wl:
         try:
@@ -1763,6 +1784,9 @@ def main() -> None:
             issue_repo=args.get("issue-repo", ""),
             covers=args.get("covers", args.get("issue", "")),
             context=args.get("context", ""),
+            isx=args.get("isx", "").lower() in ("yes", "true", "1"),
+            isx_template=args.get("template", ""),
+            isx_instance=args.get("instance", ""),
         )
         print(f"SLOT_NUMBER={result['slot_number']}")
         print(f"SLOT_DIR={result['slot_dir']}")

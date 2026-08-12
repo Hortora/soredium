@@ -591,6 +591,83 @@ class TestCreateSlot:
         assert "ERROR=clone_failed" in captured.out
 
 
+class TestCreateSlotIsx:
+    @patch("slot_manager.run_cmd")
+    def test_create_isx_slot_preflight_fails(self, mock_cmd, tmp_path, capsys):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+        mock_cmd.return_value = (0, "", "")
+        with patch("shutil.which", return_value=None):
+            with pytest.raises(SystemExit):
+                slot_manager.create_slot(
+                    family_root=family, repos=["engine"],
+                    branch="issue-42-fix", issue="42",
+                    issue_repo="Hortora/soredium", covers="42",
+                    context="test", isx=True, isx_template="tpl-java",
+                )
+        captured = capsys.readouterr()
+        assert "ERROR=isx_not_found" in captured.out
+
+    @patch("slot_manager.run_cmd")
+    def test_create_isx_slot_writes_isolation(self, mock_cmd, tmp_path):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+        mock_cmd.return_value = (0, "", "")
+        with patch("shutil.which", return_value="/opt/homebrew/bin/isx"):
+            result = slot_manager.create_slot(
+                family_root=family, repos=["engine"],
+                branch="issue-42-fix", issue="42",
+                issue_repo="Hortora/soredium", covers="42",
+                context="test", isx=True, isx_template="tpl-java",
+            )
+        slot_dir = family / "slots" / str(result["slot_number"])
+        info = slot_manager.parse_slot_md(slot_dir)
+        assert info["isolation_type"] == "isx"
+        assert info["isx_template"] == "tpl-java"
+        assert info["isx_instance"] == "issue-42-fix"
+
+    @patch("slot_manager.run_cmd")
+    def test_create_non_isx_unchanged(self, mock_cmd, tmp_path):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+        mock_cmd.return_value = (0, "", "")
+        result = slot_manager.create_slot(
+            family_root=family, repos=["engine"],
+            branch="issue-42-fix", issue="42",
+            issue_repo="Hortora/soredium", covers="42",
+            context="test",
+        )
+        slot_dir = family / "slots" / str(result["slot_number"])
+        info = slot_manager.parse_slot_md(slot_dir)
+        assert info["isolation_type"] == ""
+
+    @patch("slot_manager.run_cmd")
+    def test_create_isx_slot_isx_branch_fails(self, mock_cmd, tmp_path, capsys):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+        call_count = [0]
+        def side_effect(args, cwd=None):
+            call_count[0] += 1
+            if args[0] == "isx" and args[1] == "branch":
+                return (1, "", "template not found")
+            return (0, "", "")
+        mock_cmd.side_effect = side_effect
+        with patch("shutil.which", return_value="/opt/homebrew/bin/isx"):
+            with pytest.raises(SystemExit):
+                slot_manager.create_slot(
+                    family_root=family, repos=["engine"],
+                    branch="issue-42-fix", issue="42",
+                    issue_repo="Hortora/soredium", covers="42",
+                    context="test", isx=True, isx_template="tpl-java",
+                )
+        captured = capsys.readouterr()
+        assert "ERROR=isx_branch_failed" in captured.out
+
+
 class TestListSlots:
     def test_empty_slots(self, tmp_path):
         family = tmp_path / "casehub"
