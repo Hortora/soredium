@@ -778,6 +778,93 @@ class TestParseSlotMdIsolation:
         assert result["context"] == "Fix scoring"
 
 
+class TestIsxHelpers:
+    def test_check_isx_available_found(self):
+        with patch("shutil.which", return_value="/opt/homebrew/bin/isx"):
+            assert slot_manager._check_isx_available() is True
+
+    def test_check_isx_available_missing(self):
+        with patch("shutil.which", return_value=None):
+            assert slot_manager._check_isx_available() is False
+
+    def test_truncate_short_name(self):
+        assert slot_manager._truncate_instance_name("issue-42-fix") == "issue-42-fix"
+
+    def test_truncate_long_name(self):
+        long_name = "issue-223-isx-isolation-for-slots-with-very-long-description-that-exceeds-limit"
+        result = slot_manager._truncate_instance_name(long_name, max_len=63)
+        assert len(result) <= 63
+        assert result.startswith("issue-223-isx-isolation")
+
+    def test_truncate_strips_trailing_hyphens(self):
+        name = "a" * 60 + "---bcd"
+        result = slot_manager._truncate_instance_name(name, max_len=63)
+        assert not result.endswith("-")
+
+
+class TestTeardownIsx:
+    def test_teardown_isx_slot(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Isolation\ntype: isx\n"
+            "instance: test-instance\ntemplate: tpl-java\n\n"
+            "## Created\n2026-08-12, branch: test\n"
+        )
+        with patch("slot_manager.run_cmd", return_value=(0, "", "")) as mock:
+            slot_manager._teardown_isx(tmp_path)
+            mock.assert_called_once_with(["isx", "destroy", "test-instance"])
+
+    def test_teardown_non_isx_slot(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 1 — test\n\n## Repos\n- soredium\n\n"
+            "## Created\n2026-08-12, branch: test\n"
+        )
+        with patch("slot_manager.run_cmd") as mock:
+            slot_manager._teardown_isx(tmp_path)
+            mock.assert_not_called()
+
+    def test_teardown_destroy_fails_warns(self, tmp_path, capsys):
+        (tmp_path / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Isolation\ntype: isx\n"
+            "instance: gone-instance\ntemplate: tpl-java\n\n"
+            "## Created\n2026-08-12, branch: test\n"
+        )
+        with patch("slot_manager.run_cmd", return_value=(1, "", "not found")):
+            slot_manager._teardown_isx(tmp_path)
+            out = capsys.readouterr().out
+            assert "WARN" in out
+
+
+class TestWireIsxRemotes:
+    def test_wire_remotes_adds_per_repo(self, tmp_path):
+        repos = ["engine", "iot"]
+        for r in repos:
+            repo_dir = tmp_path / r
+            repo_dir.mkdir()
+            (repo_dir / ".git").mkdir()
+        with patch("slot_manager.run_cmd", return_value=(0, "", "")) as mock:
+            slot_manager._wire_isx_remotes(tmp_path, repos, "test-instance")
+            assert mock.call_count == 2
+            mock.assert_any_call([
+                "git", "-C", str(tmp_path / "engine"),
+                "remote", "add", "isx",
+                "isx://test-instance/home/agentuser/engine",
+            ])
+            mock.assert_any_call([
+                "git", "-C", str(tmp_path / "iot"),
+                "remote", "add", "isx",
+                "isx://test-instance/home/agentuser/iot",
+            ])
+
+    def test_wire_skips_missing_repo_dir(self, tmp_path):
+        with patch("slot_manager.run_cmd") as mock:
+            slot_manager._wire_isx_remotes(tmp_path, ["nonexistent"], "test-instance")
+            mock.assert_not_called()
+
+
 class TestScanReady:
     def test_finds_phase_a_complete_slots(self, tmp_path):
         worktrees = tmp_path / "slots"

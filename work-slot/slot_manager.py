@@ -183,6 +183,37 @@ def run_cmd(args: list[str], cwd: str | None = None) -> tuple[int, str, str]:
     return result.returncode, result.stdout, result.stderr
 
 
+def _check_isx_available() -> bool:
+    return shutil.which("isx") is not None
+
+
+def _truncate_instance_name(name: str, max_len: int = 63) -> str:
+    if len(name) <= max_len:
+        return name
+    return name[:max_len].rstrip("-")
+
+
+def _teardown_isx(slot_dir: Path) -> None:
+    info = parse_slot_md(slot_dir)
+    if info.get("isolation_type") != "isx":
+        return
+    instance = info.get("isx_instance", "")
+    if not instance:
+        return
+    rc, _, stderr = run_cmd(["isx", "destroy", instance])
+    if rc != 0:
+        print(f"WARN=isx_destroy_failed instance={instance} err={stderr.strip()}")
+
+
+def _wire_isx_remotes(slot_dir: Path, repos: list[str], instance: str) -> None:
+    for repo_name in repos:
+        clone_path = slot_dir / repo_name
+        if not clone_path.is_dir():
+            continue
+        remote_url = f"isx://{instance}/home/agentuser/{repo_name}"
+        run_cmd(["git", "-C", str(clone_path), "remote", "add", "isx", remote_url])
+
+
 def allocate_slot_number(family_root: Path) -> int:
     existing: list[int] = []
     for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
