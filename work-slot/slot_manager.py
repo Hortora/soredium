@@ -10,6 +10,7 @@ Subcommands:
   merge-slot <family-root> slot=<N>
   archive-slot <family-root> slot=<N> [--force]
   check-cross-deps <family-root> slot=<N>
+  sync-isx [<slot-dir>] [slot=<N>]
   migrate-remotes <family-root>
 
 Note: remove-slot always archives to slots/attic/. --force skips the .landed check.
@@ -212,6 +213,38 @@ def _wire_isx_remotes(slot_dir: Path, repos: list[str], instance: str) -> None:
             continue
         remote_url = f"isx://{instance}/home/agentuser/{repo_name}"
         run_cmd(["git", "-C", str(clone_path), "remote", "add", "isx", remote_url])
+
+
+def sync_isx(slot_dir: Path) -> int:
+    info = parse_slot_md(slot_dir)
+    if info.get("isolation_type") != "isx":
+        print("ERROR=not_isx_slot")
+        print("ERROR_DETAIL=This slot has no ISX isolation.")
+        return 1
+
+    branch = info.get("branch", "")
+    repos = get_slot_repos(slot_dir)
+
+    for repo_name in repos:
+        clone_path = slot_dir / repo_name
+        if not clone_path.is_dir():
+            continue
+        rc, _, _ = run_cmd(["git", "-C", str(clone_path), "remote", "get-url", "isx"])
+        if rc != 0:
+            print(f"WARN=no_isx_remote repo={repo_name}")
+            continue
+        rc, _, stderr = run_cmd(["git", "-C", str(clone_path), "fetch", "isx", branch])
+        if rc != 0:
+            print(f"WARN=fetch_failed repo={repo_name} err={stderr.strip()}")
+            continue
+        rc, _, stderr = run_cmd(["git", "-C", str(clone_path), "merge", "--ff-only", f"isx/{branch}"])
+        if rc != 0:
+            print(f"ERROR=merge_failed repo={repo_name} err={stderr.strip()}")
+            print("ERROR_DETAIL=Histories have diverged. Resolve manually or reset.")
+            return 1
+        print(f"SYNCED={repo_name}")
+
+    return 0
 
 
 def allocate_slot_number(family_root: Path) -> int:
@@ -1857,6 +1890,21 @@ def main() -> None:
         family_root = Path(args.get("target", "."))
         count = migrate_remotes(family_root)
         print(f"COUNT={count}")
+
+    elif subcommand == "sync-isx":
+        target = args.get("target", "")
+        slot_num_str = args.get("slot", "")
+        if slot_num_str:
+            family_root = Path(target) if target else Path(".")
+            slot_dir = _resolve_slot_dir_for_number(family_root, int(slot_num_str))
+        elif target:
+            slot_dir = Path(target)
+        else:
+            slot_dir = Path(".")
+        if not slot_dir.exists():
+            print("ERROR=slot_not_found")
+            sys.exit(1)
+        sys.exit(sync_isx(slot_dir))
 
     else:
         print(f"ERROR=unknown_subcommand subcommand={subcommand}", file=sys.stderr)

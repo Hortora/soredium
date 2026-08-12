@@ -942,6 +942,74 @@ class TestWireIsxRemotes:
             mock.assert_not_called()
 
 
+class TestSyncIsx:
+    def test_sync_happy_path(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        (slot_dir / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Isolation\ntype: isx\ninstance: test-inst\n"
+            "template: tpl-java\n\n## Created\n2026-08-12, branch: test\n"
+        )
+        with patch("slot_manager.run_cmd") as mock:
+            mock.return_value = (0, "", "")
+            result = slot_manager.sync_isx(slot_dir)
+        assert result == 0
+        call_args_list = [c[0][0] for c in mock.call_args_list]
+        assert any("fetch" in args for args in call_args_list)
+        assert any("merge" in args for args in call_args_list)
+
+    def test_sync_non_isx_slot(self, tmp_path, capsys):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 1 — test\n\n## Repos\n- engine\n\n"
+            "## Created\n2026-08-12, branch: test\n"
+        )
+        result = slot_manager.sync_isx(slot_dir)
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "ERROR=not_isx_slot" in captured.out
+
+    def test_sync_diverged_stops(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        (slot_dir / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Isolation\ntype: isx\ninstance: test-inst\n"
+            "template: tpl-java\n\n## Created\n2026-08-12, branch: test\n"
+        )
+        def side_effect(args, cwd=None):
+            if "merge" in args and "--ff-only" in args:
+                return (1, "", "fatal: Not possible to fast-forward")
+            return (0, "", "")
+        with patch("slot_manager.run_cmd", side_effect=side_effect):
+            result = slot_manager.sync_isx(slot_dir)
+        assert result == 1
+
+    def test_sync_no_isx_remote_skips(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        (slot_dir / ".slot").write_text(
+            "# Slot 1 — test\n\n## Issue\nOrg/repo#42\nCovers: 42\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Isolation\ntype: isx\ninstance: test-inst\n"
+            "template: tpl-java\n\n## Created\n2026-08-12, branch: test\n"
+        )
+        def side_effect(args, cwd=None):
+            if "get-url" in args:
+                return (1, "", "fatal: No such remote 'isx'")
+            return (0, "", "")
+        with patch("slot_manager.run_cmd", side_effect=side_effect):
+            result = slot_manager.sync_isx(slot_dir)
+        assert result == 0
+
+
 class TestScanReady:
     def test_finds_phase_a_complete_slots(self, tmp_path):
         worktrees = tmp_path / "slots"
