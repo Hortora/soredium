@@ -1,0 +1,9 @@
+from typing import Protocol
+
+from commands.events import IssueContext
+
+
+class SessionProvider(Protocol):
+    async def start(self, context: IssueContext) -> None: ...
+    def is_active(self) -> bool: ...
+    async def stop(self) -> None: ...

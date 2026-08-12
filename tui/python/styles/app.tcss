@@ -1,0 +1,13 @@
+Screen {
+    layout: grid;
+    grid-size: 1;
+    grid-rows: 3 1fr 1;
+}
+
+#main-container {
+    layout: horizontal;
+}
+
+.dimmed {
+    opacity: 0.4;
+}
