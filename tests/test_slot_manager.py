@@ -2068,6 +2068,103 @@ class TestRemoveSlotForceArchiveClaude:
         assert not proj_dir.exists(), "Claude session dir should be relocated"
 
 
+class TestListSlotsDriftDetection:
+    """Inline drift detection comparing DB vs disk state."""
+
+    def _setup_db(self, tmp_path, monkeypatch):
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        import worklog as _wl_mod
+        db_path = tmp_path / "drift_test.db"
+        monkeypatch.setattr(slot_manager, "_wl", _wl_mod)
+        monkeypatch.setattr(_wl_mod, "DEFAULT_DB", str(db_path))
+        return _wl_mod
+
+    def test_no_warnings_when_aligned(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 1 — test-branch\n")
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (1, ?, 'active', '2026-01-01')",
+            (_wl_mod._norm(str(family)),),
+        )
+        conn.commit()
+        conn.close()
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift" not in captured.out
+
+    def test_warns_on_db_only(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        (family / "slots").mkdir(parents=True)
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (99, ?, 'active', '2026-01-01')",
+            (_wl_mod._norm(str(family)),),
+        )
+        conn.commit()
+        conn.close()
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift type=db-only slot=99" in captured.out
+
+    def test_warns_on_disk_only(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 1 — test\n")
+        _wl_mod.connect().close()
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift type=disk-only slot=1" in captured.out
+
+    def test_warns_on_state_mismatch(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        attic = family / "slots" / "attic" / "1"
+        attic.mkdir(parents=True)
+        (attic / ".slot").write_text("# Slot 1 — test\n")
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (1, ?, 'active', '2026-01-01')",
+            (_wl_mod._norm(str(family)),),
+        )
+        conn.commit()
+        conn.close()
+        slot_manager.list_slots(family, include_archived=True)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift type=state-mismatch slot=1" in captured.out
+
+    def test_warns_on_ghost(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        ghost = family / "slots" / "1"
+        ghost.mkdir(parents=True)
+        (ghost / ".m2").mkdir()
+        _wl_mod.connect().close()
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift type=ghost slot=1" in captured.out
+
+    def test_no_drift_check_without_worklog(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(slot_manager, "_wl", None)
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 1 — test\n")
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift" not in captured.out
+
+
 class TestAllocateSlotNumberDB:
     """DB-authoritative slot numbering: reserve-first pattern."""
 

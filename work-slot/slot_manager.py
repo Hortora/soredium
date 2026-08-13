@@ -1627,7 +1627,74 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
                     "isolation": md.get("isolation_type", "") or "none",
                 })
 
+    _check_drift(family_root, slots, include_archived)
+
     return slots
+
+
+def _map_db_to_disk_state(db_state: str) -> str:
+    mapping = {
+        "active": "active",
+        "pending": "active",
+        "ready": "ready to land",
+        "landed": "landed",
+        "archived": "archived",
+    }
+    return mapping.get(db_state, db_state)
+
+
+def _check_drift(family_root: Path, slots: list[dict],
+                  include_archived: bool) -> None:
+    if _wl is None:
+        return
+    try:
+        conn = _wl.connect()
+        db_rows = _wl.slot_status(conn, family_root=str(family_root))
+        conn.close()
+    except Exception:
+        return
+
+    db_slots: dict[int, str] = {r["slot_number"]: r["state"] for r in db_rows}
+    disk_nums: dict[int, str] = {s["number"]: s["state"] for s in slots}
+
+    has_slot_file: set[int] = set()
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        slots_dir = family_root / dir_name
+        if not slots_dir.exists():
+            continue
+        for d in slots_dir.iterdir():
+            if not d.is_dir() or not d.name.isdigit() or d.name == "attic":
+                continue
+            num = int(d.name)
+            if (d / ".slot").exists():
+                has_slot_file.add(num)
+
+    for num, db_state in db_slots.items():
+        if db_state == "pending":
+            if num in disk_nums:
+                print(f"WARN=db_drift type=pending slot={num}")
+            continue
+        if num not in disk_nums:
+            if not include_archived:
+                attic_exists = any(
+                    (family_root / dn / "attic" / str(num)).exists()
+                    for dn in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME)
+                )
+                if attic_exists and db_state in ("archived", "landed"):
+                    continue
+            print(f"WARN=db_drift type=db-only slot={num}")
+        else:
+            disk_state = disk_nums[num]
+            db_mapped = _map_db_to_disk_state(db_state)
+            if db_mapped != disk_state:
+                print(f"WARN=db_drift type=state-mismatch slot={num} db={db_state} disk={disk_state}")
+
+    for num in disk_nums:
+        if num not in db_slots:
+            if num not in has_slot_file:
+                print(f"WARN=db_drift type=ghost slot={num}")
+            else:
+                print(f"WARN=db_drift type=disk-only slot={num}")
 
 
 def remove_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
