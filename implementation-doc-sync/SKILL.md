@@ -77,23 +77,20 @@ are filed as GitHub issues — **never committed from this session**.
 
 | Change type | Docs to check | Location |
 |-------------|--------------|----------|
-| New capability or feature | `docs/PLATFORM.md` → Capability Ownership table | **peer repo** (parent) |
-| New or changed cross-repo dependency | `docs/PLATFORM.md` → Cross-Repo Dependency Map | **peer repo** (parent) |
-| Repo renamed / restructured | `docs/PLATFORM.md` → Repository Map | **peer repo** (parent) |
-| Per-repo deep dive affected | `docs/repos/casehub-{repo}.md` | **peer repo** (parent) |
-| Application tier change | `docs/APPLICATIONS.md` | **peer repo** (parent) |
+| New capability, module, or SPI | `docs/guides/consumer-guide.md` (module table, SPI docs, config) | **home repo** |
+| New or changed external dependency | `docs/guides/contributor-guide.md` (module listing) | **home repo** |
+| Module renamed / restructured | `docs/guides/contributor-guide.md` + `docs/guides/consumer-guide.md` | **home repo** |
+| Architecture record affected | `ARC42STORIES.MD` (layer table, module listing, building block view) | **home repo** |
 | New platform protocol | `docs/protocols/INDEX.md` + the protocol file itself | home repo |
 | Existing protocol updated | The protocol file + any files that reference it | home repo |
 | Convention or workflow change | `CLAUDE.md` (invoke `update-claude-md`) | home repo |
 | Architecture decision | `adr/` (invoke `adr` if not yet recorded) | home repo |
 | Design journal (epic branch) | `design/JOURNAL.md` (invoke `update-design`) | home repo |
 | Maven coordinate change | `docs/protocols/maven-coordinate-standard.md` if convention changed | home repo |
-| Cross-repo artifact rename | `docs/PLATFORM.md` → Cross-Repo Dependency Map | **peer repo** (parent) |
 
-**Note on the Location column:** The entries marked "peer repo (parent)" apply
-to the casehubio platform layout where `docs/PLATFORM.md` lives in the parent
-repo. For other project layouts, apply the Step 1b boundary check to confirm
-whether a given doc path is inside `$HOME_REPO` or not.
+**Note:** Each repo owns its own documentation. The parent repo aggregates
+via CI — never file issues on the parent for doc updates that belong in
+the repo's own `docs/guides/` directory.
 
 If a doc type is not in this table and not obviously related to the session
 scope, skip it.
