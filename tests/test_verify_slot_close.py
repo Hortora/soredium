@@ -151,3 +151,119 @@ class TestVerifyBadArgs:
             capture_output=True, text=True,
         )
         assert result.returncode == 1
+
+
+work_end_dir = Path(__file__).parent.parent / "work-end"
+sys.path.insert(0, str(work_end_dir))
+import verify_slot_close
+
+
+class TestCheckLandedMarker:
+    def test_landed_marker_present(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".landed").write_text(
+            "branch=issue-42\nrepos=engine,work\n"
+            "landed_shas=engine:abc123,work:def456\n"
+            "timestamp=2026-08-12T00:00:00Z\n"
+        )
+        result = verify_slot_close.check_landed_marker(str(slot_dir))
+        assert result["status"] == "pass"
+
+    def test_landed_marker_absent(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        result = verify_slot_close.check_landed_marker(str(slot_dir))
+        assert result["status"] == "fail"
+        assert "no .landed marker" in result["detail"]
+
+    def test_landed_marker_no_shas(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".landed").write_text("branch=issue-42\n")
+        result = verify_slot_close.check_landed_marker(str(slot_dir))
+        assert result["status"] == "fail"
+        assert "no landed_shas" in result["detail"]
+
+
+class TestCheckOriginalSync:
+    def test_original_in_sync(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        original = _init_repo(tmp_path / "original")
+        clone = _init_repo(slot_dir / "engine")
+        orig_sha = _git(original, "rev-parse", "HEAD")
+        (slot_dir / ".landed").write_text(f"landed_shas=engine:{orig_sha}\n")
+        result = verify_slot_close.check_original_sync(
+            str(slot_dir), "engine", str(original),
+        )
+        assert result["status"] == "pass"
+
+    def test_original_behind(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        original = _init_repo(tmp_path / "original")
+        clone = _init_repo(slot_dir / "engine")
+        (clone / "extra.txt").write_text("new\n")
+        _git(clone, "add", "extra.txt")
+        _git(clone, "commit", "-m", "extra")
+        clone_sha = _git(clone, "rev-parse", "HEAD")
+        (slot_dir / ".landed").write_text(f"landed_shas=engine:{clone_sha}\n")
+        result = verify_slot_close.check_original_sync(
+            str(slot_dir), "engine", str(original),
+        )
+        assert result["status"] == "fail"
+        assert "not reachable" in result["detail"]
+
+    def test_no_landed_marker(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        result = verify_slot_close.check_original_sync(
+            str(slot_dir), "engine", str(tmp_path / "original"),
+        )
+        assert result["status"] == "fail"
+        assert "no .landed" in result["detail"]
+
+
+class TestCheckSlotArchiveStatus:
+    def test_archived(self, tmp_path: Path) -> None:
+        attic_dir = tmp_path / "slots" / "attic" / "1"
+        attic_dir.mkdir(parents=True)
+        result = verify_slot_close.check_slot_archive_status(
+            str(tmp_path / "slots" / "1"), str(attic_dir),
+        )
+        assert result["status"] == "pass"
+        assert "archived" in result["detail"]
+
+    def test_landed_not_archived(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".landed").write_text("landed\n")
+        result = verify_slot_close.check_slot_archive_status(
+            str(slot_dir), str(tmp_path / "slots" / "attic" / "1"),
+        )
+        assert result["status"] == "warn"
+        assert "landed but not archived" in result["detail"]
+
+    def test_active(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        result = verify_slot_close.check_slot_archive_status(
+            str(slot_dir), str(tmp_path / "slots" / "attic" / "1"),
+        )
+        assert result["status"] == "warn"
+        assert "active" in result["detail"]
+
+
+class TestVerifySlotModeCLI:
+    def test_slot_dir_enables_slot_checks(self, tmp_path: Path) -> None:
+        project, workspace = _create_clean_single_repo(tmp_path)
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".landed").write_text(
+            "branch=issue-99-test\nrepos=project\n"
+            "landed_shas=project:abc123\ntimestamp=2026-08-12\n"
+        )
+        result = _run_verify(project, workspace, slot_dir=str(slot_dir))
+        assert result.returncode == 0
+        assert "landed_marker" in result.stdout

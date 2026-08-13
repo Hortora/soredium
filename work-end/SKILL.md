@@ -219,6 +219,16 @@ For each repo: spawn a squash analysis subagent that classifies commits
 and writes `.squash-plan-<repo>.json`. Repos with existing plan files
 are skipped on restart.
 
+**Slot mode marker:** After squash completes for all repos, if `IN_SLOT=yes`:
+
+```bash
+python3 work-end/work_end_execute.py write-marker slot_path=<SLOT_PATH> branch=<BRANCH>
+```
+
+This writes `.phase-a-complete` to the slot root, enabling `merge-slot`
+in Phase C. Read `MARKER_WRITTEN=` from output. If error, report and
+offer to retry — the squash is already done, only the marker failed.
+
 ### 3.5 Phase C — Land
 
 **Branch mode (IN_SLOT=no):**
@@ -233,14 +243,17 @@ Progress tracked in `.execute-progress` for crash recovery.
 
 **Slot mode (IN_SLOT=yes):**
 
+Requires `.phase-a-complete` marker (written in Step 3.4). Do NOT call
+`work_end_execute.py land` in slot mode — that path is for branch mode only.
+
 ```bash
 python3 work-slot/slot_manager.py merge-slot <SLOT_PATH>
 ```
 
-Uses the existing `merge_slot()` implementation which correctly handles:
-per-repo rebase loop with retry, two-hop push (slot clone → original repo
-→ GitHub), landing SHA stamps on all project branches, workspace branch
-stamps and push, `.landed` marker with SHA audit trail.
+merge-slot handles: per-repo rebase (no-op if already rebased in Phase A),
+two-hop push (slot clone → original repo → GitHub), SHA verification,
+`.landed` marker with SHA audit trail, branch stamps on all repos
+(project + workspace via `get_all_slot_repos()`).
 
 **Lifecycle:** After land returns, fire `push_pass`, `merge_pass`,
 `stamp_pass` in rapid succession.
@@ -250,11 +263,16 @@ stamps and push, `.landed` marker with SHA audit trail.
 ## Step 4 — Verify
 
 ```bash
-python3 work-end/verify_slot_close.py <PROJ> branch=<BRANCH> workspace=<WS> [covers=<CSV>]
+python3 work-end/verify_slot_close.py <PROJ> branch=<BRANCH> workspace=<WS> [covers=<CSV>] [slot_dir=<SLOT_PATH>]
 ```
 
 Defense-in-depth audit. Checks per-repo: merged, stamped, landing SHA,
 main pushed. Checks workspace: stamped.
+
+**Slot mode:** pass `slot_dir=<SLOT_PATH>` to enable slot-specific checks:
+`.landed` marker, original repo sync (compares landed SHAs against
+originals), archive status. Original repo paths resolved from slot
+clone `local` remote URLs.
 
 **Hard gate:** `VERIFIED=no` blocks Step 5. Present per-check failures
 and offer recovery (re-run the failing Execute sub-step).

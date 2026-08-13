@@ -521,3 +521,54 @@ class TestBadArgs:
         result = _run_execute("unknown")
         assert result.returncode == 1
         assert "ERROR" in result.stdout
+
+
+class TestWriteMarker:
+    def test_writes_marker_with_correct_fields(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        result = _run_execute(
+            "write-marker",
+            f"slot_path={slot_dir}",
+            "branch=issue-42-fix",
+        )
+        assert result.returncode == 0, f"write-marker failed: {result.stdout}\n{result.stderr}"
+        marker = slot_dir / ".phase-a-complete"
+        assert marker.exists()
+        content = marker.read_text()
+        assert "branch=issue-42-fix" in content
+        assert "timestamp=" in content
+
+    def test_marker_format_matches_merge_slot(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        _run_execute(
+            "write-marker",
+            f"slot_path={slot_dir}",
+            "branch=issue-42-fix",
+        )
+        content = (slot_dir / ".phase-a-complete").read_text()
+        branch_lines = [l for l in content.splitlines() if l.startswith("branch=")]
+        assert len(branch_lines) == 1
+        assert branch_lines[0] == "branch=issue-42-fix"
+
+    def test_missing_slot_path(self) -> None:
+        result = _run_execute("write-marker", "branch=test")
+        assert result.returncode == 1
+        assert "MISSING_ARGS" in result.stdout
+
+    def test_missing_branch(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        result = _run_execute("write-marker", f"slot_path={slot_dir}")
+        assert result.returncode == 1
+        assert "MISSING_ARGS" in result.stdout
+
+    def test_slot_path_not_exists(self, tmp_path: Path) -> None:
+        result = _run_execute(
+            "write-marker",
+            f"slot_path={tmp_path / 'nonexistent'}",
+            "branch=test",
+        )
+        assert result.returncode == 1
+        assert "BAD_PATH" in result.stdout

@@ -87,9 +87,72 @@ def check_workspace_stamped(workspace: str, branch: str) -> dict:
     return check_branch_stamped(workspace, branch)
 
 
+def check_landed_marker(slot_dir: str) -> dict:
+    landed = Path(slot_dir) / ".landed"
+    if not landed.exists():
+        return {"status": "fail", "detail": "no .landed marker"}
+    content = landed.read_text()
+    if "landed_shas=" not in content:
+        return {"status": "fail", "detail": "no landed_shas in .landed marker"}
+    return {"status": "pass"}
+
+
+def check_original_sync(slot_dir: str, repo_name: str, original_path: str) -> dict:
+    landed = Path(slot_dir) / ".landed"
+    if not landed.exists():
+        return {"status": "fail", "detail": "no .landed marker"}
+
+    landed_sha = ""
+    for line in landed.read_text().splitlines():
+        if line.startswith("landed_shas="):
+            shas_str = line.split("=", 1)[1]
+            for entry in shas_str.split(","):
+                if ":" in entry:
+                    name, sha = entry.split(":", 1)
+                    if name == repo_name:
+                        landed_sha = sha
+                        break
+
+    if not landed_sha:
+        return {"status": "fail", "detail": f"no landed SHA for {repo_name}"}
+
+    result = git(original_path, "merge-base", "--is-ancestor", landed_sha, "main")
+    if result.returncode == 0:
+        return {"status": "pass", "detail": f"{repo_name} SHA {landed_sha[:8]} on main"}
+    return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not reachable from main — original behind"}
+
+
+def check_slot_archive_status(slot_dir: str, attic_dir: str) -> dict:
+    if Path(attic_dir).is_dir():
+        return {"status": "pass", "detail": "archived"}
+    slot_path = Path(slot_dir)
+    if slot_path.is_dir() and (slot_path / ".landed").exists():
+        return {"status": "warn", "detail": "landed but not archived"}
+    if slot_path.is_dir():
+        return {"status": "warn", "detail": "active — not landed"}
+    return {"status": "fail", "detail": "slot not found"}
+
+
+def _resolve_original_repos(slot_dir: str) -> dict[str, str]:
+    result = {}
+    slot_path = Path(slot_dir)
+    for sub in sorted(slot_path.iterdir()):
+        if not sub.is_dir() or not (sub / ".git").exists():
+            continue
+        if sub.name in (".m2", "attic"):
+            continue
+        local_url = git(str(sub), "remote", "get-url", "local")
+        if local_url.returncode == 0 and local_url.stdout.strip():
+            orig_path = local_url.stdout.strip()
+            if Path(orig_path).is_dir():
+                result[sub.name] = orig_path
+    return result
+
+
 def verify(
     project: str, branch: str, workspace: str,
     base: str = "main", covers: list[int] | None = None,
+    slot_dir: str = "", original_repos: dict[str, str] | None = None,
 ) -> bool:
     checks: list[tuple[str, dict]] = []
 
@@ -99,11 +162,23 @@ def verify(
     checks.append(("main_pushed", check_main_pushed(project, base)))
     checks.append(("workspace_stamped", check_workspace_stamped(workspace, branch)))
 
+    if slot_dir:
+        checks.append(("landed_marker", check_landed_marker(slot_dir)))
+        if original_repos:
+            for repo_name, orig_path in original_repos.items():
+                checks.append((
+                    f"original_sync_{repo_name}",
+                    check_original_sync(slot_dir, repo_name, orig_path),
+                ))
+        slot_num = Path(slot_dir).name
+        attic = str(Path(slot_dir).parent / "attic" / slot_num)
+        checks.append(("archive_status", check_slot_archive_status(slot_dir, attic)))
+
     all_pass = True
     for name, result in checks:
         status = result["status"]
         detail = result.get("detail", "")
-        icon = "✅" if status == "pass" else "❌"
+        icon = "✅" if status == "pass" else "❌" if status == "fail" else "⚠️"
         suffix = f" — {detail}" if detail else ""
         print(f"{icon} {name}: {status}{suffix}")
         if status == "fail":
@@ -118,7 +193,7 @@ def verify(
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("Usage: verify_slot_close.py <project> branch=<name> workspace=<path> [covers=N,M]",
+        print("Usage: verify_slot_close.py <project> branch=<name> workspace=<path> [covers=N,M] [slot_dir=<path>]",
               file=sys.stderr)
         return 1
 
@@ -142,7 +217,13 @@ def main() -> int:
     covers_str = opts.get("covers", "")
     covers = [int(x) for x in covers_str.split(",") if x.strip()] if covers_str else None
 
-    verify(project, branch, workspace, base, covers)
+    slot_dir = opts.get("slot_dir", "")
+    original_repos = None
+    if slot_dir:
+        original_repos = _resolve_original_repos(slot_dir)
+
+    verify(project, branch, workspace, base, covers,
+           slot_dir=slot_dir, original_repos=original_repos)
     return 0
 
 

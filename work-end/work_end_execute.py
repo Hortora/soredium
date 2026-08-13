@@ -317,9 +317,38 @@ def cmd_land(opts: dict[str, str]) -> int:
     return 0
 
 
+def cmd_write_marker(opts: dict[str, str]) -> int:
+    slot_path = opts.get("slot_path", "")
+    branch = opts.get("branch", "")
+
+    if not slot_path:
+        print("ERROR=MISSING_ARGS")
+        print("ERROR_DETAIL=slot_path= is required")
+        return 1
+    if not branch:
+        print("ERROR=MISSING_ARGS")
+        print("ERROR_DETAIL=branch= is required")
+        return 1
+
+    slot_dir = Path(slot_path)
+    if not slot_dir.is_dir():
+        print("ERROR=BAD_PATH")
+        print(f"ERROR_DETAIL=slot_path={slot_path} not found")
+        return 1
+
+    import datetime
+    marker = slot_dir / ".phase-a-complete"
+    marker.write_text(
+        f"branch={branch}\n"
+        f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+    )
+    print(f"MARKER_WRITTEN={marker}")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
-        print("Usage: work_end_execute.py <promote|rebase|land> key=value ...",
+        print("Usage: work_end_execute.py <promote|rebase|land|write-marker> key=value ...",
               file=sys.stderr)
         return 1
 
@@ -332,9 +361,11 @@ def main() -> int:
         return cmd_rebase(opts)
     elif command == "land":
         return cmd_land(opts)
+    elif command == "write-marker":
+        return cmd_write_marker(opts)
     else:
         print("ERROR=UNKNOWN_COMMAND")
-        print(f"ERROR_DETAIL=unknown command '{command}' — use promote, rebase, or land")
+        print(f"ERROR_DETAIL=unknown command '{command}' — use promote, rebase, land, or write-marker")
         return 1
 
 
