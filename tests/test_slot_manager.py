@@ -25,67 +25,58 @@ def init_repo(path: Path) -> Path:
 
 
 class TestAllocateSlotNumber:
-    def test_empty_slots_dir(self, tmp_path):
-        (tmp_path / "slots").mkdir()
+    """DB-authoritative numbering replaced disk-scan allocation.
+    See TestAllocateSlotNumberDB for the primary test class."""
+
+    def _setup_db(self, tmp_path, monkeypatch):
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        import worklog as _wl_mod
+        db_path = tmp_path / "alloc_test.db"
+        monkeypatch.setattr(slot_manager, "_wl", _wl_mod)
+        monkeypatch.setattr(_wl_mod, "DEFAULT_DB", str(db_path))
+        return _wl_mod
+
+    def test_empty_db_returns_1(self, tmp_path, monkeypatch):
+        self._setup_db(tmp_path, monkeypatch)
         assert slot_manager.allocate_slot_number(tmp_path) == 1
 
-    def test_existing_slots(self, tmp_path):
-        slots = tmp_path / "slots"
-        slots.mkdir()
-        (slots / "1").mkdir()
-        (slots / "2").mkdir()
-        assert slot_manager.allocate_slot_number(tmp_path) == 3
-
-    def test_gap_in_numbering(self, tmp_path):
-        slots = tmp_path / "slots"
-        slots.mkdir()
-        (slots / "1").mkdir()
-        (slots / "3").mkdir()
-        assert slot_manager.allocate_slot_number(tmp_path) == 4
-
-    def test_no_slots_dir(self, tmp_path):
-        assert slot_manager.allocate_slot_number(tmp_path) == 1
-
-    def test_considers_attic(self, tmp_path):
-        slots = tmp_path / "slots"
-        slots.mkdir()
-        (slots / "1").mkdir()
-        (slots / "2").mkdir()
-        attic = slots / "attic"
-        attic.mkdir()
-        (attic / "3").mkdir()
-        (attic / "5").mkdir()
+    def test_increments_from_db_max(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (?, ?, 'active', '2026-01-01')",
+            (5, _wl_mod._norm(str(tmp_path))),
+        )
+        conn.commit()
+        conn.close()
         assert slot_manager.allocate_slot_number(tmp_path) == 6
 
-    def test_only_attic(self, tmp_path):
-        slots = tmp_path / "slots"
-        slots.mkdir()
-        attic = slots / "attic"
-        attic.mkdir()
-        (attic / "4").mkdir()
-        assert slot_manager.allocate_slot_number(tmp_path) == 5
+    def test_skips_gaps(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        conn = _wl_mod.connect()
+        for n in (1, 3):
+            conn.execute(
+                "INSERT INTO slots (slot_number, family_root, state, created_at) "
+                "VALUES (?, ?, 'active', '2026-01-01')",
+                (n, _wl_mod._norm(str(tmp_path))),
+            )
+        conn.commit()
+        conn.close()
+        assert slot_manager.allocate_slot_number(tmp_path) == 4
 
-    def test_considers_legacy_worktrees(self, tmp_path):
-        slots = tmp_path / "slots"
-        slots.mkdir()
-        (slots / "1").mkdir()
-        (slots / "2").mkdir()
-        wt = tmp_path / "worktrees"
-        wt.mkdir()
-        attic = wt / "attic"
-        attic.mkdir()
-        (attic / "50").mkdir()
-        (attic / "60").mkdir()
-        assert slot_manager.allocate_slot_number(tmp_path) == 61
-
-    def test_considers_active_legacy_slots(self, tmp_path):
-        slots = tmp_path / "slots"
-        slots.mkdir()
-        (slots / "1").mkdir()
-        wt = tmp_path / "worktrees"
-        wt.mkdir()
-        (wt / "54").mkdir()
-        assert slot_manager.allocate_slot_number(tmp_path) == 55
+    def test_considers_archived_in_db(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (?, ?, 'archived', '2026-01-01')",
+            (50, _wl_mod._norm(str(tmp_path))),
+        )
+        conn.commit()
+        conn.close()
+        assert slot_manager.allocate_slot_number(tmp_path) == 51
 
 
 class TestResolveWorkspaceSource:
@@ -541,7 +532,7 @@ class TestCreateSlot:
     @patch("slot_manager.run_cmd")
     def test_slot_numbering_increments(self, mock_cmd, tmp_path):
         family = tmp_path / "casehub"
-        (family / "slots" / "1").mkdir(parents=True)
+        family.mkdir(parents=True)
         engine = init_repo(family / "engine")
         shared_ws = init_repo(tmp_path / "public" / "casehub")
         (shared_ws / "engine").mkdir()
@@ -549,7 +540,18 @@ class TestCreateSlot:
 
         mock_cmd.return_value = (0, "", "")
 
-        result = slot_manager.create_slot(
+        result1 = slot_manager.create_slot(
+            family_root=family,
+            repos=["engine"],
+            branch="issue-42-spi",
+            issue="42",
+            issue_repo="casehubio/engine",
+            covers="42",
+            context="First slot",
+        )
+        assert result1["slot_number"] == 1
+
+        result2 = slot_manager.create_slot(
             family_root=family,
             repos=["engine"],
             branch="issue-55-ledger",
@@ -558,7 +560,7 @@ class TestCreateSlot:
             covers="55",
             context="Fix ledger",
         )
-        assert result["slot_number"] == 2
+        assert result2["slot_number"] == 2
 
     @patch("slot_manager.run_cmd")
     def test_clone_failure_exits(self, mock_cmd, tmp_path, capsys):
@@ -2064,6 +2066,208 @@ class TestRemoveSlotForceArchiveClaude:
         assert attic.exists(), "force must archive to attic, never delete"
         assert (attic / ".slot").exists()
         assert not proj_dir.exists(), "Claude session dir should be relocated"
+
+
+class TestListSlotsDriftDetection:
+    """Inline drift detection comparing DB vs disk state."""
+
+    def _setup_db(self, tmp_path, monkeypatch):
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        import worklog as _wl_mod
+        db_path = tmp_path / "drift_test.db"
+        monkeypatch.setattr(slot_manager, "_wl", _wl_mod)
+        monkeypatch.setattr(_wl_mod, "DEFAULT_DB", str(db_path))
+        return _wl_mod
+
+    def test_no_warnings_when_aligned(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 1 — test-branch\n")
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (1, ?, 'active', '2026-01-01')",
+            (_wl_mod._norm(str(family)),),
+        )
+        conn.commit()
+        conn.close()
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift" not in captured.out
+
+    def test_warns_on_db_only(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        (family / "slots").mkdir(parents=True)
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (99, ?, 'active', '2026-01-01')",
+            (_wl_mod._norm(str(family)),),
+        )
+        conn.commit()
+        conn.close()
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift type=db-only slot=99" in captured.out
+
+    def test_warns_on_disk_only(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 1 — test\n")
+        _wl_mod.connect().close()
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift type=disk-only slot=1" in captured.out
+
+    def test_warns_on_state_mismatch(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        attic = family / "slots" / "attic" / "1"
+        attic.mkdir(parents=True)
+        (attic / ".slot").write_text("# Slot 1 — test\n")
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (1, ?, 'active', '2026-01-01')",
+            (_wl_mod._norm(str(family)),),
+        )
+        conn.commit()
+        conn.close()
+        slot_manager.list_slots(family, include_archived=True)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift type=state-mismatch slot=1" in captured.out
+
+    def test_warns_on_ghost(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        ghost = family / "slots" / "1"
+        ghost.mkdir(parents=True)
+        (ghost / ".m2").mkdir()
+        _wl_mod.connect().close()
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift type=ghost slot=1" in captured.out
+
+    def test_no_drift_check_without_worklog(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(slot_manager, "_wl", None)
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 1 — test\n")
+        slot_manager.list_slots(family)
+        captured = capsys.readouterr()
+        assert "WARN=db_drift" not in captured.out
+
+
+class TestAllocateSlotNumberDB:
+    """DB-authoritative slot numbering: reserve-first pattern."""
+
+    def _setup_db(self, tmp_path, monkeypatch):
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        import worklog as _wl_mod
+        db_path = tmp_path / "test.db"
+        monkeypatch.setattr(slot_manager, "_wl", _wl_mod)
+        monkeypatch.setattr(_wl_mod, "DEFAULT_DB", str(db_path))
+        return _wl_mod
+
+    def test_first_slot_returns_1(self, tmp_path, monkeypatch):
+        self._setup_db(tmp_path, monkeypatch)
+        num = slot_manager.allocate_slot_number(tmp_path)
+        assert num == 1
+
+    def test_increments_from_existing(self, tmp_path, monkeypatch):
+        self._setup_db(tmp_path, monkeypatch)
+        slot_manager.allocate_slot_number(tmp_path)
+        num = slot_manager.allocate_slot_number(tmp_path)
+        assert num == 2
+
+    def test_hard_fails_without_worklog(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(slot_manager, "_wl", None)
+        with pytest.raises(SystemExit):
+            slot_manager.allocate_slot_number(tmp_path)
+        captured = capsys.readouterr()
+        assert "ERROR=worklog_unavailable" in captured.out
+
+    def test_inserts_pending_row(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        num = slot_manager.allocate_slot_number(tmp_path)
+        conn = _wl_mod.connect()
+        row = conn.execute(
+            "SELECT state FROM slots WHERE slot_number=?", (num,)
+        ).fetchone()
+        conn.close()
+        assert row["state"] == "pending"
+
+    def test_different_families_independent(self, tmp_path, monkeypatch):
+        self._setup_db(tmp_path, monkeypatch)
+        family_a = tmp_path / "a"
+        family_a.mkdir()
+        family_b = tmp_path / "b"
+        family_b.mkdir()
+        slot_manager.allocate_slot_number(family_a)
+        slot_manager.allocate_slot_number(family_a)
+        num = slot_manager.allocate_slot_number(family_b)
+        assert num == 1
+
+
+class TestRelocateClaudeProjectsRelativePath:
+    """Regression: relative slot_dir paths must resolve to absolute before encoding."""
+
+    def test_relocate_matches_when_slot_dir_is_relative(self, tmp_path, monkeypatch):
+        slot_abs = tmp_path / "family" / "slots" / "1"
+        slot_abs.mkdir(parents=True)
+        repo = slot_abs / "engine"
+        repo.mkdir()
+
+        fake_home = tmp_path / "home"
+        claude_projects = fake_home / ".claude" / "projects"
+        claude_projects.mkdir(parents=True)
+        proj_dir = claude_projects / str(slot_abs / "engine").replace("/", "-")
+        proj_dir.mkdir()
+        (proj_dir / "memory.md").write_text("data")
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        slot_rel = Path("family") / "slots" / "1"
+        dest_rel = Path("family") / "slots" / "attic" / "1"
+        monkeypatch.chdir(tmp_path)
+
+        moved = slot_manager.relocate_claude_projects(slot_rel, dest_rel)
+
+        assert moved == 1, "relative path must still find the Claude project dir"
+        assert not proj_dir.exists()
+        dest_encoded = str((tmp_path / dest_rel / "engine").resolve()).replace("/", "-")
+        assert (claude_projects / dest_encoded).exists()
+
+    def test_remove_matches_when_slot_dir_is_relative(self, tmp_path, monkeypatch):
+        slot_abs = tmp_path / "family" / "slots" / "1"
+        slot_abs.mkdir(parents=True)
+        repo = slot_abs / "engine"
+        repo.mkdir()
+
+        fake_home = tmp_path / "home"
+        claude_projects = fake_home / ".claude" / "projects"
+        claude_projects.mkdir(parents=True)
+        proj_dir = claude_projects / str(slot_abs / "engine").replace("/", "-")
+        proj_dir.mkdir()
+        (proj_dir / "session.jsonl").write_text("[]")
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        slot_rel = Path("family") / "slots" / "1"
+        monkeypatch.chdir(tmp_path)
+
+        removed = slot_manager.remove_claude_projects(slot_rel)
+
+        assert removed == 1, "relative path must still find the Claude project dir"
+        assert not proj_dir.exists()
 
 
 class TestReadPromotionStamp:

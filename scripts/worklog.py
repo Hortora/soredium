@@ -211,6 +211,56 @@ def _find_slot(conn: sqlite3.Connection, slot_number: int,
     return row["id"] if row else None
 
 
+def reserve_slot_number(conn: sqlite3.Connection,
+                        family_root: str) -> int:
+    """Allocate next slot number and insert a pending row. No @safe."""
+    family_root = _norm(family_root)
+    row = conn.execute(
+        "SELECT MAX(slot_number) FROM slots WHERE family_root=?",
+        (family_root,),
+    ).fetchone()
+    next_num = (row[0] or 0) + 1
+    conn.execute(
+        "INSERT INTO slots (slot_number, family_root, state, created_at) "
+        "VALUES (?, ?, 'pending', ?)",
+        (next_num, family_root, _now()),
+    )
+    conn.commit()
+    return next_num
+
+
+def confirm_slot_create(conn: sqlite3.Connection, slot_number: int,
+                        family_root: str, repos: list[str],
+                        branch: str, issue_number: int,
+                        issue_repo: str,
+                        covers: str | None = None) -> int:
+    """Confirm a pending slot reservation. No @safe — errors propagate."""
+    family_root = _norm(family_root)
+    sid = _find_slot(conn, slot_number, family_root)
+    if sid is None:
+        raise ValueError(f"No pending slot {slot_number} for {family_root}")
+    conn.execute("UPDATE slots SET state='active' WHERE id=?", (sid,))
+    issue_nums = [int(n.strip()) for n in (covers or str(issue_number)).split(",") if n.strip()]
+    for repo_path in repos:
+        repo_id = _ensure_repo_strict(conn, repo_path, family_root=family_root)
+        wi_cur = conn.execute(
+            "INSERT INTO work_items (branch, repo_id, state, location, slot_id, created_at) "
+            "VALUES (?, ?, 'active', 'slot', ?, ?)",
+            (branch, repo_id, sid, _now()),
+        )
+        wid = wi_cur.lastrowid
+        for num in issue_nums:
+            conn.execute(
+                "INSERT INTO work_item_issues (work_item_id, issue_number, issue_repo, is_primary) "
+                "VALUES (?, ?, ?, ?)",
+                (wid, num, issue_repo, 1 if num == issue_number else 0),
+            )
+    _log_event(conn, "slot-create", slot_id=sid,
+               metadata={"repos": repos, "branch": branch})
+    conn.commit()
+    return sid
+
+
 # --- Repos ---
 
 @safe
@@ -243,6 +293,23 @@ def ensure_repo(conn: sqlite3.Connection, path: str,
         "INSERT INTO repos (path, workspace, family_root, github_repo, project_type) "
         "VALUES (?, ?, ?, ?, ?)",
         (path, workspace, family_root, github_repo, project_type),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def _ensure_repo_strict(conn: sqlite3.Connection, path: str,
+                        family_root: str | None = None) -> int:
+    """Like ensure_repo but raises on failure. No @safe."""
+    path = _norm(path)
+    if family_root:
+        family_root = _norm(family_root)
+    row = conn.execute("SELECT id FROM repos WHERE path=?", (path,)).fetchone()
+    if row:
+        return row["id"]
+    cur = conn.execute(
+        "INSERT INTO repos (path, family_root) VALUES (?, ?)",
+        (path, family_root),
     )
     conn.commit()
     return cur.lastrowid

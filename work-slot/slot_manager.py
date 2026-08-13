@@ -248,22 +248,18 @@ def sync_isx(slot_dir: Path) -> int:
 
 
 def allocate_slot_number(family_root: Path) -> int:
-    existing: list[int] = []
-    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
-        base = family_root / dir_name
-        if not base.exists():
-            continue
-        existing.extend(
-            int(d.name) for d in base.iterdir()
-            if d.is_dir() and d.name.isdigit()
-        )
-        attic_dir = base / "attic"
-        if attic_dir.exists():
-            existing.extend(
-                int(d.name) for d in attic_dir.iterdir()
-                if d.is_dir() and d.name.isdigit()
-            )
-    return max(existing, default=0) + 1
+    """Reserve next slot number via DB. Hard fail if DB unavailable."""
+    if _wl is None:
+        print("ERROR=worklog_unavailable")
+        print("ERROR_DETAIL=worklog module required for slot numbering — "
+              "ensure scripts/worklog.py is importable")
+        sys.exit(1)
+    conn = _wl.connect()
+    try:
+        slot_num = _wl.reserve_slot_number(conn, str(family_root))
+    finally:
+        conn.close()
+    return slot_num
 
 
 def _get_clone_origin(clone_path: Path) -> str | None:
@@ -635,19 +631,17 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
     if isx:
         _wire_isx_remotes(slot_dir, repos, instance_name)
 
-    if _wl:
-        try:
-            _conn = _wl.connect()
-            repo_paths = [str(family_root / r) for r in repos]
-            _wl.record_slot_create(
-                _conn, slot_num, str(family_root),
-                repos=repo_paths, branch=branch,
-                issue_number=int(issue) if issue else 0,
-                issue_repo=issue_repo, covers=covers,
-            )
-            _conn.close()
-        except Exception:
-            pass
+    conn = _wl.connect()
+    try:
+        repo_paths = [str(family_root / r) for r in repos]
+        _wl.confirm_slot_create(
+            conn, slot_num, str(family_root),
+            repos=repo_paths, branch=branch,
+            issue_number=int(issue) if issue else 0,
+            issue_repo=issue_repo, covers=covers,
+        )
+    finally:
+        conn.close()
 
     return {
         "slot_number": slot_num,
@@ -1380,8 +1374,8 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
     if not claude_projects.is_dir():
         return 0
 
-    slot_path_encoded = str(slot_dir).replace("/", "-")
-    dest_path_encoded = str(dest_dir).replace("/", "-")
+    slot_path_encoded = str(slot_dir.resolve()).replace("/", "-")
+    dest_path_encoded = str(dest_dir.resolve()).replace("/", "-")
     moved = 0
 
     for proj_dir in claude_projects.iterdir():
@@ -1402,7 +1396,7 @@ def remove_claude_projects(slot_dir: Path) -> int:
     if not claude_projects.is_dir():
         return 0
 
-    slot_path_encoded = str(slot_dir).replace("/", "-")
+    slot_path_encoded = str(slot_dir.resolve()).replace("/", "-")
     removed = 0
 
     for proj_dir in list(claude_projects.iterdir()):
@@ -1633,7 +1627,74 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
                     "isolation": md.get("isolation_type", "") or "none",
                 })
 
+    _check_drift(family_root, slots, include_archived)
+
     return slots
+
+
+def _map_db_to_disk_state(db_state: str) -> str:
+    mapping = {
+        "active": "active",
+        "pending": "active",
+        "ready": "ready to land",
+        "landed": "landed",
+        "archived": "archived",
+    }
+    return mapping.get(db_state, db_state)
+
+
+def _check_drift(family_root: Path, slots: list[dict],
+                  include_archived: bool) -> None:
+    if _wl is None:
+        return
+    try:
+        conn = _wl.connect()
+        db_rows = _wl.slot_status(conn, family_root=str(family_root))
+        conn.close()
+    except Exception:
+        return
+
+    db_slots: dict[int, str] = {r["slot_number"]: r["state"] for r in db_rows}
+    disk_nums: dict[int, str] = {s["number"]: s["state"] for s in slots}
+
+    has_slot_file: set[int] = set()
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        slots_dir = family_root / dir_name
+        if not slots_dir.exists():
+            continue
+        for d in slots_dir.iterdir():
+            if not d.is_dir() or not d.name.isdigit() or d.name == "attic":
+                continue
+            num = int(d.name)
+            if (d / ".slot").exists():
+                has_slot_file.add(num)
+
+    for num, db_state in db_slots.items():
+        if db_state == "pending":
+            if num in disk_nums:
+                print(f"WARN=db_drift type=pending slot={num}")
+            continue
+        if num not in disk_nums:
+            if not include_archived:
+                attic_exists = any(
+                    (family_root / dn / "attic" / str(num)).exists()
+                    for dn in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME)
+                )
+                if attic_exists and db_state in ("archived", "landed"):
+                    continue
+            print(f"WARN=db_drift type=db-only slot={num}")
+        else:
+            disk_state = disk_nums[num]
+            db_mapped = _map_db_to_disk_state(db_state)
+            if db_mapped != disk_state:
+                print(f"WARN=db_drift type=state-mismatch slot={num} db={db_state} disk={disk_state}")
+
+    for num in disk_nums:
+        if num not in db_slots:
+            if num not in has_slot_file:
+                print(f"WARN=db_drift type=ghost slot={num}")
+            else:
+                print(f"WARN=db_drift type=disk-only slot={num}")
 
 
 def remove_slot(family_root: Path, slot_num: int, force: bool = False) -> None:

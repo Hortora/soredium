@@ -5,6 +5,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 import worklog
@@ -653,6 +655,163 @@ class TestIssueEvents:
         conn = worklog.connect(str(tmp_path / "wl.db"))
         result = worklog.record_issue_activate(conn, "nonexistent", "/repo", 42, "org/r")
         assert result is None
+        conn.close()
+
+
+class TestReserveSlotNumber:
+    def test_first_slot_returns_1(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        num = worklog.reserve_slot_number(conn, "/family/root")
+        assert num == 1
+        conn.close()
+
+    def test_increments_from_existing(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.reserve_slot_number(conn, "/family/root")
+        num = worklog.reserve_slot_number(conn, "/family/root")
+        assert num == 2
+        conn.close()
+
+    def test_inserts_pending_row(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        num = worklog.reserve_slot_number(conn, "/family/root")
+        row = conn.execute(
+            "SELECT state FROM slots WHERE slot_number=? AND family_root=?",
+            (num, worklog._norm("/family/root")),
+        ).fetchone()
+        assert row["state"] == "pending"
+        conn.close()
+
+    def test_different_families_independent(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.reserve_slot_number(conn, "/family/a")
+        worklog.reserve_slot_number(conn, "/family/a")
+        num = worklog.reserve_slot_number(conn, "/family/b")
+        assert num == 1
+        conn.close()
+
+    def test_skips_over_existing_numbers(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (?, ?, 'archived', '2026-01-01')",
+            (50, worklog._norm("/family/root")),
+        )
+        conn.commit()
+        num = worklog.reserve_slot_number(conn, "/family/root")
+        assert num == 51
+        conn.close()
+
+    def test_skips_over_pending_numbers(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        worklog.reserve_slot_number(conn, "/family/root")
+        num = worklog.reserve_slot_number(conn, "/family/root")
+        assert num == 2
+        conn.close()
+
+
+class TestEnsureRepoStrict:
+    def test_inserts_new_repo(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        repo_id = worklog._ensure_repo_strict(conn, "/path/to/repo")
+        assert repo_id is not None
+        row = conn.execute("SELECT path FROM repos WHERE id=?", (repo_id,)).fetchone()
+        assert row["path"] == worklog._norm("/path/to/repo")
+        conn.close()
+
+    def test_returns_existing_repo_id(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        id1 = worklog._ensure_repo_strict(conn, "/path/to/repo")
+        id2 = worklog._ensure_repo_strict(conn, "/path/to/repo")
+        assert id1 == id2
+        conn.close()
+
+    def test_raises_on_closed_connection(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        conn.close()
+        with pytest.raises(Exception):
+            worklog._ensure_repo_strict(conn, "/path/to/repo")
+
+
+class TestConfirmSlotCreate:
+    def test_transitions_pending_to_active(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        num = worklog.reserve_slot_number(conn, "/family")
+        sid = worklog.confirm_slot_create(
+            conn, num, "/family",
+            repos=["/family/engine"],
+            branch="issue-42-test",
+            issue_number=42,
+            issue_repo="Org/repo",
+        )
+        row = conn.execute("SELECT state FROM slots WHERE id=?", (sid,)).fetchone()
+        assert row["state"] == "active"
+        conn.close()
+
+    def test_creates_work_items(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        num = worklog.reserve_slot_number(conn, "/family")
+        sid = worklog.confirm_slot_create(
+            conn, num, "/family",
+            repos=["/family/engine", "/family/app"],
+            branch="issue-42-test",
+            issue_number=42,
+            issue_repo="Org/repo",
+        )
+        rows = conn.execute(
+            "SELECT COUNT(*) as cnt FROM work_items WHERE slot_id=?", (sid,)
+        ).fetchone()
+        assert rows["cnt"] == 2
+        conn.close()
+
+    def test_creates_issue_linkages(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        num = worklog.reserve_slot_number(conn, "/family")
+        sid = worklog.confirm_slot_create(
+            conn, num, "/family",
+            repos=["/family/engine"],
+            branch="issue-42-test",
+            issue_number=42,
+            issue_repo="Org/repo",
+            covers="42,43",
+        )
+        rows = conn.execute(
+            "SELECT issue_number, is_primary FROM work_item_issues "
+            "ORDER BY issue_number"
+        ).fetchall()
+        assert len(rows) == 2
+        assert rows[0]["issue_number"] == 42
+        assert rows[0]["is_primary"] == 1
+        assert rows[1]["issue_number"] == 43
+        assert rows[1]["is_primary"] == 0
+        conn.close()
+
+    def test_raises_if_no_pending_slot(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        with pytest.raises(ValueError, match="No pending slot"):
+            worklog.confirm_slot_create(
+                conn, 999, "/family",
+                repos=["/family/engine"],
+                branch="test",
+                issue_number=1,
+                issue_repo="Org/repo",
+            )
+        conn.close()
+
+    def test_logs_slot_create_event(self, tmp_path):
+        conn = worklog.connect(str(tmp_path / "wl.db"))
+        num = worklog.reserve_slot_number(conn, "/family")
+        sid = worklog.confirm_slot_create(
+            conn, num, "/family",
+            repos=["/family/engine"],
+            branch="issue-42-test",
+            issue_number=42,
+            issue_repo="Org/repo",
+        )
+        events = conn.execute(
+            "SELECT event_type FROM events WHERE slot_id=?", (sid,)
+        ).fetchall()
+        assert any(e["event_type"] == "slot-create" for e in events)
         conn.close()
 
 
