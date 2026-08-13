@@ -34,19 +34,8 @@ def _extract_handoff_summary(handoff_path: str) -> str:
     """Extract the first 2-3 lines of the Last Session section from HANDOFF.md."""
     path = Path(handoff_path)
     if not path.exists():
-        workspace_dir = path.parent
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(workspace_dir), "show", f"main:{path.name}"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode != 0:
-                return ""
-            content = result.stdout
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return ""
-    else:
-        content = path.read_text()
+        return ""
+    content = path.read_text()
 
     in_section = False
     lines = []

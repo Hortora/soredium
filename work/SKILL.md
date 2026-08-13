@@ -75,8 +75,8 @@ this state with additional tool calls.
 If the user invoked `work` without an issue number and `ROUTE=start`:
 
 0. **Active branch detection from HANDOFF.md:**
-   Read HANDOFF.md from the workspace (check working tree, then
-   `git show main:HANDOFF.md`). If the Last Session or Immediate Next
+   HANDOFF.md is branch-scoped — read from the workspace working tree
+   (it lives on the current branch, not main). If the Last Session or Immediate Next
    Step section references a branch name (e.g. `Branch: issue-NNN-slug`
    or `run /work to continue #NNN`), check if that branch exists locally:
    ```bash

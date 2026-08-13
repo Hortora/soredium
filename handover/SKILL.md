@@ -525,16 +525,16 @@ The rename is cosmetic — the handover must be committed regardless.
 
 ### Step 6 — Commit (required)
 
-Resolve the workspace path via the context script (already run in Path Resolution above), then commit. HANDOFF.md must **always** be committed to workspace **main**, even when the session is on a branch. It is a session artifact, not a branch artifact — committing it to a branch makes it invisible to the next session starting on main.
+Resolve the workspace path via the context script (already run in Path Resolution above), then commit HANDOFF.md to the **current workspace branch**. HANDOFF.md is ephemeral to the work — it lives on the branch because work lives on the branch. Pause/resume preserves it; branch closure discards it. For persistent cross-session notes, use `.notes/NOTES.md`.
 
 Use `WORKSPACE` from the ctx.py output as a concrete string.
 
 ```bash
-CURRENT_BRANCH=$(git -C <Workspace> branch --show-current)
-python3 ~/.claude/skills/handover/handover_commit.py commit-to-main <Workspace> branch=$CURRENT_BRANCH
+git -C <Workspace> add HANDOFF.md
+git -C <Workspace> commit -m "docs: session handover"
 ```
 
-Read `COMMITTED=yes` and `PUSHED=yes|no` from output. If `ERROR=` appears, report and stop.
+If on main (quick-fix work or no active branch), this commits to main — which is correct because main IS the branch in that case.
 
 Committing is mandatory. It's what makes git history the archive.
 
@@ -654,7 +654,7 @@ Handover is complete when:
 - ✅ update-claude-md invoked (if checked) — CLAUDE.md synced
 - ✅ journal-entry written (if checked) — design/JOURNAL.md updated; off by default; only applicable on epic branches
 - ✅ Session name offered — user was prompted to `/rename` or acknowledged the session already has a meaningful name
-- ✅ HANDOFF.md exists at project root
+- ✅ HANDOFF.md exists on the workspace branch
 - ✅ Readable in under 500 tokens
 - ✅ Unchanged sections reference git history, not repeated content
 - ✅ Immediate next step is specific enough to act on without asking

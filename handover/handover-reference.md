@@ -64,7 +64,7 @@ session both narrative context and work state.
 | Why a design decision was made | write-blog or adr |
 | Current architecture | design-snapshot (reference from handover) |
 | Cross-project technical gotcha | garden (reference from handover) |
-| Undecided possibilities, notes for later | `$WORKSPACE/NOTES.md` |
+| Undecided possibilities, notes for later | `$WORKSPACE/.notes/NOTES.md` |
 | Permanent conventions | CLAUDE.md (auto-loaded, don't repeat) |
 
 ---

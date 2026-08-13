@@ -1,4 +1,4 @@
-"""Tests for handover/handover_commit.py"""
+"""Tests for handover/handover_commit.py — branch-scoped handoffs"""
 
 import subprocess
 from pathlib import Path
@@ -24,23 +24,21 @@ def workspace_repo(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# commit-to-main on main branch
+# commit on main branch
 # ---------------------------------------------------------------------------
 
-def test_commit_to_main_on_main(workspace_repo):
-    """commit-to-main on main branch commits HANDOFF.md directly."""
+def test_commit_on_main(workspace_repo):
+    """commit on main branch commits HANDOFF.md directly."""
     ws = workspace_repo
     (ws / "HANDOFF.md").write_text("# Handover\n\nTest session.\n")
 
     result = subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws), "branch=main"],
+        ["python3", str(HANDOVER_COMMIT), "commit", str(ws)],
         capture_output=True, text=True,
     )
     assert result.returncode == 0
     assert "COMMITTED=yes" in result.stdout
-    assert "PUSHED=no" in result.stdout  # no remote
 
-    # Verify commit
     log = subprocess.run(
         ["git", "-C", str(ws), "log", "-1", "--format=%s"],
         capture_output=True, text=True,
@@ -48,13 +46,13 @@ def test_commit_to_main_on_main(workspace_repo):
     assert "session handover" in log.stdout
 
 
-def test_commit_to_main_still_on_main(workspace_repo):
-    """After commit-to-main on main, repo stays on main."""
+def test_commit_stays_on_main(workspace_repo):
+    """After commit on main, repo stays on main."""
     ws = workspace_repo
     (ws / "HANDOFF.md").write_text("# Handover\n")
 
     subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws), "branch=main"],
+        ["python3", str(HANDOVER_COMMIT), "commit", str(ws)],
         capture_output=True, text=True,
     )
 
@@ -66,30 +64,24 @@ def test_commit_to_main_still_on_main(workspace_repo):
 
 
 # ---------------------------------------------------------------------------
-# commit-to-main from a branch
+# commit from a feature branch — stays on the branch
 # ---------------------------------------------------------------------------
 
-def test_commit_to_main_from_branch(workspace_repo):
-    """commit-to-main from a branch stashes, commits on main, returns."""
+def test_commit_from_branch(workspace_repo):
+    """commit from a branch commits on that branch, not main."""
     ws = workspace_repo
     subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-42-test"],
                     check=True, capture_output=True)
 
-    # Create branch-specific work
-    (ws / "branch-work.txt").write_text("branch work")
-
-    # Write HANDOFF.md
     (ws / "HANDOFF.md").write_text("# Handover from branch\n")
 
     result = subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws),
-         "branch=issue-42-test"],
+        ["python3", str(HANDOVER_COMMIT), "commit", str(ws)],
         capture_output=True, text=True,
     )
     assert result.returncode == 0
     assert "COMMITTED=yes" in result.stdout
 
-    # Verify we're back on the original branch
     branch = subprocess.run(
         ["git", "-C", str(ws), "branch", "--show-current"],
         capture_output=True, text=True,
@@ -97,16 +89,42 @@ def test_commit_to_main_from_branch(workspace_repo):
     assert branch == "issue-42-test"
 
 
-def test_commit_to_main_from_branch_preserves_work(workspace_repo):
-    """commit-to-main from branch preserves uncommitted work via stash."""
+def test_commit_from_branch_handoff_on_branch(workspace_repo):
+    """HANDOFF.md commit appears on the branch, not on main."""
+    ws = workspace_repo
+    subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-7-feature"],
+                    check=True, capture_output=True)
+
+    (ws / "HANDOFF.md").write_text("# Session handover\n")
+
+    subprocess.run(
+        ["python3", str(HANDOVER_COMMIT), "commit", str(ws)],
+        capture_output=True, text=True,
+    )
+
+    branch_log = subprocess.run(
+        ["git", "-C", str(ws), "log", "issue-7-feature", "-1", "--format=%s"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert "session handover" in branch_log
+
+    main_log = subprocess.run(
+        ["git", "-C", str(ws), "log", "main", "-1", "--format=%s"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert "session handover" not in main_log
+
+
+# ---------------------------------------------------------------------------
+# commit-to-main legacy alias
+# ---------------------------------------------------------------------------
+
+def test_commit_to_main_legacy_alias(workspace_repo):
+    """commit-to-main still works as a legacy alias — commits on current branch."""
     ws = workspace_repo
     subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-99-wip"],
                     check=True, capture_output=True)
 
-    # Create uncommitted file on the branch
-    (ws / "wip.txt").write_text("work in progress")
-
-    # Write HANDOFF.md
     (ws / "HANDOFF.md").write_text("# Handover\n")
 
     result = subprocess.run(
@@ -115,51 +133,17 @@ def test_commit_to_main_from_branch_preserves_work(workspace_repo):
         capture_output=True, text=True,
     )
     assert result.returncode == 0
-
-    # wip.txt should still exist on the branch
-    assert (ws / "wip.txt").exists()
-
-
-def test_commit_to_main_handoff_on_main_branch(workspace_repo):
-    """HANDOFF.md commit appears on main, not on the branch."""
-    ws = workspace_repo
-    subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-7-feature"],
-                    check=True, capture_output=True)
-
-    (ws / "HANDOFF.md").write_text("# Session handover\n")
-
-    subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws),
-         "branch=issue-7-feature"],
-        capture_output=True, text=True,
-    )
-
-    # Check main has the handover commit
-    main_log = subprocess.run(
-        ["git", "-C", str(ws), "log", "main", "-1", "--format=%s"],
-        capture_output=True, text=True,
-    ).stdout.strip()
-    assert "session handover" in main_log
+    assert "COMMITTED=yes" in result.stdout
 
 
 # ---------------------------------------------------------------------------
 # Error cases
 # ---------------------------------------------------------------------------
 
-def test_missing_branch_arg():
-    """commit-to-main without branch= fails."""
-    result = subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main", "/tmp"],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "ERROR=missing_branch" in result.stdout
-
-
 def test_missing_workspace_arg():
-    """commit-to-main without workspace arg fails."""
+    """commit without workspace arg fails."""
     result = subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main"],
+        ["python3", str(HANDOVER_COMMIT), "commit"],
         capture_output=True, text=True,
     )
     assert result.returncode == 1
@@ -176,32 +160,42 @@ def test_unknown_subcommand():
     assert "ERROR=unknown_subcommand" in result.stdout
 
 
+def test_missing_subcommand():
+    """No subcommand fails."""
+    result = subprocess.run(
+        ["python3", str(HANDOVER_COMMIT)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "ERROR=missing_subcommand" in result.stdout
+
+
 # ---------------------------------------------------------------------------
 # Per-project HANDOFF filename
 # ---------------------------------------------------------------------------
 
-def test_commit_project_handoff_on_main(workspace_repo):
-    """commit-to-main with file= commits per-project HANDOFF file."""
+def test_commit_project_handoff(workspace_repo):
+    """commit with file= commits per-project HANDOFF file on current branch."""
     ws = workspace_repo
     (ws / "HANDOFF-engine.md").write_text("# Engine handover\n")
 
     result = subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws),
-         "branch=main", "file=HANDOFF-engine.md"],
+        ["python3", str(HANDOVER_COMMIT), "commit", str(ws),
+         "file=HANDOFF-engine.md"],
         capture_output=True, text=True,
     )
     assert result.returncode == 0
     assert "COMMITTED=yes" in result.stdout
 
     show = subprocess.run(
-        ["git", "-C", str(ws), "show", "main:HANDOFF-engine.md"],
+        ["git", "-C", str(ws), "show", "HEAD:HANDOFF-engine.md"],
         capture_output=True, text=True,
     )
     assert "Engine handover" in show.stdout
 
 
 def test_commit_project_handoff_from_branch(workspace_repo):
-    """commit-to-main from branch with file= commits per-project HANDOFF."""
+    """commit from branch with file= commits per-project HANDOFF on the branch."""
     ws = workspace_repo
     subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-42-test"],
                     check=True, capture_output=True)
@@ -209,21 +203,15 @@ def test_commit_project_handoff_from_branch(workspace_repo):
     (ws / "HANDOFF-engine.md").write_text("# Engine branch handover\n")
 
     result = subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws),
-         "branch=issue-42-test", "file=HANDOFF-engine.md"],
+        ["python3", str(HANDOVER_COMMIT), "commit", str(ws),
+         "file=HANDOFF-engine.md"],
         capture_output=True, text=True,
     )
     assert result.returncode == 0
     assert "COMMITTED=yes" in result.stdout
 
-    branch = subprocess.run(
-        ["git", "-C", str(ws), "branch", "--show-current"],
-        capture_output=True, text=True,
-    ).stdout.strip()
-    assert branch == "issue-42-test"
-
     show = subprocess.run(
-        ["git", "-C", str(ws), "show", "main:HANDOFF-engine.md"],
+        ["git", "-C", str(ws), "show", "HEAD:HANDOFF-engine.md"],
         capture_output=True, text=True,
     )
     assert "Engine branch handover" in show.stdout
@@ -235,24 +223,13 @@ def test_default_file_is_handoff_md(workspace_repo):
     (ws / "HANDOFF.md").write_text("# Generic\n")
 
     result = subprocess.run(
-        ["python3", str(HANDOVER_COMMIT), "commit-to-main", str(ws),
-         "branch=main"],
+        ["python3", str(HANDOVER_COMMIT), "commit", str(ws)],
         capture_output=True, text=True,
     )
     assert result.returncode == 0
 
     show = subprocess.run(
-        ["git", "-C", str(ws), "show", "main:HANDOFF.md"],
+        ["git", "-C", str(ws), "show", "HEAD:HANDOFF.md"],
         capture_output=True, text=True,
     )
     assert "Generic" in show.stdout
-
-
-def test_missing_subcommand():
-    """No subcommand fails."""
-    result = subprocess.run(
-        ["python3", str(HANDOVER_COMMIT)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 1
-    assert "ERROR=missing_subcommand" in result.stdout

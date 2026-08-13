@@ -105,7 +105,7 @@ def detect(topo: Topology) -> WorkState:
                 epic_batch = f"{current} of {total}" if total else ""
                 epic_active_issue = str(epic_info.get("current_issue", ""))
 
-    # Handoff detection — project-specific first (F4 fix)
+    # Handoff detection — branch-scoped, working tree only
     has_handoff = False
     handoff_path = ""
     project_name = topo.project.name
@@ -116,13 +116,6 @@ def detect(topo: Topology) -> WorkState:
             if candidate.exists():
                 handoff_file = candidate
                 break
-        if handoff_file is None:
-            rc = subprocess.run(
-                ["git", "-C", workspace, "cat-file", "-e", f"main:{name}"],
-                capture_output=True,
-            ).returncode
-            if rc == 0:
-                handoff_file = topo.workspace / name
         if handoff_file:
             break
 
@@ -132,11 +125,11 @@ def detect(topo: Topology) -> WorkState:
             has_handoff = True
         else:
             issue_match = re.match(r"issue-(\d+)", current_branch)
-            if issue_match and handoff_file.exists():
+            if issue_match:
                 has_handoff = bool(
                     re.search(rf'#{issue_match.group(1)}\b', handoff_file.read_text())
                 )
-            elif not issue_match:
+            else:
                 has_handoff = True
 
     # Meta state

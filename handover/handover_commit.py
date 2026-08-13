@@ -4,12 +4,13 @@ handover_commit.py — Externalized git operations for handover
 
 Subcommands:
 
-    commit-to-main <workspace> branch=<current>
-        Commit HANDOFF.md to workspace main, even when on a branch.
-        If branch != main: stash, checkout main, pull --rebase,
-            add HANDOFF.md, commit, push, checkout <branch>, stash pop.
-        If branch == main: pull --rebase, add HANDOFF.md, commit, push.
-        Output: COMMITTED=yes, PUSHED=yes|no
+    commit <workspace> [file=HANDOFF.md]
+        Commit HANDOFF.md on the current branch.
+        Output: COMMITTED=yes|skipped
+
+    commit-to-main <workspace> branch=<current> [file=HANDOFF.md]
+        Legacy alias — commits on the current branch (same as commit).
+        Kept for backward compatibility with callers that pass branch=.
 
 Exit codes:
     0  success
@@ -35,64 +36,23 @@ def run_git(repo: str, *args: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def commit_to_main(workspace: str, branch: str, handoff_file: str = "HANDOFF.md") -> int:
-    """Commit a HANDOFF file to workspace main."""
+def commit_handoff(workspace: str, handoff_file: str = "HANDOFF.md") -> int:
+    """Commit HANDOFF.md on the current branch."""
     today = date.today().isoformat()
     commit_msg = f"docs: session handover {today}"
 
-    if branch != "main":
-        run_git(workspace, "stash")
+    ok, _ = run_git(workspace, "add", handoff_file)
+    if not ok:
+        print("ERROR=add_failed")
+        return 1
 
-        ok, _ = run_git(workspace, "checkout", "main")
-        if not ok:
-            run_git(workspace, "checkout", branch)
-            run_git(workspace, "stash", "pop")
-            print("ERROR=checkout_main_failed")
-            return 1
-
-        run_git(workspace, "pull", "--rebase", "origin", "main")
-
-        ok, _ = run_git(workspace, "add", handoff_file)
-        if not ok:
-            run_git(workspace, "checkout", branch)
-            run_git(workspace, "stash", "pop")
-            print("ERROR=add_failed")
-            return 1
-
-        ok, _ = run_git(workspace, "commit", "-m", commit_msg)
-        if not ok:
-            run_git(workspace, "checkout", branch)
-            run_git(workspace, "stash", "pop")
-            print("ERROR=commit_failed")
-            return 1
-
-        push_ok, _ = run_git(workspace, "push")
-
-        run_git(workspace, "checkout", branch)
-        run_git(workspace, "stash", "pop")
-
-        print("COMMITTED=yes")
-        print(f"PUSHED={'yes' if push_ok else 'no'}")
+    ok, _ = run_git(workspace, "commit", "-m", commit_msg)
+    if not ok:
+        print("COMMITTED=skipped")
         return 0
 
-    else:
-        run_git(workspace, "pull", "--rebase", "origin", "main")
-
-        ok, _ = run_git(workspace, "add", handoff_file)
-        if not ok:
-            print("ERROR=add_failed")
-            return 1
-
-        ok, _ = run_git(workspace, "commit", "-m", commit_msg)
-        if not ok:
-            print("ERROR=commit_failed")
-            return 1
-
-        push_ok, _ = run_git(workspace, "push")
-
-        print("COMMITTED=yes")
-        print(f"PUSHED={'yes' if push_ok else 'no'}")
-        return 0
+    print("COMMITTED=yes")
+    return 0
 
 
 def parse_kv_args(args: list[str]) -> dict[str, str]:
@@ -112,18 +72,14 @@ def main() -> int:
 
     cmd = sys.argv[1]
 
-    if cmd == "commit-to-main":
+    if cmd in ("commit", "commit-to-main"):
         if len(sys.argv) < 3:
             print("ERROR=missing_args")
             return 1
         workspace = sys.argv[2]
         kv = parse_kv_args(sys.argv[3:])
-        branch = kv.get("branch")
-        if not branch:
-            print("ERROR=missing_branch")
-            return 1
         handoff_file = kv.get("file", "HANDOFF.md")
-        return commit_to_main(workspace, branch, handoff_file)
+        return commit_handoff(workspace, handoff_file)
 
     else:
         print("ERROR=unknown_subcommand")
