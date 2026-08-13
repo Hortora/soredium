@@ -2,23 +2,27 @@
 """
 Reconcile slot filesystem state with worklog DB.
 
-Scans all four slot locations (slots/, slots/attic/, worktrees/, worktrees/attic/)
-and compares against worklog.db. Fixes stale DB states, moves active legacy slots
-to slots/, and removes ghost directories.
+Three phases:
+  1. audit    — scan disk + DB, classify divergences
+  2. strategy — propose actions for each divergence
+  3. execute  — apply approved actions (quarantine, not delete)
 
 Usage:
-    python3 scripts/reconcile_slots.py <family-root>          # dry-run
-    python3 scripts/reconcile_slots.py <family-root> --apply  # execute
+    python3 scripts/reconcile_slots.py <family-root>              # audit only
+    python3 scripts/reconcile_slots.py <family-root> --strategy   # audit + strategy
+    python3 scripts/reconcile_slots.py <family-root> --execute    # audit + strategy + execute
 """
 
 import shutil
-import sqlite3
 import sys
 from pathlib import Path
 
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
     sys.path.insert(0, str(_lib))
+
+_scripts = Path(__file__).resolve().parent
+sys.path.insert(0, str(_scripts))
 
 _slot_mgr = Path(__file__).resolve().parent.parent / "work-slot"
 if _slot_mgr.exists():
@@ -35,212 +39,264 @@ except ImportError:
     relocate_claude_projects = None
     remove_claude_projects = None
 
+SLOT_DIR_NAME = "slots"
+LEGACY_SLOT_DIR_NAME = "worktrees"
 
-def scan_disk(family_root: Path) -> dict[int, dict]:
-    """Scan all four slot locations and return a map of slot_number -> disk info."""
+
+def _list_dir_contents(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return sorted(f.name for f in path.iterdir())
+
+
+def _infer_disk_state(location: str, has_landed: bool, has_phase_a: bool) -> str:
+    if location == "attic":
+        return "archived"
+    if has_landed:
+        return "landed"
+    if has_phase_a:
+        return "ready"
+    return "active"
+
+
+def _states_compatible(db_state: str, disk_state: str) -> bool:
+    if db_state == disk_state:
+        return True
+    if db_state == "pending" and disk_state == "active":
+        return True
+    if db_state == "ready" and disk_state in ("active", "ready"):
+        return True
+    return False
+
+
+def _scan_disk(family_root: Path) -> dict[int, dict]:
     results: dict[int, dict] = {}
-
-    for dir_name, is_legacy in [("slots", False), ("worktrees", True)]:
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
         base = family_root / dir_name
         if not base.exists():
             continue
-
         for d in base.iterdir():
             if not d.is_dir() or not d.name.isdigit() or d.name == "attic":
                 continue
             num = int(d.name)
-            has_slot_file = (d / ".slot").exists()
-            has_m2_only = not has_slot_file and (d / ".m2").exists() and len(list(d.iterdir())) <= 1
-            has_landed = (d / ".landed").exists()
-            has_phase_a = (d / ".phase-a-complete").exists()
-
-            if num in results and results[num]["location"] == "active":
+            if num in results:
                 continue
-
             results[num] = {
                 "location": "active",
-                "dir_type": "legacy" if is_legacy else "current",
                 "path": str(d),
-                "has_slot_file": has_slot_file,
-                "has_m2_only": has_m2_only,
-                "has_landed": has_landed,
-                "has_phase_a": has_phase_a,
+                "has_slot_file": (d / ".slot").exists(),
+                "has_landed": (d / ".landed").exists(),
+                "has_phase_a": (d / ".phase-a-complete").exists(),
+                "contents": _list_dir_contents(d),
             }
-
         attic = base / "attic"
         if attic.exists():
             for d in attic.iterdir():
                 if not d.is_dir() or not d.name.isdigit():
                     continue
                 num = int(d.name)
-                has_landed = (d / ".landed").exists()
-                has_phase_a = (d / ".phase-a-complete").exists()
-
-                if num in results:
-                    existing = results[num]
-                    if existing["location"] == "active" and existing["has_slot_file"]:
-                        results.setdefault(f"{num}_attic", {
-                            "location": "attic",
-                            "dir_type": "legacy_attic" if is_legacy else "current_attic",
-                            "path": str(d),
-                            "has_landed": has_landed,
-                            "has_phase_a": has_phase_a,
-                        })
-                        continue
-                    if existing["location"] == "active" and not existing["has_slot_file"]:
-                        results[f"{num}_ghost"] = existing
-                        results[num] = {
-                            "location": "attic",
-                            "dir_type": "legacy_attic" if is_legacy else "current_attic",
-                            "path": str(d),
-                            "has_landed": has_landed,
-                            "has_phase_a": has_phase_a,
-                        }
-                        continue
-
+                if num in results and results[num]["has_slot_file"]:
+                    continue
                 results[num] = {
                     "location": "attic",
-                    "dir_type": "legacy_attic" if is_legacy else "current_attic",
                     "path": str(d),
-                    "has_landed": has_landed,
-                    "has_phase_a": has_phase_a,
+                    "has_slot_file": (d / ".slot").exists(),
+                    "has_landed": (d / ".landed").exists(),
+                    "has_phase_a": (d / ".phase-a-complete").exists(),
+                    "contents": _list_dir_contents(d),
                 }
-
     return results
 
 
-def scan_db(family_root: str) -> dict[int, dict]:
-    """Query worklog DB for all slots in this family_root."""
+def _scan_db(family_root: str) -> dict[int, dict]:
     if not _wl:
         return {}
     conn = _wl.connect()
-    normalized = str(Path(family_root).resolve())
+    normalized = _wl._norm(family_root)
     rows = conn.execute(
         "SELECT id, slot_number, state, created_at, archived_at "
         "FROM slots WHERE family_root=? OR family_root=?",
         (normalized, family_root),
     ).fetchall()
-    result = {}
-    for r in rows:
-        result[r["slot_number"]] = {
+    conn.close()
+    return {
+        r["slot_number"]: {
             "id": r["id"],
             "state": r["state"],
             "created_at": r["created_at"],
             "archived_at": r["archived_at"],
         }
-    conn.close()
-    return result
+        for r in rows
+    }
 
 
-def reconcile(family_root: Path, apply: bool = False) -> None:
-    disk = scan_disk(family_root)
-    db = scan_db(str(family_root))
+def audit(family_root: Path) -> list[dict]:
+    """Phase 1: scan disk and DB, classify all divergences."""
+    disk = _scan_disk(family_root)
+    db = _scan_db(str(family_root))
+    divergences = []
+    all_nums = sorted(set(disk.keys()) | set(db.keys()))
 
-    actions: list[dict] = []
-
-    integer_keys = sorted(k for k in disk if isinstance(k, int))
-
-    for num in integer_keys:
-        d = disk[num]
+    for num in all_nums:
+        d = disk.get(num)
         db_entry = db.get(num)
 
-        # Ghost directory: no .slot file, just remnants
-        ghost_key = f"{num}_ghost"
-        if ghost_key in disk:
-            ghost = disk[ghost_key]
-            actions.append({
-                "type": "remove_ghost",
+        if d and not d["has_slot_file"] and d["location"] == "active":
+            divergences.append({
                 "slot": num,
-                "path": ghost["path"],
-                "reason": f"ghost remnant (no .slot, real data in {d['path']})",
+                "class": "ghost",
+                "disk_path": d["path"],
+                "disk_contents": d["contents"],
+                "db_state": db_entry["state"] if db_entry else None,
+                "detail": f"directory with no .slot file, contains: {d['contents']}",
             })
+            continue
 
-        # Active legacy slot that should move to slots/
-        if d["location"] == "active" and d["dir_type"] == "legacy" and d["has_slot_file"]:
-            dest = family_root / "slots" / str(num)
-            if not dest.exists():
-                actions.append({
-                    "type": "move_to_slots",
-                    "slot": num,
-                    "from": d["path"],
-                    "to": str(dest),
-                    "reason": "active legacy slot — move to slots/",
-                })
-
-        # Active slot without .slot file (ghost)
-        if d["location"] == "active" and not d.get("has_slot_file", True):
-            if d.get("has_m2_only"):
-                actions.append({
-                    "type": "remove_ghost",
-                    "slot": num,
-                    "path": d["path"],
-                    "reason": "ghost directory (only .m2, no .slot)",
-                })
-
-        # DB says active but disk shows archived
-        if db_entry and db_entry["state"] in ("active", "ready") and d["location"] == "attic":
-            actions.append({
-                "type": "update_db_archived",
+        if db_entry and not d:
+            divergences.append({
                 "slot": num,
+                "class": "db-only",
                 "db_state": db_entry["state"],
-                "disk_location": d["path"],
-                "reason": f"DB says {db_entry['state']} but slot is in attic",
+                "db_created": db_entry.get("created_at", ""),
+                "detail": f"DB says {db_entry['state']} but no directory on disk",
             })
+            continue
 
-    # Print plan
-    if not actions:
-        print("Nothing to reconcile — all clean.")
-        return
+        if d and not db_entry:
+            divergences.append({
+                "slot": num,
+                "class": "disk-only",
+                "disk_path": d["path"],
+                "disk_location": d["location"],
+                "has_landed": d.get("has_landed", False),
+                "detail": f"directory at {d['location']} but no DB record",
+            })
+            continue
 
-    print(f"{'PLAN' if not apply else 'EXECUTING'}: {len(actions)} actions\n")
+        if d and db_entry:
+            disk_state = _infer_disk_state(
+                d["location"], d.get("has_landed", False),
+                d.get("has_phase_a", False))
+            if not _states_compatible(db_entry["state"], disk_state):
+                divergences.append({
+                    "slot": num,
+                    "class": "state-mismatch",
+                    "disk_path": d["path"],
+                    "disk_state": disk_state,
+                    "db_state": db_entry["state"],
+                    "detail": f"DB={db_entry['state']}, disk={disk_state}",
+                })
 
-    move_count = 0
-    ghost_count = 0
-    db_update_count = 0
+    return divergences
 
-    for a in sorted(actions, key=lambda x: (x["type"], x.get("slot", 0))):
-        if a["type"] == "move_to_slots":
-            move_count += 1
-            print(f"  MOVE  slot {a['slot']:>3}: {a['from']} -> {a['to']}")
-            if apply:
-                Path(a["to"]).parent.mkdir(parents=True, exist_ok=True)
-                if relocate_claude_projects:
-                    moved = relocate_claude_projects(Path(a["from"]), Path(a["to"]))
-                    if moved:
-                        print(f"         claude projects relocated: {moved}")
-                shutil.move(a["from"], a["to"])
-                src = Path(a["from"])
-                if src.exists():
-                    shutil.rmtree(str(src), ignore_errors=True)
-                print(f"         done")
 
-        elif a["type"] == "remove_ghost":
-            ghost_count += 1
-            print(f"  GHOST slot {a['slot']:>3}: {a['path']} — {a['reason']}")
-            if apply:
-                if remove_claude_projects:
-                    removed = remove_claude_projects(Path(a["path"]))
-                    if removed:
-                        print(f"         claude projects removed: {removed}")
-                shutil.rmtree(a["path"], ignore_errors=True)
-                print(f"         removed")
+def strategy(divergences: list[dict]) -> list[dict]:
+    """Phase 2: propose an action for each divergence."""
+    actions = []
+    for d in divergences:
+        cls = d["class"]
+        if cls == "ghost":
+            actions.append({
+                "slot": d["slot"],
+                "action": "quarantine",
+                "source": d["disk_path"],
+                "detail": f"move to quarantine/ — contents: {d.get('disk_contents', [])}",
+                "risk": "low",
+            })
+        elif cls == "db-only":
+            actions.append({
+                "slot": d["slot"],
+                "action": "remove_db_record",
+                "db_state": d["db_state"],
+                "detail": f"remove stale DB record (was {d['db_state']})",
+                "risk": "low",
+            })
+        elif cls == "disk-only":
+            actions.append({
+                "slot": d["slot"],
+                "action": "backfill_db",
+                "disk_path": d["disk_path"],
+                "disk_location": d["disk_location"],
+                "detail": "create DB record from disk state",
+                "risk": "medium" if d.get("has_landed") else "low",
+            })
+        elif cls == "state-mismatch":
+            actions.append({
+                "slot": d["slot"],
+                "action": "update_db_state",
+                "new_state": d["disk_state"],
+                "old_state": d["db_state"],
+                "detail": f"update DB from {d['db_state']} to {d['disk_state']}",
+                "risk": "low",
+            })
+    return actions
 
-        elif a["type"] == "update_db_archived":
-            db_update_count += 1
-            print(f"  DB    slot {a['slot']:>3}: {a['db_state']} -> archived ({a['reason']})")
-            if apply and _wl:
-                conn = _wl.connect()
-                _wl.record_slot_archive(
-                    conn, a["slot"], str(family_root),
-                    archived_from="unknown",
-                    archived_to=a["disk_location"],
-                )
-                conn.close()
-                print(f"         updated")
 
-    print(f"\nSummary: {move_count} moves, {ghost_count} ghost removals, {db_update_count} DB updates")
-    if not apply:
-        print("\nRe-run with --apply to execute.")
+def execute(actions: list[dict], family_root: Path) -> list[dict]:
+    """Phase 3: apply approved actions. Returns results."""
+    results = []
+    for a in actions:
+        try:
+            if a["action"] == "quarantine":
+                quarantine_dir = family_root / "slots" / "quarantine"
+                quarantine_dir.mkdir(parents=True, exist_ok=True)
+                dest = quarantine_dir / str(a["slot"])
+                if dest.exists():
+                    results.append({"slot": a["slot"], "action": a["action"],
+                                    "status": "skipped", "detail": "quarantine dest exists"})
+                    continue
+                shutil.move(a["source"], str(dest))
+                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+
+            elif a["action"] == "remove_db_record":
+                if _wl:
+                    conn = _wl.connect()
+                    normalized = _wl._norm(str(family_root))
+                    conn.execute(
+                        "DELETE FROM slots WHERE slot_number=? AND family_root=?",
+                        (a["slot"], normalized),
+                    )
+                    conn.commit()
+                    conn.close()
+                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+
+            elif a["action"] == "backfill_db":
+                if _wl:
+                    conn = _wl.connect()
+                    state = "archived" if a["disk_location"] == "attic" else "active"
+                    normalized = _wl._norm(str(family_root))
+                    conn.execute(
+                        "INSERT INTO slots (slot_number, family_root, state, created_at) "
+                        "VALUES (?, ?, ?, ?)",
+                        (a["slot"], normalized, state, _wl._now()),
+                    )
+                    conn.commit()
+                    conn.close()
+                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+
+            elif a["action"] == "update_db_state":
+                if _wl:
+                    conn = _wl.connect()
+                    normalized = _wl._norm(str(family_root))
+                    if a["new_state"] == "archived":
+                        conn.execute(
+                            "UPDATE slots SET state='archived', archived_at=? "
+                            "WHERE slot_number=? AND family_root=?",
+                            (_wl._now(), a["slot"], normalized),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE slots SET state=? WHERE slot_number=? AND family_root=?",
+                            (a["new_state"], a["slot"], normalized),
+                        )
+                    conn.commit()
+                    conn.close()
+                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+
+        except Exception as e:
+            results.append({"slot": a["slot"], "action": a["action"],
+                            "status": "error", "detail": str(e)})
+    return results
 
 
 def main() -> int:
@@ -253,8 +309,41 @@ def main() -> int:
         print(f"ERROR: {family_root} is not a directory")
         return 1
 
-    apply = "--apply" in sys.argv
-    reconcile(family_root, apply=apply)
+    phase = "audit"
+    if "--execute" in sys.argv:
+        phase = "execute"
+    elif "--strategy" in sys.argv:
+        phase = "strategy"
+
+    divergences = audit(family_root)
+    if not divergences:
+        print("Nothing to reconcile — all clean.")
+        return 0
+
+    print(f"AUDIT: {len(divergences)} divergence(s) found\n")
+    for d in divergences:
+        print(f"  SLOT {d['slot']:>3}  class={d['class']}  {d['detail']}")
+    print()
+
+    if phase == "audit":
+        print("Run with --strategy to see proposed actions.")
+        return 0
+
+    actions = strategy(divergences)
+    print(f"STRATEGY: {len(actions)} action(s) proposed\n")
+    for a in actions:
+        print(f"  SLOT {a['slot']:>3}  {a['action']}  risk={a['risk']}  {a['detail']}")
+    print()
+
+    if phase == "strategy":
+        print("Run with --execute to apply.")
+        return 0
+
+    results = execute(actions, family_root)
+    print(f"EXECUTE: {len(results)} action(s) applied\n")
+    for r in results:
+        status_detail = f"  ({r['detail']})" if r.get("detail") else ""
+        print(f"  SLOT {r['slot']:>3}  {r['action']}  {r['status']}{status_detail}")
     return 0
 
 

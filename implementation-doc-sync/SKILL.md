@@ -77,9 +77,9 @@ are filed as GitHub issues — **never committed from this session**.
 
 | Change type | Docs to check | Location |
 |-------------|--------------|----------|
-| New capability, module, or SPI | `docs/guides/consumer-guide.md` (module table, SPI docs, config) | **home repo** |
-| New or changed external dependency | `docs/guides/contributor-guide.md` (module listing) | **home repo** |
-| Module renamed / restructured | `docs/guides/contributor-guide.md` + `docs/guides/consumer-guide.md` | **home repo** |
+| New capability, module, or SPI | Repo's own guides (see CLAUDE.md `## Repo Guide` for paths) | **home repo** |
+| New or changed external dependency | Repo's own guides (contributor/internal docs) | **home repo** |
+| Module renamed / restructured | Repo's own guides + `ARC42STORIES.MD` if present | **home repo** |
 | Architecture record affected | `ARC42STORIES.MD` (layer table, module listing, building block view) | **home repo** |
 | New platform protocol | `docs/protocols/INDEX.md` + the protocol file itself | home repo |
 | Existing protocol updated | The protocol file + any files that reference it | home repo |
@@ -88,9 +88,17 @@ are filed as GitHub issues — **never committed from this session**.
 | Design journal (epic branch) | `design/JOURNAL.md` (invoke `update-design`) | home repo |
 | Maven coordinate change | `docs/protocols/maven-coordinate-standard.md` if convention changed | home repo |
 
-**Note:** Each repo owns its own documentation. The parent repo aggregates
-via CI — never file issues on the parent for doc updates that belong in
-the repo's own `docs/guides/` directory.
+**Repo-owned documentation:** Each repo owns its own docs. The parent repo
+aggregates via CI — never file issues on the parent for doc updates.
+
+To find which docs a repo owns, check CLAUDE.md for a `## Repo Guide` section.
+Common patterns:
+- `docs/guides/consumer-guide.md` + `docs/guides/contributor-guide.md` (platform repos)
+- `docs/arc42stories-*.md` (app repos)
+- `README.md` (simple repos)
+
+If the repo has no `## Repo Guide` section, check for `docs/` directory presence
+and update whatever documentation exists there.
 
 If a doc type is not in this table and not obviously related to the session
 scope, skip it.
@@ -117,9 +125,9 @@ For each doc identified in Step 2, run this checklist:
 
 ### Gaps
 - Is there something that changed this session that the doc should cover but doesn't?
-- Was a new capability added that belongs in the Capability Ownership table?
+- Was a new module or SPI added that belongs in the repo's guides?
 - Was a new protocol created that isn't in INDEX.md?
-- Was a new cross-repo dependency introduced that isn't in the Dependency Map?
+- Does `ARC42STORIES.MD` reflect the current module/layer structure?
 
 ---
 
@@ -135,15 +143,15 @@ Route each issue by location before acting:
 
 ### Peer-repo docs — file an issue, never commit
 
-For any gap found in a peer-repo doc (e.g. `docs/PLATFORM.md` in the parent repo):
+If a cross-repo slot session touches docs outside the home repo:
 
 1. **Do not edit or commit to the peer repo**
-2. File a GitHub issue on the peer repo describing exactly what needs updating:
-   ```bash
-   gh issue create --repo <owner/peer-repo> --title "docs: sync <doc-name> for <feature>" \
-     --body "## What to update\n\n<exact change needed>\n\n## Context\n<why this change is needed>"
-   ```
+2. File a GitHub issue on the peer repo describing exactly what needs updating
 3. Report the issue number in the summary
+
+**Note:** Most doc updates are home-repo work — each repo owns its own guides.
+Peer-repo issues are rare and only arise in cross-repo slots where a change
+in one repo reveals a gap in another repo's docs.
 
 After all actions, report a brief summary:
 
