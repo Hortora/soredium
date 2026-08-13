@@ -97,6 +97,28 @@ def _closed_branches(project: str, workspace: str | None, max_count: int = 5) ->
     return closed
 
 
+def _extract_notes(workspace: str) -> str:
+    """Extract the most recent date section from .notes/NOTES.md."""
+    notes_file = Path(workspace) / ".notes" / "NOTES.md"
+    if not notes_file.exists():
+        return ""
+    content = notes_file.read_text()
+    current_section: list[str] = []
+    in_section = False
+    for line in content.splitlines():
+        if line.startswith("## "):
+            if in_section:
+                break
+            in_section = True
+            current_section = [line]
+            continue
+        if in_section:
+            stripped = line.strip()
+            if stripped:
+                current_section.append(stripped)
+    return "\n".join(current_section) if current_section else ""
+
+
 def _capture_health(scope: str, project: str, workspace: str,
                     owner_repo: str | None = None) -> list[str]:
     """Run work_health.run_checks and capture its printed output."""
@@ -169,6 +191,9 @@ def resolve(cwd: str | None = None) -> dict:
     if state == "main_idle":
         closed = _closed_branches(project, workspace)
     result["_closed_branches"] = closed
+
+    notes_summary = _extract_notes(workspace)
+    result["NOTES_SUMMARY"] = notes_summary
 
     return result
 

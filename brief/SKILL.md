@@ -44,6 +44,8 @@ Recent commits (<RECENT_COMMITS>):
 
 Health:
   <CHECK lines, formatted as "✓ name" or "⚠ name: detail">
+
+<NOTES_SUMMARY if non-empty — show as-is, most recent date section>
 ```
 
 ### When STATE=main_with_stack
@@ -64,6 +66,8 @@ Recently closed:
   — or "None" if empty
 
 Use `work` to start something new.
+
+<NOTES_SUMMARY if non-empty — show as-is, most recent date section>
 ```
 
 ---

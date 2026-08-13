@@ -10,9 +10,9 @@ HANDOFF.md serves two roles with different lifecycles: ephemeral session narrati
 
 ## Design
 
-### HANDOFF.md stays ephemeral — no changes
+### HANDOFF.md stays ephemeral — now branch-scoped
 
-Overwritten each session. Token budget under 200. Git history is the archive. Nothing changes here.
+Overwritten each session. Token budget under 200. Git history is the archive. **Post-spec update:** HANDOFF.md is now committed to the workspace branch (not main) so it travels with the work through pause/resume cycles. Each branch carries its own handoff.
 
 ### NOTES.md on an orphan branch worktree
 
@@ -119,7 +119,7 @@ Manual. Delete entries when they're irrelevant. The file won't grow fast.
 
 ## What this does NOT change
 
-- HANDOFF.md — stays ephemeral, overwritten each session
+- HANDOFF.md — stays ephemeral, overwritten each session (**post-spec:** now branch-scoped)
 - work-end — no changes to close sequence (NOTES.md not branch-scoped)
 - slot_manager.py — no changes (slots access original workspace directly)
 

@@ -133,3 +133,82 @@ class TestWorkStateDetect:
         state = _detect(str(project))
         assert state.has_handoff is True
         assert "HANDOFF-project.md" in state.handoff_path
+
+    def test_handoff_branch_scoped_present(self, tmp_path):
+        """Branch-scoped: HANDOFF.md on branch is detected regardless of content."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", "issue-42-feat"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-feat"],
+            capture_output=True,
+        )
+        (workspace / "HANDOFF.md").write_text("# Handover\n\nSome context.\n")
+        state = _detect(str(project))
+        assert state.has_handoff is True
+
+    def test_handoff_absent_on_main_after_branch_switch(self, tmp_path):
+        """Branch-scoped: HANDOFF.md on branch A is invisible from main."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "-b", "issue-42-feat"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "-b", "issue-42-feat"],
+            capture_output=True,
+        )
+        (workspace / "HANDOFF.md").write_text("# Handover\n\n#42\n")
+        subprocess.run(
+            ["git", "-C", str(workspace), "add", "HANDOFF.md"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "handoff"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(project), "checkout", "main"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "checkout", "main"],
+            capture_output=True,
+        )
+        state = _detect(str(project))
+        assert state.has_handoff is False
+
+    def test_handoff_isolation_across_branches(self, tmp_path):
+        """Pause/resume: branch A and B each carry their own HANDOFF.md."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-42-feat"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "issue-42-feat"], capture_output=True)
+        (workspace / "HANDOFF.md").write_text("# Branch A handoff\n")
+        subprocess.run(["git", "-C", str(workspace), "add", "HANDOFF.md"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "handoff A"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-55-other"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "issue-55-other"], capture_output=True)
+        (workspace / "HANDOFF.md").write_text("# Branch B handoff\n")
+        subprocess.run(["git", "-C", str(workspace), "add", "HANDOFF.md"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "commit", "-m", "handoff B"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "issue-42-feat"], capture_output=True)
+        subprocess.run(["git", "-C", str(workspace), "checkout", "issue-42-feat"], capture_output=True)
+
+        state = _detect(str(project))
+        assert state.has_handoff is True
+        content = Path(state.handoff_path).read_text()
+        assert "Branch A" in content
+        assert "Branch B" not in content

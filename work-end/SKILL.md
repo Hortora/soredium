@@ -320,9 +320,10 @@ If `ARC42STORIES.MD` exists, scan for stale statuses and fix.
 
 ### 5.5 Write HANDOFF.md
 
-Invoke the handover skill's Steps 2-6 to write HANDOFF.md on the
-workspace branch. HANDOFF.md is ephemeral to the work — it lives on
-the branch and is discarded when the branch closes.
+Invoke the handover skill's Steps 2-6 to write HANDOFF.md. At this
+point Step 5.2 has already checked out main, so the handoff commits
+to main — this is the "what's next" handoff for the next `work`
+invocation after the branch is closed.
 
 ### 5.6 Session rename
 

@@ -121,16 +121,7 @@ def detect(topo: Topology) -> WorkState:
 
     if handoff_file:
         handoff_path = str(handoff_file)
-        if on_main:
-            has_handoff = True
-        else:
-            issue_match = re.match(r"issue-(\d+)", current_branch)
-            if issue_match:
-                has_handoff = bool(
-                    re.search(rf'#{issue_match.group(1)}\b', handoff_file.read_text())
-                )
-            else:
-                has_handoff = True
+        has_handoff = True
 
     # Meta state
     meta_file = find_design_file(".meta", topo)

@@ -552,7 +552,7 @@ Session wrap complete.
 ✅ journal-entry         (or ⏭ skipped — not mid-epic)
 ✅ arc42 stale scan      N items fixed  (or: nothing stale found)  (or ⏭ skipped — no ARC42STORIES.MD)
 ✅ write-content (diary)  <entry filename>
-✅ HANDOFF.md committed  <workspace>/HANDOFF.md → main
+✅ HANDOFF.md committed  <workspace>/HANDOFF.md
 ```
 
 Rules:
