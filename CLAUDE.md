@@ -418,6 +418,11 @@ python3 scripts/validate_all.py --tier commit
 # Run lifecycle state machine tests
 python3 -m pytest tests/test_lifecycle.py tests/test_pre_push_hook.py -v
 
+# Reconcile slot DB/disk state (three-phase: audit → strategy → execute)
+python3 scripts/reconcile_slots.py <family-root>              # audit — report divergences
+python3 scripts/reconcile_slots.py <family-root> --strategy   # + propose actions
+python3 scripts/reconcile_slots.py <family-root> --execute    # + apply approved actions
+
 # Run TUI tests (Textual widget + app integration)
 python3 -m pytest tests/test_tui_project_view.py tests/test_tui_home_view.py tests/test_tui_app.py tests/test_session_spi.py -v
 
