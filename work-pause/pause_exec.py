@@ -227,21 +227,18 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
     if slot_dir is not None:
         push_args.append(f"slot={slot_dir}")
 
-    epic_detect_dir = Path(__file__).resolve().parent.parent / "work-slot"
-    if str(epic_detect_dir) not in sys.path:
-        sys.path.insert(0, str(epic_detect_dir))
+    plan_detect_dir = Path(__file__).resolve().parent.parent / "work-slot"
+    if str(plan_detect_dir) not in sys.path:
+        sys.path.insert(0, str(plan_detect_dir))
     try:
-        from epic_manager import detect as _epic_detect
-        epic_info = _epic_detect(Path(workspace))
-        from slot_manager import is_slot_path as _is_slot_path
-        if epic_info is None and _is_slot_path(project):
-            epic_info = _epic_detect(Path(project))
-        if epic_info:
-            cur = epic_info.get("current_batch", 0)
-            tot = len(epic_info.get("batches", []))
-            if tot:
-                push_args.append(f"epic_batch={cur}/{tot}")
-            active = epic_info.get("current_issue", 0)
+        from plan_manager import detect as _plan_detect
+        plan_info = _plan_detect(Path(workspace))
+        if plan_info is None:
+            from slot_manager import is_slot_path as _is_slot_path
+            if _is_slot_path(project):
+                plan_info = _plan_detect(Path(project))
+        if plan_info:
+            active = plan_info.get("active_issue")
             if active:
                 push_args.append(f"epic_active_issue={active}")
     except ImportError:
