@@ -79,30 +79,29 @@ _STARTED_RE = re.compile(r'^Started:\s*(.+)')
 _LAST_WRAP_RE = re.compile(r'^Last wrap:\s*(.+)')
 
 
-def _read_meta_fields(meta_path: Path) -> dict[str, str]:
+def _read_plan_state(plan_path: Path) -> dict[str, str]:
+    """Read ## State section key-values from unified .plan."""
     fields: dict[str, str] = {}
-    for line in meta_path.read_text().splitlines():
-        if ':' in line:
+    in_state = False
+    for line in plan_path.read_text().splitlines():
+        if line.strip() == "## State":
+            in_state = True
+            continue
+        if line.startswith("## "):
+            in_state = False
+            continue
+        if in_state and ':' in line:
             k, _, v = line.partition(':')
             fields[k.strip()] = v.strip()
+    if not fields:
+        for line in plan_path.read_text().splitlines():
+            if ':' in line:
+                k, _, v = line.partition(':')
+                fields[k.strip()] = v.strip()
     return fields
 
 
-def _update_meta_issue(meta_path: Path, issue_number: int) -> None:
-    """Update the active issue number in .meta without touching other fields."""
-    if not meta_path.exists():
-        return
-    lines = meta_path.read_text().splitlines()
-    result = []
-    for line in lines:
-        if line.startswith("issue:"):
-            result.append(f"issue: {issue_number}")
-        else:
-            result.append(line)
-    meta_path.write_text("\n".join(result) + "\n")
-
-
-def _emit_issue_events(meta_path: Path, repo_path: str,
+def _emit_issue_events(plan_path: Path, repo_path: str,
                        completed: int, next_issue: int | None) -> None:
     try:
         _scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
@@ -110,7 +109,7 @@ def _emit_issue_events(meta_path: Path, repo_path: str,
             _sys.path.insert(0, _scripts_dir)
         import worklog
 
-        fields = _read_meta_fields(meta_path)
+        fields = _read_plan_state(plan_path)
         branch = fields.get("branch", "")
         issue_repo = fields.get("issue-repo", "")
         if not branch:
@@ -425,7 +424,7 @@ class NoQueueFile(Exception):
     pass
 
 
-def advance(plan_path: Path, meta_path: Path,
+def advance(plan_path: Path,
             repo_path: str | None = None) -> AdvanceResult:
     tree = parse_plan(plan_path)
     leaves = flatten_leaves(tree)
@@ -465,13 +464,10 @@ def advance(plan_path: Path, meta_path: Path,
     tree.current_issue = next_leaf.issue_number if next_leaf else None
     rewrite_plan(plan_path, tree)
 
-    if next_leaf:
-        _update_meta_issue(meta_path, next_leaf.issue_number)
-
     if repo_path:
         try:
             _emit_issue_events(
-                meta_path, repo_path,
+                plan_path, repo_path,
                 completed_leaf.issue_number,
                 next_leaf.issue_number if next_leaf else None,
             )
@@ -489,26 +485,20 @@ def advance(plan_path: Path, meta_path: Path,
     )
 
 
-def advance_issue(plan_path: Path | None, epic_path: Path | None,
-                  meta_path: Path, repo_path: str | None = None) -> AdvanceResult:
+def advance_issue(plan_path: Path | None,
+                  repo_path: str | None = None) -> AdvanceResult:
     if plan_path and plan_path.exists():
-        return advance(plan_path, meta_path, repo_path=repo_path)
-    if epic_path and epic_path.exists():
-        try:
-            import epic_manager
-            return epic_manager.advance(epic_path, meta_path=meta_path)
-        except ImportError:
-            pass
-    raise NoQueueFile("No .plan or .epic found")
+        return advance(plan_path, repo_path=repo_path)
+    raise NoQueueFile("No .plan found")
 
 
-def complete_active_issue(plan_path: Path, meta_path: Path,
+def complete_active_issue(plan_path: Path,
                           repo_path: str) -> int | None:
     tree = parse_plan(plan_path)
     active = _find_active_leaf(tree.queue)
     if not active:
         return None
-    _emit_issue_events(meta_path, repo_path, active.issue_number, next_issue=None)
+    _emit_issue_events(plan_path, repo_path, active.issue_number, next_issue=None)
     return active.issue_number
 
 

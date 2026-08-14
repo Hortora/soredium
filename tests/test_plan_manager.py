@@ -333,7 +333,7 @@ class TestAdvance:
     def test_linear_advance(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
-        result = plan_manager.advance(plan_file, meta)
+        result = plan_manager.advance(plan_file)
         assert result.completed == 42
         assert result.next_issue == 43
         assert result.epic_complete is False
@@ -344,7 +344,7 @@ class TestAdvance:
 
     def test_epic_child_advance(self, tmp_path):
         plan_file, meta = self._setup(tmp_path, MULTI_ISSUE_PLAN, covers="42")
-        result = plan_manager.advance(plan_file, meta)
+        result = plan_manager.advance(plan_file)
         assert result.completed == 109
         assert result.next_issue == 110
         assert result.batch_complete is False
@@ -352,7 +352,7 @@ class TestAdvance:
     def test_epic_last_child_completes_parent(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  - [x] #108 — A\n  - [ ] #109 — B ← active\n- [ ] #32 — C\n\n## Session State\nCurrent: #109 — B\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
-        result = plan_manager.advance(plan_file, meta)
+        result = plan_manager.advance(plan_file)
         assert result.completed == 109
         assert result.next_issue == 32
         tree = plan_manager.parse_plan(plan_file)
@@ -361,7 +361,7 @@ class TestAdvance:
     def test_nested_epic_completes(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  - [ ] #52 — Nested (epic)\n    - [x] #60 — A\n    - [ ] #61 — B ← active\n  - [ ] #53 — C\n\n## Session State\nCurrent: #61 — B\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
-        result = plan_manager.advance(plan_file, meta)
+        result = plan_manager.advance(plan_file)
         assert result.completed == 61
         assert result.next_issue == 53
         tree = plan_manager.parse_plan(plan_file)
@@ -370,7 +370,7 @@ class TestAdvance:
     def test_queue_exhausted(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
-        result = plan_manager.advance(plan_file, meta)
+        result = plan_manager.advance(plan_file)
         assert result.completed == 43
         assert result.next_issue is None
         assert result.epic_complete is True
@@ -378,35 +378,22 @@ class TestAdvance:
     def test_batch_boundary_safe_exit(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  ### Batch 1 — Model\n  - [x] #108 — A\n  - [ ] #109 — B ← active\n  ### Batch 2 — Logic\n  - [ ] #110 — C\n\n## Session State\nCurrent: #109 — B\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
-        result = plan_manager.advance(plan_file, meta)
+        result = plan_manager.advance(plan_file)
         assert result.batch_complete is True
         assert result.safe_exit is True
         assert result.next_issue == 110
 
-    def test_advance_updates_meta_issue_but_not_covers(self, tmp_path):
-        """advance() updates .meta issue: to next active but leaves covers: unchanged."""
-        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan)
-        plan_manager.advance(plan_file, meta)
-        meta_text = meta.read_text()
-        assert "issue: 43" in meta_text, ".meta issue: must update to next active"
-        assert "covers: 42" in meta_text, ".meta covers: must not change"
-
-
-class TestAdvanceIssueDispatch:
     def test_dispatches_to_plan(self, tmp_path):
         design = tmp_path / "design"
         design.mkdir()
         plan_file = design / ".plan"
         plan_file.write_text("# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n")
-        meta = design / ".meta"
-        meta.write_text("branch: test\nissue: 42\ncovers: 42\n")
-        result = plan_manager.advance_issue(plan_file, None, meta)
+        result = plan_manager.advance_issue(plan_file)
         assert result.completed == 42
 
     def test_raises_when_no_files(self, tmp_path):
         with pytest.raises(plan_manager.NoQueueFile):
-            plan_manager.advance_issue(tmp_path / "nope.plan", tmp_path / "nope.epic", tmp_path / ".meta")
+            plan_manager.advance_issue(tmp_path / "nope.plan")
 
 
 class TestDetectEpic:
@@ -566,34 +553,33 @@ class TestDetectSlotMode:
         design.mkdir()
         plan_file = design / ".plan"
         plan_file.write_text(
-            "# Work Plan — test\n\n## Queue\n"
+            "# Work Plan — test\n\n"
+            "## State\nbranch: test\nissue-repo: Org/repo\ncovers: 42\n\n"
+            "## Queue\n"
             "- [ ] #42 — A ← active\n"
-            "- [ ] #43 — B\n\n"
-            "## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+            "- [ ] #43 — B\n"
         )
-        meta = design / ".meta"
-        meta.write_text("branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
         slot_project = slot_dir / "soredium"
         slot_project.mkdir()
         with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
-            result = plan_manager.advance(plan_file, meta, repo_path=str(slot_project))
+            result = plan_manager.advance(plan_file, repo_path=str(slot_project))
         assert result.completed == 42
         assert result.next_issue == 43
-        mock_emit.assert_called_once_with(meta, str(slot_project), 42, 43)
+        mock_emit.assert_called_once_with(plan_file, str(slot_project), 42, 43)
 
 
-class TestReadMetaFields:
+class TestReadPlanState:
     def test_reads_branch_and_issue_repo(self, tmp_path):
         meta = tmp_path / ".meta"
         meta.write_text("branch: issue-42-fix\nstate: active\nissue: 42\nissue-repo: Hortora/soredium\n")
-        fields = plan_manager._read_meta_fields(meta)
+        fields = plan_manager._read_plan_state(meta)
         assert fields["branch"] == "issue-42-fix"
         assert fields["issue-repo"] == "Hortora/soredium"
 
     def test_handles_empty_values(self, tmp_path):
         meta = tmp_path / ".meta"
         meta.write_text("branch: test\nissue:\nissue-repo:\n")
-        fields = plan_manager._read_meta_fields(meta)
+        fields = plan_manager._read_plan_state(meta)
         assert fields["branch"] == "test"
         assert fields["issue"] == ""
 
@@ -639,37 +625,43 @@ class TestAdvanceWorklog:
         design = tmp_path / "design"
         design.mkdir(exist_ok=True)
         plan_file = design / ".plan"
-        plan_file.write_text(plan_content)
-        meta = design / ".meta"
-        meta.write_text(f"branch: test-branch\nissue: 42\nissue-repo: Org/repo\ncovers: {covers}\n")
-        return plan_file, meta
+        # Inject ## State into plan content for _emit_issue_events
+        state_block = (
+            f"## State\n"
+            f"branch: test-branch\n"
+            f"issue-repo: Org/repo\n"
+            f"covers: {covers}\n\n"
+        )
+        enriched = plan_content.replace("## Queue", state_block + "## Queue")
+        plan_file.write_text(enriched)
+        return plan_file
 
     def test_advance_emits_events_when_repo_path_provided(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan)
+        plan_file = self._setup(tmp_path, plan)
         with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
-            result = plan_manager.advance(plan_file, meta, repo_path="/project")
-            mock_emit.assert_called_once_with(meta, "/project", 42, 43)
+            result = plan_manager.advance(plan_file, repo_path="/project")
+            mock_emit.assert_called_once_with(plan_file, "/project", 42, 43)
 
     def test_advance_skips_worklog_when_no_repo_path(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan)
+        plan_file = self._setup(tmp_path, plan)
         with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
-            plan_manager.advance(plan_file, meta)
+            plan_manager.advance(plan_file)
             mock_emit.assert_not_called()
 
     def test_advance_emits_none_next_on_queue_exhausted(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan)
+        plan_file = self._setup(tmp_path, plan)
         with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
-            plan_manager.advance(plan_file, meta, repo_path="/project")
-            mock_emit.assert_called_once_with(meta, "/project", 43, None)
+            plan_manager.advance(plan_file, repo_path="/project")
+            mock_emit.assert_called_once_with(plan_file, "/project", 43, None)
 
     def test_advance_worklog_error_does_not_break_advance(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan)
+        plan_file = self._setup(tmp_path, plan)
         with patch.object(plan_manager, '_emit_issue_events', side_effect=Exception("boom")):
-            result = plan_manager.advance(plan_file, meta, repo_path="/project")
+            result = plan_manager.advance(plan_file, repo_path="/project")
             assert result.completed == 42
             assert result.next_issue == 43
             tree = plan_manager.parse_plan(plan_file)
@@ -681,12 +673,10 @@ class TestAdvanceIssueWorklog:
         design = tmp_path / "design"
         design.mkdir()
         plan_file = design / ".plan"
-        plan_file.write_text("# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n")
-        meta = design / ".meta"
-        meta.write_text("branch: test\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
+        plan_file.write_text("# Work Plan — test\n\n## State\nbranch: test\nissue-repo: Org/repo\ncovers: 42\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n")
         with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
-            result = plan_manager.advance_issue(plan_file, None, meta, repo_path="/project")
-            mock_emit.assert_called_once_with(meta, "/project", 42, 43)
+            result = plan_manager.advance_issue(plan_file, repo_path="/project")
+            mock_emit.assert_called_once_with(plan_file, "/project", 42, 43)
 
 
 class TestCompleteActiveIssue:
@@ -694,33 +684,33 @@ class TestCompleteActiveIssue:
         design = tmp_path / "design"
         design.mkdir(exist_ok=True)
         plan_file = design / ".plan"
-        plan_file.write_text(plan_content)
-        meta = design / ".meta"
-        meta.write_text("branch: test-branch\nissue: 42\nissue-repo: Org/repo\ncovers: 42\n")
-        return plan_file, meta
+        state_block = "## State\nbranch: test-branch\nissue-repo: Org/repo\ncovers: 42\n\n"
+        enriched = plan_content.replace("## Queue", state_block + "## Queue")
+        plan_file.write_text(enriched)
+        return plan_file
 
     def test_emits_complete_for_active_issue(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan)
+        plan_file = self._setup(tmp_path, plan)
         with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
-            result = plan_manager.complete_active_issue(plan_file, meta, "/project")
+            result = plan_manager.complete_active_issue(plan_file, "/project")
             assert result == 42
-            mock_emit.assert_called_once_with(meta, "/project", 42, next_issue=None)
+            mock_emit.assert_called_once_with(plan_file, "/project", 42, next_issue=None)
 
     def test_returns_none_when_no_active_issue(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [x] #43 — B\n\n## Session State\nCurrent: none\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan)
+        plan_file = self._setup(tmp_path, plan)
         with patch.object(plan_manager, '_emit_issue_events') as mock_emit:
-            result = plan_manager.complete_active_issue(plan_file, meta, "/project")
+            result = plan_manager.complete_active_issue(plan_file, "/project")
             assert result is None
             mock_emit.assert_not_called()
 
     def test_does_not_modify_plan_file(self, tmp_path):
         plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
-        plan_file, meta = self._setup(tmp_path, plan)
+        plan_file = self._setup(tmp_path, plan)
         original_content = plan_file.read_text()
         with patch.object(plan_manager, '_emit_issue_events'):
-            plan_manager.complete_active_issue(plan_file, meta, "/project")
+            plan_manager.complete_active_issue(plan_file, "/project")
         assert plan_file.read_text() == original_content
 
 
@@ -928,7 +918,7 @@ class TestAdvanceWithDeferred:
         )
         meta = tmp_path / ".meta"
         meta.write_text("branch: test\nissue: 1\n")
-        result = plan_manager.advance(plan, meta)
+        result = plan_manager.advance(plan)
         assert result.has_deferred is True
         assert result.next_issue is None
 
@@ -942,7 +932,7 @@ class TestAdvanceWithDeferred:
         )
         meta = tmp_path / ".meta"
         meta.write_text("branch: test\nissue: 1\n")
-        result = plan_manager.advance(plan, meta)
+        result = plan_manager.advance(plan)
         assert result.has_deferred is False
         assert result.next_issue == 2
 
