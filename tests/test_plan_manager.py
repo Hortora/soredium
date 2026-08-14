@@ -82,6 +82,42 @@ EMPTY_PLAN = """\
 Started: 2026-08-04
 """
 
+UNIFIED_PLAN = """\
+# Work Plan — issue-42-fix-login
+
+## State
+branch: issue-42-fix-login
+state: active
+project-sha: abc123
+date: 2026-08-04
+issue-repo: Hortora/soredium
+covers: 42
+design-repo: workspace
+flyway-next-v: unknown
+
+## Queue
+- [ ] #42 — Fix login validation ← active
+
+## Deferred
+- [ ] Follow-up refactor (S / Low) [soredium]
+"""
+
+UNIFIED_PLAN_MULTI = """\
+# Work Plan — issue-42-batch
+
+## State
+branch: issue-42-batch
+state: active
+date: 2026-08-04
+covers: 42,43,44
+issue-repo: Hortora/soredium
+
+## Queue
+- [x] #42 — Fix login
+- [ ] #43 — Add tests ← active
+- [ ] #44 — Update docs
+"""
+
 
 class TestParsePlan:
     def test_single_issue(self, tmp_path):
@@ -909,3 +945,109 @@ class TestAdvanceWithDeferred:
         result = plan_manager.advance(plan, meta)
         assert result.has_deferred is False
         assert result.next_issue == 2
+
+
+class TestStateSectionParsing:
+    def test_parse_plan_reads_state_section(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(UNIFIED_PLAN)
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.state["branch"] == "issue-42-fix-login"
+        assert tree.state["state"] == "active"
+        assert tree.state["covers"] == "42"
+        assert tree.state["project-sha"] == "abc123"
+        assert tree.state["design-repo"] == "workspace"
+
+    def test_parse_plan_state_and_queue_coexist(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(UNIFIED_PLAN)
+        tree = plan_manager.parse_plan(plan_file)
+        assert len(tree.queue) == 1
+        assert tree.queue[0].issue_number == 42
+        assert tree.queue[0].active is True
+        assert tree.state["branch"] == "issue-42-fix-login"
+
+    def test_parse_old_plan_without_state_section(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(SINGLE_ISSUE_PLAN)
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.state == {}
+        assert tree.started == "2026-08-04"
+        assert len(tree.queue) == 1
+
+    def test_parse_unified_multi_issue(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(UNIFIED_PLAN_MULTI)
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.state["covers"] == "42,43,44"
+        assert len(tree.queue) == 3
+        assert tree.queue[0].completed is True
+        assert tree.queue[1].active is True
+
+
+class TestStateSectionWriting:
+    def test_build_plan_content_with_state(self):
+        state = {"branch": "issue-42", "state": "active", "date": "2026-08-14", "covers": "42"}
+        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True)]
+        content = plan_manager.build_plan_content("issue-42", items, "2026-08-14", state=state)
+        assert "## State" in content
+        assert "branch: issue-42" in content
+        assert "state: active" in content
+        assert "## Queue" in content
+        assert "← active" in content
+
+    def test_build_plan_content_without_state(self):
+        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True)]
+        content = plan_manager.build_plan_content("issue-42", items, "2026-08-14")
+        assert "## State" not in content
+        assert "## Queue" in content
+
+    def test_roundtrip_preserves_state(self, tmp_path):
+        state = {"branch": "issue-42", "state": "active", "date": "2026-08-14", "covers": "42"}
+        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True)]
+        content = plan_manager.build_plan_content("issue-42", items, "2026-08-14", state=state)
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(content)
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.state == state
+        assert len(tree.queue) == 1
+        assert tree.queue[0].active
+
+    def test_rewrite_plan_preserves_state(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(UNIFIED_PLAN)
+        tree = plan_manager.parse_plan(plan_file)
+        plan_manager.rewrite_plan(plan_file, tree)
+        tree2 = plan_manager.parse_plan(plan_file)
+        assert tree2.state == tree.state
+        assert len(tree2.queue) == len(tree.queue)
+
+    def test_rewrite_plan_is_atomic(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(UNIFIED_PLAN)
+        tree = plan_manager.parse_plan(plan_file)
+        plan_manager.rewrite_plan(plan_file, tree)
+        assert not (tmp_path / ".plan.tmp").exists()
+
+
+class TestDetectWithState:
+    def test_detect_returns_state_dict(self, tmp_path):
+        design = tmp_path / "design"
+        design.mkdir()
+        plan_file = design / ".plan"
+        plan_file.write_text(UNIFIED_PLAN)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None
+        assert result["state"]["branch"] == "issue-42-fix-login"
+        assert result["state"]["state"] == "active"
+        assert result["active_issue"] == 42
+
+    def test_detect_old_plan_returns_empty_state(self, tmp_path):
+        design = tmp_path / "design"
+        design.mkdir()
+        plan_file = design / ".plan"
+        plan_file.write_text(SINGLE_ISSUE_PLAN)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None
+        assert result["state"] == {}
+        assert result["active_issue"] == 42

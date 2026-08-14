@@ -41,6 +41,7 @@ class PlanTree:
     started: str
     last_wrap: str | None = None
     deferred: list[DeferredItem] = field(default_factory=list)
+    state: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -135,9 +136,11 @@ def parse_plan(plan_path: Path) -> PlanTree:
     heading = ""
     queue_lines: list[str] = []
     deferred_lines: list[str] = []
+    state_dict: dict[str, str] = {}
     current_issue = None
     started = ""
     last_wrap = None
+    in_state = False
     in_queue = False
     in_deferred = False
     in_session = False
@@ -146,26 +149,42 @@ def parse_plan(plan_path: Path) -> PlanTree:
         if line.startswith("# Work Plan"):
             heading = line[2:].strip()
             continue
+        if line.strip() == "## State":
+            in_state = True
+            in_queue = False
+            in_deferred = False
+            in_session = False
+            continue
         if line.strip() == "## Queue":
+            in_state = False
             in_queue = True
             in_deferred = False
             in_session = False
             continue
         if line.strip() == "## Deferred":
+            in_state = False
             in_queue = False
             in_deferred = True
             in_session = False
             continue
         if line.strip() == "## Session State":
+            in_state = False
             in_queue = False
             in_deferred = False
             in_session = True
             continue
         if line.startswith("## "):
+            in_state = False
             in_queue = False
             in_deferred = False
             in_session = False
             continue
+
+        if in_state:
+            stripped = line.strip()
+            if ':' in stripped:
+                k, _, v = stripped.partition(':')
+                state_dict[k.strip()] = v.strip()
 
         if in_session:
             stripped = line.strip()
@@ -187,8 +206,14 @@ def parse_plan(plan_path: Path) -> PlanTree:
     queue = _parse_queue_lines(queue_lines)
     deferred = _parse_deferred_lines(deferred_lines)
 
+    if state_dict and not started:
+        started = state_dict.get("date", "")
+    if state_dict and not last_wrap:
+        last_wrap = state_dict.get("last-wrap") or None
+
     return PlanTree(heading=heading, queue=queue, current_issue=current_issue,
-                    started=started, last_wrap=last_wrap, deferred=deferred)
+                    started=started, last_wrap=last_wrap, deferred=deferred,
+                    state=state_dict)
 
 
 def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
@@ -307,14 +332,26 @@ def rewrite_plan(plan_path: Path, tree: PlanTree) -> None:
         tree.started,
         last_wrap=tree.last_wrap,
         deferred=tree.deferred,
+        state=tree.state,
     )
-    plan_path.write_text(content)
+    tmp_path = plan_path.parent / '.plan.tmp'
+    tmp_path.write_text(content)
+    tmp_path.replace(plan_path)
 
 
 def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
                        last_wrap: str | None = None,
-                       deferred: list[DeferredItem] | None = None) -> str:
-    lines = [f"# Work Plan — {branch_slug}", "", "## Queue"]
+                       deferred: list[DeferredItem] | None = None,
+                       state: dict[str, str] | None = None) -> str:
+    lines = [f"# Work Plan — {branch_slug}"]
+
+    if state:
+        lines.append("")
+        lines.append("## State")
+        for k, v in state.items():
+            lines.append(f"{k}: {v}")
+
+    lines.extend(["", "## Queue"])
 
     if not items:
         lines.append("(empty — issues created during design)")
@@ -330,18 +367,17 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
             repos_str = ", ".join(d.repos)
             lines.append(f"- [{check}] {d.title} ({d.scale} / {d.complexity}) [{repos_str}]")
 
-    lines.append("")
-    lines.append("## Session State")
-
-    active_leaf = _find_active_leaf(items)
-    if active_leaf:
-        lines.append(f"Current: #{active_leaf.issue_number} — {active_leaf.title}")
-    else:
-        lines.append("Current: none")
-
-    lines.append(f"Started: {date}")
-    if last_wrap:
-        lines.append(f"Last wrap: {last_wrap}")
+    if not state:
+        lines.append("")
+        lines.append("## Session State")
+        active_leaf = _find_active_leaf(items)
+        if active_leaf:
+            lines.append(f"Current: #{active_leaf.issue_number} — {active_leaf.title}")
+        else:
+            lines.append("Current: none")
+        lines.append(f"Started: {date}")
+        if last_wrap:
+            lines.append(f"Last wrap: {last_wrap}")
 
     lines.append("")
     return "\n".join(lines)
@@ -631,6 +667,7 @@ def detect(workspace_path: Path) -> dict | None:
         "completed_count": completed_count,
         "total_count": total_count,
         "current_batch": batch,
+        "state": tree.state,
     }
 
 
