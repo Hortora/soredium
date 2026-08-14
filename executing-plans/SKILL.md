@@ -59,11 +59,19 @@ For each task:
 
 ### Step 3: Complete Development
 
-After all tasks complete and verified:
-1. Invoke work-end — it handles the final review (code-review or
-   design-review --mode final-review depending on diff scope),
-   squash, push, and branch closure. Do NOT run a separate review
-   before work-end.
+After all tasks complete and verified, check queue state:
+
+```bash
+python3 ~/.claude/skills/project/ctx.py
+```
+
+Read `HAS_PLAN` and `PLAN_POSITION` from the output.
+
+- **If `HAS_PLAN=yes` and the queue has remaining issues** → this plan
+  is done but the branch has more work. Run `work next` to advance to
+  the next issue — do NOT invoke work-end.
+- **If no plan, or the queue is complete** → invoke work-end for final
+  review, squash, push, and branch closure.
 
 ## When to Stop and Ask for Help
 

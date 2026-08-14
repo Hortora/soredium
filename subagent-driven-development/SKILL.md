@@ -81,6 +81,8 @@ flowchart TD
     VBC["Run verification-before-completion"]
     DONE["Mark task complete in ledger and todo list"]
     MORE{"More tasks remain?"}
+    QUEUE{"Queue has\nmore issues?"}
+    WORKNEXT["Invoke work next\n(advance to next issue)"]
     WORKEND["Invoke work-end\n(includes final review at Step 3c)"]
 
     PLAN --> BRIEF
@@ -96,7 +98,9 @@ flowchart TD
     VBC --> DONE
     DONE --> MORE
     MORE -->|"yes"| BRIEF
-    MORE -->|"no"| WORKEND
+    MORE -->|"no"| QUEUE
+    QUEUE -->|"yes"| WORKNEXT
+    QUEUE -->|"no"| WORKEND
 ```
 
 ## Step 0 — Pre-conditions
@@ -410,9 +414,10 @@ Do NOT dispatch a separate final review before invoking work-end.
   independent tasks or when review between tasks adds value)
 
 **Invokes:**
-- `work-end` — after all tasks complete. work-end handles the final review
-  (code-review or design-review --mode final-review depending on diff scope),
-  squash, push, and branch closure.
+- `work next` — after all plan tasks complete, if the `.plan` queue has
+  remaining issues. Advances to the next issue — do NOT invoke work-end.
+- `work-end` — after all plan tasks complete AND the queue is empty (or no
+  queue). Handles final review, squash, push, and branch closure.
 - `design-review` — via `work-end` Step 3c, for structural diffs requiring adversarial review
 - `requesting-code-review` — deprecated; use `design-review` `--mode final-review` instead
 
