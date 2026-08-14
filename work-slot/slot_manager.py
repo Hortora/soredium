@@ -75,6 +75,41 @@ def _resolve_slot_dir_for_number(family_root: Path, slot_num: int) -> Path:
     return family_root / SLOT_DIR_NAME / str(slot_num)
 
 
+def _get_family_repo_names(family_root: Path) -> set[str]:
+    """Return names of all top-level git directories in the family root."""
+    excluded = {"slots", "worktrees", "attic", ".m2"}
+    names: set[str] = set()
+    if not family_root.is_dir():
+        return names
+    for entry in family_root.iterdir():
+        if not entry.is_dir() or entry.name in excluded or entry.name.startswith("."):
+            continue
+        if (entry / ".git").exists() or (entry / ".git").is_file():
+            names.add(entry.name)
+    return names
+
+
+def validate_slot_wksp(slot_dir: Path, repo_names: list[str] | None = None) -> list[str]:
+    """Validate wksp/ symlinks in slot repo clones.
+    Returns list of failure descriptions (empty = all OK)."""
+    failures: list[str] = []
+    names = repo_names if repo_names is not None else get_slot_repos(slot_dir)
+    for repo_name in names:
+        clone = slot_dir / repo_name
+        if not clone.is_dir() or not (clone / ".git").exists():
+            continue
+        original = resolve_original_repo(clone)
+        original_wksp = original / "wksp"
+        if not original_wksp.is_symlink():
+            continue
+        clone_wksp = clone / "wksp"
+        if not clone_wksp.is_symlink():
+            failures.append(f"{repo_name}: wksp/ symlink missing")
+        elif not clone_wksp.resolve().exists():
+            failures.append(f"{repo_name}: wksp/ symlink dangling -> {clone_wksp.resolve()}")
+    return failures
+
+
 def is_slot_path(path: str) -> bool:
     """Check if a path is inside a slot directory (not a git/Claude Code worktree)."""
     if "/slots/" in path:
@@ -514,6 +549,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
     m2_dir.mkdir()
 
     ws_created: dict[str, Path] = {}
+    family_repo_names = _get_family_repo_names(family_root)
 
     for repo_name in repos:
         repo_path = family_root / repo_name
@@ -545,7 +581,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         ws_info = resolve_workspace_source(repo_path)
         if ws_info:
             ws_source, ws_name = ws_info
-            if ws_name in repos:
+            if ws_name in family_repo_names:
                 ws_name = f"work-{ws_source.name}"
             ws_key = str(ws_source)
             # Disambiguate when different workspace sources resolve to the same name
@@ -643,6 +679,12 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
     finally:
         conn.close()
 
+    wksp_failures = validate_slot_wksp(slot_dir)
+    if wksp_failures:
+        for f in wksp_failures:
+            print(f"ERROR=wksp_validation_failed detail={f}")
+        sys.exit(1)
+
     return {
         "slot_number": slot_num,
         "slot_dir": str(slot_dir),
@@ -699,8 +741,8 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
     ws_info = resolve_workspace_source(repo_path)
     if ws_info:
         ws_source, ws_name = ws_info
-        existing_repos = get_slot_repos(slot_dir)
-        if ws_name in existing_repos:
+        family_repo_names = _get_family_repo_names(family_root)
+        if ws_name in family_repo_names:
             ws_name = f"work-{ws_source.name}"
         ws_slot_dir = slot_dir / ws_name
         # Disambiguate when directory exists but belongs to a different workspace
@@ -718,6 +760,8 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             if rc == 0:
                 run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
                 _exclude_symlinks(ws_slot_dir)
+                configure_slot_remotes(ws_slot_dir, ws_source)
+                configure_update_instead(ws_source)
 
         wksp_target = repo_path / "wksp"
         if wksp_target.is_symlink():
@@ -735,6 +779,13 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             replicate_claude_md(repo_path, ws_subdir, clone_dest)
 
     _update_slot_repos(slot_dir, repo_name, add=True)
+
+    wksp_failures = validate_slot_wksp(slot_dir, repo_names=[repo_name])
+    if wksp_failures:
+        for f in wksp_failures:
+            print(f"ERROR=wksp_validation_failed detail={f}")
+        sys.exit(1)
+
     print(f"ADDED={repo_name} SLOT={slot_number}")
 
 
@@ -989,7 +1040,7 @@ def resolve_original_repo(repo_path: Path) -> Path:
         rc, url, _ = run_cmd(
             ["git", "-C", str(repo_path), "remote", "get-url", remote]
         )
-        if rc == 0:
+        if rc == 0 and url.strip():
             origin_path = Path(url.strip())
             if origin_path.is_dir():
                 return origin_path.resolve()
@@ -1602,12 +1653,18 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
                 md = parse_slot_md(d)
                 isolation = md.get("isolation_type", "") or "none"
 
+            wksp_ok = True
+            if state not in ("archived", "landed"):
+                wksp_failures = validate_slot_wksp(d)
+                wksp_ok = len(wksp_failures) == 0
+
             slots.append({
                 "number": num,
                 "branch": branch,
                 "repos": repos,
                 "state": state,
                 "isolation": isolation,
+                "wksp_ok": wksp_ok,
             })
 
         if include_archived and attic_dir.exists():
@@ -1625,6 +1682,7 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
                     "repos": md.get("repos", []),
                     "state": "archived",
                     "isolation": md.get("isolation_type", "") or "none",
+                    "wksp_ok": True,
                 })
 
     _check_drift(family_root, slots, include_archived)
@@ -1909,7 +1967,8 @@ def main() -> None:
         slots = list_slots(family_root, include_archived=include_archived)
         for s in slots:
             repos_str = ",".join(s["repos"]) if isinstance(s["repos"], list) else s["repos"]
-            print(f"SLOT={s['number']} BRANCH={s['branch']} REPOS={repos_str} STATE={s['state']} ISOLATION={s.get('isolation', 'none')}")
+            wksp = "ok" if s.get("wksp_ok", True) else "broken"
+            print(f"SLOT={s['number']} BRANCH={s['branch']} REPOS={repos_str} STATE={s['state']} ISOLATION={s.get('isolation', 'none')} WKSP={wksp}")
         print(f"COUNT={len(slots)}")
 
     elif subcommand == "remove-slot":

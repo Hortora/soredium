@@ -3149,3 +3149,252 @@ class TestMigrateRemotes:
         count2 = slot_manager.migrate_remotes(family)
         assert count1 > 0
         assert count2 == 0
+
+
+class TestGetFamilyRepoNames:
+    def test_finds_git_repos(self, tmp_path):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+        init_repo(family / "work")
+        (family / "not-a-repo").mkdir()
+        result = slot_manager._get_family_repo_names(family)
+        assert result == {"engine", "work"}
+
+    def test_excludes_slots_and_m2(self, tmp_path):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+        (family / "slots").mkdir()
+        (family / ".m2").mkdir()
+        result = slot_manager._get_family_repo_names(family)
+        assert "slots" not in result
+        assert ".m2" not in result
+        assert "engine" in result
+
+    def test_empty_family(self, tmp_path):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        result = slot_manager._get_family_repo_names(family)
+        assert result == set()
+
+
+class TestCreateSlotCollisionFamily:
+    @patch("slot_manager.run_cmd")
+    def test_collision_detected_against_family_repo_not_in_slot(self, mock_cmd, tmp_path):
+        """Family has repo 'work' but slot only has 'engine'.
+        Workspace clone default name 'work' must be deconflicted."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        init_repo(family / "work")  # exists in family but NOT in this slot
+        shared_ws = init_repo(tmp_path / "public" / "casehub")
+        (shared_ws / "engine").mkdir()
+        (engine / "wksp").symlink_to(shared_ws / "engine")
+
+        mock_cmd.return_value = (0, "", "")
+
+        result = slot_manager.create_slot(
+            family_root=family,
+            repos=["engine"],
+            branch="issue-99-test",
+            issue="99",
+            issue_repo="casehubio/parent",
+            covers="99",
+            context="Test collision",
+        )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+        clone_dests = []
+        for c in mock_cmd.call_args_list:
+            args = c.args[0] if c.args else c[0]
+            if isinstance(args, list) and len(args) >= 2 and args[0] == "git" and "clone" in args:
+                dest = Path(args[-1])
+                if dest.parent == slot_dir and "work" in dest.name:
+                    clone_dests.append(dest.name)
+        for name in clone_dests:
+            assert name != "work", (
+                f"workspace clone used name 'work' which collides with family repo"
+            )
+
+
+class TestValidateSlotWksp:
+    def test_passes_when_symlinks_resolve(self, tmp_path):
+        """All repo clones have working wksp/ symlinks."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        original = init_repo(family / "engine")
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        (ws_dir / "engine").mkdir()
+        (original / "wksp").symlink_to(ws_dir / "engine")
+
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        clone = init_repo(slot_dir / "engine")
+        ws_slot = slot_dir / "work" / "engine"
+        ws_slot.mkdir(parents=True)
+        (clone / "wksp").symlink_to(os.path.relpath(ws_slot, clone))
+
+        failures = slot_manager.validate_slot_wksp(slot_dir)
+        assert failures == []
+
+    def test_fails_when_symlink_dangling(self, tmp_path):
+        """wksp/ points to a non-existent directory."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        original = init_repo(family / "engine")
+        (original / "wksp").symlink_to("/nonexistent/path")
+
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        clone = init_repo(slot_dir / "engine")
+        (clone / "wksp").symlink_to("/nonexistent/path")
+
+        failures = slot_manager.validate_slot_wksp(slot_dir)
+        assert len(failures) == 1
+        assert "engine" in failures[0]
+
+    def test_fails_when_symlink_missing(self, tmp_path):
+        """Original has wksp/ but clone doesn't."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        original = init_repo(family / "engine")
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        (original / "wksp").symlink_to(ws_dir)
+
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        clone = init_repo(slot_dir / "engine")
+
+        subprocess.run(["git", "-C", str(clone), "remote", "add", "local", str(original)], capture_output=True)
+
+        failures = slot_manager.validate_slot_wksp(slot_dir)
+        assert len(failures) == 1
+        assert "missing" in failures[0].lower()
+
+    def test_passes_when_original_has_no_wksp(self, tmp_path):
+        """Original repo has no wksp/ — nothing to validate."""
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+
+        failures = slot_manager.validate_slot_wksp(slot_dir)
+        assert failures == []
+
+    def test_scoped_to_specific_repos(self, tmp_path):
+        """When repo_names is provided, only those repos are checked."""
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+        bad = init_repo(slot_dir / "iot")
+        (bad / "wksp").symlink_to("/nonexistent")
+
+        failures = slot_manager.validate_slot_wksp(slot_dir, repo_names=["engine"])
+        assert failures == []
+
+
+class TestCreateSlotWkspValidation:
+    @patch("slot_manager.validate_slot_wksp")
+    @patch("slot_manager.run_cmd")
+    def test_create_slot_exits_on_broken_wksp(self, mock_cmd, mock_validate, tmp_path, capsys):
+        """create_slot must fail if post-creation validation finds broken wksp/."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+
+        mock_cmd.return_value = (0, "", "")
+        mock_validate.return_value = ["engine: wksp/ symlink dangling -> /nonexistent"]
+
+        with pytest.raises(SystemExit):
+            slot_manager.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-99-test",
+                issue="99",
+                issue_repo="casehubio/engine",
+                covers="99",
+                context="test",
+            )
+        captured = capsys.readouterr()
+        assert "ERROR=wksp_validation_failed" in captured.out
+
+    @patch("slot_manager.validate_slot_wksp")
+    @patch("slot_manager.run_cmd")
+    def test_create_slot_succeeds_when_wksp_ok(self, mock_cmd, mock_validate, tmp_path):
+        """create_slot succeeds when validation passes."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+
+        mock_cmd.return_value = (0, "", "")
+        mock_validate.return_value = []
+
+        result = slot_manager.create_slot(
+            family_root=family,
+            repos=["engine"],
+            branch="issue-99-test",
+            issue="99",
+            issue_repo="casehubio/engine",
+            covers="99",
+            context="test",
+        )
+        assert result["slot_number"] >= 1
+
+
+class TestListSlotsWkspHealth:
+    def test_wksp_ok_true_when_no_wksp(self, tmp_path):
+        """Repos without workspace integration are wksp_ok=True."""
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 1 — test\n")
+        init_repo(slot_dir / "engine")
+        slots = slot_manager.list_slots(tmp_path)
+        assert len(slots) == 1
+        assert slots[0]["wksp_ok"] is True
+
+    def test_wksp_ok_false_when_dangling(self, tmp_path):
+        """Broken wksp/ symlink surfaces as wksp_ok=False."""
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 1 — test\n")
+        clone = init_repo(slot_dir / "engine")
+        (clone / "wksp").symlink_to("/nonexistent")
+        slots = slot_manager.list_slots(tmp_path)
+        assert len(slots) == 1
+        assert slots[0]["wksp_ok"] is False
+
+
+class TestAddRepoWorkspaceRemotes:
+    @patch("slot_manager.configure_slot_remotes")
+    @patch("slot_manager.run_cmd")
+    def test_add_repo_configures_workspace_remotes(self, mock_cmd, mock_configure, tmp_path):
+        """add_repo must call configure_slot_remotes on new workspace clones."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        init_repo(slot_dir / "engine")
+
+        repo_b = init_repo(family / "iot")
+        ws = init_repo(tmp_path / "public" / "casehub")
+        (ws / "iot").mkdir()
+        (repo_b / "wksp").symlink_to(ws / "iot")
+
+        slot_manager.write_slot_md(
+            slot_dir, 1, ["engine"], "test-branch", "42",
+            "Org/repo", "42", "test",
+        )
+
+        mock_cmd.return_value = (0, "", "")
+        mock_configure.return_value = {"origin": "", "upstream": "", "local": ""}
+        slot_manager.add_repo(family, 1, "iot", "test-branch")
+
+        ws_calls = [
+            c for c in mock_configure.call_args_list
+            if "work" in str(c.args[0])
+        ]
+        assert len(ws_calls) >= 1, (
+            "add_repo did not call configure_slot_remotes on workspace clone"
+        )
