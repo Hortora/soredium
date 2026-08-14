@@ -749,3 +749,35 @@ def _set_first_leaf_active(items: list[QueueItem]) -> bool:
         if _set_first_leaf_active(item.children):
             return True
     return False
+
+
+def _tick_github_checkboxes(issue_repo: str, epic_number: int,
+                            completed_issues: list[int]) -> bool:
+    """Tick checkboxes on the GitHub epic issue body. Returns True on success."""
+    try:
+        r = subprocess.run(
+            ["gh", "api", f"repos/{issue_repo}/issues/{epic_number}",
+             "--jq", ".body"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            return False
+        body = r.stdout
+        updated = body
+        for issue_num in completed_issues:
+            updated = re.sub(
+                rf'- \[ \] #?{issue_num}\b',
+                f'- [x] #{issue_num}',
+                updated,
+            )
+        if updated == body:
+            return True
+        r = subprocess.run(
+            ["gh", "api", "-X", "PATCH",
+             f"repos/{issue_repo}/issues/{epic_number}",
+             "-f", f"body={updated}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
