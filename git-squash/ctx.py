@@ -66,10 +66,12 @@ else:
 
 # Workspace path (if applicable)
 workspace_root = run("git", "rev-parse", "--show-toplevel")
+plan_path = Path(workspace_root) / "design" / ".plan"
 meta_path = Path(workspace_root) / "design" / ".meta"
+state_file = plan_path if plan_path.exists() else meta_path
 meta_sha = ""
-if meta_path.exists():
-    for line in meta_path.read_text().splitlines():
+if state_file.exists():
+    for line in state_file.read_text().splitlines():
         if line.startswith("project-sha:"):
             meta_sha = line.partition(": ")[2].strip()
 

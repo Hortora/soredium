@@ -100,20 +100,33 @@ def resolve(cwd=None) -> dict[str, str]:
     wksp_declined = "workspace: declined" in claude_text
     workspace_ok = "yes" if (wksp_ok or proj_ok or wksp_declined) else "no"
 
-    # .meta — via find_design_file
-    meta_path = find_design_file(".meta", topo)
-    meta = _parse_meta(meta_path) if meta_path else {}
+    # Identity — from .plan's ## State section (via plan_manager.detect)
+    plan_state: dict[str, str] = {}
+    if state.has_plan and state.plan_path:
+        from plan_manager import detect as _plan_detect_full
+        plan_p = Path(state.plan_path)
+        detect_base = plan_p.parent.parent if plan_p.parent.name == "design" else plan_p.parent
+        plan_info_full = _plan_detect_full(detect_base)
+        if plan_info_full:
+            plan_state = plan_info_full.get("state", {})
 
-    branch_name = meta.get("branch", "")
-    project_sha = meta.get("project-sha", "")
-    issue_n = meta.get("issue", "")
-    issue_repo = meta.get("issue-repo", owner_repo)
-    covers = meta.get("covers", issue_n)
-    design_repo_key = meta.get("design-repo", "")
-    flyway_next_v = meta.get("flyway-next-v", "")
-    meta_section_hashes = meta.get("design-section-hashes", "")
+    # Fallback to .meta if still exists (pre-migration branch)
+    if not plan_state:
+        meta_path = find_design_file(".meta", topo)
+        if meta_path:
+            meta_fallback = _parse_meta(meta_path)
+            plan_state = meta_fallback
 
-    has_meta = "yes" if meta_path and meta_path.exists() and meta else "no"
+    branch_name = plan_state.get("branch", "")
+    project_sha = plan_state.get("project-sha", "")
+    covers = plan_state.get("covers", "")
+    issue_n = covers.split(",")[0].strip() if covers else ""
+    issue_repo = plan_state.get("issue-repo", owner_repo)
+    design_repo_key = plan_state.get("design-repo", "")
+    flyway_next_v = plan_state.get("flyway-next-v", "")
+    meta_section_hashes = plan_state.get("design-section-hashes", "")
+
+    has_meta = "yes" if plan_state else "no"
 
     # Branch detection
     workspace = str(topo.workspace)
@@ -197,15 +210,11 @@ def resolve(cwd=None) -> dict[str, str]:
         "HANDOFF_PATH": state.handoff_path,
         "HAS_PLAN": "yes" if state.has_plan else "no",
         "PLAN_PATH": state.plan_path,
-        "PLAN_ACTIVE_ISSUE": state.plan_active_issue,
+        "ACTIVE_ISSUE": state.active_issue,
         "PLAN_POSITION": state.plan_position,
         "PLAN_BATCH": state.plan_batch,
         "META_STATE": state.meta_state,
         "META_IS_TRANSIENT": "yes" if state.meta_is_transient else "no",
-        "IS_EPIC": "yes" if state.is_epic else "no",
-        "EPIC_PATH": state.epic_path,
-        "EPIC_BATCH": state.epic_batch,
-        "EPIC_ACTIVE_ISSUE": state.epic_active_issue,
         # CLAUDE.md fields (all from topo.project)
         "OWNER_REPO": owner_repo,
         "BASE_BRANCH": base_branch,

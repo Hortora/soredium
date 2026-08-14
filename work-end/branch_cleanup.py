@@ -51,16 +51,16 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
         return 1
 
     files_to_remove = []
-    meta_path = ws / "design" / ".meta"
+    plan_path = ws / "design" / ".plan"
     journal_path = ws / "design" / "JOURNAL.md"
-    epic_path = ws / "design" / ".epic"
+    meta_path = ws / "design" / ".meta"
 
-    if meta_path.exists():
-        files_to_remove.append("design/.meta")
+    if plan_path.exists():
+        files_to_remove.append("design/.plan")
     if journal_path.exists():
         files_to_remove.append("design/JOURNAL.md")
-    if epic_path.exists():
-        files_to_remove.append("design/.epic")
+    if meta_path.exists():
+        files_to_remove.append("design/.meta")
 
     if not files_to_remove:
         print("CLEANED=yes")
