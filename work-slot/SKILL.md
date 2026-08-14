@@ -330,7 +330,7 @@ nothing and enable branch hygiene scans, blog recovery, and stamp verification.
   `.mvn/maven.config`. No cross-contamination with the originals.
 - **Symlinks re-pointed.** `wksp`/`proj` symlinks point to the slot's
   workspace, not the originals. ctx.py follows them transparently.
-- **Scaffold pre-created.** `.meta` and `JOURNAL.md` exist in the slot.
+- **Scaffold pre-created.** `.plan` and `JOURNAL.md` exist in the slot.
   work-start detects state 2 (scaffold exists) and runs the resume path.
 
 ### What happens in the slot

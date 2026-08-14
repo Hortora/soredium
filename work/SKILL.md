@@ -189,7 +189,7 @@ If `HAS_PLAN=yes` and queue has remaining items, annotate the end option:
 
 **On continue (option 1):**
 
-**Lifecycle:** Fire `transition(meta_path, 'work_continue')` — validates
+**Lifecycle:** Fire `transition(plan_path, 'work_continue')` — validates
 branch is `active`, emits worklog event. No state change (self-transition).
 
 When `HAS_HANDOFF=yes` (subsequent session):
@@ -199,13 +199,13 @@ When `HAS_HANDOFF=yes` (subsequent session):
    active issue. Display:
    ```
    Queue — Position $PLAN_POSITION
-   Active issue: #$PLAN_ACTIVE_ISSUE
+   Active issue: #$ACTIVE_ISSUE
    ```
-   Set active issue for commit linkage (`Refs #$PLAN_ACTIVE_ISSUE`).
+   Set active issue for commit linkage (`Refs #$ACTIVE_ISSUE`).
 4. If `IN_SLOT=yes` and `HAS_PLAN=no`: read .slot for issue context
 5. **Load design specs (mandatory):** Run work-start Step 3c — scan workspace
    and project for specs, read them all
-6. **Done-detection auto-suggest (D3):** If `PLAN_ACTIVE_ISSUE` is empty after
+6. **Done-detection auto-suggest (D3):** If `ACTIVE_ISSUE` is empty after
    health sync (issue was marked complete), suggest next action:
    - If remaining items in queue: "Current issue complete. `next` (N remaining) or `end`?"
    - If queue is empty: "Current issue complete. `end` to close the branch?"
@@ -219,6 +219,22 @@ When `HAS_HANDOFF=no` (first session, or HANDOFF.md missing):
 3. If `HAS_PLAN=yes` or `IN_SLOT=yes`: read .plan/slot context as above
 4. Done-detection auto-suggest (D3)
 5. Begin working — the branch and scaffold already exist.
+
+**Mid-session issue completion (D4):** When the active issue is completed
+during a session (GitHub issue closed, user says "that's done", execution
+skill reports all tasks done, or a `Closes #N` commit is made), ALWAYS
+check queue state before suggesting next action:
+
+1. Run `python3 ~/.claude/skills/project/ctx.py`
+2. Read `HAS_PLAN` and `ACTIVE_ISSUE`
+3. If `HAS_PLAN=yes`:
+   - If `ACTIVE_ISSUE` is non-empty → more work remains.
+     Suggest `next` to advance, NOT `work end`.
+   - If `ACTIVE_ISSUE` is empty → queue is exhausted.
+     Suggest `work end`.
+4. If `HAS_PLAN=no` → suggest `work end`.
+
+**Never suggest work-end when the queue has remaining issues.**
 
 **On switch (option 2):**
 Route to **work-pause** (saves current branch), then **work-resume**
@@ -237,15 +253,15 @@ branch and slot mode — the `.plan` file is the single source of truth.
 Steps:
 
 1. Run `ctx.py` to resolve paths. Read `PLAN_PATH` from output.
-2. Fire `transition(meta, 'work_next')` — validates the transition,
-   returns effects `[advance_issue, update_meta, tick_github]`.
+2. Fire `transition(plan_path, 'work_next')` — validates the transition,
+   returns effects `[advance_issue, tick_github]`.
 3. Execute effects:
-   - `advance_issue`: Call `plan_manager.advance(<PLAN_PATH>, <META_PATH>)`.
+   - `advance_issue`: Call `plan_manager.advance(<PLAN_PATH>)`.
      The function atomically checks off the current issue and moves the
      `← active` marker to the next leaf issue.
    - `tick_github`: Check off the completed issue's checkbox on the
      GitHub epic body (if the completed issue was an epic child).
-4. Call `commit_transition(meta, result)` — writes `state: transitioning`.
+4. Call `commit_transition(plan_path, result)` — writes `state: transitioning`.
 5. If `has_deferred` in the result → deferred items exist and the agreed
    queue is complete. Determine available repos:
    - **Branch mode:** the project repo name (basename of `$PROJECT`)
@@ -269,10 +285,10 @@ Steps:
 6. If `queue_complete` and not `has_deferred` → report: "All issues done. Run work end."
 7. If `batch_complete` and not `queue_complete` → log: "Batch N complete.
    Safe exit point — run work end to close, or continue."
-8. **Context refresh (auto-resolve):** Fire `transition(meta, 'auto_refresh')`,
+8. **Context refresh (auto-resolve):** Fire `transition(plan_path, 'auto_refresh')`,
    execute context refresh effects (garden search with new issue keywords,
    load specs matching new issue, check protocols), then
-   `commit_transition(meta, result)`. The branch transitions back to `active`.
+   `commit_transition(plan_path, result)`. The branch transitions back to `active`.
 9. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
 
 ---

@@ -85,10 +85,10 @@ The lifecycle state machine replaces the previous 6-state inference logic.
 | `paused` | branch | Should not reach work-start — work-resume handles this |
 | `closing:*` | branch | Close in progress — offer to continue or abort |
 
-**Orphaned `.meta` on main** (from ctx.py `BRANCH_MISMATCH=yes` when on main):
-Hard stop. Offer to switch to the surviving branch or remove `.meta`.
+**Orphaned `.plan` on main** (from ctx.py `BRANCH_MISMATCH=yes` when on main):
+Hard stop. Offer to switch to the surviving branch or remove `.plan`.
 
-**Branch mismatch** (`.meta` branch != current branch, not on main):
+**Branch mismatch** (`.plan` branch != current branch, not on main):
 Invoke Branch Switch Helper. If it fails → hard stop.
 
 **Pause stack**: if `.pause-stack` has entries AND on main, route to
@@ -246,7 +246,7 @@ names additional issue numbers to be closed on this same branch — e.g., "do #5
   > "This branch will close #5 (primary), #19, and #32. Correct? (y/n)"
 - If single issue: `COVERS="$ISSUE_N"` (same as primary).
 
-`COVERS` is written to `.meta` in Step 9 and read by `work-end` to close all issues at
+`COVERS` is written to `.plan`'s `## State` in Step 9 and read by `work-end` to close all issues at
 branch close time. The branch name slug is still derived from the primary `ISSUE_N` only.
 
 ### Step 4b — Stacked PR base detection
@@ -410,7 +410,7 @@ Apply resolved routing:
 - If `design → workspace`: `DESIGN_REPO="$WORKSPACE"`, baseline = `git -C "$WORKSPACE" rev-parse main`, `DESIGN_REPO_KEY=workspace`
 - If `design → project` (default): `DESIGN_REPO="$PROJECT"`, baseline = `git -C "$PROJECT" rev-parse HEAD`, `DESIGN_REPO_KEY=project`
 
-`DESIGN_REPO_KEY` is stored in `.meta` so work-end can recover it without re-deriving
+`DESIGN_REPO_KEY` is stored in `.plan`'s `## State` so work-end can recover it without re-deriving
 from routing config — which may have changed between sessions.
 
 Compute section hashes (single pipe-separated line):
@@ -434,7 +434,7 @@ python3 ~/.claude/skills/work-start/scaffold.py <WORKSPACE> \
   design-section-hashes=<pipe-sep-hashes>
 ```
 
-Read `META_PATH` and `JOURNAL_PATH` from output. If `ERROR=` appears: hard stop.
+Read `PLAN_PATH` and `JOURNAL_PATH` from output. If `ERROR=` appears: hard stop.
 
 `covers:` is the authoritative list of all issues this branch will close. `work-end`
 reads it to close every issue at branch close time. When tracking is disabled or no
@@ -509,7 +509,7 @@ cascade covers blog/adr/snapshots/plans/design only.
 
 ## Resume Path (Detection state 2)
 
-Surface `.meta`:
+Surface `.plan`'s `## State`:
 ```
 ⚡ Resuming: <branch-name>  Issue: #<N>  Started: <date>
    Covers: <comma-separated list from covers: field, or just #N if single>
@@ -526,7 +526,7 @@ the authoritative source of architectural decisions for the branch. Working
 without them leads to proposing alternatives to settled designs.
 
 Scan **all** locations where specs may exist. Search the issue number
-(from `.meta`) and the branch slug — specs may use either as an
+(from `.plan`'s `## State`) and the branch slug — specs may use either as an
 organising key, or may use date-based names with no issue reference.
 
 **Always search both workspace AND project — never just one.**
@@ -610,7 +610,7 @@ Work-start is complete when:
 - ✅ Project setup verified (CLAUDE.md, workspace, issue tracking)
 - ✅ Issue identified and confirmed (or hotfix mode acknowledged)
 - ✅ Branches created in both repos (project + workspace) on matching names
-- ✅ `.meta` scaffolded with issue, SHA baseline, and design routing
+- ✅ `.plan` scaffolded with state, SHA baseline, and design routing
 - ✅ IntelliJ MCP connected and project indexed
 
 **Not complete until** the Done report is printed with all fields populated.
@@ -621,7 +621,7 @@ Work-start is complete when:
 - `work` — routing skill, when on main with no pause stack
 - `work-resume` — when resuming a paused branch, work-resume delegates to
   work-start for platform coherence and pre-checks
-- `handover` — resume path directs user to `/work` which detects existing `.meta`
+- `handover` — resume path directs user to `/work` which detects existing `.plan`
 - Session hooks — triggered at session start
 
 **Invokes:**
@@ -638,5 +638,5 @@ Work-start is complete when:
 - `work-slot` — slot mode detection; work-start runs inside slots via
   the resume path after slot creation
 
-**Reads from:** `ctx.py`, `.meta`, `.plan`, `.pause-stack`, CLAUDE.md, GitHub issues API,
+**Reads from:** `ctx.py`, `.plan`, `.pause-stack`, CLAUDE.md, GitHub issues API,
 garden (gardenSearch or fallback), `ARC42STORIES.MD`

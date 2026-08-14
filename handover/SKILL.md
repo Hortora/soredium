@@ -74,7 +74,7 @@ python3 ~/.claude/skills/project/work_health.py --scope entry --project "$PROJEC
 Read the output. If any CHECK has STATUS=warn or STATUS=changed, include the
 findings in the resume output.
 
-Then check for an open branch. Read the branch name from `$WORKSPACE/design/.meta`
+Then check for an open branch. Read the branch name from `$WORKSPACE/design/.plan`
 (if it exists). Use `is_closed()` to determine branch state:
 
 ```python
@@ -82,12 +82,12 @@ from lifecycle import is_closed, ClosureState
 state = is_closed(PROJECT, branch, workspace=WORKSPACE)
 ```
 
-- If `.meta` exists and `is_closed()` returns `OPEN` or `MERGED_UNSTAMPED` →
+- If `.plan` exists and `is_closed()` returns `OPEN` or `MERGED_UNSTAMPED` →
   branch is still open. Present resume output with this Immediate Next Step:
   > "Branch `<branch-name>` is still open for #`<issue>`. Run `/work` to continue."
 - If `is_closed()` returns `CLOSED` or `DELETED` → previous session closed cleanly.
   Proceed normally — the Immediate Next Step comes from HANDOFF.md content.
-- If no `.meta` exists → no active branch. Proceed normally.
+- If no `.plan` exists → no active branch. Proceed normally.
 
 ### Step R3 — Display .plan queue (replaces issue cross-check)
 
@@ -272,9 +272,9 @@ not actionable enough to be issues. Append-only with date headers and optional
 </SESSION-BOUND-ITEMS>
 
 - **protocol sweep is on by default** — scans the session for project-specific rules worth formalising. Skip it for sessions that worked purely in universal tools with no project-specific rules established or re-enforced. The protocol skill creates `docs/protocols/` if it does not exist — never skip the sweep because the directory is absent.
-- **journal-entry is ON by default when on an epic branch** — check `ls design/.meta 2>/dev/null` before showing the checklist. If `.meta` exists the session is mid-epic and design reasoning is about to be lost; default journal-entry to ON. If not on an epic branch, default to OFF.
+- **journal-entry is ON by default when on an epic branch** — check `ls design/.plan 2>/dev/null` before showing the checklist. If `.meta` exists the session is mid-epic and design reasoning is about to be lost; default journal-entry to ON. If not on an epic branch, default to OFF.
 - **epic hygiene is ON by default when a workspace is configured** — check `**Workspace:**` in CLAUDE.md. Runs these checks and surfaces any issues before the session ends:
-  1. Orphaned `.meta` on main (epic closed without cleanup)
+  1. Orphaned `.plan` on main (epic closed without cleanup)
   2. Workspace/project branch misalignment
   3. Open epic branches with no commits in the last 7 days (stale)
   4. Mid-epic: journal exists but has no `§Section` anchors (entries will not merge at close)
@@ -690,7 +690,7 @@ the resume output directs the user to `/work` which handles branch resumption
 - `git diff HEAD -- HANDOFF.md` — what changed from last handover
 - `git log --oneline -6` — recent commits for orientation
 - `ls` on workspace directories — locate paths without reading files
-- `design/.meta` + `design/EPIC-CLOSED.md` — open branch detection on resume
+- `design/.plan` — open branch detection on resume
 
 **Complements:**
 - `work-end` — branch closure includes full wrap; this skill is for mid-work only
