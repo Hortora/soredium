@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Create the workspace branch scaffold: design/.meta and design/JOURNAL.md.
+Create the workspace branch scaffold: design/.plan (unified) and design/JOURNAL.md.
 
-Called by work-start Step 9 after branch creation. Replaces mkdir + heredoc
-blocks that trigger Claude Code permission prompts.
+Called by work-start Step 9 after branch creation. The unified .plan file
+contains both ## State (identity/lifecycle) and ## Queue (work items).
+No separate .meta file is created.
 
 Usage:
     python3 ~/.claude/skills/work-start/scaffold.py \\
@@ -17,10 +18,11 @@ Usage:
         [flyway-next-v=<N|none|unknown>] \\
         [design-repo=<workspace|project|cross-repo:name>] \\
         [design-section-hashes=<pipe-sep-pairs>] \\
+        [plan-content=<raw content>] \\
         [force=yes]
 
 Output (KEY=value lines):
-    META_PATH=/abs/path/to/design/.meta
+    PLAN_PATH=/abs/path/to/design/.plan
     JOURNAL_PATH=/abs/path/to/design/JOURNAL.md
     CREATED=yes|no   (no = files already existed and were left unchanged)
 
@@ -42,19 +44,18 @@ try:
 except ImportError:
     _wl = None
 
+_slot_dir = str(Path(__file__).resolve().parent.parent / "work-slot")
+if _slot_dir not in sys.path:
+    sys.path.insert(0, _slot_dir)
+
 
 REQUIRED = {"branch", "project-sha"}
 
 
-# ---------------------------------------------------------------------------
-# Library API — typed interface for command layer
-# ---------------------------------------------------------------------------
-
 @dataclass
 class ScaffoldResult:
-    meta_path: str
+    plan_path: str
     journal_path: str
-    plan_path: str | None
     created: bool
 
 
@@ -63,20 +64,19 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
              today: str | None = None, flyway_next_v: str = "unknown",
              design_repo: str = "project",
              design_section_hashes: str = "",
-             plan: bool = False, plan_content: str = "",
+             plan_content: str = "",
              force: bool = False) -> ScaffoldResult:
-    """Create workspace branch scaffold: design/.meta and design/JOURNAL.md."""
+    """Create workspace branch scaffold: unified design/.plan and design/JOURNAL.md."""
     design_dir = workspace / "design"
     design_dir.mkdir(parents=True, exist_ok=True)
 
-    meta_path = design_dir / ".meta"
+    plan_path = design_dir / ".plan"
     journal_path = design_dir / "JOURNAL.md"
 
-    if not force and meta_path.exists() and journal_path.exists():
+    if not force and plan_path.exists() and journal_path.exists():
         return ScaffoldResult(
-            meta_path=str(meta_path),
+            plan_path=str(plan_path),
             journal_path=str(journal_path),
-            plan_path=str(design_dir / ".plan") if (design_dir / ".plan").exists() else None,
             created=False,
         )
 
@@ -86,50 +86,38 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
     if not covers:
         covers = issue
 
-    meta_lines = [
-        f"branch: {branch}",
-        f"state: scaffolded",
-        f"project-sha: {project_sha}",
-        f"date: {today}",
-        f"issue: {issue}",
-        f"issue-repo: {issue_repo}",
-        f"covers: {covers}",
-        f"flyway-next-v: {flyway_next_v}",
-        f"design-repo: {design_repo}",
-        f"design-section-hashes: {design_section_hashes}",
-    ]
-    if plan:
-        meta_lines.append("plan: yes")
+    if plan_content:
+        plan_path.write_text(plan_content)
+    else:
+        from plan_manager import build_plan_content, QueueItem
 
-    meta_path.write_text("\n".join(meta_lines) + "\n")
+        state = {
+            "branch": branch,
+            "state": "scaffolded",
+            "project-sha": project_sha,
+            "date": today,
+            "issue-repo": issue_repo,
+            "covers": covers,
+            "design-repo": design_repo,
+            "design-section-hashes": design_section_hashes,
+            "flyway-next-v": flyway_next_v,
+        }
+
+        if issue:
+            items = [QueueItem(issue_number=int(issue),
+                               title=f"Issue #{issue}", active=True)]
+        else:
+            items = []
+        plan_path.write_text(build_plan_content(branch, items, today, state=state))
+
     journal_path.write_text(f"# Design Journal — {branch}\n")
 
-    result_plan_path: str | None = None
-    if plan:
-        plan_file = design_dir / ".plan"
-        if plan_content:
-            plan_file.write_text(plan_content)
-        elif not plan_file.exists():
-            plan_file.write_text(
-                f"# Work Plan — {branch}\n\n"
-                f"## Queue\n"
-                f"(empty — issues created during design)\n\n"
-                f"## Session State\n"
-                f"Started: {today}\n"
-            )
-        result_plan_path = str(plan_file)
-
     return ScaffoldResult(
-        meta_path=str(meta_path),
+        plan_path=str(plan_path),
         journal_path=str(journal_path),
-        plan_path=result_plan_path,
         created=True,
     )
 
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 def parse_args(args: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
@@ -169,7 +157,6 @@ def main() -> int:
             flyway_next_v=params.get("flyway-next-v", "unknown"),
             design_repo=params.get("design-repo", "project"),
             design_section_hashes=params.get("design-section-hashes", ""),
-            plan=params.get("plan", "") == "yes",
             plan_content=params.get("plan-content", ""),
             force=params.get("force", "") == "yes",
         )
@@ -177,10 +164,8 @@ def main() -> int:
         print(f"ERROR=Failed to write scaffold: {e}", file=sys.stderr)
         return 1
 
-    print(f"META_PATH={result.meta_path}")
+    print(f"PLAN_PATH={result.plan_path}")
     print(f"JOURNAL_PATH={result.journal_path}")
-    if result.plan_path:
-        print(f"PLAN_PATH={result.plan_path}")
     print(f"CREATED={'yes' if result.created else 'no'}")
 
     if _wl and result.created:

@@ -3,7 +3,7 @@
 Tests for work-start/scaffold.py
 
 Covers: happy path field writing, idempotency, missing workspace,
-missing required params, defaults, .meta format correctness.
+missing required params, defaults, unified .plan format correctness.
 """
 
 import json
@@ -37,6 +37,10 @@ def required_args(**overrides) -> list[str]:
     return [f"{k}={v}" for k, v in defaults.items()]
 
 
+def _read_plan(ws: Path) -> str:
+    return (ws / "design" / ".plan").read_text()
+
+
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
@@ -49,11 +53,17 @@ class TestHappyPath:
         run(ws, *required_args())
         assert (ws / "design").is_dir()
 
-    def test_creates_meta_file(self, tmp_path):
+    def test_creates_plan_file(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args())
-        assert (ws / "design" / ".meta").exists()
+        assert (ws / "design" / ".plan").exists()
+
+    def test_does_not_create_meta_file(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        run(ws, *required_args())
+        assert not (ws / "design" / ".meta").exists()
 
     def test_creates_journal_md(self, tmp_path):
         ws = tmp_path / "workspace"
@@ -68,15 +78,17 @@ class TestHappyPath:
         content = (ws / "design" / "JOURNAL.md").read_text()
         assert "issue-99-payments" in content
 
-    def test_meta_contains_all_required_fields(self, tmp_path):
+    def test_plan_contains_state_section(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args(branch="issue-42-auth", **{"project-sha": "deadbeef"}))
-        meta = (ws / "design" / ".meta").read_text()
-        assert "branch: issue-42-auth" in meta
-        assert "project-sha: deadbeef" in meta
+        plan = _read_plan(ws)
+        assert "## State" in plan
+        assert "branch: issue-42-auth" in plan
+        assert "project-sha: deadbeef" in plan
+        assert "state: scaffolded" in plan
 
-    def test_meta_optional_fields_written(self, tmp_path):
+    def test_plan_optional_fields_written(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args(
@@ -84,27 +96,25 @@ class TestHappyPath:
             covers="42,43",
             **{"flyway-next-v": "17", "design-repo": "workspace"}
         ))
-        meta = (ws / "design" / ".meta").read_text()
-        assert "issue: 42" in meta
-        assert "covers: 42,43" in meta
-        assert "flyway-next-v: 17" in meta
-        assert "design-repo: workspace" in meta
+        plan = _read_plan(ws)
+        assert "covers: 42,43" in plan
+        assert "flyway-next-v: 17" in plan
+        assert "design-repo: workspace" in plan
 
-    def test_output_contains_meta_and_journal_paths(self, tmp_path):
+    def test_output_contains_plan_and_journal_paths(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         result = run(ws, *required_args())
         out = parse(result)
-        assert "META_PATH" in out
+        assert "PLAN_PATH" in out
         assert "JOURNAL_PATH" in out
         assert out["CREATED"] == "yes"
 
     def test_creates_nested_design_dir(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
-        # design/ doesn't exist yet
         run(ws, *required_args())
-        assert (ws / "design" / ".meta").exists()
+        assert (ws / "design" / ".plan").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -117,11 +127,10 @@ class TestIdempotency:
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args(branch="issue-42-auth"))
-        # Manually modify the meta
-        meta = ws / "design" / ".meta"
-        meta.write_text("branch: modified\n")
+        plan = ws / "design" / ".plan"
+        plan.write_text("# modified\n")
         run(ws, *required_args(branch="issue-42-auth"))
-        assert "modified" in meta.read_text()  # not overwritten
+        assert "modified" in plan.read_text()
 
     def test_second_run_returns_created_no(self, tmp_path):
         ws = tmp_path / "workspace"
@@ -142,22 +151,22 @@ class TestDefaults:
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args())
-        meta = (ws / "design" / ".meta").read_text()
-        assert "flyway-next-v: unknown" in meta
+        plan = _read_plan(ws)
+        assert "flyway-next-v: unknown" in plan
 
     def test_design_repo_defaults_to_project(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args())
-        meta = (ws / "design" / ".meta").read_text()
-        assert "design-repo: project" in meta
+        plan = _read_plan(ws)
+        assert "design-repo: project" in plan
 
     def test_covers_defaults_to_issue_when_given(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args(issue="55"))
-        meta = (ws / "design" / ".meta").read_text()
-        assert "covers: 55" in meta
+        plan = _read_plan(ws)
+        assert "covers: 55" in plan
 
 
 # ---------------------------------------------------------------------------
