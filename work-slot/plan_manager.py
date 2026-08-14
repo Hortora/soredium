@@ -41,6 +41,7 @@ class PlanTree:
     started: str
     last_wrap: str | None = None
     deferred: list[DeferredItem] = field(default_factory=list)
+    state: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -78,30 +79,29 @@ _STARTED_RE = re.compile(r'^Started:\s*(.+)')
 _LAST_WRAP_RE = re.compile(r'^Last wrap:\s*(.+)')
 
 
-def _read_meta_fields(meta_path: Path) -> dict[str, str]:
+def _read_plan_state(plan_path: Path) -> dict[str, str]:
+    """Read ## State section key-values from unified .plan."""
     fields: dict[str, str] = {}
-    for line in meta_path.read_text().splitlines():
-        if ':' in line:
+    in_state = False
+    for line in plan_path.read_text().splitlines():
+        if line.strip() == "## State":
+            in_state = True
+            continue
+        if line.startswith("## "):
+            in_state = False
+            continue
+        if in_state and ':' in line:
             k, _, v = line.partition(':')
             fields[k.strip()] = v.strip()
+    if not fields:
+        for line in plan_path.read_text().splitlines():
+            if ':' in line:
+                k, _, v = line.partition(':')
+                fields[k.strip()] = v.strip()
     return fields
 
 
-def _update_meta_issue(meta_path: Path, issue_number: int) -> None:
-    """Update the active issue number in .meta without touching other fields."""
-    if not meta_path.exists():
-        return
-    lines = meta_path.read_text().splitlines()
-    result = []
-    for line in lines:
-        if line.startswith("issue:"):
-            result.append(f"issue: {issue_number}")
-        else:
-            result.append(line)
-    meta_path.write_text("\n".join(result) + "\n")
-
-
-def _emit_issue_events(meta_path: Path, repo_path: str,
+def _emit_issue_events(plan_path: Path, repo_path: str,
                        completed: int, next_issue: int | None) -> None:
     try:
         _scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
@@ -109,7 +109,7 @@ def _emit_issue_events(meta_path: Path, repo_path: str,
             _sys.path.insert(0, _scripts_dir)
         import worklog
 
-        fields = _read_meta_fields(meta_path)
+        fields = _read_plan_state(plan_path)
         branch = fields.get("branch", "")
         issue_repo = fields.get("issue-repo", "")
         if not branch:
@@ -135,9 +135,11 @@ def parse_plan(plan_path: Path) -> PlanTree:
     heading = ""
     queue_lines: list[str] = []
     deferred_lines: list[str] = []
+    state_dict: dict[str, str] = {}
     current_issue = None
     started = ""
     last_wrap = None
+    in_state = False
     in_queue = False
     in_deferred = False
     in_session = False
@@ -146,26 +148,42 @@ def parse_plan(plan_path: Path) -> PlanTree:
         if line.startswith("# Work Plan"):
             heading = line[2:].strip()
             continue
+        if line.strip() == "## State":
+            in_state = True
+            in_queue = False
+            in_deferred = False
+            in_session = False
+            continue
         if line.strip() == "## Queue":
+            in_state = False
             in_queue = True
             in_deferred = False
             in_session = False
             continue
         if line.strip() == "## Deferred":
+            in_state = False
             in_queue = False
             in_deferred = True
             in_session = False
             continue
         if line.strip() == "## Session State":
+            in_state = False
             in_queue = False
             in_deferred = False
             in_session = True
             continue
         if line.startswith("## "):
+            in_state = False
             in_queue = False
             in_deferred = False
             in_session = False
             continue
+
+        if in_state:
+            stripped = line.strip()
+            if ':' in stripped:
+                k, _, v = stripped.partition(':')
+                state_dict[k.strip()] = v.strip()
 
         if in_session:
             stripped = line.strip()
@@ -187,8 +205,14 @@ def parse_plan(plan_path: Path) -> PlanTree:
     queue = _parse_queue_lines(queue_lines)
     deferred = _parse_deferred_lines(deferred_lines)
 
+    if state_dict and not started:
+        started = state_dict.get("date", "")
+    if state_dict and not last_wrap:
+        last_wrap = state_dict.get("last-wrap") or None
+
     return PlanTree(heading=heading, queue=queue, current_issue=current_issue,
-                    started=started, last_wrap=last_wrap, deferred=deferred)
+                    started=started, last_wrap=last_wrap, deferred=deferred,
+                    state=state_dict)
 
 
 def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
@@ -307,14 +331,26 @@ def rewrite_plan(plan_path: Path, tree: PlanTree) -> None:
         tree.started,
         last_wrap=tree.last_wrap,
         deferred=tree.deferred,
+        state=tree.state,
     )
-    plan_path.write_text(content)
+    tmp_path = plan_path.parent / '.plan.tmp'
+    tmp_path.write_text(content)
+    tmp_path.replace(plan_path)
 
 
 def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
                        last_wrap: str | None = None,
-                       deferred: list[DeferredItem] | None = None) -> str:
-    lines = [f"# Work Plan — {branch_slug}", "", "## Queue"]
+                       deferred: list[DeferredItem] | None = None,
+                       state: dict[str, str] | None = None) -> str:
+    lines = [f"# Work Plan — {branch_slug}"]
+
+    if state:
+        lines.append("")
+        lines.append("## State")
+        for k, v in state.items():
+            lines.append(f"{k}: {v}")
+
+    lines.extend(["", "## Queue"])
 
     if not items:
         lines.append("(empty — issues created during design)")
@@ -330,18 +366,17 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
             repos_str = ", ".join(d.repos)
             lines.append(f"- [{check}] {d.title} ({d.scale} / {d.complexity}) [{repos_str}]")
 
-    lines.append("")
-    lines.append("## Session State")
-
-    active_leaf = _find_active_leaf(items)
-    if active_leaf:
-        lines.append(f"Current: #{active_leaf.issue_number} — {active_leaf.title}")
-    else:
-        lines.append("Current: none")
-
-    lines.append(f"Started: {date}")
-    if last_wrap:
-        lines.append(f"Last wrap: {last_wrap}")
+    if not state:
+        lines.append("")
+        lines.append("## Session State")
+        active_leaf = _find_active_leaf(items)
+        if active_leaf:
+            lines.append(f"Current: #{active_leaf.issue_number} — {active_leaf.title}")
+        else:
+            lines.append("Current: none")
+        lines.append(f"Started: {date}")
+        if last_wrap:
+            lines.append(f"Last wrap: {last_wrap}")
 
     lines.append("")
     return "\n".join(lines)
@@ -389,7 +424,7 @@ class NoQueueFile(Exception):
     pass
 
 
-def advance(plan_path: Path, meta_path: Path,
+def advance(plan_path: Path,
             repo_path: str | None = None) -> AdvanceResult:
     tree = parse_plan(plan_path)
     leaves = flatten_leaves(tree)
@@ -429,13 +464,10 @@ def advance(plan_path: Path, meta_path: Path,
     tree.current_issue = next_leaf.issue_number if next_leaf else None
     rewrite_plan(plan_path, tree)
 
-    if next_leaf:
-        _update_meta_issue(meta_path, next_leaf.issue_number)
-
     if repo_path:
         try:
             _emit_issue_events(
-                meta_path, repo_path,
+                plan_path, repo_path,
                 completed_leaf.issue_number,
                 next_leaf.issue_number if next_leaf else None,
             )
@@ -453,26 +485,20 @@ def advance(plan_path: Path, meta_path: Path,
     )
 
 
-def advance_issue(plan_path: Path | None, epic_path: Path | None,
-                  meta_path: Path, repo_path: str | None = None) -> AdvanceResult:
+def advance_issue(plan_path: Path | None,
+                  repo_path: str | None = None) -> AdvanceResult:
     if plan_path and plan_path.exists():
-        return advance(plan_path, meta_path, repo_path=repo_path)
-    if epic_path and epic_path.exists():
-        try:
-            import epic_manager
-            return epic_manager.advance(epic_path, meta_path=meta_path)
-        except ImportError:
-            pass
-    raise NoQueueFile("No .plan or .epic found")
+        return advance(plan_path, repo_path=repo_path)
+    raise NoQueueFile("No .plan found")
 
 
-def complete_active_issue(plan_path: Path, meta_path: Path,
+def complete_active_issue(plan_path: Path,
                           repo_path: str) -> int | None:
     tree = parse_plan(plan_path)
     active = _find_active_leaf(tree.queue)
     if not active:
         return None
-    _emit_issue_events(meta_path, repo_path, active.issue_number, next_issue=None)
+    _emit_issue_events(plan_path, repo_path, active.issue_number, next_issue=None)
     return active.issue_number
 
 
@@ -631,6 +657,7 @@ def detect(workspace_path: Path) -> dict | None:
         "completed_count": completed_count,
         "total_count": total_count,
         "current_batch": batch,
+        "state": tree.state,
     }
 
 
@@ -722,3 +749,35 @@ def _set_first_leaf_active(items: list[QueueItem]) -> bool:
         if _set_first_leaf_active(item.children):
             return True
     return False
+
+
+def _tick_github_checkboxes(issue_repo: str, epic_number: int,
+                            completed_issues: list[int]) -> bool:
+    """Tick checkboxes on the GitHub epic issue body. Returns True on success."""
+    try:
+        r = subprocess.run(
+            ["gh", "api", f"repos/{issue_repo}/issues/{epic_number}",
+             "--jq", ".body"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            return False
+        body = r.stdout
+        updated = body
+        for issue_num in completed_issues:
+            updated = re.sub(
+                rf'- \[ \] #?{issue_num}\b',
+                f'- [x] #{issue_num}',
+                updated,
+            )
+        if updated == body:
+            return True
+        r = subprocess.run(
+            ["gh", "api", "-X", "PATCH",
+             f"repos/{issue_repo}/issues/{epic_number}",
+             "-f", f"body={updated}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False

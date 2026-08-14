@@ -202,7 +202,7 @@ class TestSlotWorkspaceResolution:
         subdir.mkdir()
         (subdir / "design").mkdir()
         (subdir / "design" / ".meta").write_text(
-            "branch: issue-215-test\nissue: 215\n"
+            "branch: issue-215-test\ncovers: 215\n"
         )
         (project / "wksp").symlink_to("../work/engine")
         subprocess.run(
@@ -244,7 +244,7 @@ class TestSlotMetaDetectionViaGitRoot:
         subdir.mkdir()
         (workspace / "design").mkdir()
         (workspace / "design" / ".meta").write_text(
-            "branch: issue-99-test\nissue: 99\n"
+            "branch: issue-99-test\ncovers: 99\n"
         )
         (project / "wksp").symlink_to("../work/platform")
         subprocess.run(
@@ -291,7 +291,7 @@ class TestSlotRootPlanDetection:
 
         assert result.returncode == 0
         assert data["HAS_PLAN"] == "yes", "plan at slot root must be found from project repo"
-        assert data["PLAN_ACTIVE_ISSUE"] == "10"
+        assert data["ACTIVE_ISSUE"] == "10"
 
 
 class TestClaudeMdParsing:
@@ -362,7 +362,7 @@ class TestMetaParsing:
     """Test .meta file parsing."""
 
     def test_meta_fields_extracted(self, tmp_path):
-        """Extract all 5 fields from .meta."""
+        """Extract identity fields from .meta (migrated to .plan on read)."""
         meta_content = """branch: issue-123-test-feature
 project-sha: abc123def456
 issue: 123
@@ -381,7 +381,7 @@ covers: 42,43
         assert result.returncode == 0
         assert data["BRANCH_NAME"] == "issue-123-test-feature"
         assert data["PROJECT_SHA"] == "abc123def456"
-        assert data["ISSUE_N"] == "123"
+        assert data["ISSUE_N"] == "42"
         assert data["ISSUE_REPO"] == "owner/repo"
         assert data["COVERS"] == "42,43"
 
@@ -399,9 +399,10 @@ covers: 42,43
         assert data["COVERS"] == ""
 
     def test_covers_defaults_to_issue(self, tmp_path):
-        """COVERS falls back to ISSUE_N value when covers field absent."""
+        """ISSUE_N derived from covers first entry."""
         meta_content = """branch: issue-99-something
 issue: 99
+covers: 99
 """
         repo = init_repo(tmp_path / "repo")
         subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-99-something"],
@@ -445,9 +446,9 @@ issue: 123
         subprocess.run(["git", "-C", str(project), "checkout", "-b", "ws-branch"],
                        capture_output=True)
         (workspace / "design").mkdir()
-        (workspace / "design" / ".meta").write_text("branch: ws-branch\nissue: 42\n")
+        (workspace / "design" / ".meta").write_text("branch: ws-branch\ncovers: 42\n")
         (project / "design").mkdir()
-        (project / "design" / ".meta").write_text("branch: proj-branch\nissue: 999\n")
+        (project / "design" / ".meta").write_text("branch: proj-branch\ncovers: 999\n")
         out = parse(run_ctx(workspace))
         assert out["ISSUE_N"] == "42"
         assert out["BRANCH_NAME"] == "ws-branch"
@@ -461,7 +462,7 @@ issue: 123
         (repo / "design" / ".meta").write_text(
             "branch: good-branch\n"
             "this line has no separator\n"
-            "issue: 42\n"
+            "covers: 42\n"
         )
         out = parse(run_ctx(repo))
         assert out["BRANCH_NAME"] == "good-branch"
@@ -1056,7 +1057,7 @@ class TestInferredIssue:
         subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-42-fix-bug"],
                         capture_output=True)
         (repo / "design").mkdir()
-        (repo / "design" / ".meta").write_text("branch: issue-42-fix-bug\nissue: 42\n")
+        (repo / "design" / ".meta").write_text("branch: issue-42-fix-bug\ncovers: 42\n")
         data = parse(run_ctx(repo))
         assert data["INFERRED_ISSUE"] == ""
 
@@ -1081,68 +1082,6 @@ class TestInferredIssue:
                         capture_output=True)
         data = parse(run_ctx(repo))
         assert data["INFERRED_ISSUE"] == "1234"
-
-
-class TestEpicDetection:
-    """Test IS_EPIC and EPIC_PATH fields."""
-
-    def test_epic_file_detected(self, tmp_path):
-        """IS_EPIC=yes when workspace/design/.epic exists with Type: epic."""
-        repo = init_repo(tmp_path / "repo")
-        design = repo / "design"
-        design.mkdir(parents=True)
-        (design / ".epic").write_text(
-            "## Issue\nHortora/soredium#100\nType: epic\n"
-        )
-        data = parse(run_ctx(repo))
-        assert data["IS_EPIC"] == "yes"
-        assert data["EPIC_PATH"] == str(design / ".epic")
-
-    def test_epic_batch_and_active_issue(self, tmp_path):
-        """EPIC_BATCH and EPIC_ACTIVE_ISSUE populated from .epic."""
-        repo = init_repo(tmp_path / "repo")
-        design = repo / "design"
-        design.mkdir(parents=True)
-        (design / ".epic").write_text(
-            "## Issue\nrepo#1\nType: epic\n\n## Batch Plan\n\n"
-            "### Batch 1 — Done\n- [x] #10 — A\n\n"
-            "### Batch 2 — Work\n- [ ] #11 — B ← active\n\n"
-            "## Session State\nCurrent batch: 2\nCurrent issue: #11 — B\n"
-        )
-        data = parse(run_ctx(repo))
-        assert data["EPIC_BATCH"] == "2 of 2"
-        assert data["EPIC_ACTIVE_ISSUE"] == "11"
-
-    def test_no_epic_file(self, tmp_path):
-        """IS_EPIC=no when no .epic file."""
-        repo = init_repo(tmp_path / "repo")
-        data = parse(run_ctx(repo))
-        assert data["IS_EPIC"] == "no"
-        assert data["EPIC_PATH"] == ""
-
-    def test_epic_file_without_type_epic(self, tmp_path):
-        """IS_EPIC=no when .epic exists but has no Type: epic."""
-        repo = init_repo(tmp_path / "repo")
-        design = repo / "design"
-        design.mkdir(parents=True)
-        (design / ".epic").write_text("## Issue\nrepo#100\n")
-        data = parse(run_ctx(repo))
-        assert data["IS_EPIC"] == "no"
-        assert data["EPIC_PATH"] == ""
-
-    def test_epic_in_workspace_not_project(self, tmp_path):
-        """IS_EPIC detects .epic in workspace, not project."""
-        project = init_repo(tmp_path / "project")
-        workspace = init_repo(tmp_path / "workspace")
-        (workspace / "proj").symlink_to(project)
-        design = workspace / "design"
-        design.mkdir(parents=True)
-        (design / ".epic").write_text(
-            "## Issue\nrepo#100\nType: epic\n"
-        )
-        data = parse(run_ctx(workspace))
-        assert data["IS_EPIC"] == "yes"
-        assert data["EPIC_PATH"] == str(design / ".epic")
 
 
 class TestWorktreeResolution:

@@ -1136,14 +1136,15 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     slot_info = parse_slot_md(slot_dir)
     _slot_is_epic = slot_info.get("is_epic", False)
     if _slot_is_epic:
-        from epic_manager import status as _epic_status
-        _es = _epic_status(slot_dir / ".slot")
-        if _es.get("is_epic"):
-            _total = _es["total_issues"]
-            _done = _es["completed_count"]
-            _batch = _es["current_batch"]
-            _total_b = _es["total_batches"]
-            print(f"EPIC_STATUS=batch {_batch}/{_total_b}, {_done} completed, {_total - _done} remaining")
+        try:
+            from plan_manager import detect as _plan_detect
+            plan_info = _plan_detect(slot_dir)
+            if plan_info:
+                _done = plan_info.get("completed_count", 0)
+                _total = plan_info.get("total_count", 0)
+                print(f"EPIC_STATUS={_done} completed, {_total - _done} remaining")
+        except Exception:
+            pass
 
     branch = ""
     for line in (slot_dir / ".phase-a-complete").read_text().splitlines():
@@ -1389,12 +1390,12 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         completed = [int(x) for x in covers_str.split(",") if x.strip()]
         if epic_num and epic_repo and completed:
             try:
-                from epic_manager import tick_epic_checkboxes
-                ok = tick_epic_checkboxes(epic_repo, epic_num, completed)
+                from plan_manager import _tick_github_checkboxes
+                ok = _tick_github_checkboxes(epic_repo, epic_num, completed)
                 if not ok:
                     print("WARN=epic_tick_failed")
-            except Exception:
-                print("WARN=epic_tick_failed")
+            except (ImportError, Exception):
+                print("WARN=epic_tick_skipped")
 
     # Phase 4: Report propagation summary
     print("STAGE=push STATUS=pass")
@@ -1552,11 +1553,11 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
             epic_repo = slot_info.get("issue_repo", "")
             if epic_num and epic_repo:
                 try:
-                    from epic_manager import tick_epic_checkboxes
-                    ok = tick_epic_checkboxes(epic_repo, epic_num, completed)
+                    from plan_manager import _tick_github_checkboxes
+                    ok = _tick_github_checkboxes(epic_repo, epic_num, completed)
                     if not ok:
                         print("WARN=github_unreachable_for_checkbox_verify")
-                except Exception:
+                except (ImportError, Exception):
                     print("WARN=github_unreachable_for_checkbox_verify")
 
     _teardown_isx(slot_dir)

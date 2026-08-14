@@ -88,7 +88,9 @@ Parse the JSON output. Handle preconditions:
 | `meta_exists` | `pass` | Proceed — read context values from output |
 
 **Queue gate** (if `HAS_PLAN=yes`): Run `plan_manager.py detect` to check
-queue state. If mid-queue, require `confirm-partial` to proceed.
+queue state. If mid-queue (remaining uncompleted items exist), STOP and
+redirect: "Queue has N remaining issues. Run `work next` to advance, or
+pass `confirm-partial` to close the branch with remaining work."
 
 **Issue-complete emission** (if `HAS_PLAN=yes`): Run
 `complete_active_issue` after confirming close.
@@ -303,7 +305,7 @@ python3 work-end/branch_cleanup.py checkout-main <WORKSPACE> <PROJECT>
 
 ### 5.2b Scaffold cleanup
 
-Remove `.meta` and `JOURNAL.md` from workspace to prevent stale state
+Remove `.plan` and `JOURNAL.md` from workspace to prevent stale state
 detection in subsequent sessions.
 
 ```bash
@@ -408,5 +410,5 @@ Skip silently if no `.notes/` directory exists.
 - `verification-before-completion` — verification gate before claiming
   work is done; work-end runs the full close sequence after verification
 
-**Reads from:** `ctx.py`, `.meta`, `.pause-stack`, CLAUDE.md, `.execute-progress`,
+**Reads from:** `ctx.py`, `.plan`, `.pause-stack`, CLAUDE.md, `.execute-progress`,
 `.squash-plan-*.json`, `verify_slot_close.py` output

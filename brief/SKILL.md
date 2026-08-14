@@ -36,7 +36,7 @@ Adapt output to the STATE field:
 Branch: <BRANCH>  Issue: #<ISSUE>
 <HANDOFF_SUMMARY if non-empty>
 
-Plan: <PLAN_POSITION> (<PLAN_BATCH>)  Active: #<PLAN_ACTIVE_ISSUE>
+Plan: <PLAN_POSITION> (<PLAN_BATCH>)  Active: #<ACTIVE_ISSUE>
   — or "No plan" if HAS_PLAN=no
 
 Recent commits (<RECENT_COMMITS>):

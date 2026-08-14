@@ -38,11 +38,22 @@ from lifecycle import (
 )
 
 
+def _write_plan(path: Path, state: str = "active", branch: str = "issue-42-foo", **extra):
+    defaults = {"date": "2026-08-03"}
+    defaults.update(extra)
+    lines = ["# Work Plan — test", "", "## State",
+             f"branch: {branch}", f"state: {state}"]
+    for k, v in defaults.items():
+        lines.append(f"{k.replace('_', '-')}: {v}")
+    lines.extend(["", "## Queue", "(empty)", ""])
+    path.write_text("\n".join(lines))
+
+
 @pytest.fixture
 def tmp_meta(tmp_path):
-    meta = tmp_path / ".meta"
-    meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
-    return meta
+    plan = tmp_path / ".plan"
+    _write_plan(plan)
+    return plan
 
 
 # --- State constants and classification ---
@@ -110,33 +121,33 @@ class TestReadWriteState:
         assert read_state(tmp_meta) == "active"
 
     def test_read_closing_pushed(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: x\nstate: closing:pushed\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:pushed", branch="x", date="2026-08-03")
         assert read_state(meta) == "closing:pushed"
 
     def test_read_all_valid_states(self, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         for state in VALID_STATES - {"idle"}:
             meta.write_text(f"branch: x\nstate: {state}\ndate: 2026-08-03\n")
             assert read_state(meta) == state
 
     def test_no_meta_returns_none(self, tmp_path):
-        assert read_state(tmp_path / ".meta") is None
+        assert read_state(tmp_path / ".plan") is None
 
     def test_missing_state_field_returns_active(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-42-foo", date="2026-08-03")
         assert read_state(meta) == "active"
 
     def test_unknown_state_raises_corrupted(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: x\nstate: bogus\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="bogus", branch="x", date="2026-08-03")
         with pytest.raises(CorruptedState):
             read_state(meta)
 
     def test_truncated_closing_state_raises_corrupted(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: x\nstate: closing:pro\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:pro", branch="x", date="2026-08-03")
         with pytest.raises(CorruptedState):
             read_state(meta)
 
@@ -146,22 +157,22 @@ class TestReadWriteState:
         assert tmp_meta.read_text().count("state:") == 1
 
     def test_write_appends_to_legacy(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-42-foo", date="2026-08-03")
         write_state(meta, "scaffolded")
         content = meta.read_text()
         assert "state: scaffolded" in content
         assert content.index("branch:") < content.index("state:")
 
     def test_write_appends_at_end_if_no_branch(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("date: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-42-foo", date="2026-08-03")
         write_state(meta, "active")
         assert "state: active" in meta.read_text()
 
     def test_write_is_atomic(self, tmp_meta):
         write_state(tmp_meta, "closing:merged")
-        assert not (tmp_meta.parent / ".meta.tmp").exists()
+        assert not (tmp_meta.parent / ".plan.tmp").exists()
 
     def test_write_preserves_other_fields(self, tmp_meta):
         original = tmp_meta.read_text()
@@ -179,10 +190,10 @@ class TestValidTransitions:
     @pytest.mark.parametrize(
         "from_state, event, expected_state, expected_effects",
         [
-            ("idle", "work", "scaffolded", ["create_branch", "write_meta", "build_plan"]),
-            ("idle", "slot_create", "scaffolded", ["create_slot", "write_meta", "build_plan"]),
+            ("idle", "work", "scaffolded", ["create_branch", "write_plan", "build_plan"]),
+            ("idle", "slot_create", "scaffolded", ["create_slot", "write_plan", "build_plan"]),
             ("scaffolded", "auto_setup", "active", ["garden_search", "load_specs", "check_protocols", "check_intellij"]),
-            ("active", "work_next", "transitioning", ["advance_issue", "update_meta", "tick_github"]),
+            ("active", "work_next", "transitioning", ["advance_issue", "tick_github"]),
             ("transitioning", "auto_refresh", "active", ["garden_search", "load_specs", "check_protocols"]),
             ("active", "work_pause", "paused", ["wip_commit"]),
             ("paused", "work_resume", "active", ["pop_stack", "reset_wip", "context_resume"]),
@@ -196,7 +207,7 @@ class TestValidTransitions:
         ],
     )
     def test_valid_transition(self, from_state, event, expected_state, expected_effects, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         if from_state != "idle":
             meta.write_text(f"branch: issue-42-foo\nstate: {from_state}\ndate: 2026-08-03\n")
         result = transition(meta, event)
@@ -212,8 +223,8 @@ class TestValidTransitions:
         assert result.post_commit_effects == ["switch_to_main", "push_stack"]
 
     def test_cleanup_has_post_commit_effects(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: x\nstate: closing:stamped\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:stamped", branch="x", date="2026-08-03")
         result = transition(meta, "cleanup_pass")
         assert result.effects == ["write_plan_closed"]
         assert result.post_commit_effects == ["return_to_main", "write_handoff"]
@@ -224,7 +235,7 @@ class TestValidTransitions:
 
     @pytest.mark.parametrize("closing_state", ["closing:review", "closing:verified"])
     def test_abort_from_pre_artifact(self, closing_state, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         meta.write_text(f"branch: x\nstate: {closing_state}\ndate: 2026-08-03\n")
         result = transition(meta, "abort_close")
         assert result.new_state == "active"
@@ -235,7 +246,7 @@ class TestValidTransitions:
         ["closing:promoted", "closing:pushed", "closing:merged", "closing:stamped"],
     )
     def test_abort_blocked_post_artifact(self, closing_state, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         meta.write_text(f"branch: x\nstate: {closing_state}\ndate: 2026-08-03\n")
         with pytest.raises(InvalidTransition):
             transition(meta, "abort_close")
@@ -272,7 +283,7 @@ class TestInvalidTransitions:
         ],
     )
     def test_invalid_transition_raises(self, from_state, event, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         if from_state != "idle":
             meta.write_text(f"branch: x\nstate: {from_state}\ndate: 2026-08-03\n")
         with pytest.raises(InvalidTransition):
@@ -289,8 +300,8 @@ class TestInvalidTransitions:
 
 class TestWorkContinueTransition:
     def test_active_work_continue_is_self_transition(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-1-test\nstate: active\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-1-test")
         result = transition(meta, 'work_continue')
         assert result.from_state == 'active'
         assert result.new_state == 'active'
@@ -298,27 +309,27 @@ class TestWorkContinueTransition:
         assert result.post_commit_effects == []
 
     def test_idle_work_continue_raises(self, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         with pytest.raises(InvalidTransition) as exc_info:
             transition(meta, 'work_continue')
         assert 'continue' in str(exc_info.value).lower()
 
     def test_scaffolded_work_continue_raises(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-1-test\nstate: scaffolded\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="scaffolded", branch="issue-1-test")
         with pytest.raises(InvalidTransition):
             transition(meta, 'work_continue')
 
     def test_paused_work_continue_raises(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-1-test\nstate: paused\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="paused", branch="issue-1-test")
         with pytest.raises(InvalidTransition) as exc_info:
             transition(meta, 'work_continue')
         assert 'resume' in str(exc_info.value).lower()
 
     def test_transitioning_work_continue_raises(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-1-test\nstate: transitioning\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="transitioning", branch="issue-1-test")
         with pytest.raises(InvalidTransition):
             transition(meta, 'work_continue')
 
@@ -345,28 +356,28 @@ class TestCommitTransition:
             commit_transition(tmp_meta, result)
 
     def test_commit_idle_to_scaffolded_verifies_meta(self, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         result = transition(meta, "work")
-        meta.write_text("branch: issue-1-test\nstate: scaffolded\ndate: 2026-08-03\n")
+        _write_plan(meta, state="scaffolded", branch="issue-1-test", date="2026-08-03")
         commit_transition(meta, result)
         assert read_state(meta) == "scaffolded"
 
     def test_commit_idle_to_scaffolded_fails_without_meta(self, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         result = transition(meta, "work")
         with pytest.raises(StateError):
             commit_transition(meta, result)
 
     def test_commit_to_idle_skips_write(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: x\nstate: closing:stamped\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:stamped", branch="x", date="2026-08-03")
         result = transition(meta, "cleanup_pass")
         commit_transition(meta, result)
         assert read_state(meta) == "closing:stamped"
 
     def test_commit_to_idle_checks_concurrent(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: x\nstate: closing:stamped\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:stamped", branch="x", date="2026-08-03")
         result = transition(meta, "cleanup_pass")
         write_state(meta, "closing:merged")
         with pytest.raises(ConcurrentModification):
@@ -387,23 +398,23 @@ class TestCommitTransition:
 
 class TestMigrateLegacyPaused:
     def test_migrates_missing_state_to_paused(self, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         meta.write_text("branch: issue-42-foo\ndate: 2026-08-03\n")
         assert migrate_legacy_paused(meta) is True
         assert read_state(meta) == "paused"
 
     def test_no_op_if_already_paused(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: paused\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="paused")
         assert migrate_legacy_paused(meta) is False
 
     def test_no_op_if_has_explicit_state(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active")
         assert migrate_legacy_paused(meta) is False
 
     def test_no_op_if_no_meta(self, tmp_path):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         assert migrate_legacy_paused(meta) is False
 
 
@@ -413,7 +424,7 @@ class TestMigrateLegacyPaused:
 class TestHygieneInvariants:
     @pytest.fixture
     def git_project(self, tmp_path):
-        """Create a minimal git repo with .meta on a feature branch."""
+        """Create a minimal git repo with .plan on a feature branch."""
         project = tmp_path / "project"
         project.mkdir()
         subprocess.run(["git", "init", str(project)], capture_output=True)
@@ -427,9 +438,17 @@ class TestHygieneInvariants:
         )
         meta_dir = project / "design"
         meta_dir.mkdir()
-        meta = meta_dir / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
-        return project, meta
+        plan = meta_dir / ".plan"
+        _write_plan(plan, state="active", branch="issue-42-foo")
+        subprocess.run(
+            ["git", "-C", str(project), "add", "design/.plan"],
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(project), "commit", "-m", "scaffold"],
+            capture_output=True,
+        )
+        return project, plan
 
     def test_untracked_files_detected(self, git_project):
         project, meta = git_project
@@ -446,10 +465,14 @@ class TestHygieneInvariants:
         assert not any(".idea" in v for v in violations)
 
     def test_branch_mismatch_detected(self, git_project):
-        project, meta = git_project
+        project, plan = git_project
         subprocess.run(
             ["git", "-C", str(project), "checkout", "main"], capture_output=True
         )
+        # In the real system, workspace is separate and keeps .plan even when
+        # project switches to main. Simulate by re-creating .plan on main.
+        (project / "design").mkdir(exist_ok=True)
+        _write_plan(project / "design" / ".plan", state="active", branch="issue-42-foo")
         violations = validate_state("active", project, project)
         assert any("Branch mismatch" in v for v in violations)
 
@@ -490,7 +513,7 @@ class TestHygieneInvariants:
 
 class TestDeprecatedEvents:
     def test_work_epic_maps_to_work(self, tmp_path, capsys):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         result = transition(meta, "work_epic")
         assert result.new_state == "scaffolded"
         assert "build_plan" in result.effects
@@ -499,7 +522,7 @@ class TestDeprecatedEvents:
         assert "work_epic" in captured.out
 
     def test_slot_epic_maps_to_slot_create(self, tmp_path, capsys):
-        meta = tmp_path / ".meta"
+        meta = tmp_path / ".plan"
         result = transition(meta, "slot_epic")
         assert result.new_state == "scaffolded"
         assert "build_plan" in result.effects
@@ -508,8 +531,8 @@ class TestDeprecatedEvents:
         assert "slot_epic" in captured.out
 
     def test_deprecated_event_from_non_idle_still_fails(self, tmp_path, capsys):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: test\nstate: active\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="test")
         with pytest.raises(InvalidTransition):
             transition(meta, "work_epic")
 
@@ -564,8 +587,8 @@ class TestWorklogEmission:
     def test_commit_emits_worklog_event(self, tmp_path, worklog_env):
         import worklog
         db_path, repo_path = worklog_env
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-42-foo", date="2026-08-03")
 
         result = transition(meta, "work_pause")
         commit_transition(meta, result, repo_path=repo_path)
@@ -581,8 +604,8 @@ class TestWorklogEmission:
     def test_commit_updates_work_item_state(self, tmp_path, worklog_env):
         import worklog
         db_path, repo_path = worklog_env
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-42-foo", date="2026-08-03")
 
         result = transition(meta, "work_pause")
         commit_transition(meta, result, repo_path=repo_path)
@@ -597,8 +620,8 @@ class TestWorklogEmission:
     def test_commit_passes_caller_metadata(self, tmp_path, worklog_env):
         import worklog
         db_path, repo_path = worklog_env
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: closing:pushed\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:pushed", branch="issue-42-foo", date="2026-08-03")
 
         result = transition(meta, "merge_pass")
         commit_transition(
@@ -617,15 +640,15 @@ class TestWorklogEmission:
         conn.close()
 
     def test_commit_without_repo_path_skips_worklog(self, tmp_path):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-42-foo", date="2026-08-03")
         result = transition(meta, "work_pause")
         commit_transition(meta, result)
         assert read_state(meta) == "paused"
 
     def test_commit_survives_worklog_failure(self, tmp_path, monkeypatch):
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: active\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-42-foo", date="2026-08-03")
         monkeypatch.setenv("WORKLOG_DB", "/nonexistent/path/worklog.db")
         result = transition(meta, "work_pause")
         commit_transition(meta, result, repo_path=str(tmp_path / "project"))
@@ -634,8 +657,8 @@ class TestWorklogEmission:
     def test_commit_to_idle_sets_ended(self, tmp_path, worklog_env):
         import worklog
         db_path, repo_path = worklog_env
-        meta = tmp_path / ".meta"
-        meta.write_text("branch: issue-42-foo\nstate: closing:stamped\ndate: 2026-08-03\n")
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:stamped", branch="issue-42-foo", date="2026-08-03")
 
         result = transition(meta, "cleanup_pass")
         commit_transition(meta, result, repo_path=repo_path)
@@ -668,11 +691,11 @@ class TestWorklogIntegration:
             worklog.ensure_repo(conn, repo_path)
             conn.close()
 
-            meta = tmp_path / ".meta"
+            meta = tmp_path / ".plan"
 
             # idle -> scaffolded
             result = transition(meta, "work")
-            meta.write_text("branch: issue-99-test\nstate: scaffolded\ndate: 2026-08-04\n")
+            _write_plan(meta, state="scaffolded", branch="issue-99-test", date="2026-08-04")
             conn = worklog.connect(db_path)
             worklog.record_work_start(
                 conn, "issue-99-test", repo_path,

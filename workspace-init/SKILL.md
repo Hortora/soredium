@@ -466,7 +466,7 @@ Read `CREATED=<count>` from output. If `ERROR=` appears, stop and report the err
 (`specs/`, `plans/`, and `design/` need no INDEX.md — superpowers and design skills manage them directly.)
 
 The `design/` directory is intentionally left empty at workspace init. `work-start`
-creates `design/JOURNAL.md` and `design/.meta` when a work branch begins.
+creates `design/JOURNAL.md` and `design/.plan` when a work branch begins.
 
 ### Step 4 — Create HANDOFF.md and IDEAS.md stubs
 

@@ -70,7 +70,7 @@ Update `decision_count` each time a decision is captured.
 You MUST create a task for each of these items and complete them in order:
 
 1. **Gather context** — check files, docs, recent commits. If work-start
-   has run, read `$WORKSPACE/design/.meta` for `issue` and `covers` (the
+   has run, read `$WORKSPACE/design/.plan`'s `## State` for `covers` (the
    issue group). Run forage SEARCH and protocol SEARCH with keywords from
    the idea to surface relevant garden entries (gotchas, techniques, prior
    decisions) and project protocols (standing conventions, architectural
@@ -144,7 +144,7 @@ writing-plans.
 ### Gathering Context
 
 - Check the current project state (files, docs, recent commits)
-- If work-start has run, read `$WORKSPACE/design/.meta` for the issue
+- If work-start has run, read `$WORKSPACE/design/.plan`'s `## State` for the issue
   group context — the focal issue and what the branch covers
 - Run forage SEARCH with keywords from the idea — surface relevant garden
   entries before the user starts answering design questions. A garden entry
@@ -153,8 +153,8 @@ writing-plans.
   provenance** — call `gardenRecordProvenance` with the selected GE-IDs:
   ```
   gardenRecordProvenance(
-      issueRepo=<from .meta issue-repo>,
-      issueNumber=<from .meta issue>,
+      issueRepo=<from .plan issue-repo>,
+      issueNumber=<from .plan covers>,
       specName="",
       geIds=<pipe-separated selected GE-IDs>,
       recordedBy="brainstorming"
@@ -405,8 +405,8 @@ When decision-review revises decisions:
   during context gathering, re-record provenance with the spec filename:
   ```
   gardenRecordProvenance(
-      issueRepo=<from .meta>,
-      issueNumber=<from .meta>,
+      issueRepo=<from .plan>,
+      issueNumber=<from .plan>,
       specName=<spec filename>,
       geIds=<pipe-separated selected GE-IDs>,
       recordedBy="brainstorming"
@@ -531,7 +531,7 @@ See [visual-companion.md](visual-companion.md) for the full guide.
   shape the design before questions begin.
 - `ide-tooling` — Navigate tools for exploring existing architecture
   during context gathering.
-- `work-start` — if work-start has run, `.meta` provides the issue group
+- `work-start` — if work-start has run, `.plan`'s `## State` provides the issue group
   context. If not, brainstorming gathers all context itself.
 - `design-review` — brainstorming creates the spec; design-review validates
   it (pre-review mode for approach, spec-review mode for detail)

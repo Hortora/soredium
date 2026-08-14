@@ -79,7 +79,7 @@ class TestWorkStateDetect:
         )
         state = _detect(str(repo))
         assert state.has_plan is True
-        assert state.plan_active_issue == "10"
+        assert state.active_issue == "10"
 
     def test_no_plan_has_plan_false(self, tmp_path):
         repo = init_repo(tmp_path / "repo")
@@ -106,7 +106,7 @@ class TestWorkStateDetect:
         project = init_repo(slot_dir / "engine")
         state = _detect(str(project))
         assert state.has_plan is True
-        assert state.plan_active_issue == "10"
+        assert state.active_issue == "10"
 
     def test_handoff_project_specific_found(self, tmp_path):
         """F4: HANDOFF-{project}.md checked before HANDOFF.md."""

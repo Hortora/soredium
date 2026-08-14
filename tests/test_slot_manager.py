@@ -2419,6 +2419,10 @@ class TestMergeSlotEpicCheck:
             "## Session State\nCurrent batch: 1\nCurrent issue: #84 — Active\n\n"
             "## Repos\n- engine (primary)\n"
         )
+        (wt / ".plan").write_text(
+            "# Work Plan — slot-72\n\n## State\nbranch: issue-50\nstate: active\ncovers: 83,84\n\n"
+            "## Queue\n- [x] #83 — Done\n- [ ] #84 — Active ← active\n"
+        )
         (wt / ".phase-a-complete").write_text("branch=issue-50\nrepos=engine\n")
         repo = init_repo(wt / "engine")
         subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-50"], capture_output=True)

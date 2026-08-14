@@ -50,12 +50,25 @@ def check_clean_tree(workspace: str, project: str) -> dict:
 
 
 def check_meta_exists(workspace: str) -> dict:
+    plan_path = Path(workspace) / "design" / ".plan"
     meta_path = Path(workspace) / "design" / ".meta"
-    if not meta_path.exists():
+    target = plan_path if plan_path.exists() else meta_path
+    if not target.exists():
         return {"status": "needs_input", "detail": "no-meta"}
 
     meta_data = {}
-    for line in meta_path.read_text().splitlines():
+    in_state = False
+    has_sections = False
+    for line in target.read_text().splitlines():
+        if line.strip() == "## State":
+            in_state = True
+            has_sections = True
+            continue
+        if line.startswith("## "):
+            in_state = False
+            continue
+        if has_sections and not in_state:
+            continue
         if ":" in line:
             k, _, v = line.partition(":")
             meta_data[k.strip()] = v.strip()

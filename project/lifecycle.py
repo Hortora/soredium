@@ -86,10 +86,10 @@ class StateError(Exception):
 # (from_state, event): (new_state, effects, post_commit_effects)
 TRANSITION_TABLE: dict[tuple[str, str], tuple[str, list[str], list[str]]] = {
     # Core lifecycle
-    ('idle', 'work'):                  ('scaffolded',       ['create_branch', 'write_meta', 'build_plan'],                             []),
-    ('idle', 'slot_create'):           ('scaffolded',       ['create_slot', 'write_meta', 'build_plan'],                               []),
+    ('idle', 'work'):                  ('scaffolded',       ['create_branch', 'write_plan', 'build_plan'],                             []),
+    ('idle', 'slot_create'):           ('scaffolded',       ['create_slot', 'write_plan', 'build_plan'],                               []),
     ('scaffolded', 'auto_setup'):      ('active',           ['garden_search', 'load_specs', 'check_protocols', 'check_intellij'],      []),
-    ('active', 'work_next'):           ('transitioning',    ['advance_issue', 'update_meta', 'tick_github'],                           []),
+    ('active', 'work_next'):           ('transitioning',    ['advance_issue', 'tick_github'],                                          []),
     ('transitioning', 'auto_refresh'): ('active',           ['garden_search', 'load_specs', 'check_protocols'],                        []),
     ('active', 'work_continue'):       ('active',           [],                                                                        []),
     ('active', 'work_pause'):          ('paused',           ['wip_commit'],                                                            ['switch_to_main', 'push_stack']),
@@ -136,31 +136,63 @@ INVALID_MESSAGES: dict[tuple[str, str], str] = {
 # --- Public API ---
 
 
-def read_state(meta_path: Path) -> Optional[str]:
-    """Read lifecycle state from .meta. Returns None if no .meta exists.
+def read_state(plan_path: Path) -> Optional[str]:
+    """Read lifecycle state from .plan's ## State section (or legacy .meta).
+    Returns None if file doesn't exist.
     Raises CorruptedState if state: field has unrecognised value."""
-    if not meta_path.exists():
+    if not plan_path.exists():
         return None
-    content = meta_path.read_text()
-    for line in content.splitlines():
+    in_state_section = False
+    has_sections = False
+    for line in plan_path.read_text().splitlines():
+        if line.strip() == '## State':
+            in_state_section = True
+            has_sections = True
+            continue
+        if line.startswith('## '):
+            in_state_section = False
+            continue
+        if in_state_section and line.startswith('state:'):
+            raw = line.split(':', 1)[1].strip()
+            if raw in VALID_STATES:
+                return raw
+            raise CorruptedState(plan_path, raw)
+    if has_sections:
+        return 'active'
+    for line in plan_path.read_text().splitlines():
         if line.startswith('state:'):
             raw = line.split(':', 1)[1].strip()
             if raw in VALID_STATES:
                 return raw
-            raise CorruptedState(meta_path, raw)
+            raise CorruptedState(plan_path, raw)
     return 'active'
 
 
-def write_state(meta_path: Path, state: str) -> None:
-    """Write lifecycle state to existing .meta atomically."""
-    content = meta_path.read_text()
+def write_state(plan_path: Path, state: str) -> None:
+    """Write lifecycle state to .plan's ## State section atomically."""
+    content = plan_path.read_text()
     lines = content.splitlines()
 
+    in_state_section = False
+    has_sections = any(l.strip() == '## State' for l in lines)
     state_line_idx = None
-    for i, line in enumerate(lines):
-        if line.startswith('state:'):
-            state_line_idx = i
-            break
+
+    if has_sections:
+        for i, line in enumerate(lines):
+            if line.strip() == '## State':
+                in_state_section = True
+                continue
+            if line.startswith('## '):
+                in_state_section = False
+                continue
+            if in_state_section and line.startswith('state:'):
+                state_line_idx = i
+                break
+    else:
+        for i, line in enumerate(lines):
+            if line.startswith('state:'):
+                state_line_idx = i
+                break
 
     if state_line_idx is not None:
         lines[state_line_idx] = f'state: {state}'
@@ -174,9 +206,9 @@ def write_state(meta_path: Path, state: str) -> None:
         if not inserted:
             lines.append(f'state: {state}')
 
-    tmp_path = meta_path.parent / '.meta.tmp'
+    tmp_path = plan_path.parent / '.plan.tmp'
     tmp_path.write_text('\n'.join(lines) + '\n')
-    tmp_path.replace(meta_path)
+    tmp_path.replace(plan_path)
 
 
 _DEPRECATED_EVENTS = {
@@ -186,13 +218,13 @@ _DEPRECATED_EVENTS = {
 
 
 def transition(
-    meta_path: Path,
+    plan_path: Path,
     event: str,
     project: Optional[Path] = None,
     workspace: Optional[Path] = None,
 ) -> TransitionResult:
     """Phase 1: Validate transition and return result. Does NOT write state."""
-    raw_state = read_state(meta_path)
+    raw_state = read_state(plan_path)
     current_state = raw_state or 'idle'
 
     if event in _DEPRECATED_EVENTS:
@@ -232,18 +264,32 @@ _LIFECYCLE_TO_WORKLOG: dict[str, str | None] = {
 }
 
 
-def _read_branch(meta_path: Path) -> Optional[str]:
-    """Read branch name from .meta."""
-    if not meta_path.exists():
+def _read_branch(plan_path: Path) -> Optional[str]:
+    """Read branch name from .plan's ## State section (or legacy .meta)."""
+    if not plan_path.exists():
         return None
-    for line in meta_path.read_text().splitlines():
+    in_state_section = False
+    has_sections = False
+    for line in plan_path.read_text().splitlines():
+        if line.strip() == '## State':
+            in_state_section = True
+            has_sections = True
+            continue
+        if line.startswith('## '):
+            in_state_section = False
+            continue
+        if in_state_section and line.startswith('branch:'):
+            return line.split(':', 1)[1].strip()
+    if has_sections:
+        return None
+    for line in plan_path.read_text().splitlines():
         if line.startswith('branch:'):
             return line.split(':', 1)[1].strip()
     return None
 
 
 def _emit_to_worklog(
-    meta_path: Path,
+    plan_path: Path,
     result: TransitionResult,
     repo_path: str,
     metadata: Optional[dict],
@@ -259,7 +305,7 @@ def _emit_to_worklog(
         db_path = os.environ.get("WORKLOG_DB")
         conn = worklog.connect(db_path) if db_path else worklog.connect()
 
-        branch = _read_branch(meta_path)
+        branch = _read_branch(plan_path)
         if not branch:
             conn.close()
             return
@@ -289,33 +335,33 @@ def _emit_to_worklog(
 
 
 def commit_transition(
-    meta_path: Path,
+    plan_path: Path,
     result: TransitionResult,
     repo_path: Optional[str] = None,
     metadata: Optional[dict] = None,
 ) -> None:
     """Phase 2: Verify state unchanged, write atomically, emit worklog."""
     if result.from_state == 'idle':
-        if not meta_path.exists():
+        if not plan_path.exists():
             raise StateError(
-                f".meta not created by write_meta effect at {meta_path}"
+                f".plan not created by write_plan effect at {plan_path}"
             )
-        current = read_state(meta_path)
+        current = read_state(plan_path)
         if current != result.new_state:
             raise StateError(
                 f"Expected '{result.new_state}' after scaffold, got '{current}'"
             )
     else:
-        current = read_state(meta_path)
+        current = read_state(plan_path)
         if current != result.from_state:
             raise ConcurrentModification(
                 expected=result.from_state, actual=current or 'None'
             )
         if result.new_state != 'idle':
-            write_state(meta_path, result.new_state)
+            write_state(plan_path, result.new_state)
 
     if repo_path:
-        _emit_to_worklog(meta_path, result, repo_path, metadata)
+        _emit_to_worklog(plan_path, result, repo_path, metadata)
 
 
 _DEFAULT_EXCLUDES = [
@@ -343,12 +389,12 @@ def validate_state(
             _check_untracked(workspace, excludes, violations, "workspace")
 
     if state not in ('idle', 'paused'):
-        meta_path = (
+        plan_path = (
             workspace if project.resolve() != workspace.resolve() else project
-        ) / "design" / ".meta"
-        if meta_path.exists():
+        ) / "design" / ".plan"
+        if plan_path.exists():
             meta_branch = ""
-            for line in meta_path.read_text().splitlines():
+            for line in plan_path.read_text().splitlines():
                 if line.startswith("branch:"):
                     meta_branch = line.split(":", 1)[1].strip()
                     break
@@ -359,7 +405,7 @@ def validate_state(
                 ).stdout.strip()
                 if current and current != meta_branch:
                     violations.append(
-                        f"Branch mismatch: .meta says '{meta_branch}', "
+                        f"Branch mismatch: .plan says '{meta_branch}', "
                         f"git says '{current}'"
                     )
 

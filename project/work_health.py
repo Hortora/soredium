@@ -65,12 +65,24 @@ def _parse_yaml_intent(path):
 
 
 def check_meta_consistency(project, workspace):
+    plan_path = Path(workspace) / "design" / ".plan"
     meta_path = Path(workspace) / "design" / ".meta"
-    if not meta_path.exists():
+    state_file = plan_path if plan_path.exists() else meta_path
+    if not state_file.exists():
         return "CHECK=meta_consistency STATUS=ok"
     meta_branch = None
-    for line in meta_path.read_text().splitlines():
-        if line.startswith("branch:"):
+    in_state = False
+    has_sections = False
+    for line in state_file.read_text().splitlines():
+        if line.strip() == "## State":
+            in_state = True
+            has_sections = True
+            continue
+        if line.startswith("## "):
+            in_state = False
+            continue
+        should_check = in_state if has_sections else True
+        if should_check and line.startswith("branch:"):
             meta_branch = line.split(":", 1)[1].strip()
             break
     if not meta_branch:
@@ -78,10 +90,10 @@ def check_meta_consistency(project, workspace):
     current, _ = _git(workspace, "branch", "--show-current")
     if current == "main" and meta_branch != "main":
         return (f"CHECK=meta_consistency STATUS=warn "
-                f"DETAIL=.meta says branch '{meta_branch}' but on main — orphaned .meta")
+                f"DETAIL=.plan says branch '{meta_branch}' but on main — orphaned .plan")
     if current != meta_branch:
         return (f"CHECK=meta_consistency STATUS=warn "
-                f"DETAIL=.meta says '{meta_branch}', git says '{current}'")
+                f"DETAIL=.plan says '{meta_branch}', git says '{current}'")
     return "CHECK=meta_consistency STATUS=ok"
 
 
@@ -178,10 +190,22 @@ def check_branch_closure(project, workspace):
     for e in _parse_pause_stack(workspace):
         if "branch" in e:
             branches_to_check.add(e["branch"])
+    plan_path = Path(workspace) / "design" / ".plan"
     meta_path = Path(workspace) / "design" / ".meta"
-    if meta_path.exists():
-        for line in meta_path.read_text().splitlines():
-            if line.startswith("branch:"):
+    state_file = plan_path if plan_path.exists() else meta_path
+    if state_file.exists():
+        in_state = False
+        has_sections = False
+        for line in state_file.read_text().splitlines():
+            if line.strip() == "## State":
+                in_state = True
+                has_sections = True
+                continue
+            if line.startswith("## "):
+                in_state = False
+                continue
+            should_check = in_state if has_sections else True
+            if should_check and line.startswith("branch:"):
                 branches_to_check.add(line.split(":", 1)[1].strip())
     if not branches_to_check:
         return "CHECK=branch_closure STATUS=ok"

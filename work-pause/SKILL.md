@@ -42,14 +42,14 @@ Read `$PROJECT` and `$WORKSPACE` from CLAUDE.md (see Path Resolution above).
 ## Step 1 — Validate state and fire transition
 
 ```bash
-ls "$WORKSPACE/design/.meta" 2>/dev/null || { echo "No .meta found — not on a working branch."; exit 1; }
-BRANCH_NAME=$(grep "^branch:" "$WORKSPACE/design/.meta" | sed 's/branch: //')
-ISSUE_N=$(grep "^issue:" "$WORKSPACE/design/.meta" | sed 's/issue: //')
+ls "$WORKSPACE/design/.plan" 2>/dev/null || { echo "No .plan found — not on a working branch."; exit 1; }
+BRANCH_NAME=$(grep "^branch:" "$WORKSPACE/design/.plan" | sed 's/branch: //')
+COVERS=$(grep "^covers:" "$WORKSPACE/design/.plan" | sed 's/issue: //')
 ```
 
-Must be on a branch where `$WORKSPACE/design/.meta` exists.
+Must be on a branch where `$WORKSPACE/design/.plan` exists.
 
-**Lifecycle transition:** Fire `transition(meta_path, 'work_pause')`. This validates
+**Lifecycle transition:** Fire `transition(plan_path, 'work_pause')`. This validates
 the transition (`active → paused`) and returns effects `[wip_commit]` with
 post-commit effects `[switch_to_main, push_stack]`. Execute pre-commit effects
 (Steps 2-3 below), then `commit_transition()`, then post-commit effects (Step 4).
@@ -171,5 +171,5 @@ internally; does not delegate to other skills
 - `handover` — different intent: handover preserves session context for next
   session on the same branch; work-pause switches branches mid-session
 
-**Reads from:** `.meta` (branch, issue), project/workspace working tree state,
+**Reads from:** `.plan` (branch, covers), project/workspace working tree state,
 `.pause-stack` on workspace main

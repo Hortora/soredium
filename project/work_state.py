@@ -29,7 +29,7 @@ class WorkState:
     in_slot: bool
     has_plan: bool
     plan_path: str
-    plan_active_issue: str
+    active_issue: str
     plan_position: str
     plan_batch: str
     stack_depth: int
@@ -37,10 +37,6 @@ class WorkState:
     handoff_path: str
     meta_state: str
     meta_is_transient: bool
-    is_epic: bool
-    epic_path: str
-    epic_batch: str
-    epic_active_issue: str
 
 
 def _run(*cmd: str, cwd: str | None = None) -> str:
@@ -65,11 +61,17 @@ def detect(topo: Topology) -> WorkState:
             if line.strip().startswith("- branch:")
         )
 
+    # Migration — convert old .meta to unified .plan if needed
+    meta_file = find_design_file(".meta", topo)
+    if meta_file and meta_file.exists():
+        from plan_migrate import migrate_if_needed
+        migrate_if_needed(meta_file.parent)
+
     # Plan detection via shared search
     from plan_manager import detect as _plan_detect
     has_plan = False
     plan_path = ""
-    plan_active_issue = ""
+    active_issue = ""
     plan_position = ""
     plan_batch = ""
 
@@ -80,30 +82,11 @@ def detect(topo: Topology) -> WorkState:
         if plan_info:
             has_plan = True
             plan_path = plan_info["plan_path"]
-            plan_active_issue = str(plan_info["active_issue"] or "")
+            active_issue = str(plan_info["active_issue"] or "")
             completed = plan_info.get("completed_count", 0)
             total = plan_info.get("total_count", 0)
             plan_position = f"{completed}/{total}" if total else ""
             plan_batch = plan_info.get("current_batch") or ""
-
-    # Epic detection via shared search
-    from epic_manager import detect as _epic_detect
-    is_epic = False
-    epic_path = ""
-    epic_batch = ""
-    epic_active_issue = ""
-    if not has_plan:
-        epic_file = find_design_file(".epic", topo)
-        if epic_file:
-            detect_base = epic_file.parent.parent if epic_file.parent.name == "design" else epic_file.parent
-            epic_info = _epic_detect(detect_base)
-            if epic_info:
-                is_epic = True
-                epic_path = str(epic_info["epic_path"])
-                current = epic_info.get("current_batch", 0)
-                total = len(epic_info.get("batches", []))
-                epic_batch = f"{current} of {total}" if total else ""
-                epic_active_issue = str(epic_info.get("current_issue", ""))
 
     # Handoff detection — branch-scoped, working tree only
     has_handoff = False
@@ -123,9 +106,9 @@ def detect(topo: Topology) -> WorkState:
         handoff_path = str(handoff_file)
         has_handoff = True
 
-    # Meta state
-    meta_file = find_design_file(".meta", topo)
-    meta_state = _read_state(meta_file) if meta_file else ""
+    # Lifecycle state — from .plan (unified) or .meta (legacy, pre-migration)
+    state_file = plan_file or find_design_file(".meta", topo)
+    meta_state = _read_state(state_file) if state_file else ""
     meta_state = meta_state or ""
     meta_is_transient = bool(meta_state and _is_transient(meta_state))
 
@@ -133,7 +116,7 @@ def detect(topo: Topology) -> WorkState:
     project_branch = _run("git", "-C", project, "branch", "--show-current") if project != workspace else current_branch
     workspace_dirty = (
         not on_main
-        and meta_file is None
+        and state_file is None
         and project != workspace
         and project_branch == "main"
     )
@@ -151,7 +134,7 @@ def detect(topo: Topology) -> WorkState:
         in_slot=in_slot,
         has_plan=has_plan,
         plan_path=plan_path,
-        plan_active_issue=plan_active_issue,
+        active_issue=active_issue,
         plan_position=plan_position,
         plan_batch=plan_batch,
         stack_depth=stack_depth,
@@ -159,8 +142,4 @@ def detect(topo: Topology) -> WorkState:
         handoff_path=handoff_path,
         meta_state=meta_state,
         meta_is_transient=meta_is_transient,
-        is_epic=is_epic,
-        epic_path=epic_path,
-        epic_batch=epic_batch,
-        epic_active_issue=epic_active_issue,
     )

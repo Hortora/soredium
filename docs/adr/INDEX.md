@@ -14,3 +14,4 @@
 | 0010 | [Universal document validation](0010-universal-document-validation.md) | Accepted | — |
 | 0011 | [Revert subtype taxonomy value from 'log' back to 'diary'](0011-revert-subtype-diary-log-to-diary.md) | Accepted | 2026-05-22 |
 | 0012 | [Unified review framework — lifecycle-driven dimensions with degree-only user choice](0012-unified-review-framework.md) | Proposed | 2026-08-01 |
+| 0013 | [Unified .plan file replaces .meta and .epic](0013-unified-plan-file.md) | Accepted | 2026-08-14 |
