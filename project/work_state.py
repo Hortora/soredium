@@ -65,6 +65,12 @@ def detect(topo: Topology) -> WorkState:
             if line.strip().startswith("- branch:")
         )
 
+    # Migration — convert old .meta to unified .plan if needed
+    meta_file = find_design_file(".meta", topo)
+    if meta_file and meta_file.exists():
+        from plan_migrate import migrate_if_needed
+        migrate_if_needed(meta_file.parent)
+
     # Plan detection via shared search
     from plan_manager import detect as _plan_detect
     has_plan = False
