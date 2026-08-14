@@ -318,18 +318,11 @@ If the closed branch was in `.pause-stack`, remove it.
 
 If `ARC42STORIES.MD` exists, scan for stale statuses and fix.
 
-### 5.5 Write HANDOFF.md
-
-Invoke the handover skill's Steps 2-6 to write HANDOFF.md. At this
-point Step 5.2 has already checked out main, so the handoff commits
-to main — this is the "what's next" handoff for the next `work`
-invocation after the branch is closed.
-
-### 5.6 Session rename
+### 5.5 Session rename
 
 Suggest a descriptive session name if auto-generated.
 
-### 5.7 Session close summary
+### 5.6 Session close summary
 
 ```
 Session close complete.
@@ -343,7 +336,7 @@ Session close complete.
 ✅ Branch closed     <branch-name>
 ```
 
-### 5.8 Surface notes
+### 5.7 Notes — surface and offer to append
 
 If `$WORKSPACE/.notes/NOTES.md` exists and has content, surface the most
 recent date section after the close summary:
@@ -354,8 +347,22 @@ Notes (2026-08-10):
   - [engine] reindex needed after next schema change
 ```
 
-Reminds the user of persistent context before they decide what to do next.
-Skip silently if no notes exist or `.notes/` directory is absent.
+Then offer to append:
+> "Anything worth noting for future sessions? (Enter to skip)"
+
+If the user provides notes, append under today's date header and commit
+to the orphan `notes` branch:
+```bash
+# Append to $WORKSPACE/.notes/NOTES.md under today's date
+git -C $WORKSPACE/.notes add NOTES.md
+git -C $WORKSPACE/.notes commit -m "notes: work-end"
+```
+
+This captures context that matters beyond the closed branch but isn't
+a CLAUDE.md convention yet — e.g. "slot 107 has a stale .m2 cache",
+"the enrichment DB needs a manual refresh after the next casehub slot".
+
+Skip silently if no `.notes/` directory exists.
 
 ---
 
@@ -394,7 +401,6 @@ Skip silently if no notes exist or `.notes/` directory is absent.
 **Complements:**
 - `work` — routing entry point
 - `work-pause` — alternative (pause vs. close)
-- `handover` — work-end includes the full wrap (Step 5.6)
 - `work-start` — opens branches; work-end closes them
 - `work-slot` — slot detection triggers per-repo loop in Execute
 - `using-git-worktrees` — worktree isolation before plan execution;
