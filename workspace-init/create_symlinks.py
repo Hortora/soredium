@@ -45,6 +45,13 @@ def main() -> int:
         print(f"Project path does not exist: {project}", file=sys.stderr)
         return 1
 
+    from workspace_create import validate_workspace_location
+    loc_err = validate_workspace_location(workspace)
+    if loc_err:
+        print(f"ERROR={loc_err}")
+        print(f"BLOCKED: {loc_err}", file=sys.stderr)
+        return 1
+
     proj_symlink = workspace / "proj"
     wksp_symlink = project / "wksp"
 

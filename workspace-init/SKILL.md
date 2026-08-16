@@ -868,7 +868,7 @@ project pointing to the workspace. Also ensures `wksp` is in `.gitignore`.
 mode and all workspace artifacts land in the project repo.
 
 ```bash
-python3 ~/.claude/skills/workspace-init/create_symlinks.py "<project-path>" "<BASE>"
+python3 ~/.claude/skills/workspace-init/create_symlinks.py "<BASE>" "<project-path>"
 ```
 
 Read `PROJ_SYMLINK`, `WKSP_SYMLINK`, `GITIGNORE_UPDATED` from output.
