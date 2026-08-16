@@ -65,7 +65,9 @@ def resolve(cwd=None) -> dict[str, str]:
         if str(_ws_init) not in sys.path:
             sys.path.insert(0, str(_ws_init))
         try:
-            from workspace_create import validate_workspace_location, validate_workspace_marker
+            from workspace_create import (validate_workspace_location,
+                                          validate_workspace_marker,
+                                          write_workspace_marker)
             loc_err = validate_workspace_location(topo.workspace)
             if loc_err:
                 workspace_valid = "nested"
@@ -73,8 +75,14 @@ def resolve(cwd=None) -> dict[str, str]:
             else:
                 marker_err = validate_workspace_marker(topo.workspace, topo.project)
                 if marker_err:
-                    workspace_valid = "no_marker"
-                    workspace_error = marker_err
+                    write_workspace_marker(topo.workspace, topo.project)
+                    import subprocess as _sp2
+                    _sp2.run(["git", "-C", str(topo.workspace), "add", ".workspace"],
+                             capture_output=True)
+                    _sp2.run(["git", "-C", str(topo.workspace), "commit", "-m",
+                              "chore: add .workspace marker"],
+                             capture_output=True)
+                    workspace_valid = "yes"
         except ImportError:
             pass
 
