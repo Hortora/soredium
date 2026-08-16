@@ -30,6 +30,7 @@ Exit codes:
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 
 def run_git(repo: str, *args: str) -> tuple[bool, str]:
@@ -95,6 +96,20 @@ def create_branches(project: str, workspace: str, branch: str, base: str | None)
 def commit_scaffold(workspace: str, branch: str) -> int:
     """Commit scaffold files and push."""
     import os
+
+    ws_path = Path(workspace)
+    ws_init = Path(__file__).parent.parent / "workspace-init"
+    if str(ws_init) not in sys.path:
+        sys.path.insert(0, str(ws_init))
+    try:
+        from workspace_create import validate_workspace_location
+        loc_err = validate_workspace_location(ws_path)
+        if loc_err:
+            print("ERROR=nested_workspace")
+            print(f"ERROR_DETAIL={loc_err}")
+            return 1
+    except ImportError:
+        pass
 
     current_ok, current_branch = run_git(workspace, "branch", "--show-current")
     if current_ok and current_branch != branch:

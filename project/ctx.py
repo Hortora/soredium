@@ -58,6 +58,26 @@ def resolve(cwd=None) -> dict[str, str]:
     if topo.workspace and topo.workspace.is_dir():
         migrate_to_root(topo.workspace)
 
+    workspace_valid = "yes"
+    workspace_error = ""
+    if topo.workspace and topo.workspace.is_dir() and str(topo.workspace) != str(topo.project):
+        _ws_init = Path(__file__).parent.parent / "workspace-init"
+        if str(_ws_init) not in sys.path:
+            sys.path.insert(0, str(_ws_init))
+        try:
+            from workspace_create import validate_workspace_location, validate_workspace_marker
+            loc_err = validate_workspace_location(topo.workspace)
+            if loc_err:
+                workspace_valid = "nested"
+                workspace_error = loc_err
+            else:
+                marker_err = validate_workspace_marker(topo.workspace, topo.project)
+                if marker_err:
+                    workspace_valid = "no_marker"
+                    workspace_error = marker_err
+        except ImportError:
+            pass
+
     state = ws_detect(topo)
 
     # CLAUDE.md — ALL fields from topo.project (F2/F5 fix)
@@ -235,6 +255,8 @@ def resolve(cwd=None) -> dict[str, str]:
         "HAS_WRITING_STYLE_REF": has_writing_style_ref,
         "HAS_PROJECT_ARTIFACTS": has_project_artifacts,
         "WORKSPACE_DECLINED": workspace_declined_flag,
+        "WORKSPACE_VALID": workspace_valid,
+        "WORKSPACE_ERROR": workspace_error,
         # Branch state
         "CURRENT_BRANCH": current_branch,
         "PROJECT_BRANCH": project_branch,

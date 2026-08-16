@@ -125,6 +125,25 @@ def check_workspace_alignment(project, workspace):
     return "CHECK=workspace_alignment STATUS=ok"
 
 
+def check_workspace_integrity(project, workspace):
+    if str(Path(project).resolve()) == str(Path(workspace).resolve()):
+        return "CHECK=workspace_integrity STATUS=ok"
+    try:
+        _ws_init = str(Path(__file__).parent.parent / "workspace-init")
+        if _ws_init not in sys.path:
+            sys.path.insert(0, _ws_init)
+        from workspace_create import validate_workspace_location, validate_workspace_marker
+        loc_err = validate_workspace_location(Path(workspace))
+        if loc_err:
+            return f"CHECK=workspace_integrity STATUS=fail DETAIL={loc_err}"
+        marker_err = validate_workspace_marker(Path(workspace), Path(project))
+        if marker_err:
+            return f"CHECK=workspace_integrity STATUS=warn DETAIL={marker_err}"
+    except ImportError:
+        pass
+    return "CHECK=workspace_integrity STATUS=ok"
+
+
 def check_main_divergence(project, workspace):
     warnings = []
     for label, repo in [("project", project), ("workspace", workspace)]:
@@ -409,6 +428,7 @@ ENTRY_CHECKS = [
     lambda p, w: check_meta_consistency(p, w),
     lambda p, w: check_pause_stack(p, w),
     lambda p, w: check_workspace_alignment(p, w),
+    lambda p, w: check_workspace_integrity(p, w),
     lambda p, w: check_main_divergence(p, w),
     lambda p, w: check_dirty_main(p, w),
     lambda p, w: check_stale_scaffold_on_main(p, w),

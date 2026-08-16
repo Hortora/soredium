@@ -61,6 +61,53 @@ STUB_FILES: dict[str, str] = {
 }
 
 
+def write_workspace_marker(workspace: Path, project: Path) -> None:
+    """Write .workspace marker identifying this as a valid workspace."""
+    marker = workspace / ".workspace"
+    marker.write_text(
+        f"project: {project.resolve()}\n"
+        f"created: {__import__('datetime').date.today().isoformat()}\n"
+    )
+
+
+def validate_workspace_location(workspace: Path) -> str | None:
+    """Check that workspace is an independent git root, not nested inside another repo.
+    Returns None if valid, error message if invalid."""
+    if not workspace.is_dir():
+        return f"workspace path does not exist: {workspace}"
+    result = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    toplevel = Path(result.stdout.strip()).resolve()
+    ws_resolved = workspace.resolve()
+    if toplevel != ws_resolved:
+        return (f"workspace is nested inside another git repo: "
+                f"{workspace} is inside {toplevel} — "
+                f"commits will go to the wrong repo")
+    return None
+
+
+def validate_workspace_marker(workspace: Path, project: Path | None = None) -> str | None:
+    """Check that .workspace marker exists and matches the expected project.
+    Returns None if valid, error message if invalid."""
+    marker = workspace / ".workspace"
+    if not marker.exists():
+        return f"no .workspace marker at {workspace} — not a valid workspace"
+    if project is None:
+        return None
+    for line in marker.read_text().splitlines():
+        if line.startswith("project:"):
+            marker_project = Path(line.split(":", 1)[1].strip()).resolve()
+            if marker_project != project.resolve():
+                return (f".workspace marker points to {marker_project}, "
+                        f"but expected {project.resolve()}")
+            return None
+    return ".workspace marker has no project field"
+
+
 # -- Subcommands -------------------------------------------------------------
 
 def cmd_create_dirs(workspace: Path) -> int:
@@ -193,11 +240,33 @@ def cmd_init_repo(workspace: Path, params: dict[str, str]) -> int:
 
 # -- Dispatcher --------------------------------------------------------------
 
+def cmd_write_marker(workspace: Path, params: dict[str, str]) -> int:
+    project_str = params.get("project", "")
+    if not project_str:
+        print("ERROR=missing_project")
+        print("ERROR_DETAIL=project= is required")
+        return 1
+    project = Path(project_str)
+    if not project.is_dir():
+        print("ERROR=project_not_found")
+        print(f"ERROR_DETAIL={project}")
+        return 1
+    err = validate_workspace_location(workspace)
+    if err:
+        print(f"ERROR=nested_workspace")
+        print(f"ERROR_DETAIL={err}")
+        return 1
+    write_workspace_marker(workspace, project)
+    print(f"MARKER={workspace / '.workspace'}")
+    return 0
+
+
 SUBCOMMANDS = {
     "create-dirs": lambda ws, _p: cmd_create_dirs(ws),
     "create-indexes": lambda ws, _p: cmd_create_indexes(ws),
     "create-stubs": lambda ws, _p: cmd_create_stubs(ws),
     "init-repo": cmd_init_repo,
+    "write-marker": cmd_write_marker,
 }
 
 
