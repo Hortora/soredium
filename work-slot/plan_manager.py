@@ -31,6 +31,7 @@ class DeferredItem:
     complexity: str
     repos: list[str]
     completed: bool = False
+    reason: str = ""
 
 
 @dataclass
@@ -72,7 +73,7 @@ _EPIC_MARKER_RE = re.compile(r'\(epic\)')
 _ACTIVE_MARKER_RE = re.compile(r'←\s*active')
 _BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*←\s*current)?$')
 _DEFERRED_RE = re.compile(
-    r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]+)\]$'
+    r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]+)\](?:\s+—\s+(.+))?$'
 )
 _CURRENT_RE = re.compile(r'^Current:\s*#(\d+)')
 _STARTED_RE = re.compile(r'^Started:\s*(.+)')
@@ -298,7 +299,8 @@ def _parse_deferred_lines(lines: list[str]) -> list[DeferredItem]:
             scale = m.group(3).strip()
             complexity = m.group(4).strip()
             repos = [r.strip() for r in m.group(5).split(",")]
-            items.append(DeferredItem(title, scale, complexity, repos, completed))
+            reason = (m.group(6) or "").strip()
+            items.append(DeferredItem(title, scale, complexity, repos, completed, reason))
     return items
 
 
@@ -364,7 +366,8 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
         for d in deferred:
             check = "x" if d.completed else " "
             repos_str = ", ".join(d.repos)
-            lines.append(f"- [{check}] {d.title} ({d.scale} / {d.complexity}) [{repos_str}]")
+            reason_suffix = f" — {d.reason}" if d.reason else ""
+            lines.append(f"- [{check}] {d.title} ({d.scale} / {d.complexity}) [{repos_str}]{reason_suffix}")
 
     if not state:
         lines.append("")
@@ -436,7 +439,10 @@ def advance(plan_path: Path,
             break
 
     if active_idx is None:
-        raise ValueError("No active item in .plan")
+        return AdvanceResult(
+            completed=0, next_issue=None,
+            epic_complete=True, has_deferred=len(tree.deferred) > 0,
+        )
 
     completed_leaf = leaves[active_idx]
 
@@ -531,9 +537,7 @@ def create_main_plan(workspace_path: Path, items: list[dict],
     Returns path to created .plan file.
     """
     from datetime import date
-    design = workspace_path / "design"
-    design.mkdir(exist_ok=True)
-    plan_path = design / ".plan"
+    plan_path = workspace_path / ".plan"
     queue_items = []
     for i, item in enumerate(items):
         queue_items.append(QueueItem(
@@ -575,9 +579,10 @@ def append_to_queue(plan_path: Path, new_items: list[QueueItem]) -> None:
 
 
 def append_deferred(plan_path: Path, title: str, scale: str,
-                    complexity: str, repos: list[str]) -> None:
+                    complexity: str, repos: list[str],
+                    reason: str = "") -> None:
     tree = parse_plan(plan_path)
-    tree.deferred.append(DeferredItem(title, scale, complexity, repos))
+    tree.deferred.append(DeferredItem(title, scale, complexity, repos, reason=reason))
     rewrite_plan(plan_path, tree)
 
 
@@ -603,6 +608,45 @@ def promote_deferred(plan_path: Path,
         return []
 
     next_issue_num = 9000
+    for existing in tree.queue:
+        if existing.issue_number >= next_issue_num:
+            next_issue_num = existing.issue_number + 1
+    for d in to_promote:
+        tree.queue.append(QueueItem(
+            issue_number=next_issue_num,
+            title=d.title,
+        ))
+        next_issue_num += 1
+
+    if not _find_active_leaf(tree.queue):
+        _set_first_uncompleted_active(tree.queue)
+
+    tree.deferred = remaining
+    rewrite_plan(plan_path, tree)
+    return to_promote
+
+
+def promote_selected(plan_path: Path,
+                     indices: list[int]) -> list[DeferredItem]:
+    """Promote specific deferred items (by 0-based index) to the queue."""
+    tree = parse_plan(plan_path)
+    index_set = set(indices)
+    to_promote: list[DeferredItem] = []
+    remaining: list[DeferredItem] = []
+
+    for i, d in enumerate(tree.deferred):
+        if i in index_set:
+            to_promote.append(d)
+        else:
+            remaining.append(d)
+
+    if not to_promote:
+        return []
+
+    next_issue_num = 9000
+    for existing in tree.queue:
+        if existing.issue_number >= next_issue_num:
+            next_issue_num = existing.issue_number + 1
     for d in to_promote:
         tree.queue.append(QueueItem(
             issue_number=next_issue_num,
@@ -630,9 +674,9 @@ def _set_first_uncompleted_active(items: list[QueueItem]) -> bool:
 
 
 def detect(workspace_path: Path) -> dict | None:
-    plan_path = workspace_path / "design" / ".plan"
+    plan_path = workspace_path / ".plan"
     if not plan_path.exists():
-        plan_path = workspace_path / ".plan"
+        plan_path = workspace_path / "design" / ".plan"
     if not plan_path.exists():
         return None
 
@@ -781,3 +825,75 @@ def _tick_github_checkboxes(issue_repo: str, epic_number: int,
         return r.returncode == 0
     except Exception:
         return False
+
+
+def _parse_cli_args(args: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for arg in args:
+        if "=" in arg:
+            k, _, v = arg.partition("=")
+            result[k.strip()] = v.strip()
+    return result
+
+
+def main() -> int:
+    if len(_sys.argv) < 3:
+        print("Usage: plan_manager.py <command> <plan_path> [key=value ...]",
+              file=_sys.stderr)
+        return 1
+
+    command = _sys.argv[1]
+    plan_path = Path(_sys.argv[2])
+    opts = _parse_cli_args(_sys.argv[3:])
+
+    if command == "defer":
+        title = opts.get("title", "")
+        scale = opts.get("scale", "M")
+        complexity = opts.get("complexity", "Med")
+        repos_str = opts.get("repos", "")
+        reason = opts.get("reason", "")
+        if not title:
+            print("ERROR=title is required", file=_sys.stderr)
+            return 1
+        repos = [r.strip() for r in repos_str.split(",") if r.strip()] if repos_str else []
+        append_deferred(plan_path, title, scale, complexity, repos, reason)
+        print(f"DEFERRED={title}")
+        return 0
+
+    elif command == "list-deferred":
+        items = list_deferred(plan_path)
+        for i, d in enumerate(items):
+            reason_suffix = f" — {d.reason}" if d.reason else ""
+            print(f"{i}. {d.title} ({d.scale} / {d.complexity}) [{', '.join(d.repos)}]{reason_suffix}")
+        print(f"TOTAL={len(items)}")
+        return 0
+
+    elif command == "promote-selected":
+        indices_str = opts.get("indices", "")
+        if not indices_str:
+            print("ERROR=indices is required", file=_sys.stderr)
+            return 1
+        indices = [int(x.strip()) for x in indices_str.split(",") if x.strip()]
+        promoted = promote_selected(plan_path, indices)
+        for d in promoted:
+            print(f"PROMOTED={d.title}")
+        print(f"PROMOTED_COUNT={len(promoted)}")
+        return 0
+
+    elif command == "detect":
+        ws = plan_path.parent.parent if plan_path.parent.name == "design" else plan_path.parent
+        result = detect(ws)
+        if result:
+            for k, v in result.items():
+                print(f"{k.upper()}={v}")
+        else:
+            print("HAS_PLAN=no")
+        return 0
+
+    else:
+        print(f"Unknown command: {command}", file=_sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    _sys.exit(main())

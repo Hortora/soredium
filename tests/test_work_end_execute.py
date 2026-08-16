@@ -66,7 +66,7 @@ class TestPromoteSingleRepo:
         assert result.returncode == 0
         assert "PROMOTED=yes" in result.stdout
 
-        progress_path = design / ".execute-progress"
+        progress_path = workspace / ".execute-progress"
         assert progress_path.exists()
         content = progress_path.read_text()
         assert "promoted" in content
@@ -80,7 +80,7 @@ class TestPromoteSingleRepo:
         design = workspace / "design"
         design.mkdir(exist_ok=True)
         (design / ".meta").write_text(f"branch: {branch}\nstate: active\n")
-        (design / ".execute-progress").write_text("default=promoted\n")
+        (workspace / ".execute-progress").write_text("default=promoted\n")
         _git(workspace, "add", ".")
         _git(workspace, "commit", "-m", "scaffold")
 
@@ -132,6 +132,7 @@ class TestRebaseSingleRepo:
         (project / "README.md").write_text("main version\n")
         _git(project, "add", "README.md")
         _git(project, "commit", "-m", "fix: main change")
+        _git(project, "push", "origin", "main")
 
         _git(project, "checkout", "issue-102-test")
 
@@ -142,6 +143,45 @@ class TestRebaseSingleRepo:
             "base_branch=main",
         )
         assert "ERROR=REBASE_CONFLICT" in result.stdout
+
+    def test_rebase_uses_blessed_remote_in_fork_model(self, tmp_path: Path) -> None:
+        """In fork model, rebase should fetch from upstream, not origin."""
+        blessed = _init_bare(tmp_path / "blessed.git")
+        fork = _init_bare(tmp_path / "fork.git")
+        project = _init_repo(tmp_path / "project")
+        _git(project, "remote", "add", "origin", str(fork))
+        _git(project, "remote", "add", "upstream", str(blessed))
+        _git(project, "push", "origin", "main")
+        _git(project, "push", "upstream", "main")
+
+        # Push a new commit to upstream only (not to origin/fork)
+        other = tmp_path / "other"
+        subprocess.run(["git", "clone", str(blessed), str(other)],
+                       capture_output=True, check=True)
+        _git(other, "config", "user.email", "other@test.com")
+        _git(other, "config", "user.name", "Other")
+        (other / "upstream-work.txt").write_text("from upstream\n")
+        _git(other, "add", "upstream-work.txt")
+        _git(other, "commit", "-m", "feat: upstream work")
+        _git(other, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", "issue-fork-rebase")
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: our work")
+
+        result = _run_execute(
+            "rebase",
+            f"project={project}",
+            "branch=issue-fork-rebase",
+            "base_branch=main",
+        )
+        assert result.returncode == 0
+        assert "REBASE_REMOTE=upstream" in result.stdout
+        assert "REBASED=yes" in result.stdout
+
+        log = _git(project, "log", "--oneline")
+        assert "feat: upstream work" in log
 
 
 class TestLandSingleRepo:
@@ -509,6 +549,151 @@ class TestLandPushTopology:
         assert "MIRRORED_TO" not in result.stdout
 
 
+class TestLandRollbackOnPushFailure:
+    def test_merge_rolled_back_when_push_fails(self, tmp_path: Path) -> None:
+        """If push fails after merge, local main must be rolled back
+        to prevent orphaned merge commits that get rescued and lost."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-rollback-test"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: will fail to push")
+
+        _git(project, "checkout", "main")
+        pre_merge_sha = _git(project, "rev-parse", "HEAD")
+
+        # Remove remote so push will fail
+        _git(project, "remote", "remove", "origin")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 1
+
+        # Main should be rolled back to pre-merge state
+        current_sha = _git(project, "rev-parse", "HEAD")
+        assert current_sha == pre_merge_sha, (
+            f"Main not rolled back: expected {pre_merge_sha[:12]}, got {current_sha[:12]}"
+        )
+        main_log = _git(project, "log", "--oneline", "main")
+        assert "feat: will fail to push" not in main_log
+
+
+class TestLandLedger:
+    def test_land_writes_ledger_entry(self, tmp_path: Path) -> None:
+        """Successful land should append to .land-ledger.jsonl."""
+        import json
+
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-ledger-test"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: ledger test")
+
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0
+
+        ledger = workspace / ".land-ledger.jsonl"
+        assert ledger.exists(), "Land ledger should be created"
+
+        entries = [json.loads(line) for line in ledger.read_text().splitlines() if line.strip()]
+        land_entries = [e for e in entries if e.get("event") == "land"]
+        assert len(land_entries) >= 1
+
+        entry = land_entries[-1]
+        assert entry["branch"] == branch
+        assert entry["repo"] == project.name
+        assert entry["push_target"] == "origin"
+        assert entry["stamped"] is True
+        assert "landed_sha" in entry
+        assert "timestamp" in entry
+
+    def test_land_does_not_write_ledger_on_failure(self, tmp_path: Path) -> None:
+        """Failed land should NOT write to the ledger."""
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-no-ledger"
+
+        _git(project, "checkout", "-b", branch)
+        _git(project, "commit", "--allow-empty", "-m", "feat: no remote")
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 1
+
+        ledger = workspace / ".land-ledger.jsonl"
+        assert not ledger.exists(), "Ledger should not exist after failed land"
+
+
+class TestLandPostPushVerify:
+    def test_land_verifies_sha_on_remote(self, tmp_path: Path) -> None:
+        """After push, verify the landed SHA exists on the remote."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-verify-test"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: verify test")
+
+        _git(project, "checkout", "main")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert result.returncode == 0
+        assert "PUSH_VERIFIED=yes" in result.stdout
+
+
 class TestBadArgs:
     def test_missing_subcommand(self) -> None:
         result = subprocess.run(
@@ -572,3 +757,37 @@ class TestWriteMarker:
         )
         assert result.returncode == 1
         assert "BAD_PATH" in result.stdout
+
+
+class TestCloseIssues:
+    def test_missing_repo(self) -> None:
+        result = _run_execute("close-issues", "covers=42")
+        assert result.returncode == 1
+        assert "MISSING_ARGS" in result.stdout
+
+    def test_missing_covers(self) -> None:
+        result = _run_execute("close-issues", "repo=owner/repo")
+        assert result.returncode == 1
+        assert "MISSING_ARGS" in result.stdout
+
+    def test_delegates_to_artifact_promote(self, tmp_path: Path, monkeypatch) -> None:
+        work_end_dir = Path(__file__).parent.parent / "work-end"
+        sys.path.insert(0, str(work_end_dir))
+        import work_end_execute
+
+        calls = []
+        original_run = subprocess.run
+
+        def fake_run(cmd, **kwargs):
+            if isinstance(cmd, list) and any("artifact_promote.py" in str(c) for c in cmd):
+                calls.append(cmd)
+                return subprocess.CompletedProcess(cmd, 0, "CLOSED=2\n", "")
+            return original_run(cmd, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        rc = work_end_execute.cmd_close_issues({"repo": "owner/repo", "covers": "42,43"})
+        assert rc == 0
+        assert len(calls) == 1
+        assert "close-issues" in calls[0]
+        assert "owner/repo" in calls[0]
+        assert "covers=42,43" in calls[0]

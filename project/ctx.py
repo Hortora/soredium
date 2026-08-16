@@ -53,6 +53,11 @@ def _check_dir(*paths: Path) -> str:
 def resolve(cwd=None) -> dict[str, str]:
     """Resolve all workspace context. Returns a dict of KEY -> value strings."""
     topo = topo_resolve(cwd)
+
+    from plan_migrate import migrate_to_root
+    if topo.workspace and topo.workspace.is_dir():
+        migrate_to_root(topo.workspace)
+
     state = ws_detect(topo)
 
     # CLAUDE.md — ALL fields from topo.project (F2/F5 fix)

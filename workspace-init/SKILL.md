@@ -465,8 +465,7 @@ Read `CREATED=<count>` from output. If `ERROR=` appears, stop and report the err
 
 (`specs/`, `plans/`, and `design/` need no INDEX.md — superpowers and design skills manage them directly.)
 
-The `design/` directory is intentionally left empty at workspace init. `work-start`
-creates `design/JOURNAL.md` and `design/.plan` when a work branch begins.
+`work-start` creates `JOURNAL.md` and `.plan` at workspace root when a work branch begins.
 
 ### Step 4 — Create HANDOFF.md and IDEAS.md stubs
 
@@ -522,7 +521,7 @@ Run `add-dir <absolute-path-to-project>` and `add-dir <absolute-path-to-workspac
 | writing-plans (plans) | `plans/` |
 | handover | `HANDOFF.md` |
 | idea-log | `IDEAS.md` |
-| update-design | `design/JOURNAL.md` (created by `work-start`) |
+| update-design | `JOURNAL.md` (created by `work-start` at workspace root) |
 | adr | `adr/` |
 | write-content | `blog/` |
 

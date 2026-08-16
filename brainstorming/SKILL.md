@@ -65,12 +65,26 @@ States: `CONTEXT_GATHERING`, `CLARIFYING_QUESTIONS`, `APPROACH_EXPLORATION`,
 Overwrite the file at each transition — git history preserves the trail.
 Update `decision_count` each time a decision is captured.
 
+## Commit Discipline
+
+**Commit after every write.** All workspace artifacts — pipeline.state,
+decisions.md, spec docs, exploration docs — must be committed immediately
+after writing. Use WIP-style messages; semantic squash cleans them up later.
+
+```bash
+git -C "$WORKSPACE" add specs/<branch>/
+git -C "$WORKSPACE" commit -m "wip(design): <what changed> Refs #<N>"
+```
+
+This is not optional. Uncommitted files are lost on session crash and cause
+dirty-tree failures in work-end. The commit is the save.
+
 ## Checklist
 
 You MUST create a task for each of these items and complete them in order:
 
 1. **Gather context** — check files, docs, recent commits. If work-start
-   has run, read `$WORKSPACE/design/.plan`'s `## State` for `covers` (the
+   has run, read `$WORKSPACE/.plan`'s `## State` for `covers` (the
    issue group). Run forage SEARCH and protocol SEARCH with keywords from
    the idea to surface relevant garden entries (gotchas, techniques, prior
    decisions) and project protocols (standing conventions, architectural
@@ -144,7 +158,7 @@ writing-plans.
 ### Gathering Context
 
 - Check the current project state (files, docs, recent commits)
-- If work-start has run, read `$WORKSPACE/design/.plan`'s `## State` for the issue
+- If work-start has run, read `$WORKSPACE/.plan`'s `## State` for the issue
   group context — the focal issue and what the branch covers
 - Run forage SEARCH with keywords from the idea — surface relevant garden
   entries before the user starts answering design questions. A garden entry

@@ -31,7 +31,9 @@ def _git(repo, *args, timeout=10):
 
 
 def _parse_pause_stack(workspace):
-    stack_path = Path(workspace) / "design" / ".pause-stack"
+    stack_path = Path(workspace) / ".pause-stack"
+    if not stack_path.exists():
+        stack_path = Path(workspace) / "design" / ".pause-stack"
     if not stack_path.exists():
         return []
     entries = []
@@ -65,7 +67,7 @@ def _parse_yaml_intent(path):
 
 
 def check_meta_consistency(project, workspace):
-    plan_path = Path(workspace) / "design" / ".plan"
+    plan_path = Path(workspace) / ".plan"
     meta_path = Path(workspace) / "design" / ".meta"
     state_file = plan_path if plan_path.exists() else meta_path
     if not state_file.exists():
@@ -141,6 +143,21 @@ def check_main_divergence(project, workspace):
     return "CHECK=main_divergence STATUS=ok"
 
 
+def check_stale_scaffold_on_main(project, workspace):
+    current, _ = _git(workspace, "branch", "--show-current")
+    if current != "main":
+        return "CHECK=stale_scaffold_on_main STATUS=ok"
+    ws = Path(workspace)
+    stale = []
+    for name in (".plan", ".meta", ".epic", "JOURNAL.md", ".execute-progress"):
+        if (ws / name).exists():
+            stale.append(name)
+    if stale:
+        return (f"CHECK=stale_scaffold_on_main STATUS=warn "
+                f"DETAIL=workspace main has stale scaffold: {', '.join(stale)} — run cleanup-scaffold")
+    return "CHECK=stale_scaffold_on_main STATUS=ok"
+
+
 def check_dirty_main(project, workspace):
     current, _ = _git(project, "branch", "--show-current")
     if current != "main":
@@ -152,7 +169,9 @@ def check_dirty_main(project, workspace):
 
 
 def check_partial_pause(project, workspace):
-    path = Path(workspace) / "design" / ".pausing"
+    path = Path(workspace) / ".pausing"
+    if not path.exists():
+        path = Path(workspace) / "design" / ".pausing"
     data = _parse_yaml_intent(path)
     if data is None:
         return "CHECK=partial_pause STATUS=ok"
@@ -169,7 +188,9 @@ def check_partial_pause(project, workspace):
 
 
 def check_partial_resume(project, workspace):
-    path = Path(workspace) / "design" / ".resuming"
+    path = Path(workspace) / ".resuming"
+    if not path.exists():
+        path = Path(workspace) / "design" / ".resuming"
     data = _parse_yaml_intent(path)
     if data is None:
         return "CHECK=partial_resume STATUS=ok"
@@ -190,9 +211,7 @@ def check_branch_closure(project, workspace):
     for e in _parse_pause_stack(workspace):
         if "branch" in e:
             branches_to_check.add(e["branch"])
-    plan_path = Path(workspace) / "design" / ".plan"
-    meta_path = Path(workspace) / "design" / ".meta"
-    state_file = plan_path if plan_path.exists() else meta_path
+    state_file = Path(workspace) / ".plan"
     if state_file.exists():
         in_state = False
         has_sections = False
@@ -222,7 +241,7 @@ def check_branch_closure(project, workspace):
 
 
 def check_plan_state(project, workspace, owner_repo=None):
-    plan_path = Path(workspace) / "design" / ".plan"
+    plan_path = Path(workspace) / ".plan"
     if not plan_path.exists():
         return "CHECK=plan_state STATUS=ok"
     if not owner_repo:
@@ -282,7 +301,7 @@ def check_plan_state(project, workspace, owner_repo=None):
 
 def format_resume_display(workspace, health_output=""):
     """Render .plan as a human-readable queue summary for the resume path."""
-    plan_path = Path(workspace) / "design" / ".plan"
+    plan_path = Path(workspace) / ".plan"
     if not plan_path.exists():
         return ""
 
@@ -392,6 +411,7 @@ ENTRY_CHECKS = [
     lambda p, w: check_workspace_alignment(p, w),
     lambda p, w: check_main_divergence(p, w),
     lambda p, w: check_dirty_main(p, w),
+    lambda p, w: check_stale_scaffold_on_main(p, w),
     lambda p, w: check_partial_pause(p, w),
     lambda p, w: check_partial_resume(p, w),
     lambda p, w: check_branch_closure(p, w),

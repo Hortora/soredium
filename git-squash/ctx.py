@@ -66,8 +66,13 @@ else:
 
 # Workspace path (if applicable)
 workspace_root = run("git", "rev-parse", "--show-toplevel")
-plan_path = Path(workspace_root) / "design" / ".plan"
-meta_path = Path(workspace_root) / "design" / ".meta"
+ws_root = Path(workspace_root)
+plan_path = ws_root / ".plan"
+if not plan_path.exists():
+    plan_path = ws_root / "design" / ".plan"
+meta_path = ws_root / ".meta"
+if not meta_path.exists():
+    meta_path = ws_root / "design" / ".meta"
 state_file = plan_path if plan_path.exists() else meta_path
 meta_sha = ""
 if state_file.exists():

@@ -70,6 +70,57 @@ def _queue_items_from_epic(epic_path: Path):
     return items
 
 
+def migrate_to_root(workspace: Path) -> bool:
+    """Move scaffold files from design/ subdirectory to workspace root.
+
+    Called once at session entry (ctx.py). After this, all code reads
+    from root only — no per-file fallback logic needed anywhere.
+    """
+    design = workspace / "design"
+    if not design.is_dir():
+        return False
+
+    moved = False
+    for name in (".plan", "JOURNAL.md", ".execute-progress",
+                 ".artifacts-promoted", ".land-ledger.jsonl",
+                 ".pause-stack", ".pausing", ".resuming"):
+        src = design / name
+        dst = workspace / name
+        if src.exists() and not dst.exists():
+            try:
+                src.rename(dst)
+                moved = True
+            except FileNotFoundError:
+                moved = True
+
+    for name in (".meta", ".epic"):
+        old = design / name
+        if old.exists() and not (workspace / ".plan").exists():
+            migrate_if_needed(design)
+            plan_in_design = design / ".plan"
+            if plan_in_design.exists():
+                try:
+                    plan_in_design.rename(workspace / ".plan")
+                    moved = True
+                except FileNotFoundError:
+                    moved = True
+            break
+
+    for stale in (".meta", ".epic", ".plan"):
+        p = design / stale
+        if p.exists() and (stale != ".plan" or (workspace / ".plan").exists()):
+            p.unlink()
+            moved = True
+
+    if design.is_dir() and not any(design.iterdir()):
+        try:
+            design.rmdir()
+        except OSError:
+            pass
+
+    return moved
+
+
 def migrate_if_needed(design_dir: Path) -> bool:
     meta_path = design_dir / ".meta"
     plan_path = design_dir / ".plan"

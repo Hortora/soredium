@@ -50,9 +50,9 @@ def check_clean_tree(workspace: str, project: str) -> dict:
 
 
 def check_meta_exists(workspace: str) -> dict:
-    plan_path = Path(workspace) / "design" / ".plan"
-    meta_path = Path(workspace) / "design" / ".meta"
-    target = plan_path if plan_path.exists() else meta_path
+    ws = Path(workspace)
+    plan_path = ws / ".plan"
+    target = plan_path
     if not target.exists():
         return {"status": "needs_input", "detail": "no-meta"}
 
@@ -124,9 +124,28 @@ def check_isx_staleness(workspace: str, project: str) -> dict:
     return {"status": "pass"}
 
 
+def check_branch_alignment(workspace: str, project: str) -> dict:
+    ws_branch = get_branch(workspace)
+    proj_branch = get_branch(project)
+    if not ws_branch or not proj_branch:
+        return {"status": "fail", "detail": "cannot determine branch"}
+    if ws_branch == "main" and proj_branch != "main":
+        return {"status": "fail", "detail": f"workspace on main but project on {proj_branch} — workspace branch missing"}
+    if ws_branch != proj_branch:
+        return {"status": "fail", "detail": f"workspace on {ws_branch}, project on {proj_branch} — branch mismatch"}
+    return {"status": "pass"}
+
+
 def gather_context(workspace: str, project: str) -> dict:
+    _slot_dir = str(Path(__file__).parent.parent / "work-slot")
+    if _slot_dir not in sys.path:
+        sys.path.insert(0, _slot_dir)
+    from plan_migrate import migrate_to_root
+    migrate_to_root(Path(workspace))
+
     preconditions: dict[str, dict] = {}
 
+    preconditions["branch_alignment"] = check_branch_alignment(workspace, project)
     preconditions["clean_tree"] = check_clean_tree(workspace, project)
     preconditions["isx_staleness"] = check_isx_staleness(workspace, project)
     meta_result = check_meta_exists(workspace)

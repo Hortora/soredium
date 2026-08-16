@@ -74,7 +74,7 @@ python3 ~/.claude/skills/project/work_health.py --scope entry --project "$PROJEC
 Read the output. If any CHECK has STATUS=warn or STATUS=changed, include the
 findings in the resume output.
 
-Then check for an open branch. Read the branch name from `$WORKSPACE/design/.plan`
+Then check for an open branch. Read the branch name from `$WORKSPACE/.plan`
 (if it exists). Use `is_closed()` to determine branch state:
 
 ```python
@@ -91,7 +91,7 @@ state = is_closed(PROJECT, branch, workspace=WORKSPACE)
 
 ### Step R3 — Display .plan queue (replaces issue cross-check)
 
-If `$WORKSPACE/design/.plan` exists, display the human-readable queue
+If `$WORKSPACE/.plan` exists, display the human-readable queue
 using `format_resume_display()` from `work_health.py`. The `plan_state`
 check in Step R2b already validated issue state against GitHub — any
 closed issues were marked `[x]` automatically.
@@ -244,7 +244,7 @@ Session wrap — create before writing the handover?
 [x] 2  update-claude-md  sync any new workflow conventions
 [x] 3  forage sweep      check for gotchas, techniques, undocumented
 [x] 4  protocol sweep    check for project rules worth formalising
-[?] 5  journal-entry     document any design changes this session not yet in design/JOURNAL.md  ← ON if mid-epic (design/.meta exists), OFF otherwise
+[?] 5  journal-entry     document any design changes this session not yet in JOURNAL.md  ← ON if mid-epic (.plan exists), OFF otherwise
 [?] 6  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
 [?] 7  arc42 stale scan  check ARC42STORIES.MD for stale statuses, resolved blockers, closed-issue forward refs  ← ON if ARC42STORIES.MD exists
 [x] 8  notes             anything to note for later? (appends to $WORKSPACE/.notes/NOTES.md)
@@ -272,7 +272,7 @@ not actionable enough to be issues. Append-only with date headers and optional
 </SESSION-BOUND-ITEMS>
 
 - **protocol sweep is on by default** — scans the session for project-specific rules worth formalising. Skip it for sessions that worked purely in universal tools with no project-specific rules established or re-enforced. The protocol skill creates `docs/protocols/` if it does not exist — never skip the sweep because the directory is absent.
-- **journal-entry is ON by default when on an epic branch** — check `ls design/.plan 2>/dev/null` before showing the checklist. If `.meta` exists the session is mid-epic and design reasoning is about to be lost; default journal-entry to ON. If not on an epic branch, default to OFF.
+- **journal-entry is ON by default when on an epic branch** — check `ls .plan 2>/dev/null` before showing the checklist. If `.meta` exists the session is mid-epic and design reasoning is about to be lost; default journal-entry to ON. If not on an epic branch, default to OFF.
 - **epic hygiene is ON by default when a workspace is configured** — check `**Workspace:**` in CLAUDE.md. Runs these checks and surfaces any issues before the session ends:
   1. Orphaned `.plan` on main (epic closed without cleanup)
   2. Workspace/project branch misalignment
@@ -652,7 +652,7 @@ Handover is complete when:
 - ✅ Protocol sweep performed (if checked) — session scanned for project-specific rules worth formalising; confirmed entries captured and committed
 - ✅ write-content (diary) invoked (if checked) — session diary entry written
 - ✅ update-claude-md invoked (if checked) — CLAUDE.md synced
-- ✅ journal-entry written (if checked) — design/JOURNAL.md updated; off by default; only applicable on epic branches
+- ✅ journal-entry written (if checked) — JOURNAL.md updated; off by default; only applicable on epic branches
 - ✅ Session name offered — user was prompted to `/rename` or acknowledged the session already has a meaningful name
 - ✅ HANDOFF.md exists on the workspace branch
 - ✅ Readable in under 500 tokens
@@ -690,7 +690,7 @@ the resume output directs the user to `/work` which handles branch resumption
 - `git diff HEAD -- HANDOFF.md` — what changed from last handover
 - `git log --oneline -6` — recent commits for orientation
 - `ls` on workspace directories — locate paths without reading files
-- `design/.plan` — open branch detection on resume
+- `.plan` — open branch detection on resume
 
 **Complements:**
 - `work-end` — branch closure includes full wrap; this skill is for mid-work only

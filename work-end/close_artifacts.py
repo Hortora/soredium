@@ -85,9 +85,8 @@ def resolve_routing(workspace: Path) -> dict[str, str]:
 
 
 def write_stamp(workspace: Path, branch: str, results: dict[str, str]) -> Path:
-    """Write .artifacts-promoted stamp to workspace design/ on the branch."""
-    stamp_path = workspace / "design" / ".artifacts-promoted"
-    stamp_path.parent.mkdir(parents=True, exist_ok=True)
+    """Write .artifacts-promoted stamp to workspace root."""
+    stamp_path = workspace / ".artifacts-promoted"
 
     lines = [
         f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}",

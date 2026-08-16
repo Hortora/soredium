@@ -215,7 +215,7 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
                 return 1
 
     # Push stack entry to the stack workspace (original if slot, else workspace)
-    stack_file = Path(stack_workspace) / "design" / ".pause-stack"
+    stack_file = Path(stack_workspace) / ".pause-stack"
     repo_stack = Path(__file__).resolve().parent.parent / "project" / "stack.py"
     installed_stack = Path.home() / ".claude" / "skills" / "project" / "stack.py"
     stack_script = repo_stack if repo_stack.exists() else installed_stack
@@ -263,7 +263,7 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
             return 1
 
         # Add, commit, push stack change on the stack workspace
-        add_ok, _ = run_git(stack_workspace, "add", "design/.pause-stack")
+        add_ok, _ = run_git(stack_workspace, "add", ".pause-stack")
         if not add_ok:
             print("ERROR=stack_add_failed")
             return 1
@@ -308,7 +308,7 @@ PAUSE_STEPS = ["wip_project", "wip_workspace", "stack_push", "checkout_main"]
 
 
 def _intent_path(workspace: str) -> Path:
-    return Path(workspace) / "design" / ".pausing"
+    return Path(workspace) / ".pausing"
 
 
 def _write_intent_atomic(path: Path, content: str) -> None:

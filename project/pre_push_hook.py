@@ -36,30 +36,35 @@ class HookResult:
 
 
 def find_meta(repo_root: Path | None = None) -> Path | None:
-    """Find .meta via wksp/ symlink, $WORKSPACE env, or local design/.meta."""
+    """Find .plan or .meta via wksp/ symlink, $WORKSPACE env, or local path.
+
+    Search order at each level: root .plan, design/.plan, design/.meta.
+    """
     if repo_root is None:
         repo_root = Path.cwd()
 
+    search_bases: list[Path] = []
+
     wksp = repo_root / "wksp"
-    if wksp.is_symlink():
-        if wksp.is_dir():
-            candidate = wksp.resolve() / "design" / ".meta"
-            if candidate.exists():
-                return candidate
-        else:
-            return None
+    if wksp.is_symlink() and wksp.is_dir():
+        search_bases.append(wksp.resolve())
 
     ws_env = os.environ.get("WORKSPACE")
     if ws_env:
         ws_path = Path(ws_env)
         if ws_path.is_dir():
-            candidate = ws_path / "design" / ".meta"
+            search_bases.append(ws_path)
+
+    search_bases.append(repo_root)
+
+    for base in search_bases:
+        for candidate in [
+            base / ".plan",
+            base / "design" / ".plan",
+            base / "design" / ".meta",
+        ]:
             if candidate.exists():
                 return candidate
-
-    local = repo_root / "design" / ".meta"
-    if local.exists():
-        return local
 
     return None
 

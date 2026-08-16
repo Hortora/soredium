@@ -158,10 +158,10 @@ def resolve(cwd: str | None = None) -> Topology:
 
 
 def find_design_file(name: str, topo: Topology) -> Path | None:
-    """Search all relevant locations for a design file (.meta, .plan, .epic).
+    """Search all relevant locations for a design file (.plan, .meta).
 
-    Order: workspace, workspace_root, slot_dir — checking design/<name>
-    then <name> at each level. Falls back to primary repo's workspace
+    Order: workspace, workspace_root, slot_dir — checking root <name>
+    then design/<name> at each level. Falls back to primary repo's workspace
     in multi-repo slots.
     """
     candidates = [topo.workspace, topo.workspace_root]
@@ -171,7 +171,7 @@ def find_design_file(name: str, topo: Topology) -> Path | None:
     for base in candidates:
         if base is None:
             continue
-        for sub in [base / "design" / name, base / name]:
+        for sub in [base / name, base / "design" / name]:
             if sub.exists():
                 return sub
 
@@ -179,13 +179,13 @@ def find_design_file(name: str, topo: Topology) -> Path | None:
         primary_wksp = topo.slot_dir / topo.primary_repo / "wksp"
         if primary_wksp.is_symlink():
             target = primary_wksp.resolve()
-            for path in [target / "design" / name, target / name]:
+            for path in [target / name, target / "design" / name]:
                 if path.exists():
                     return path
             root = _git_root(target)
             if root and str(Path(root).resolve()) != str(target.resolve()):
                 root_p = Path(root)
-                for path in [root_p / "design" / name, root_p / name]:
+                for path in [root_p / name, root_p / "design" / name]:
                     if path.exists():
                         return path
     return None

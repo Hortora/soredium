@@ -32,7 +32,9 @@ def execute(cwd: str | None = None, **_kwargs) -> list:
         from plan_manager import parse_plan, advance, flatten
 
         workspace = Path(ctx.workspace_path) if ctx.workspace_path else Path(ctx.project_path)
-        plan_path = workspace / "design" / ".plan"
+        plan_path = workspace / ".plan"
+        if not plan_path.exists():
+            plan_path = workspace / "design" / ".plan"
 
         if not plan_path.exists():
             events.append(CommandFailed("next", None, "plan_not_found",

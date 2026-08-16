@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create the workspace branch scaffold: design/.plan (unified) and design/JOURNAL.md.
+Create the workspace branch scaffold: .plan (unified) and JOURNAL.md at workspace root.
 
 Called by work-start Step 9 after branch creation. The unified .plan file
 contains both ## State (identity/lifecycle) and ## Queue (work items).
@@ -22,8 +22,8 @@ Usage:
         [force=yes]
 
 Output (KEY=value lines):
-    PLAN_PATH=/abs/path/to/design/.plan
-    JOURNAL_PATH=/abs/path/to/design/JOURNAL.md
+    PLAN_PATH=/abs/path/to/.plan
+    JOURNAL_PATH=/abs/path/to/JOURNAL.md
     CREATED=yes|no   (no = files already existed and were left unchanged)
 
 Exit codes:
@@ -66,12 +66,9 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
              design_section_hashes: str = "",
              plan_content: str = "",
              force: bool = False) -> ScaffoldResult:
-    """Create workspace branch scaffold: unified design/.plan and design/JOURNAL.md."""
-    design_dir = workspace / "design"
-    design_dir.mkdir(parents=True, exist_ok=True)
-
-    plan_path = design_dir / ".plan"
-    journal_path = design_dir / "JOURNAL.md"
+    """Create workspace branch scaffold: .plan and JOURNAL.md at workspace root."""
+    plan_path = workspace / ".plan"
+    journal_path = workspace / "JOURNAL.md"
 
     if not force and plan_path.exists() and journal_path.exists():
         return ScaffoldResult(

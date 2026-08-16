@@ -41,7 +41,7 @@ Read `$PROJECT` and `$WORKSPACE` from CLAUDE.md (see Path Resolution above).
 ## Step 1 — Read pause stack
 
 ```bash
-STACK_FILE="$WORKSPACE/design/.pause-stack"
+STACK_FILE="$WORKSPACE/.pause-stack"
 [ -f "$STACK_FILE" ] || { echo "Nothing to resume — pause stack is empty."; exit 1; }
 grep -q "^- branch:" "$STACK_FILE" || { echo "Nothing to resume — pause stack is empty."; exit 1; }
 ```
@@ -127,8 +127,8 @@ is harmless since the branch is already checked out here.
 
 ```bash
 git -C <WORKSPACE> checkout main
-python3 ~/.claude/skills/project/stack.py pop <WORKSPACE>/design/.pause-stack <RESUME_BRANCH>
-git -C <WORKSPACE> add design/.pause-stack
+python3 ~/.claude/skills/project/stack.py pop <WORKSPACE>/.pause-stack <RESUME_BRANCH>
+git -C <WORKSPACE> add .pause-stack
 git -C <WORKSPACE> commit -m "chore: resume <RESUME_BRANCH> — pop from pause stack"
 git -C <WORKSPACE> push
 git -C <WORKSPACE> checkout <RESUME_BRANCH>

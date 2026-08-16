@@ -36,25 +36,26 @@ def _init_repo(path: Path) -> Path:
 def _create_project_with_branch(
     tmp_path: Path, branch: str = "issue-99-test",
 ) -> tuple[Path, Path]:
-    """Create workspace + project on a feature branch with .meta."""
+    """Create workspace + project on a feature branch with .plan."""
     workspace = _init_repo(tmp_path / "workspace")
     project = _init_repo(tmp_path / "project")
 
     _git(workspace, "checkout", "-b", branch)
-    design = workspace / "design"
-    design.mkdir(exist_ok=True)
-    meta = design / ".meta"
-    meta.write_text(
+    plan = workspace / ".plan"
+    plan.write_text(
+        f"# Work Plan — {branch}\n\n"
+        f"## State\n"
         f"branch: {branch}\n"
-        f"issue: 99\n"
-        f"issue-repo: Test/repo\n"
-        f"covers: 99\n"
+        f"state: active\n"
         f"project-sha: abc123\n"
         f"date: 2026-08-05\n"
-        f"state: active\n"
-        f"design-repo: workspace\n"
+        f"issue-repo: Test/repo\n"
+        f"covers: 99\n"
+        f"design-repo: workspace\n\n"
+        f"## Queue\n"
+        f"- [ ] #99 — Test issue ← active\n"
     )
-    _git(workspace, "add", "design/.meta")
+    _git(workspace, "add", ".plan")
     _git(workspace, "commit", "-m", "scaffold")
 
     _git(project, "checkout", "-b", branch)

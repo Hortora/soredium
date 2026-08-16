@@ -12,7 +12,7 @@ Subcommands:
         Output: CREATED=yes
 
     commit-scaffold <workspace> branch=<name>
-        Stage and commit design/JOURNAL.md and design/.meta, then push.
+        Stage and commit .plan and JOURNAL.md, then push.
         Output: COMMITTED=yes, PUSHED=yes|no
 
     sync-main <project> <workspace> [base=<branch>]
@@ -95,7 +95,14 @@ def create_branches(project: str, workspace: str, branch: str, base: str | None)
 def commit_scaffold(workspace: str, branch: str) -> int:
     """Commit scaffold files and push."""
     import os
-    files_to_add = ["design/JOURNAL.md", "design/.plan"]
+
+    current_ok, current_branch = run_git(workspace, "branch", "--show-current")
+    if current_ok and current_branch != branch:
+        print(f"ERROR=wrong_branch")
+        print(f"ERROR_DETAIL=workspace is on '{current_branch}', expected '{branch}'")
+        return 1
+
+    files_to_add = [".plan", "JOURNAL.md"]
     ok, _ = run_git(workspace, "add", *files_to_add)
     if not ok:
         print("ERROR=add_failed")
@@ -130,6 +137,7 @@ def sync_main(project: str, workspace: str, base: str) -> int:
         else:
             ok, _ = run_git(project, "rebase", f"upstream/{base}")
             if not ok:
+                run_git(project, "rebase", "--abort")
                 warnings.append("rebase_upstream_failed")
             else:
                 ok, _ = run_git(project, "push", "origin", base, "--force-with-lease")
@@ -143,6 +151,7 @@ def sync_main(project: str, workspace: str, base: str) -> int:
         else:
             ok, _ = run_git(project, "rebase", f"origin/{base}")
             if not ok:
+                run_git(project, "rebase", "--abort")
                 warnings.append("rebase_origin_failed")
             else:
                 ok, _ = run_git(project, "push", "fork", f"origin/{base}:{base}", "--force-with-lease")
@@ -156,6 +165,7 @@ def sync_main(project: str, workspace: str, base: str) -> int:
         else:
             ok, _ = run_git(project, "rebase", f"origin/{base}")
             if not ok:
+                run_git(project, "rebase", "--abort")
                 warnings.append("rebase_origin_failed")
 
     ws_ok, _ = run_git(workspace, "fetch", "origin")
@@ -164,9 +174,11 @@ def sync_main(project: str, workspace: str, base: str) -> int:
     else:
         ws_ok, _ = run_git(workspace, "rebase", "origin/main")
         if not ws_ok:
+            run_git(workspace, "rebase", "--abort")
             warnings.append("workspace_rebase_failed")
 
-    print(f"SYNCED=yes")
+    synced = "yes" if not warnings else "partial"
+    print(f"SYNCED={synced}")
     print(f"MODEL={model}")
     for w in warnings:
         print(f"WARN={w}")

@@ -83,6 +83,7 @@ Parse the JSON output. Handle preconditions:
 
 | Precondition | Status | Action |
 |-------------|--------|--------|
+| `branch_alignment` | `fail` | Hard stop — both repos must be on the same branch |
 | `clean_tree` | `fail` | Hard stop — commit or stash changes first |
 | `meta_exists` | `needs_input` | Graceful degradation: infer issue from branch name, confirm with user |
 | `meta_exists` | `pass` | Proceed — read context values from output |
@@ -283,6 +284,27 @@ After success: fire `cleanup_pass` lifecycle transition.
 
 ---
 
+## Step 4b — Close Issues
+
+After verify passes, close all covered GitHub issues. This is a mechanical
+gate — not optional, not LLM-dependent.
+
+```bash
+python3 work-end/work_end_execute.py close-issues repo=<OWNER_REPO> covers=<COVERS>
+```
+
+Read `CLOSED=N` from output. If `ERROR=`: report and offer retry.
+
+**Verify gate:** Step 4 (verify_slot_close.py) checks `issues_closed` when
+`covers=` and `issue_repo=` are passed. If issues are still open after
+close-issues, verify will catch it.
+
+```bash
+python3 work-end/verify_slot_close.py <PROJ> branch=<BRANCH> workspace=<WS> covers=<COVERS> issue_repo=<OWNER_REPO>
+```
+
+---
+
 ## Step 5 — Close
 
 ### 5.1 Archive slot (slot mode only)
@@ -300,7 +322,7 @@ Do not archive without explicit confirmation.
 ### 5.2 Return to base branches
 
 ```bash
-python3 work-end/branch_cleanup.py checkout-main <WORKSPACE> <PROJECT>
+python3 work-end/branch_cleanup.py checkout-main <PROJECT> <WORKSPACE>
 ```
 
 ### 5.2b Scaffold cleanup

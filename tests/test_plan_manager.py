@@ -517,15 +517,15 @@ class TestDetectRootLevelPlan:
         assert result is not None, "detect() must find .plan at the given path root, not only design/"
         assert result["active_issue"] == 42
 
-    def test_design_subdir_takes_precedence_over_root(self, tmp_path):
-        """If both <path>/design/.plan and <path>/.plan exist, prefer design/."""
+    def test_root_takes_precedence_over_design_subdir(self, tmp_path):
+        """If both <path>/.plan and <path>/design/.plan exist, prefer root."""
         design = tmp_path / "design"
         design.mkdir()
         (design / ".plan").write_text(MULTI_ISSUE_PLAN)
         (tmp_path / ".plan").write_text(SINGLE_ISSUE_PLAN)
         result = plan_manager.detect(tmp_path)
         assert result is not None
-        assert result["active_issue"] == 109, "design/.plan should take precedence"
+        assert result["active_issue"] == 42, "root .plan should take precedence"
 
 
 class TestDetectSlotMode:
@@ -739,7 +739,7 @@ class TestCreateMainPlan:
             {"number": 20, "title": "second"},
         ]
         plan_manager.create_main_plan(workspace, items, "test")
-        tree = plan_manager.parse_plan(workspace / "design" / ".plan")
+        tree = plan_manager.parse_plan(workspace / ".plan")
         leaves = plan_manager.flatten_leaves(tree)
         assert leaves[0].active is True
         assert leaves[1].active is False
@@ -753,12 +753,12 @@ class TestCreateMainPlan:
         assert result is not None
         assert result["active_issue"] == 42
 
-    def test_creates_design_dir_if_missing(self, tmp_path):
+    def test_creates_plan_at_root(self, tmp_path):
         workspace = tmp_path / "wksp"
         workspace.mkdir()
         items = [{"number": 1, "title": "test"}]
         plan_manager.create_main_plan(workspace, items)
-        assert (workspace / "design" / ".plan").exists()
+        assert (workspace / ".plan").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -935,6 +935,111 @@ class TestAdvanceWithDeferred:
         result = plan_manager.advance(plan)
         assert result.has_deferred is False
         assert result.next_issue == 2
+
+
+class TestDeferredReason:
+    def test_parses_reason(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan — test\n\n## Queue\n- [ ] #1 — Work ← active\n\n"
+            "## Deferred\n"
+            "- [ ] Schema migration (M / High) [engine] — blocked by #55 upstream release\n"
+            "- [ ] Quick cleanup (XS / Low) [soredium]\n\n"
+            "## Session State\nCurrent: #1 — Work\nStarted: 2026-08-06\n"
+        )
+        tree = plan_manager.parse_plan(plan)
+        assert len(tree.deferred) == 2
+        assert tree.deferred[0].reason == "blocked by #55 upstream release"
+        assert tree.deferred[1].reason == ""
+
+    def test_reason_survives_roundtrip(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan — test\n\n## Queue\n- [ ] #1 — Work ← active\n\n"
+            "## Deferred\n"
+            "- [ ] Schema migration (M / High) [engine] — needs API v2 first\n\n"
+            "## Session State\nCurrent: #1 — Work\nStarted: 2026-08-06\n"
+        )
+        tree = plan_manager.parse_plan(plan)
+        plan_manager.rewrite_plan(plan, tree)
+        tree2 = plan_manager.parse_plan(plan)
+        assert tree2.deferred[0].reason == "needs API v2 first"
+
+    def test_append_with_reason(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_NO_DEFERRED)
+        plan_manager.append_deferred(
+            plan, "Future work", "M", "Med", ["soredium"],
+            reason="depends on platform release"
+        )
+        tree = plan_manager.parse_plan(plan)
+        assert tree.deferred[0].reason == "depends on platform release"
+
+
+class TestPromoteSelected:
+    def test_promotes_by_index(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        tree = plan_manager.parse_plan(plan)
+        for item in tree.queue:
+            item.completed = True
+            item.active = False
+        plan_manager.rewrite_plan(plan, tree)
+
+        promoted = plan_manager.promote_selected(plan, [0, 2])
+        assert len(promoted) == 2
+        assert promoted[0].title == "Extract push retry logic"
+        assert promoted[1].title == "Fix portal resolutions in blocks-ui"
+
+        tree2 = plan_manager.parse_plan(plan)
+        assert len(tree2.deferred) == 1
+        assert tree2.deferred[0].title == "Add restore-slot command"
+
+        leaf_titles = [l.title for l in plan_manager.flatten_leaves(tree2)]
+        assert "Extract push retry logic" in leaf_titles
+        assert "Fix portal resolutions in blocks-ui" in leaf_titles
+
+    def test_promotes_nothing_for_empty_indices(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        promoted = plan_manager.promote_selected(plan, [])
+        assert len(promoted) == 0
+
+    def test_out_of_range_indices_ignored(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        promoted = plan_manager.promote_selected(plan, [99])
+        assert len(promoted) == 0
+
+    def test_sets_active_on_promoted_item(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_DEFERRED)
+        tree = plan_manager.parse_plan(plan)
+        for item in tree.queue:
+            item.completed = True
+            item.active = False
+        plan_manager.rewrite_plan(plan, tree)
+
+        plan_manager.promote_selected(plan, [0])
+        tree2 = plan_manager.parse_plan(plan)
+        active = plan_manager._find_active_leaf(tree2.queue)
+        assert active is not None
+        assert active.title == "Extract push retry logic"
+
+    def test_issue_numbers_dont_collide(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan — test\n\n## Queue\n"
+            "- [x] #9000 — Previously promoted\n"
+            "- [x] #9001 — Also promoted\n\n"
+            "## Deferred\n- [ ] New item (S / Low) [soredium]\n\n"
+            "## Session State\nCurrent: none\nStarted: 2026-08-06\n"
+        )
+        promoted = plan_manager.promote_selected(plan, [0])
+        tree = plan_manager.parse_plan(plan)
+        new_item = [q for q in tree.queue if q.title == "New item"]
+        assert len(new_item) == 1
+        assert new_item[0].issue_number >= 9002
 
 
 class TestStateSectionParsing:

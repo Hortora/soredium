@@ -85,7 +85,7 @@ are filed as GitHub issues — **never committed from this session**.
 | Existing protocol updated | The protocol file + any files that reference it | home repo |
 | Convention or workflow change | `CLAUDE.md` (invoke `update-claude-md`) | home repo |
 | Architecture decision | `adr/` (invoke `adr` if not yet recorded) | home repo |
-| Design journal (epic branch) | `design/JOURNAL.md` (invoke `update-design`) | home repo |
+| Design journal (epic branch) | `JOURNAL.md` at workspace root (invoke `update-design`) | home repo |
 | Maven coordinate change | `docs/protocols/maven-coordinate-standard.md` if convention changed | home repo |
 
 **Repo-owned documentation:** Each repo owns its own docs. The parent repo

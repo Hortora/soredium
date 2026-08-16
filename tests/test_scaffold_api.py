@@ -43,22 +43,22 @@ def test_scaffold_does_not_overwrite_existing():
     with tempfile.TemporaryDirectory() as tmp:
         ws = Path(tmp)
         (ws / "design").mkdir(parents=True)
-        (ws / "design" / ".plan").write_text("existing plan\n")
-        (ws / "design" / "JOURNAL.md").write_text("existing journal\n")
+        (ws / ".plan").write_text("existing plan\n")
+        (ws / "JOURNAL.md").write_text("existing journal\n")
         result = scaffold(ws, branch="issue-42", project_sha="abc123")
         assert result.created is False
-        assert (ws / "design" / ".plan").read_text() == "existing plan\n"
+        assert (ws / ".plan").read_text() == "existing plan\n"
 
 
 def test_scaffold_force_overwrites():
     with tempfile.TemporaryDirectory() as tmp:
         ws = Path(tmp)
         (ws / "design").mkdir(parents=True)
-        (ws / "design" / ".plan").write_text("old plan\n")
-        (ws / "design" / "JOURNAL.md").write_text("old journal\n")
+        (ws / ".plan").write_text("old plan\n")
+        (ws / "JOURNAL.md").write_text("old journal\n")
         result = scaffold(ws, branch="issue-42", project_sha="abc123", force=True)
         assert result.created is True
-        content = (ws / "design" / ".plan").read_text()
+        content = (ws / ".plan").read_text()
         assert "state: scaffolded" in content
 
 

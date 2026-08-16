@@ -250,6 +250,19 @@ decision before writing to disk. See `mandatory-gates.md` for full procedure.
 
 ---
 
+## Step 5 — Commit
+
+Commit the written content immediately. Do not defer to git-commit or
+the LLM's judgment — commit now, squash later.
+
+```bash
+git -C "$TARGET_REPO" add <written-file-path>
+git -C "$TARGET_REPO" commit -m "wip(content): <content-type> — <title> Refs #<N>"
+```
+
+This is mandatory. Uncommitted content is lost on session crash. The commit
+is the save. Semantic squash at work-end cleans up WIP messages.
+
 ## Success Criteria
 
 Content creation is complete when:
@@ -259,9 +272,10 @@ Content creation is complete when:
 - ✅ Style guide verified (anti-slop and mandatory rules checked)
 - ✅ Third-party reference review passed (zero unresolved flags)
 - ✅ Content written to disk at the correct path
+- ✅ Content committed to git
 - ✅ Factual accuracy verified (durations, counts, magnitudes checked against evidence)
 
-**Not complete until** content is on disk and all mandatory gates have passed.
+**Not complete until** content is committed and all mandatory gates have passed.
 
 ## Skill Chaining
 

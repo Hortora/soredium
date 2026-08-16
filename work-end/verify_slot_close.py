@@ -133,6 +133,27 @@ def check_slot_archive_status(slot_dir: str, attic_dir: str) -> dict:
     return {"status": "fail", "detail": "slot not found"}
 
 
+def check_issues_closed(issue_repo: str, covers: list[int] | None) -> dict:
+    if not covers:
+        return {"status": "pass", "detail": "no issues to check"}
+    open_issues = []
+    for issue_num in covers:
+        result = subprocess.run(
+            ["gh", "issue", "view", str(issue_num), "--repo", issue_repo,
+             "--json", "state", "--jq", ".state"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            open_issues.append(f"#{issue_num} (gh failed)")
+            continue
+        state = result.stdout.strip()
+        if state != "CLOSED":
+            open_issues.append(f"#{issue_num}")
+    if open_issues:
+        return {"status": "fail", "detail": f"OPEN: {', '.join(open_issues)}"}
+    return {"status": "pass", "detail": f"{len(covers)}/{len(covers)} closed"}
+
+
 def _resolve_original_repos(slot_dir: str) -> dict[str, str]:
     result = {}
     slot_path = Path(slot_dir)
@@ -152,6 +173,7 @@ def _resolve_original_repos(slot_dir: str) -> dict[str, str]:
 def verify(
     project: str, branch: str, workspace: str,
     base: str = "main", covers: list[int] | None = None,
+    issue_repo: str = "",
     slot_dir: str = "", original_repos: dict[str, str] | None = None,
 ) -> bool:
     checks: list[tuple[str, dict]] = []
@@ -161,6 +183,9 @@ def verify(
     checks.append(("landing_sha", check_landing_sha(project, branch, base)))
     checks.append(("main_pushed", check_main_pushed(project, base)))
     checks.append(("workspace_stamped", check_workspace_stamped(workspace, branch)))
+
+    if covers and issue_repo:
+        checks.append(("issues_closed", check_issues_closed(issue_repo, covers)))
 
     if slot_dir:
         checks.append(("landed_marker", check_landed_marker(slot_dir)))
@@ -216,6 +241,7 @@ def main() -> int:
 
     covers_str = opts.get("covers", "")
     covers = [int(x) for x in covers_str.split(",") if x.strip()] if covers_str else None
+    issue_repo = opts.get("issue_repo", "")
 
     slot_dir = opts.get("slot_dir", "")
     original_repos = None
@@ -223,6 +249,7 @@ def main() -> int:
         original_repos = _resolve_original_repos(slot_dir)
 
     verify(project, branch, workspace, base, covers,
+           issue_repo=issue_repo,
            slot_dir=slot_dir, original_repos=original_repos)
     return 0
 

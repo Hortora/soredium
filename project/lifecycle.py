@@ -389,15 +389,12 @@ def validate_state(
             _check_untracked(workspace, excludes, violations, "workspace")
 
     if state not in ('idle', 'paused'):
-        plan_path = (
-            workspace if project.resolve() != workspace.resolve() else project
-        ) / "design" / ".plan"
+        plan_base = workspace if project.resolve() != workspace.resolve() else project
+        plan_path = plan_base / ".plan"
+        if not plan_path.exists():
+            plan_path = plan_base / "design" / ".plan"
         if plan_path.exists():
-            meta_branch = ""
-            for line in plan_path.read_text().splitlines():
-                if line.startswith("branch:"):
-                    meta_branch = line.split(":", 1)[1].strip()
-                    break
+            meta_branch = _read_branch(plan_path)
             if meta_branch:
                 current = _sp.run(
                     ["git", "-C", str(project), "branch", "--show-current"],

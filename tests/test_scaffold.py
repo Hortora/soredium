@@ -38,7 +38,7 @@ def required_args(**overrides) -> list[str]:
 
 
 def _read_plan(ws: Path) -> str:
-    return (ws / "design" / ".plan").read_text()
+    return (ws / ".plan").read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -47,35 +47,31 @@ def _read_plan(ws: Path) -> str:
 
 class TestHappyPath:
 
-    def test_creates_design_directory(self, tmp_path):
+    def test_creates_plan_at_root(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args())
-        assert (ws / "design").is_dir()
-
-    def test_creates_plan_file(self, tmp_path):
-        ws = tmp_path / "workspace"
-        ws.mkdir()
-        run(ws, *required_args())
-        assert (ws / "design" / ".plan").exists()
+        assert (ws / ".plan").exists()
+        assert not (ws / "design" / ".plan").exists()
 
     def test_does_not_create_meta_file(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args())
+        assert not (ws / ".meta").exists()
         assert not (ws / "design" / ".meta").exists()
 
     def test_creates_journal_md(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args())
-        assert (ws / "design" / "JOURNAL.md").exists()
+        assert (ws / "JOURNAL.md").exists()
 
     def test_journal_contains_branch_heading(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args(branch="issue-99-payments"))
-        content = (ws / "design" / "JOURNAL.md").read_text()
+        content = (ws / "JOURNAL.md").read_text()
         assert "issue-99-payments" in content
 
     def test_plan_contains_state_section(self, tmp_path):
@@ -110,11 +106,12 @@ class TestHappyPath:
         assert "JOURNAL_PATH" in out
         assert out["CREATED"] == "yes"
 
-    def test_creates_nested_design_dir(self, tmp_path):
+    def test_creates_files_at_workspace_root(self, tmp_path):
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args())
-        assert (ws / "design" / ".plan").exists()
+        assert (ws / ".plan").exists()
+        assert (ws / "JOURNAL.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +124,7 @@ class TestIdempotency:
         ws = tmp_path / "workspace"
         ws.mkdir()
         run(ws, *required_args(branch="issue-42-auth"))
-        plan = ws / "design" / ".plan"
+        plan = ws / ".plan"
         plan.write_text("# modified\n")
         run(ws, *required_args(branch="issue-42-auth"))
         assert "modified" in plan.read_text()

@@ -263,25 +263,34 @@ Steps:
      GitHub epic body (if the completed issue was an epic child).
 4. Call `commit_transition(plan_path, result)` — writes `state: transitioning`.
 5. If `has_deferred` in the result → deferred items exist and the agreed
-   queue is complete. Determine available repos:
-   - **Branch mode:** the project repo name (basename of `$PROJECT`)
-   - **Slot mode:** repo names from `get_slot_repos()` on the slot directory
-   Present the prompt:
+   queue is complete. Read deferred items:
+   ```bash
+   python3 ~/.claude/skills/work-slot/plan_manager.py list-deferred <PLAN_PATH>
    ```
-   All planned issues complete. N deferred items can be done here:
-     - <title> (<scale> / <complexity>)
-     - ...
-   [N items require repos not available: <list>]   ← only if some don't match
+   Present each item individually with scale, complexity, and deferral reason.
+   The reason is the advice — it tells the user whether the item is feasible now.
+   ```
+   All planned issues complete. N deferred items:
 
-   Options:
-     1. continue — promote matching deferred items and keep working
-     2. new-slot — file issues, create a new slot for the deferred items
-     3. close — run work end; deferred items stay as GitHub issues for later
+     0. <title> (S / Low) — <reason>
+        → Recommendation: feasible now, no blockers
+     1. <title> (M / High) — blocked by #55 upstream release
+        → Recommendation: not feasible until #55 lands
+     2. <title> (L / High) — needs schema migration first
+        → Recommendation: do in a separate branch after migration
+
+   Select items to add to queue (e.g. "0,2"), or "none" to close:
    ```
-   - **continue** → call `plan_manager.promote_deferred(<PLAN_PATH>, available_repos)`,
-     then proceed to step 7 (context refresh) with the first promoted item as active.
-   - **new-slot** → file GitHub issues for each deferred item, then run work-end.
-   - **close** → file GitHub issues for each deferred item, then run work-end.
+   Assess each item's feasibility based on its reason and the current context
+   (available repos, what just landed, known blockers). Items with no reason
+   or reasons that are no longer blocking should be recommended. Items with
+   active blockers should be flagged.
+
+   - **User selects items** → call `plan_manager.promote_selected(<PLAN_PATH>, [indices])`,
+     then proceed to step 8 (context refresh) with the first promoted item as active.
+     Remaining unselected items stay in the deferred list.
+   - **"none"** → run work-end. Deferred items stay in `.plan` for the next branch
+     or can be filed as GitHub issues.
 6. If `queue_complete` and not `has_deferred` → report: "All issues done. Run work end."
 7. If `batch_complete` and not `queue_complete` → log: "Batch N complete.
    Safe exit point — run work end to close, or continue."

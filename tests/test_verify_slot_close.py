@@ -255,6 +255,52 @@ class TestCheckSlotArchiveStatus:
         assert "active" in result["detail"]
 
 
+class TestCheckIssuesClosed:
+    def test_all_closed(self, tmp_path: Path, monkeypatch) -> None:
+        def fake_run(cmd, **kwargs):
+            if "gh" in cmd and "issue" in cmd and "view" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "CLOSED\n", "")
+            return subprocess.run(cmd, **kwargs)
+
+        monkeypatch.setattr(verify_slot_close.subprocess, "run", fake_run)
+        result = verify_slot_close.check_issues_closed("owner/repo", [42, 43])
+        assert result["status"] == "pass"
+        assert "2/2" in result["detail"]
+
+    def test_one_open(self, tmp_path: Path, monkeypatch) -> None:
+        call_count = {"n": 0}
+
+        def fake_run(cmd, **kwargs):
+            if "gh" in cmd and "issue" in cmd and "view" in cmd:
+                call_count["n"] += 1
+                state = "CLOSED" if call_count["n"] == 1 else "OPEN"
+                return subprocess.CompletedProcess(cmd, 0, f"{state}\n", "")
+            return subprocess.run(cmd, **kwargs)
+
+        monkeypatch.setattr(verify_slot_close.subprocess, "run", fake_run)
+        result = verify_slot_close.check_issues_closed("owner/repo", [42, 43])
+        assert result["status"] == "fail"
+        assert "#43" in result["detail"]
+
+    def test_gh_failure_is_fail(self, tmp_path: Path, monkeypatch) -> None:
+        def fake_run(cmd, **kwargs):
+            if "gh" in cmd and "issue" in cmd and "view" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, "", "network error")
+            return subprocess.run(cmd, **kwargs)
+
+        monkeypatch.setattr(verify_slot_close.subprocess, "run", fake_run)
+        result = verify_slot_close.check_issues_closed("owner/repo", [42])
+        assert result["status"] == "fail"
+
+    def test_empty_covers_is_pass(self) -> None:
+        result = verify_slot_close.check_issues_closed("owner/repo", [])
+        assert result["status"] == "pass"
+
+    def test_none_covers_is_pass(self) -> None:
+        result = verify_slot_close.check_issues_closed("owner/repo", None)
+        assert result["status"] == "pass"
+
+
 class TestVerifySlotModeCLI:
     def test_slot_dir_enables_slot_checks(self, tmp_path: Path) -> None:
         project, workspace = _create_clean_single_repo(tmp_path)

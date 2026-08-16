@@ -17,7 +17,7 @@ no stash used. On resume, the WIP commit is reset so work continues cleanly.
 **Single-repo mode:** When no workspace exists (`SINGLE_REPO=yes` from ctx.py),
 all operations apply to the project repo only — skip workspace-specific steps
 (workspace WIP commit, workspace branch switch). The pause stack lives at
-`$PROJECT/.pause-stack` instead of `$WORKSPACE/design/.pause-stack`.
+`$WORKSPACE/.pause-stack`.
 
 ---
 
@@ -28,26 +28,29 @@ Run the bundled context script — no shell variable assignments, no CLAUDE.md s
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-Use `WORKSPACE`, `PROJECT`, `BASE_BRANCH`, `CURRENT_BRANCH` from the output as concrete strings.
-`BASE_BRANCH` defaults to `main` if not declared in the project CLAUDE.md.
+Use `WORKSPACE`, `PROJECT`, `BASE_BRANCH`, `CURRENT_BRANCH`, `PLAN_PATH` from
+the output as concrete strings.
 
 ---
 
 ## Step 0 — Resolve paths
 
-Read `$PROJECT` and `$WORKSPACE` from CLAUDE.md (see Path Resolution above).
+Read from ctx.py output (see Path Resolution above).
 
 ---
 
 ## Step 1 — Validate state and fire transition
 
+Use `PLAN_PATH` from ctx.py output (resolved in Step 0). If `HAS_PLAN=no`, error:
+"No .plan found — not on a working branch."
+
+Read branch and covers from the `.plan` file at `$PLAN_PATH`:
 ```bash
-ls "$WORKSPACE/design/.plan" 2>/dev/null || { echo "No .plan found — not on a working branch."; exit 1; }
-BRANCH_NAME=$(grep "^branch:" "$WORKSPACE/design/.plan" | sed 's/branch: //')
-COVERS=$(grep "^covers:" "$WORKSPACE/design/.plan" | sed 's/issue: //')
+BRANCH_NAME=$(grep "^branch:" "$PLAN_PATH" | sed 's/branch: //')
+COVERS=$(grep "^covers:" "$PLAN_PATH" | sed 's/covers: //')
 ```
 
-Must be on a branch where `$WORKSPACE/design/.plan` exists.
+Must be on a branch where `.plan` exists.
 
 **Lifecycle transition:** Fire `transition(plan_path, 'work_pause')`. This validates
 the transition (`active → paused`) and returns effects `[wip_commit]` with
@@ -108,7 +111,7 @@ This operation:
 
 Get current stack depth:
 ```bash
-STACK_DEPTH=$(python3 ~/.claude/skills/project/stack.py depth "$WORKSPACE/design/.pause-stack")
+STACK_DEPTH=$(python3 ~/.claude/skills/project/stack.py depth "$WORKSPACE/.pause-stack")
 ```
 
 Display confirmation:

@@ -258,6 +258,12 @@ After saving the plan (and optional review), offer execution choice:
 
 **"Plan complete and saved to `$WORKSPACE/plans/<filename>.md`."**
 
+Commit the plan immediately after writing:
+```bash
+git -C "$WORKSPACE" add plans/
+git -C "$WORKSPACE" commit -m "wip(plan): implementation plan for #<N> Refs #<N>"
+```
+
 **Default: invoke `executing-plans`** — inline execution with full access
 to skills, IntelliJ MCP, and project context. Review the diff after each
 task inline.
@@ -278,7 +284,7 @@ Plan is complete when:
 - ✅ Spec reviewed and understood (gaps identified and resolved)
 - ✅ Tasks decomposed with clear acceptance criteria
 - ✅ Dependencies between tasks identified
-- ✅ Plan written to file and path communicated to execution skill
+- ✅ Plan written to file, committed, and path communicated to execution skill
 - ✅ User approved the plan
 
 **Not complete until** the user confirms and an execution skill is invoked.

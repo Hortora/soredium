@@ -106,7 +106,7 @@ def resolve_context(cwd: str | None = None) -> Context:
     workspace = raw.get("WORKSPACE") or None
     meta_path = None
     if workspace:
-        candidate = Path(workspace) / "design" / ".meta"
+        candidate = Path(workspace) / ".plan"
         if candidate.exists():
             meta_path = str(candidate)
 

@@ -57,6 +57,21 @@ For each task:
    complete.
 5. Mark as completed
 
+**Deferring a task:** When a task is blocked, not feasible in the current
+context, or explicitly deferred by the user, record it mechanically:
+
+```bash
+python3 ~/.claude/skills/work-slot/plan_manager.py defer <PLAN_PATH> \
+  title="<task title>" scale=<XS|S|M|L|XL> complexity=<Low|Med|High> \
+  repos=<comma-sep-repos> reason="<why deferred>"
+```
+
+The reason is critical — it tells the user (and future sessions) whether
+this item is feasible later or permanently blocked. Good reasons:
+"blocked by #55", "needs upstream API v2", "requires schema migration
+first", "out of scope for this branch". Bad reasons: "skipped" (says
+nothing), "TODO" (no information).
+
 ### Step 3: Complete Development
 
 After all tasks complete and verified, check queue state:

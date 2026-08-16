@@ -28,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import parse_args
+from common import detect_topology, parse_args
 
 # Path to remove_from_stack.py — resolve relative to this script's location
 REMOVE_FROM_STACK = Path(__file__).parent.parent / "project" / "remove_from_stack.py"
@@ -51,16 +51,18 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
         return 1
 
     files_to_remove = []
-    plan_path = ws / "design" / ".plan"
-    journal_path = ws / "design" / "JOURNAL.md"
-    meta_path = ws / "design" / ".meta"
-
-    if plan_path.exists():
-        files_to_remove.append("design/.plan")
-    if journal_path.exists():
-        files_to_remove.append("design/JOURNAL.md")
-    if meta_path.exists():
-        files_to_remove.append("design/.meta")
+    scaffold_names = [".plan", "JOURNAL.md", ".execute-progress",
+                      ".land-ledger.jsonl", ".artifacts-promoted"]
+    for name in scaffold_names:
+        if (ws / name).exists():
+            files_to_remove.append(name)
+        if (ws / "design" / name).exists():
+            files_to_remove.append(f"design/{name}")
+    for legacy in (".meta", ".epic"):
+        if (ws / legacy).exists():
+            files_to_remove.append(legacy)
+        if (ws / "design" / legacy).exists():
+            files_to_remove.append(f"design/{legacy}")
 
     if not files_to_remove:
         print("CLEANED=yes")
@@ -110,7 +112,9 @@ def cleanup_stack(workspace: str, params: dict[str, str]) -> int:
         print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
         return 1
 
-    stack_file = ws / "design" / ".pause-stack"
+    stack_file = ws / ".pause-stack"
+    if not stack_file.exists():
+        stack_file = ws / "design" / ".pause-stack"
 
     if not stack_file.exists():
         print("REMOVED=no")
@@ -133,7 +137,8 @@ def cleanup_stack(workspace: str, params: dict[str, str]) -> int:
         return 1
 
     try:
-        git("add", "design/.pause-stack", cwd=workspace)
+        rel_path = str(stack_file.relative_to(ws))
+        git("add", rel_path, cwd=workspace)
         git("commit", "-m", f"chore(work-end): remove {branch} from pause stack (closed)", cwd=workspace)
     except subprocess.CalledProcessError as e:
         if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
@@ -173,12 +178,17 @@ def checkout_main(project: str, workspace: str) -> int:
             print(f"ERROR_DETAIL=Failed to checkout main in {label}: {e.stderr.strip()}")
             return 1
 
-    # Pull --rebase in both (non-fatal if fails — no remote)
-    for repo_path in [project, workspace]:
-        try:
-            git("pull", "--rebase", "origin", "main", cwd=repo_path)
-        except subprocess.CalledProcessError:
-            pass
+    # Pull --rebase from blessed remote (non-fatal if fails — no remote)
+    fork_remote, blessed_remote = detect_topology(project)
+    proj_remote = blessed_remote if blessed_remote else fork_remote or "origin"
+    try:
+        git("pull", "--rebase", proj_remote, "main", cwd=project)
+    except subprocess.CalledProcessError:
+        pass
+    try:
+        git("pull", "--rebase", "origin", "main", cwd=workspace)
+    except subprocess.CalledProcessError:
+        pass
 
     print("SWITCHED=yes")
     return 0

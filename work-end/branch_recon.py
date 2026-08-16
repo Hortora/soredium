@@ -76,7 +76,9 @@ def gather_diff_stats(project: str, project_sha: str) -> str:
 
 
 def parse_journal(workspace: str) -> dict:
-    journal_path = Path(workspace) / "design" / "JOURNAL.md"
+    journal_path = Path(workspace) / "JOURNAL.md"
+    if not journal_path.exists():
+        journal_path = Path(workspace) / "design" / "JOURNAL.md"
     result: dict = {
         "journal_entry_count": 0,
         "anchored_entries": 0,

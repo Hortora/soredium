@@ -102,7 +102,9 @@ def cmd_push(project: str, opts: dict[str, str]) -> int:
     workspace = opts.get("workspace", "")
 
     if workspace:
-        stamp_path = Path(workspace) / "design" / ".artifacts-promoted"
+        stamp_path = Path(workspace) / ".artifacts-promoted"
+        if not stamp_path.exists():
+            stamp_path = Path(workspace) / "design" / ".artifacts-promoted"
         if not stamp_path.exists():
             print("ERROR=MISSING_STAMP")
             print("ERROR_DETAIL=.artifacts-promoted stamp not found — return to Step 8a")

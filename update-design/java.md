@@ -24,7 +24,7 @@ This skill is invoked by `git-commit` when:
 - **update-design**: Generic document sync patterns (read path, match files, propose updates, validate)
 
 **Java-specific additions:**
-- In **workspace mode** (when `design/JOURNAL.md` exists): writes journal entries to `design/JOURNAL.md`
+- In **workspace mode** (when `JOURNAL.md` exists): writes journal entries to `JOURNAL.md`
 - In **direct mode** (no workspace): writes to `design/ARC42STORIES.MD` as before
 - Hardcoded architecture mappings:
   - New @Entity → Update "Domain Model" section
@@ -37,7 +37,7 @@ This skill is invoked by `git-commit` when:
 - **Only operates in type: java repositories** — other project types use different documentation patterns
 - ARC42STORIES.MD lives at `design/ARC42STORIES.MD` in the workspace (CWD). In the workspace
   model, the project is accessed via `add-dir`.
-- **Branch close:** When the branch completes, `work-end` reads `design/JOURNAL.md`,
+- **Branch close:** When the branch completes, `work-end` reads `JOURNAL.md`,
   generates a three-way merge preview (base + current project + journal), and
   applies the changes to the project `ARC42STORIES.MD` with user confirmation.
   The journal entry is posted to the GitHub issue, then the branch is cleaned up.
@@ -81,11 +81,11 @@ which is the project root — the check remains correct in both cases.
 All three conditions must be true for workspace mode. Check in order:
 
 ```bash
-# 1. Does design/.meta exist?
-ls "$WORKSPACE/design/.meta" 2>/dev/null
+# 1. Does .plan exist at workspace root?
+ls "$WORKSPACE/.plan" 2>/dev/null
 
-# 2. Does design/JOURNAL.md exist?
-ls "$WORKSPACE/design/JOURNAL.md" 2>/dev/null
+# 2. Does JOURNAL.md exist at workspace root?
+ls "$WORKSPACE/JOURNAL.md" 2>/dev/null
 
 # 3. Is the workspace NOT on main?
 [ "$(git -C "$WORKSPACE" branch --show-current)" != "main" ]
@@ -109,7 +109,7 @@ attempt to parse CLAUDE.md for paths.
 silently for `issue-NNN-*` branches — every commit writes directly to `ARC42STORIES.MD`
 with no error, bypassing the journal entirely. `.meta` + `JOURNAL.md` + not-on-main
 confirms an active working branch regardless of naming convention.
-In workspace mode: read `$WORKSPACE/design/JOURNAL.md` to understand which sections
+In workspace mode: read `$WORKSPACE/JOURNAL.md` to understand which sections
 have already been journalled during this branch before adding or updating an entry.
 
 > **Workspace mode path:** If workspace mode is detected in Step 1, skip Steps 5 and 6. Proceed directly to Step 7 after completing Steps 2-4 (read ARC42STORIES.MD for section names, review changes, map to sections). The journal entry (Step 7) is the only write action in workspace mode.
@@ -227,12 +227,12 @@ When the user confirms with YES (or a clear equivalent):
 
 ### Step 7: Write or update journal entry
 
-**In workspace mode only** (i.e. `design/JOURNAL.md` exists — detected in Step 1).
+**In workspace mode only** (i.e. `JOURNAL.md` exists — detected in Step 1).
 
 Read `design/ARC42STORIES.MD` now if not already read in Step 2 — section names from the project ARC42STORIES.MD are required for the `§Section` anchors below.
 
 For each section affected by the committed changes, add or update an entry
-in `design/JOURNAL.md`.
+in `JOURNAL.md`.
 
 **Entry format:**
 ```markdown
@@ -262,10 +262,10 @@ ambiguous at the API boundary.
 
 **Step 7b — Validate anchors before committing (mandatory)**
 
-After writing the entry, verify it has a `§SectionName` anchor in the header before committing to `design/JOURNAL.md`:
+After writing the entry, verify it has a `§SectionName` anchor in the header before committing to `JOURNAL.md`:
 
 ```bash
-grep -c "^### .*·.*§" design/JOURNAL.md
+grep -c "^### .*·.*§" JOURNAL.md
 ```
 
 If the entry you just wrote does not contain `· §SectionName` in its header — **do not commit**. The entry will be silently skipped at branch close (work-end), permanently losing the design context. Fix the header first:
@@ -293,7 +293,7 @@ Avoid these mistakes when updating ARC42STORIES.MD:
 | Skipping "Reason:" in proposals | User doesn't understand why change needed | Always explain rationale |
 | Not reading existing ARC42STORIES.MD first | Proposals conflict with structure | Always read full file before proposing |
 | Mentioning AI/tools in ARC42STORIES.MD | Breaks professional documentation standards | Never mention Claude, AI, or tooling in the doc itself |
-| Writing to design/ARC42STORIES.MD directly | Bypasses the journal; merge at branch close (work-end) loses context | Always write to design/JOURNAL.md with §Section anchors |
+| Writing to design/ARC42STORIES.MD directly | Bypasses the journal; merge at branch close (work-end) loses context | Always write to JOURNAL.md with §Section anchors |
 | Updating ARC42STORIES.MD when ARC42STORIES.MD exists | ARC42STORIES.MD is a transitional artifact — ARC42STORIES.MD is the sole target | Run Step 0 first; if ARC42STORIES.MD present, write there only |
 | Using ARC42STORIES.MD §Section anchors in journal when ARC42STORIES.MD exists | work-end cannot merge to ARC42STORIES.MD using ARC42STORIES.MD section names | Use `§10` or `§9.4·[LayerName]` anchors when ARC42STORIES.MD is the target |
 
@@ -357,12 +357,12 @@ Then update CLAUDE.md:
 - ✅ **Document validation passed** (no CRITICAL corruption)
 - ✅ File ready for staging (or user confirmed no changes needed)
 
-**In workspace mode** (`design/JOURNAL.md` exists):
+**In workspace mode** (`JOURNAL.md` exists):
 
 - ✅ Architectural changes identified from staged diff
 - ✅ Journal entry has `· §SectionName` anchor in the header — `§10` or `§9.4·[LayerName]` if ARC42STORIES.MD present; ARC42STORIES.MD section name otherwise — validated before commit (Step 7b)
 - ✅ User confirmed with explicit **YES**
-- ✅ Entry appended to `design/JOURNAL.md`
+- ✅ Entry appended to `JOURNAL.md`
 - ✅ File ready for staging (or user confirmed no changes needed)
 
 **Not complete until** all criteria for the active mode are met.

@@ -151,7 +151,9 @@ def _read_promotion_stamp(slot_dir: Path) -> tuple[list[str], list[str], str]:
     for sub in slot_dir.iterdir():
         if not sub.is_dir():
             continue
-        stamp = sub / "design" / ".artifacts-promoted"
+        stamp = sub / ".artifacts-promoted"
+        if not stamp.exists():
+            stamp = sub / "design" / ".artifacts-promoted"
         if not stamp.exists():
             continue
         stamp_data: dict[str, str] = {}
@@ -1533,10 +1535,10 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
             print("HINT=pass --force to override, or investigate the failed merge")
             sys.exit(1)
     has_promotion_stamp = any(
-        (sub / "design" / ".artifacts-promoted").exists()
+        (sub / ".artifacts-promoted").exists() or (sub / "design" / ".artifacts-promoted").exists()
         for sub in slot_dir.iterdir()
         if sub.is_dir()
-    ) or (slot_dir / "design" / ".artifacts-promoted").exists()
+    ) or (slot_dir / ".artifacts-promoted").exists() or (slot_dir / "design" / ".artifacts-promoted").exists()
     if not has_promotion_stamp:
         print(f"WARN=artifacts_not_promoted slot={slot_num}")
 

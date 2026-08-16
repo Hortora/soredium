@@ -1,4 +1,4 @@
-"""Tests for plan_migrate.py — one-time migration from .meta to unified .plan."""
+"""Tests for plan_migrate.py — migration from .meta to .plan and design/ to root."""
 
 import sys
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "work-slot"))
-from plan_migrate import migrate_if_needed
+from plan_migrate import migrate_if_needed, migrate_to_root
 import plan_manager
 
 
@@ -206,3 +206,90 @@ class TestMigrateWithEpic:
         assert tree.queue[0].issue_number == 51
         has_active = any(q.active for q in tree.queue)
         assert has_active
+
+
+class TestMigrateToRoot:
+
+    def test_moves_plan_from_design_to_root(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        design = ws / "design"
+        design.mkdir()
+        (design / ".plan").write_text("# Work Plan\n")
+        assert migrate_to_root(ws) is True
+        assert (ws / ".plan").exists()
+        assert not (design / ".plan").exists()
+
+    def test_moves_journal_from_design_to_root(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        design = ws / "design"
+        design.mkdir()
+        (design / "JOURNAL.md").write_text("# Journal\n")
+        assert migrate_to_root(ws) is True
+        assert (ws / "JOURNAL.md").exists()
+
+    def test_converts_meta_to_plan_at_root(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        design = ws / "design"
+        design.mkdir()
+        (design / ".meta").write_text("branch: issue-42\nstate: active\ncovers: 42\n")
+        assert migrate_to_root(ws) is True
+        assert (ws / ".plan").exists()
+        assert not (design / ".meta").exists()
+
+    def test_removes_stale_epic(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        design = ws / "design"
+        design.mkdir()
+        (design / ".epic").write_text("- [ ] #1 — test\n")
+        (design / ".meta").write_text("branch: test\nstate: active\ncovers: 1\n")
+        migrate_to_root(ws)
+        assert not (design / ".epic").exists()
+        assert not (design / ".meta").exists()
+
+    def test_removes_empty_design_dir(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        design = ws / "design"
+        design.mkdir()
+        (design / ".plan").write_text("# Plan\n")
+        migrate_to_root(ws)
+        assert not design.exists()
+
+    def test_idempotent_on_rerun(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / ".plan").write_text("# Plan\n")
+        assert migrate_to_root(ws) is False
+
+    def test_does_not_overwrite_root_with_design(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        design = ws / "design"
+        design.mkdir()
+        (ws / ".plan").write_text("ROOT VERSION\n")
+        (design / ".plan").write_text("DESIGN VERSION\n")
+        migrate_to_root(ws)
+        assert (ws / ".plan").read_text() == "ROOT VERSION\n"
+        assert not (design / ".plan").exists()
+
+    def test_moves_pause_stack(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        design = ws / "design"
+        design.mkdir()
+        (design / ".pause-stack").write_text("- branch: test\n")
+        migrate_to_root(ws)
+        assert (ws / ".pause-stack").exists()
+
+    def test_handles_concurrent_move(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        design = ws / "design"
+        design.mkdir()
+        (design / ".plan").write_text("# Plan\n")
+        (design / ".plan").unlink()
+        assert migrate_to_root(ws) is False
