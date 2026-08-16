@@ -258,6 +258,17 @@ After saving the plan (and optional review), offer execution choice:
 
 **"Plan complete and saved to `$WORKSPACE/plans/<filename>.md`."**
 
+Every plan must end with a References section listing all sources consulted:
+```markdown
+## References
+
+- [spec-name.md] — design spec this plan implements
+- [source-file:line] — key code files examined
+- [GE-ID] — garden entries consulted
+- [protocol] — protocols that constrain the implementation
+- [GitHub #N] — related issues
+```
+
 Commit the plan immediately after writing:
 ```bash
 git -C "$WORKSPACE" add plans/

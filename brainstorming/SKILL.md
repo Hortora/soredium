@@ -287,6 +287,7 @@ were presented), write the decision to
 - <option C> — <one-line trade-off>
 **Rationale:** <why this choice>
 **Trade-offs:** <what we're giving up>
+**Sources:** <code files, garden entries, docs, or URLs that informed this decision>
 **Exploration:** <quick | deep-analysis | multi-agent-debate>
 **Status:** captured
 ```
@@ -428,6 +429,20 @@ When decision-review revises decisions:
   ```
   This updates the existing provenance records with the spec name via
   UPSERT — no duplicates are created.
+- **Include a References section** at the end of every spec document:
+  ```markdown
+  ## References
+
+  - [source-file:line or URL] — what it informed
+  - [GE-ID] — garden entry title
+  - [ADR-NNNN] — decision title
+  - [protocol] — protocol title
+  ```
+  List every source consulted during design: code files read, garden
+  entries surfaced, ADRs referenced, protocols checked, external docs,
+  GitHub issues. The reader should be able to trace every design
+  decision back to its source. Omit only trivially obvious references
+  (e.g. the issue itself).
 - Commit the design document to git
 
 ### Spec Self-Review
