@@ -61,6 +61,79 @@ STUB_FILES: dict[str, str] = {
 }
 
 
+def resolve_workspace(project: Path) -> Path | None:
+    """Derive the canonical workspace path for a project.
+
+    Discovery order:
+    1. Follow project's wksp/ symlink if it points to a valid workspace
+    2. Check ~/claude/public/<parent>/<project>/
+    3. Check ~/claude/private/<parent>/<project>/
+    Returns None if no workspace found at any canonical location.
+    """
+    wksp = project / "wksp"
+    if wksp.is_symlink() and wksp.is_dir():
+        resolved = wksp.resolve()
+        loc_err = validate_workspace_location(resolved)
+        marker_err = validate_workspace_marker(resolved, project)
+        if not loc_err and not marker_err:
+            return resolved
+
+    parent_name = project.resolve().parent.name
+    project_name = project.resolve().name
+    home = Path.home()
+    for privacy in ("public", "private"):
+        candidate = home / "claude" / privacy / parent_name / project_name
+        if candidate.is_dir():
+            loc_err = validate_workspace_location(candidate)
+            if not loc_err:
+                return candidate
+
+    return None
+
+
+def ensure_workspace(project: Path) -> Path:
+    """Find or create the canonical workspace for a project.
+
+    If a valid workspace exists, returns it. If not, creates one at
+    ~/claude/public/<parent>/<project>/ with git init, standard dirs,
+    .workspace marker, and bidirectional symlinks.
+    """
+    existing = resolve_workspace(project)
+    if existing:
+        marker = existing / ".workspace"
+        if not marker.exists():
+            write_workspace_marker(existing, project)
+        return existing
+
+    parent_name = project.resolve().parent.name
+    project_name = project.resolve().name
+    workspace = Path.home() / "claude" / "public" / parent_name / project_name
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    cmd_create_dirs(workspace)
+    write_workspace_marker(workspace, project)
+
+    git_dir = workspace / ".git"
+    if not git_dir.exists():
+        subprocess.run(["git", "init"], cwd=str(workspace), capture_output=True)
+        gitignore = workspace / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text(".DS_Store\n*.swp\n")
+        subprocess.run(["git", "add", "-A"], cwd=str(workspace), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init: workspace setup"],
+                       cwd=str(workspace), capture_output=True)
+
+    proj_link = workspace / "proj"
+    if not proj_link.exists():
+        proj_link.symlink_to(project.resolve())
+    wksp_link = project / "wksp"
+    if wksp_link.is_symlink():
+        wksp_link.unlink()
+    wksp_link.symlink_to(workspace)
+
+    return workspace
+
+
 def write_workspace_marker(workspace: Path, project: Path) -> None:
     """Write .workspace marker identifying this as a valid workspace."""
     marker = workspace / ".workspace"

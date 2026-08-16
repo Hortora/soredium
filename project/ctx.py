@@ -67,11 +67,18 @@ def resolve(cwd=None) -> dict[str, str]:
         try:
             from workspace_create import (validate_workspace_location,
                                           validate_workspace_marker,
-                                          write_workspace_marker)
+                                          write_workspace_marker,
+                                          resolve_workspace, ensure_workspace)
             loc_err = validate_workspace_location(topo.workspace)
             if loc_err:
-                workspace_valid = "nested"
-                workspace_error = loc_err
+                correct_ws = resolve_workspace(topo.project)
+                if correct_ws:
+                    topo.workspace = correct_ws
+                    workspace_valid = "repaired"
+                    workspace_error = f"was nested — switched to {correct_ws}"
+                else:
+                    workspace_valid = "nested"
+                    workspace_error = loc_err
             else:
                 marker_err = validate_workspace_marker(topo.workspace, topo.project)
                 if marker_err:
