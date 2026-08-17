@@ -1,4 +1,4 @@
-# Work Command Taxonomy — Design Spec
+# Work Command Taxonomy and Orientation — Design Spec
 
 **Issue:** #202
 **Date:** 2026-08-10
@@ -47,7 +47,7 @@ decisions) — and `continue` can auto-load this.
 
 | Verb | Meaning | Lifecycle? |
 |------|---------|-----------|
-| `continue` | Keep working on the current branch | Yes — auto-loads all context |
+| `continue` | Keep working on the current branch | Yes — `work_continue` self-transition for observability |
 | `resume` | Restore a paused branch from the pause stack | Yes — pause-stack only |
 | `brief` | Orientation summary — what's the state of things? | No — purely informational |
 
@@ -94,12 +94,22 @@ auto-suggests the next action:
 - If queue is empty: "Current issue complete. `end` to close the branch?"
 
 **Mechanical definition:** "current issue is complete" = the active `.plan`
-leaf is marked `[x]` after `work_health.py --scope entry` runs `plan_state`
-validation. `continue` runs health sync explicitly (behavioral spec step 2
-in both `HAS_HANDOFF` paths) before done-detection. `plan_state`
-batch-validates all `.plan` issues against GitHub and marks closed issues
-via `plan_manager.mark_completed()`. No additional API call is needed after
+leaf is marked `[x]` after `plan_state` validation runs. `continue`
+invokes `work_health.py --scope entry --owner-repo $OWNER_REPO` explicitly
+(behavioral spec step 2 in both `HAS_HANDOFF` paths). The `--owner-repo`
+parameter enables `check_plan_state`, which batch-validates all `.plan`
+issues against GitHub and marks closed issues via
+`plan_manager.mark_completed()`. No additional API call is needed after
 health sync — done-detection reads `.plan` directly.
+
+**Implementation gap addressed:** `check_plan_state` exists in
+`work_health.py` but is not currently registered in `ENTRY_CHECKS` —
+it requires `owner_repo`, which the entry check lambda signature
+`(project, workspace)` doesn't provide. This spec adds it:
+`run_checks()` accepts `owner_repo` and conditionally includes
+`check_plan_state` in entry scope when provided. This aligns the
+implementation with the Unified Work State spec's stated design
+(`plan_state` in entry scope per the check registry table).
 
 **Implementation owner:** Done-detection lives in `work/SKILL.md`'s
 `continue` action, not in `work_router.py`. The router resolves routing
@@ -313,8 +323,9 @@ a separate command.
 | `work-resume/SKILL.md` | CSO description updated to: `Use when returning to a paused branch from the pause stack — user says "work-resume", "resume", or "go back to that branch". Pause-stack restoration only, not general branch continuation (use "work continue" for that).` |
 | `handover/SKILL.md` | Update resume section (Step R1-R3): note that `continue` subsumes automatic HANDOFF.md reading. `resume handover` remains as explicit manual invocation. |
 | `work_router.py` | Fix `_handoff_references_branch()` substring match: use `re.search(rf'#{issue_num}\b', result.stdout)` for word-boundary matching (prevents #42 matching #421). No new outputs — D3 done-detection uses existing `PLAN_ACTIVE_ISSUE` + `PLAN_POSITION` after `work_health.py` sync. |
-| `project/ctx.py` | Refactor into importable library: wrap top-level code in `resolve() -> dict[str, str]` function, guard output with `if __name__ == '__main__'`. Enables `brief.py` to import context resolution directly instead of shelling out. |
-| `lifecycle.py` | Update `INVALID_MESSAGES[('active', 'work')]` to mention `continue`: "Already on an active branch. Use `work continue`, `work end`, `work pause`, or `work next`." No state machine changes. |
+| `project/ctx.py` | Refactor into importable library: extract ~200 lines of top-level state derivation into `resolve() -> dict[str, str]`, collect results into a dict instead of printing, guard print loop with `if __name__ == '__main__'`. Helper functions (`run()`, `check_file()`, `check_dir()`, `_resolve_symlink_target()`) and imports remain top-level. Follows the same pattern as `work_router.py`'s existing `detect_state()` function. |
+| `lifecycle.py` | Add `('active', 'work_continue'): ('active', [], [])` self-transition to `TRANSITION_TABLE` — emits worklog event for observability. Add `INVALID_MESSAGES` for `work_continue` in wrong states: `('idle', 'work_continue')`, `('scaffolded', 'work_continue')`, `('transitioning', 'work_continue')`, `('paused', 'work_continue')`. Update `INVALID_MESSAGES[('active', 'work')]` to mention `continue`. |
+| `project/work_health.py` | Add `--owner-repo` CLI parameter. Update `run_checks()` to accept `owner_repo` and conditionally include `check_plan_state` in entry scope when provided. This enables D3 done-detection by ensuring `.plan` is synced with GitHub before `continue` reads it. Aligns with UWS spec's check registry (plan_state in entry scope). |
 
 ### New files
 
@@ -338,7 +349,7 @@ a separate command.
 
 ```
 1. continue — keep working (loads context automatically)
-2. resume — you have N paused branch(es) — restore one from stack     ← only if STACK_DEPTH > 0
+2. switch — you have N paused branch(es) — restore one from stack     ← only if STACK_DEPTH > 0
 N. next — mark current issue done, advance to next in queue       ← only if HAS_PLAN=yes
 N+1. end — close this branch, merge, push, return to main
 N+2. pause — commit WIP, push to stack, switch to main
@@ -350,9 +361,12 @@ regardless of HANDOFF.md existence.
 
 **`continue` behavioral specification:**
 
+**Lifecycle:** Fire `transition(meta_path, 'work_continue')` — validates
+branch is `active`, emits worklog event. No state change (self-transition).
+
 When `HAS_HANDOFF=yes` (subsequent session):
 1. Read `$HANDOFF_PATH` — summarise last session's narrative
-2. Run `work_health.py --scope entry` — syncs `.plan` with GitHub, validates workspace state
+2. Run `work_health.py --scope entry --owner-repo $OWNER_REPO` — syncs `.plan` with GitHub, validates workspace state
 3. If `HAS_PLAN=yes`: read `.plan` for queue progress and active issue
 4. If `IN_SLOT=yes` and `HAS_PLAN=no`: read `.slot` for issue context
 5. Load design specs (work-start Step 3c) — scan for specs, read them all
@@ -367,7 +381,7 @@ When `HAS_HANDOFF=no` (first session, or HANDOFF.md missing):
    - **Step 3b:** Garden search — spawn `garden-retriever` for domain context
    - **Step 3c:** design spec loading (mandatory)
    - **Step 11:** IntelliJ MCPs — hard stop if unavailable
-2. Run `work_health.py --scope entry` — syncs `.plan` with GitHub, validates workspace state
+2. Run `work_health.py --scope entry --owner-repo $OWNER_REPO` — syncs `.plan` with GitHub, validates workspace state
 3. If `HAS_PLAN=yes` or `IN_SLOT=yes`: read plan/slot context
 4. Done-detection auto-suggest (D3)
 5. Proceed to work
@@ -377,6 +391,16 @@ The asymmetry is intentional: subsequent sessions skip environment pre-checks
 in the first session and the branch scaffold already exists. First sessions
 (no HANDOFF.md) run the full pre-check suite including the IntelliJ hard gate.
 `continue` preserves this existing behavior under a unified label.
+
+**`HAS_HANDOFF` path selection dependency:** The behavioral path depends on
+`_handoff_references_branch()` correctness (word-boundary regex match). The
+degradation modes are asymmetric and safe:
+- **False positive** (HAS_HANDOFF=yes when should be no): skips environment
+  pre-checks, but the branch was used in a prior session — environment was
+  already verified. Degraded but safe.
+- **False negative** (HAS_HANDOFF=no when should be yes): runs full
+  pre-checks unnecessarily. Suboptimal but harmless — the environment
+  re-verification is redundant, not wrong.
 
 ---
 
@@ -393,7 +417,8 @@ in the first session and the branch scaffold already exists. First sessions
 | `resume handover` | → handover skill directly (manual invocation) |
 
 **Wrong-context error handling (D4):** The routing table in `work/SKILL.md`
-owns all wrong-context errors. Before forwarding to a sub-skill:
+owns all wrong-context errors. Before dispatching to a sub-skill or
+executing an internal action:
 
 - `work resume` + `ON_MAIN=no` → error (not forwarded to work-resume)
 - `work resume` + `ON_MAIN=yes` + `STACK_DEPTH=0` → error (not forwarded)
@@ -417,8 +442,8 @@ implemented independently — they touch different files with no shared code.
 
 | Phase | Decisions | Files touched | Depends on |
 |-------|-----------|--------------|-----------|
-| 1 — Taxonomy | D1, D2, D3, D4 | `work/SKILL.md`, `work-resume/SKILL.md`, `handover/SKILL.md`, `work_router.py` | Nothing |
-| 2 — Brief | D5, D6 | `brief/SKILL.md`, `brief/brief.py`, `brief/commands/brief.md` | Nothing (thematically linked to D1's verb table, no code dependency) |
+| 1 — Taxonomy | D1, D2, D3, D4 | `work/SKILL.md`, `work-resume/SKILL.md`, `handover/SKILL.md`, `work_router.py`, `lifecycle.py`, `project/work_health.py` | Nothing |
+| 2 — Brief | D5, D6 | `brief/SKILL.md`, `brief/brief.py`, `brief/commands/brief.md`, `project/ctx.py` | Nothing (thematically linked to D1's verb table, no code dependency; `ctx.py` refactoring is needed for `brief.py` import) |
 
 Phase 1 is the core fix — resolving the semantic overload. Phase 2 is a
 new feature that happens to be defined alongside its verb. Either can

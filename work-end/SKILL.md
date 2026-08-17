@@ -84,9 +84,27 @@ Parse the JSON output. Handle preconditions:
 | Precondition | Status | Action |
 |-------------|--------|--------|
 | `branch_alignment` | `fail` | Hard stop — both repos must be on the same branch |
-| `clean_tree` | `fail` | Hard stop — commit or stash changes first |
+| `clean_tree` | `fail` | Hard stop — see DIRTY TREE PROTOCOL below |
 | `meta_exists` | `needs_input` | Graceful degradation: infer issue from branch name, confirm with user |
 | `meta_exists` | `pass` | Proceed — read context values from output |
+
+<DIRTY-TREE-PROTOCOL>
+**When `clean_tree` fails, the ONLY acceptable actions are:**
+
+1. `git stash push -u -m "work-end: stashing uncommitted changes"` — preserves ALL changes (staged, unstaged, untracked) in a named stash entry
+2. `git add -A && git commit -m "wip: uncommitted changes before work-end"` — commits everything on the current branch
+
+**NEVER use any of these to clean a dirty tree:**
+- `git reset --hard` — DESTROYS all uncommitted changes permanently
+- `git checkout -- .` — DESTROYS all unstaged changes permanently
+- `git clean -fd` — DESTROYS all untracked files permanently
+- `git reset HEAD` followed by ignoring the changes
+
+**Why:** The dirty files may belong to another session working in the same repo.
+A `git reset --hard` destroyed hours of work in a real incident (Aug 2026).
+The rebase and land scripts now include a `safety_stash()` call as defense-in-depth,
+but the LLM must never attempt destructive cleanup either.
+</DIRTY-TREE-PROTOCOL>
 
 **Queue gate** (if `HAS_PLAN=yes`): Run `plan_manager.py detect` to check
 queue state. If mid-queue (remaining uncompleted items exist), STOP and
@@ -421,6 +439,7 @@ Skip silently if no `.notes/` directory exists.
 | Stamp before squash | SHAs become unreachable | Execute enforces stamp-after-squash |
 | Push main without verify | Broken content on remote | Verify gate blocks close |
 | Skip workspace stamp | Branch looks live to hygiene | land subcommand stamps both |
+| `git reset --hard` to clean dirty tree | Destroys uncommitted work from other sessions | `git stash push -u -m "..."` — ALWAYS stash, NEVER reset |
 
 ---
 

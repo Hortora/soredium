@@ -54,6 +54,24 @@ class PushResult:
     error: str | None = None
 
 
+def safety_stash(repo: str, operation: str) -> bool:
+    """Stash uncommitted changes (including untracked) before destructive ops.
+
+    Returns True if a stash was created, False if tree was already clean.
+    """
+    status = git(repo, "status", "--porcelain")
+    if status.returncode != 0 or not status.stdout.strip():
+        return False
+    msg = f"work-end safety stash before {operation}"
+    result = git(repo, "stash", "push", "-u", "-m", msg)
+    if result.returncode == 0:
+        print(f"SAFETY_STASH={Path(repo).name}|op={operation}|msg={msg}")
+        return True
+    print(f"SAFETY_STASH_WARN=stash failed for {Path(repo).name}: {result.stderr.strip()}",
+          file=sys.stderr)
+    return False
+
+
 def rebase_onto_base(project: str, branch: str, base_branch: str = "main") -> RebaseResult:
     """Rebase branch onto base branch."""
     result = git(project, "fetch", "origin", base_branch)
@@ -184,6 +202,8 @@ def cmd_rebase(opts: dict[str, str]) -> int:
         print("ERROR_DETAIL=project= and branch= are required")
         return 1
 
+    safety_stash(project, "rebase")
+
     fork_remote, blessed_remote = detect_topology(project)
     fetch_remote = blessed_remote if blessed_remote else fork_remote or "origin"
 
@@ -213,6 +233,10 @@ def cmd_land(opts: dict[str, str]) -> int:
         print("ERROR=MISSING_ARGS")
         print("ERROR_DETAIL=project= and branch= are required")
         return 1
+
+    safety_stash(project, "land")
+    if workspace:
+        safety_stash(workspace, "land-workspace")
 
     progress_path = (
         Path(workspace) / ".execute-progress"

@@ -759,6 +759,103 @@ class TestWriteMarker:
         assert "BAD_PATH" in result.stdout
 
 
+class TestSafetyStash:
+    def test_stash_created_when_dirty(self, tmp_path: Path) -> None:
+        """safety_stash should stash uncommitted changes including untracked files."""
+        project = _init_repo(tmp_path / "project")
+        (project / "dirty.txt").write_text("uncommitted work\n")
+        (project / "README.md").write_text("modified\n")
+
+        result = _run_execute(
+            "rebase",
+            f"project={project}",
+            "branch=main",
+            "base_branch=main",
+        )
+        assert "SAFETY_STASH=" in result.stdout
+
+        stash_list = _git(project, "stash", "list")
+        assert "work-end safety stash" in stash_list
+
+    def test_no_stash_when_clean(self, tmp_path: Path) -> None:
+        """safety_stash should be a no-op when the tree is clean."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", "issue-clean")
+        _git(project, "commit", "--allow-empty", "-m", "clean commit")
+
+        result = _run_execute(
+            "rebase",
+            f"project={project}",
+            "branch=issue-clean",
+            "base_branch=main",
+        )
+        assert "SAFETY_STASH=" not in result.stdout
+        stash_list = _git(project, "stash", "list")
+        assert stash_list == ""
+
+    def test_land_stashes_dirty_project(self, tmp_path: Path) -> None:
+        """cmd_land should stash dirty project tree before checkout/merge."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-stash-land"
+
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: land stash test")
+        _git(project, "checkout", "main")
+
+        (project / "other-session-work.txt").write_text("from another session\n")
+
+        _git(workspace, "checkout", "-b", branch)
+
+        result = _run_execute(
+            "land",
+            f"project={project}",
+            f"branch={branch}",
+            "base_branch=main",
+            f"workspace={workspace}",
+        )
+        assert "SAFETY_STASH=" in result.stdout
+
+        stash_list = _git(project, "stash", "list")
+        assert "work-end safety stash before land" in stash_list
+
+    def test_stash_preserves_untracked_files(self, tmp_path: Path) -> None:
+        """Untracked files must be included in the stash (the -u flag)."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", "issue-untracked")
+        _git(project, "commit", "--allow-empty", "-m", "branch start")
+
+        untracked = project / "new-untracked.txt"
+        untracked.write_text("untracked\n")
+        assert untracked.exists()
+
+        result = _run_execute(
+            "rebase",
+            f"project={project}",
+            "branch=issue-untracked",
+            "base_branch=main",
+        )
+        assert "SAFETY_STASH=" in result.stdout
+        assert not untracked.exists(), "Untracked file should be stashed (removed from tree)"
+
+        _git(project, "stash", "pop")
+        assert untracked.exists(), "Untracked file should be restored after stash pop"
+
+
 class TestCloseIssues:
     def test_missing_repo(self) -> None:
         result = _run_execute("close-issues", "covers=42")
