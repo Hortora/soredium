@@ -97,6 +97,43 @@ context when unambiguous. Set frontmatter: `entry_type`, `subtype: diary`
 **Check prior entries in this series:** if `.meta` exists, scan `<BLOG_DIR>/`
 for entries with matching `series:` frontmatter using the branch name.
 
+### Step 1b — Revise-or-new decision
+
+**Skip** if no prior entries found in Step 1's series check.
+
+If prior entries exist with matching `series:` (branch name):
+
+1. Read the most recent entry in the series
+2. Assess: would a new entry largely repeat what the existing one covers?
+
+**Default to Revise** when:
+- The existing entry covers work on this branch that this session continued
+- The entry is unpublished (still in workspace, not promoted to project)
+- A new entry would substantially overlap with the existing one
+
+**Default to New** when:
+- The existing entry covers a complete, distinct phase (different problem,
+  different discovery, different direction)
+- Enough genuinely new content exists to stand alone as its own narrative
+- The work direction changed significantly since the last entry
+
+Present the decision:
+```
+Prior entry found: <filename>
+  "<title>" — <date>, <word-count> words
+
+  [R] Revise — update this entry with new content   ← default
+  [N] New — create a separate entry in the series
+```
+
+If **Revise**: carry the existing file path forward as `REVISE_PATH`. Step 2
+gathers new content. Step 3 drafts an updated version that integrates the
+existing prose with new material — not an append, but a coherent rewrite.
+Step 4 writes to the same file.
+
+If **New**: `REVISE_PATH` is empty. Proceed as normal — Step 4 creates a new
+file with the next sequence number and a continuity note.
+
 ### Step 2 — Gather
 
 **Entry worthiness check — before gathering anything:**
@@ -135,6 +172,21 @@ identifiable groups) — flag each for author approval per
 until the user confirms.**
 
 ### Step 4 — Write
+
+**If `REVISE_PATH` is set (revise mode):**
+
+Write the updated draft to `REVISE_PATH`, replacing the existing content.
+Preserve the original frontmatter `date:` field. Update `title:` and `tags:`
+only if the revised content warrants it. Do not change the filename.
+
+Update `<BLOG_DIR>/INDEX.md` only if the summary changed:
+```bash
+python3 ~/.claude/skills/write-content/update_blog_index.py <REVISE_PATH> --summary "<updated one-line summary>"
+```
+
+Commit via `git-commit`.
+
+**If `REVISE_PATH` is empty (new entry):**
 
 ```bash
 ls <BLOG_DIR>/YYYY-MM-DD-<initials>*.md 2>/dev/null | wc -l

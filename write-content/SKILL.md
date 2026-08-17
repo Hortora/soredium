@@ -55,11 +55,15 @@ What are you writing?
 
 **Cross-session diary entries:** A diary entry can span multiple sessions.
 Write what you have now — the entry does not need to be complete to be
-written to disk. The next session can read the unpublished draft and
-append to it. Publish only when the entry covers the full arc. This is
+written to disk. Publish only when the entry covers the full arc. This is
 important because session context is lost at session end — writing
 nothing means the session's narrative is gone. Writing a partial draft
 preserves it for the continuation session to build on.
+
+When a prior entry exists in the same series (same branch), the diary
+form's Step 1b presents a revise-or-new decision — defaulting to revise
+when the existing entry covers work this session continued, defaulting
+to new when the work direction changed enough to warrant a separate entry.
 
 ### Q2 — Sub-type or section
 
