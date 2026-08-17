@@ -346,7 +346,28 @@ If `ARC42STORIES.MD` exists, scan for stale statuses and fix.
 
 Suggest a descriptive session name if auto-generated.
 
-### 5.6 Session close summary
+### 5.6 Garden retrieval feedback
+
+Record which garden entries retrieved during this session were actually useful.
+Non-blocking — if the MCP server is unavailable, skip silently and continue.
+
+1. Review `gardenSearch` results from this session's conversation context.
+   Collect all GE-IDs that appeared in search results.
+2. If no garden entries were retrieved this session, skip silently.
+3. For each retrieved GE-ID, assess its relevance to the work completed:
+   - **HIGHLY_RELEVANT** — directly solved the problem or was the key piece of context
+   - **RELEVANT** — useful and informed the work
+   - **PARTIALLY_RELEVANT** — tangentially related but not central
+   - **NOT_RELEVANT** — appeared in results but wasn't useful for this task
+4. Group GE-IDs by outcome and call `gardenFeedback` once per group:
+   ```
+   gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
+   ```
+5. If the call fails (MCP unavailable, server not responding, connection
+   refused, timeout), log a single warning and continue — never block
+   work-end completion. Do not retry.
+
+### 5.7 Session close summary
 
 ```
 Session close complete.
@@ -360,7 +381,7 @@ Session close complete.
 ✅ Branch closed     <branch-name>
 ```
 
-### 5.7 Notes — surface and offer to append
+### 5.8 Notes — surface and offer to append
 
 If `$WORKSPACE/.notes/NOTES.md` exists and has content, surface the most
 recent date section after the close summary:
