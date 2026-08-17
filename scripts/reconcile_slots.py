@@ -153,6 +153,8 @@ def audit(family_root: Path) -> list[dict]:
             continue
 
         if db_entry and not d:
+            if db_entry["state"] == "purged":
+                continue
             divergences.append({
                 "slot": num,
                 "class": "db-only",
@@ -252,13 +254,23 @@ def execute(actions: list[dict], family_root: Path) -> list[dict]:
                 if _wl:
                     conn = _wl.connect()
                     normalized = _wl._norm(str(family_root))
-                    conn.execute(
-                        "DELETE FROM slots WHERE slot_number=? AND family_root=?",
-                        (a["slot"], normalized),
-                    )
-                    conn.commit()
+                    try:
+                        conn.execute(
+                            "DELETE FROM slots WHERE slot_number=? AND family_root=?",
+                            (a["slot"], normalized),
+                        )
+                        conn.commit()
+                        results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+                    except Exception:
+                        conn.rollback()
+                        conn.execute(
+                            "UPDATE slots SET state='purged' WHERE slot_number=? AND family_root=?",
+                            (a["slot"], normalized),
+                        )
+                        conn.commit()
+                        results.append({"slot": a["slot"], "action": a["action"],
+                                        "status": "done", "note": "FK constraint — marked purged"})
                     conn.close()
-                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
 
             elif a["action"] == "backfill_db":
                 if _wl:

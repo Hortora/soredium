@@ -2037,6 +2037,162 @@ class TestIsProjectRepo:
         assert slot_manager.is_project_repo("attic") is False
 
 
+class TestIsWorkspaceClone:
+    def test_detects_workspace_marker(self, tmp_path):
+        ws = tmp_path / "work-casehub"
+        ws.mkdir()
+        (ws / ".workspace").write_text("project: /path/to/project\n")
+        assert slot_manager.is_workspace_clone(ws) is True
+
+    def test_detects_proj_symlink(self, tmp_path):
+        ws = tmp_path / "custom-ws-name"
+        ws.mkdir()
+        (ws / "proj").symlink_to("/path/to/project")
+        assert slot_manager.is_workspace_clone(ws) is True
+
+    def test_detects_work_prefix_name(self, tmp_path):
+        ws = tmp_path / "work-casehub"
+        ws.mkdir()
+        assert slot_manager.is_workspace_clone(ws) is True
+
+    def test_detects_work_name(self, tmp_path):
+        ws = tmp_path / "work"
+        ws.mkdir()
+        assert slot_manager.is_workspace_clone(ws) is True
+
+    def test_project_repo_not_workspace(self, tmp_path):
+        repo = tmp_path / "engine"
+        repo.mkdir()
+        assert slot_manager.is_workspace_clone(repo) is False
+
+    def test_worker_named_repo_not_workspace(self, tmp_path):
+        repo = tmp_path / "worker"
+        repo.mkdir()
+        assert slot_manager.is_workspace_clone(repo) is False
+
+    def test_nonexistent_path(self, tmp_path):
+        assert slot_manager.is_workspace_clone(tmp_path / "nope") is False
+
+    def test_workspace_marker_overrides_project_name(self, tmp_path):
+        """A repo named like a project but with .workspace is still a workspace."""
+        ws = tmp_path / "engine"
+        ws.mkdir()
+        (ws / ".workspace").write_text("project: /path/to/engine\n")
+        assert slot_manager.is_workspace_clone(ws) is True
+
+    def test_proj_symlink_overrides_project_name(self, tmp_path):
+        """A repo with a proj symlink is a workspace even with a project-like name."""
+        ws = tmp_path / "platform"
+        ws.mkdir()
+        (ws / "proj").symlink_to("/path/to/platform")
+        assert slot_manager.is_workspace_clone(ws) is True
+
+
+class TestGetSlotReposFiltersWorkspaces:
+    def test_excludes_workspace_by_name(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        init_repo(slot / "engine")
+        init_repo(slot / "work-casehub")
+        repos = slot_manager.get_slot_repos(slot)
+        assert "engine" in repos
+        assert "work-casehub" not in repos
+
+    def test_excludes_workspace_by_marker(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        init_repo(slot / "engine")
+        ws = init_repo(slot / "custom-ws")
+        (ws / ".workspace").write_text("project: /path\n")
+        repos = slot_manager.get_slot_repos(slot)
+        assert "engine" in repos
+        assert "custom-ws" not in repos
+
+    def test_excludes_workspace_by_proj_symlink(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        init_repo(slot / "engine")
+        ws = init_repo(slot / "my-workspace")
+        (ws / "proj").symlink_to(str(slot / "engine"))
+        repos = slot_manager.get_slot_repos(slot)
+        assert "engine" in repos
+        assert "my-workspace" not in repos
+
+    def test_get_all_still_returns_workspaces(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        init_repo(slot / "engine")
+        init_repo(slot / "work-casehub")
+        all_repos = slot_manager.get_all_slot_repos(slot)
+        assert "engine" in all_repos
+        assert "work-casehub" in all_repos
+
+
+class TestMergeSlotSkipsWorkspace:
+    def test_skips_workspace_clones(self, tmp_path, capsys):
+        """merge_slot must not process workspace clones through merge/push."""
+        family, originals, slot, branch = _create_merge_test_repos(
+            tmp_path, ["engine"]
+        )
+        ws_clone = init_repo(slot / "work-casehub")
+        subprocess.run(
+            ["git", "-C", str(ws_clone), "checkout", "-b", branch],
+            capture_output=True, check=True,
+        )
+        (ws_clone / "blog.md").write_text("# Blog entry\n")
+        subprocess.run(
+            ["git", "-C", str(ws_clone), "add", "."],
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(ws_clone), "commit", "-m", "blog entry"],
+            capture_output=True, check=True,
+        )
+
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+
+        captured = capsys.readouterr().out
+        assert "SKIPPED_WORKSPACE=work-casehub" in captured
+
+        landed = (slot / ".landed").read_text()
+        assert "work-casehub" not in landed
+        assert "engine:" in landed
+
+    def test_skips_workspace_with_marker(self, tmp_path, capsys):
+        """Workspace detected by .workspace marker is skipped."""
+        family, originals, slot, branch = _create_merge_test_repos(
+            tmp_path, ["engine"]
+        )
+        ws_clone = init_repo(slot / "custom-ws")
+        (ws_clone / ".workspace").write_text("project: /path/to/proj\n")
+        subprocess.run(
+            ["git", "-C", str(ws_clone), "checkout", "-b", branch],
+            capture_output=True, check=True,
+        )
+
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+
+        captured = capsys.readouterr().out
+        assert "custom-ws" in captured
+        landed = (slot / ".landed").read_text()
+        assert "custom-ws" not in landed
+
+    def test_project_repos_still_merge(self, tmp_path):
+        """Project repos still merge normally after workspace filtering."""
+        family, originals, slot, branch = _create_merge_test_repos(
+            tmp_path, ["engine", "iot"]
+        )
+        init_repo(slot / "work-casehub")
+
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+
+        for name in ["engine", "iot"]:
+            assert (originals[name] / "feature.py").exists()
+
+
 class TestRemoveSlotForceArchiveClaude:
     def test_force_relocates_claude_projects_to_attic(self, tmp_path, monkeypatch):
         """--force archives to attic and relocates Claude session dirs."""
@@ -3018,20 +3174,22 @@ class TestMergeSlotDualPush:
 
         return family, slot_dir, proj_orig, ws_orig
 
-    def test_workspace_repo_included_in_push_loop(self, tmp_path):
-        """Workspace repos are merged, pushed to original, and synced to GitHub."""
+    def test_workspace_repo_skipped_by_merge(self, tmp_path, capsys):
+        """Workspace repos are skipped — artifacts promoted via close_artifacts, not merge-slot."""
         family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
         result = slot_manager.merge_slot(family, 1)
 
         assert result == 0
+        captured = capsys.readouterr().out
+        assert "SKIPPED_WORKSPACE=work-hub" in captured
+
         rc, ws_log, _ = slot_manager.run_cmd(
             ["git", "-C", str(ws_orig), "log", "--oneline"])
-        assert "journal" in ws_log.lower()
+        assert "journal" not in ws_log.lower()
 
-        bare_path = family / ".work-hub-bare.git"
-        rc, bare_log, _ = slot_manager.run_cmd(
-            ["git", "-C", str(bare_path), "log", "--oneline", "main"])
-        assert "journal" in bare_log.lower()
+        landed = (slot_dir / ".landed").read_text()
+        assert "work-hub" not in landed
+        assert "engine:" in landed
 
     def test_github_push_failure_is_warning_not_error(self, tmp_path):
         """If original can't push to GitHub, local push succeeded — warn, don't block."""

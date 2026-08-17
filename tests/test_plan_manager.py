@@ -1146,3 +1146,183 @@ class TestDetectWithState:
         assert result is not None
         assert result["state"] == {}
         assert result["active_issue"] == 42
+
+
+PLAN_WITH_TASKS = """\
+# Work Plan — issue-242-merge-slot
+
+## Queue
+- [x] #240 — Previous work
+- [ ] #242 — Merge slot workspace ← active
+  - [ ] Batch 1: Detection
+    - [ ] Task 1: Add is_workspace_clone
+    - [ ] Task 2: Update get_slot_repos
+  - [ ] Batch 2: Integration
+    - [ ] Task 3: Change merge_slot
+- [ ] #243 — Reconciliation
+
+## Session State
+Current: #242 — Merge slot workspace
+Started: 2026-08-16
+"""
+
+
+class TestTaskParsing:
+    def test_parses_tasks_under_active_issue(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        tree = plan_manager.parse_plan(plan)
+        issue_242 = tree.queue[1]
+        assert issue_242.issue_number == 242
+        assert len(issue_242.tasks) == 3
+        assert issue_242.tasks[0].name == "Add is_workspace_clone"
+        assert issue_242.tasks[0].batch == "Detection"
+        assert issue_242.tasks[0].done is False
+        assert issue_242.tasks[2].name == "Change merge_slot"
+        assert issue_242.tasks[2].batch == "Integration"
+
+    def test_completed_issue_has_no_tasks(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        tree = plan_manager.parse_plan(plan)
+        assert tree.queue[0].tasks == []
+
+    def test_future_issue_has_no_tasks(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        tree = plan_manager.parse_plan(plan)
+        assert tree.queue[2].tasks == []
+
+    def test_roundtrip_preserves_tasks(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        tree = plan_manager.parse_plan(plan)
+        plan_manager.rewrite_plan(plan, tree)
+        tree2 = plan_manager.parse_plan(plan)
+        assert len(tree2.queue[1].tasks) == 3
+        assert tree2.queue[1].tasks[0].name == "Add is_workspace_clone"
+        assert tree2.queue[1].tasks[2].batch == "Integration"
+
+
+class TestInjectTasks:
+    def test_injects_into_active_issue(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        plan_manager.inject_tasks(plan, [
+            {"batch": "Setup", "name": "Create config"},
+            {"batch": "Setup", "name": "Add validation"},
+            {"batch": "Wiring", "name": "Connect pipeline"},
+        ])
+        tree = plan_manager.parse_plan(plan)
+        active = tree.queue[0]
+        assert len(active.tasks) == 3
+        assert active.tasks[0].batch == "Setup"
+        assert active.tasks[2].batch == "Wiring"
+
+    def test_replaces_existing_tasks(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        plan_manager.inject_tasks(plan, [
+            {"batch": "New", "name": "Only task"},
+        ])
+        tree = plan_manager.parse_plan(plan)
+        assert len(tree.queue[1].tasks) == 1
+        assert tree.queue[1].tasks[0].name == "Only task"
+
+
+class TestCheckTask:
+    def test_marks_task_done(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        result = plan_manager.check_task(plan, "Add is_workspace_clone")
+        assert result["checked"] == "Add is_workspace_clone"
+        assert result["batch"] == "Detection"
+        assert result["batch_done"] is False
+        assert result["all_done"] is False
+        tree = plan_manager.parse_plan(plan)
+        assert tree.queue[1].tasks[0].done is True
+        assert tree.queue[1].tasks[1].done is False
+
+    def test_batch_done_when_all_tasks_in_batch_complete(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        plan_manager.check_task(plan, "Add is_workspace_clone")
+        result = plan_manager.check_task(plan, "Update get_slot_repos")
+        assert result["batch_done"] is True
+        assert result["all_done"] is False
+        assert result["remaining_batches"] == 1
+
+    def test_all_done_when_all_tasks_complete(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        plan_manager.check_task(plan, "Add is_workspace_clone")
+        plan_manager.check_task(plan, "Update get_slot_repos")
+        result = plan_manager.check_task(plan, "Change merge_slot")
+        assert result["all_done"] is True
+        assert result["remaining_batches"] == 0
+
+    def test_error_on_unknown_task(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        result = plan_manager.check_task(plan, "Nonexistent task")
+        assert "error" in result
+
+    def test_error_on_no_active_issue(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text("# Work Plan — test\n\n## Queue\n- [x] #42 — Done\n")
+        result = plan_manager.check_task(plan, "Some task")
+        assert "error" in result
+
+
+class TestAdvanceStripsTasks:
+    @patch("plan_manager._emit_issue_events")
+    def test_advance_removes_tasks_from_completed_issue(self, mock_emit, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        plan_manager.advance(plan)
+        tree = plan_manager.parse_plan(plan)
+        issue_242 = next(i for i in tree.queue if i.issue_number == 242)
+        assert issue_242.completed is True
+        assert issue_242.tasks == []
+        issue_243 = next(i for i in tree.queue if i.issue_number == 243)
+        assert issue_243.active is True
+
+
+class TestTaskWriteFormat:
+    def test_writes_batch_and_task_checkboxes(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        plan_manager.inject_tasks(plan, [
+            {"batch": "Foundation", "name": "Parser"},
+            {"batch": "Foundation", "name": "Validator"},
+            {"batch": "Wiring", "name": "Pipeline"},
+        ])
+        content = plan.read_text()
+        assert "- [ ] Batch 1: Foundation" in content
+        assert "- [ ] Task 1: Parser" in content
+        assert "- [ ] Task 2: Validator" in content
+        assert "- [ ] Batch 2: Wiring" in content
+        assert "- [ ] Task 3: Pipeline" in content
+
+    def test_checked_task_shows_x(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        plan_manager.check_task(plan, "Add is_workspace_clone")
+        content = plan.read_text()
+        assert "- [x] Task 1: Add is_workspace_clone" in content
+        assert "- [ ] Task 2: Update get_slot_repos" in content
+
+    def test_batch_checked_when_all_tasks_done(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        plan_manager.check_task(plan, "Add is_workspace_clone")
+        plan_manager.check_task(plan, "Update get_slot_repos")
+        content = plan.read_text()
+        assert "- [x] Batch 1: Detection" in content
+        assert "- [ ] Batch 2: Integration" in content
+
+    def test_completed_issue_no_tasks_in_output(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_TASKS)
+        content = plan.read_text()
+        assert "Task" not in content.split("#240")[0]

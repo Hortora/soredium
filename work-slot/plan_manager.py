@@ -14,6 +14,13 @@ from pathlib import Path
 
 
 @dataclass
+class TaskItem:
+    name: str
+    batch: str
+    done: bool = False
+
+
+@dataclass
 class QueueItem:
     issue_number: int
     title: str
@@ -22,6 +29,7 @@ class QueueItem:
     is_epic: bool = False
     children: list['QueueItem'] = field(default_factory=list)
     batch: str | None = None
+    tasks: list[TaskItem] = field(default_factory=list)
 
 
 @dataclass
@@ -75,6 +83,8 @@ _BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*←\s*curren
 _DEFERRED_RE = re.compile(
     r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]+)\](?:\s+—\s+(.+))?$'
 )
+_TASK_BATCH_RE = re.compile(r'^\s*- \[([ x])\]\s*Batch\s+\d+:\s*(.+)')
+_TASK_ITEM_RE = re.compile(r'^\s*- \[([ x])\]\s*Task\s+\d+:\s*(.+)')
 _CURRENT_RE = re.compile(r'^Current:\s*#(\d+)')
 _STARTED_RE = re.compile(r'^Started:\s*(.+)')
 _LAST_WRAP_RE = re.compile(r'^Last wrap:\s*(.+)')
@@ -277,7 +287,32 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
                             break
                 i = j
             else:
-                i += 1
+                j = i + 1
+                task_batch = ""
+                while j < len(lines):
+                    next_line = lines[j]
+                    if not next_line.strip():
+                        j += 1
+                        continue
+                    next_indent = _indent_level(next_line)
+                    if next_indent <= indent:
+                        break
+                    bm = _TASK_BATCH_RE.match(next_line)
+                    if bm:
+                        task_batch = bm.group(2).strip()
+                        j += 1
+                        continue
+                    tm = _TASK_ITEM_RE.match(next_line)
+                    if tm:
+                        item.tasks.append(TaskItem(
+                            name=tm.group(2).strip(),
+                            batch=task_batch,
+                            done=tm.group(1) == "x",
+                        ))
+                        j += 1
+                        continue
+                    break
+                i = j if item.tasks else i + 1
 
             items.append(item)
         else:
@@ -411,6 +446,25 @@ def _write_item(item: QueueItem, lines: list[str], indent: int) -> None:
                 lines.append(f"{prefix}  ### {current_batch}{batch_marker}")
             _write_item(child, lines, indent + 1)
 
+    if item.tasks and not item.completed:
+        _write_tasks(item.tasks, lines, indent + 1)
+
+
+def _write_tasks(tasks: list[TaskItem], lines: list[str], indent: int) -> None:
+    prefix = "  " * indent
+    current_batch = None
+    batch_num = 0
+    task_num = 0
+    for task in tasks:
+        if task.batch != current_batch:
+            current_batch = task.batch
+            batch_num += 1
+            batch_check = "x" if all(t.done for t in tasks if t.batch == current_batch) else " "
+            lines.append(f"{prefix}- [{batch_check}] Batch {batch_num}: {current_batch}")
+        task_num += 1
+        task_check = "x" if task.done else " "
+        lines.append(f"{prefix}  - [{task_check}] Task {task_num}: {task.name}")
+
 
 def _find_active_leaf(items: list[QueueItem]) -> QueueItem | None:
     for item in items:
@@ -513,6 +567,7 @@ def _mark_completed(items: list[QueueItem], issue_number: int) -> bool:
         if item.issue_number == issue_number and not item.is_epic:
             item.completed = True
             item.active = False
+            item.tasks = []
             return True
         if item.is_epic and item.children:
             if _mark_completed(item.children, issue_number):
@@ -527,6 +582,48 @@ def mark_completed(plan_path: Path, issue_number: int) -> bool:
     if changed:
         rewrite_plan(plan_path, tree)
     return changed
+
+
+def inject_tasks(plan_path: Path, tasks: list[dict]) -> None:
+    """Add task breakdown to the active issue in the plan.
+
+    tasks: list of {"batch": str, "name": str}
+    Replaces any existing tasks on the active issue.
+    """
+    tree = parse_plan(plan_path)
+    active = _find_active_leaf(tree.queue)
+    if not active:
+        print("ERROR=no_active_issue")
+        return
+    active.tasks = [TaskItem(name=t["name"], batch=t["batch"]) for t in tasks]
+    rewrite_plan(plan_path, tree)
+
+
+def check_task(plan_path: Path, task_name: str) -> dict:
+    """Mark a task as done on the active issue. Returns batch status."""
+    tree = parse_plan(plan_path)
+    active = _find_active_leaf(tree.queue)
+    if not active:
+        return {"error": "no_active_issue"}
+    for task in active.tasks:
+        if task.name == task_name and not task.done:
+            task.done = True
+            batch = task.batch
+            batch_tasks = [t for t in active.tasks if t.batch == batch]
+            batch_done = all(t.done for t in batch_tasks)
+            all_done = all(t.done for t in active.tasks)
+            remaining_batches = len({t.batch for t in active.tasks if not all(
+                bt.done for bt in active.tasks if bt.batch == t.batch
+            )})
+            rewrite_plan(plan_path, tree)
+            return {
+                "checked": task_name,
+                "batch": batch,
+                "batch_done": batch_done,
+                "all_done": all_done,
+                "remaining_batches": remaining_batches,
+            }
+    return {"error": f"task_not_found: {task_name}"}
 
 
 def create_main_plan(workspace_path: Path, items: list[dict],
@@ -878,6 +975,39 @@ def main() -> int:
         for d in promoted:
             print(f"PROMOTED={d.title}")
         print(f"PROMOTED_COUNT={len(promoted)}")
+        return 0
+
+    elif command == "inject-tasks":
+        tasks_raw = opts.get("tasks", "")
+        if not tasks_raw:
+            print("ERROR=tasks is required (format: batch1:task1,batch1:task2,batch2:task3)",
+                  file=_sys.stderr)
+            return 1
+        tasks = []
+        for entry in tasks_raw.split(","):
+            entry = entry.strip()
+            if ":" not in entry:
+                continue
+            batch, name = entry.split(":", 1)
+            tasks.append({"batch": batch.strip(), "name": name.strip()})
+        if not tasks:
+            print("ERROR=no valid tasks parsed", file=_sys.stderr)
+            return 1
+        inject_tasks(plan_path, tasks)
+        print(f"INJECTED={len(tasks)}")
+        return 0
+
+    elif command == "check-task":
+        task_name = opts.get("task", "")
+        if not task_name:
+            print("ERROR=task is required", file=_sys.stderr)
+            return 1
+        result = check_task(plan_path, task_name)
+        if "error" in result:
+            print(f"ERROR={result['error']}")
+            return 1
+        for k, v in result.items():
+            print(f"{k.upper()}={v}")
         return 0
 
     elif command == "detect":

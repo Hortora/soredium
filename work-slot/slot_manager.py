@@ -857,10 +857,28 @@ def is_project_repo(name: str) -> bool:
     return True
 
 
+def is_workspace_clone(repo_path: Path) -> bool:
+    """Detect whether a repo clone is a workspace (not a project repo).
+
+    Three signals, any one sufficient:
+    - .workspace marker file (new system from #239)
+    - proj symlink (workspace convention — workspaces point back to project)
+    - Name starts with work- or is exactly work (naming convention)
+    """
+    if not repo_path.is_dir():
+        return False
+    if (repo_path / ".workspace").exists():
+        return True
+    if (repo_path / "proj").is_symlink():
+        return True
+    return not is_project_repo(repo_path.name)
+
+
 def get_slot_repos(slot_dir: Path) -> list[str]:
     return [
         d.name for d in sorted(slot_dir.iterdir())
-        if d.is_dir() and (d / ".git").exists() and is_project_repo(d.name)
+        if d.is_dir() and (d / ".git").exists()
+        and is_project_repo(d.name) and not is_workspace_clone(d)
     ]
 
 
@@ -1156,7 +1174,15 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         print("ERROR=no_branch_in_marker")
         return 1
 
-    all_repos = get_all_slot_repos(slot_dir)
+    all_repos = get_slot_repos(slot_dir)
+    skipped_ws = [
+        d.name for d in sorted(slot_dir.iterdir())
+        if d.is_dir() and (d / ".git").exists()
+        and d.name not in (".m2", "attic")
+        and d.name not in all_repos
+    ]
+    if skipped_ws:
+        print(f"SKIPPED_WORKSPACE={','.join(skipped_ws)}")
     if not all_repos:
         print("ERROR=no_repos_in_slot")
         return 1

@@ -42,7 +42,10 @@ unavailable mid-execution, stop and inform the user.
 
 ### Step 2: Execute Tasks
 
-For each task:
+Plans are organized into **batches** (`## Batch N:` sections). Each batch
+contains 1-3 tasks and ends at a safe wrap point.
+
+**For each task within a batch:**
 1. Mark as in_progress
 2. Follow TDD: write failing test, verify it fails, write minimal code
    to pass, verify all green. See test-driven-development for the full
@@ -56,6 +59,30 @@ For each task:
    read the full output, confirm it supports the claim that the task is
    complete.
 5. Mark as completed
+
+**After completing each task**, check it off in the unified `.plan`:
+
+```bash
+python3 ~/.claude/skills/work-slot/plan_manager.py check-task <PLAN_PATH> task="<task name>"
+```
+
+Read the output — it reports `BATCH_DONE`, `ALL_DONE`, and
+`REMAINING_BATCHES`. Use these to drive wrap points.
+
+**At the end of each batch** (`BATCH_DONE=True`):
+- Commit all batch work if not already committed
+- Report: "Batch complete ({batch name}). {REMAINING_BATCHES} batches remaining."
+- If more batches remain, offer:
+  ```
+  Batch complete. Options:
+    1. Continue — proceed to next batch
+    2. Wrap — commit, write handover, end session (safe to resume later)
+  ```
+- If `ALL_DONE=True`, proceed to Step 3
+
+**Legacy plans without batch headings:** if the plan uses flat `### Task N`
+sections with no `## Batch` grouping, treat the entire plan as a single
+batch — execute all tasks, then proceed to Step 3.
 
 **Deferring a task:** When a task is blocked, not feasible in the current
 context, or explicitly deferred by the user, record it mechanically:
@@ -72,9 +99,64 @@ this item is feasible later or permanently blocked. Good reasons:
 first", "out of scope for this branch". Bad reasons: "skipped" (says
 nothing), "TODO" (no information).
 
-### Step 3: Complete Development
+### Step 3: Completeness Audit
 
-After all tasks complete and verified, check queue state:
+**Before claiming done, audit for gaps.** This is not optional — run
+every check, present the results, and let the user decide.
+
+**1. Scan for leftover work:**
+- **Spec vs. plan:** Re-read the spec. Is every requirement covered by a
+  completed task? List any spec sections with no matching task.
+- **Deferred items:** Read `.plan` deferred section. List any items that
+  were deferred during execution.
+- **Skipped steps:** Scan the plan doc for unchecked `- [ ]` steps.
+  List any that were skipped without being deferred.
+- **TODOs in code:** `grep -rn "TODO\|FIXME\|HACK\|XXX" <changed files>`
+  — list any added this session.
+- **Uncommitted work:** `git status` in both project and workspace.
+  List anything staged or modified.
+- **Failed pushes:** Any garden pushes, workspace pushes, or artifact
+  promotions that failed silently during the session.
+
+**2. Present the audit:**
+
+```
+## Completeness Audit
+
+Gaps found: {N}
+
+1. [spec gap] Section "Error Handling" — no task implemented this
+2. [deferred] Domain attributes for CaseLedgerEntry — blocked by JAR inspection
+3. [uncommitted] 3 files modified in workspace, not committed
+4. [todo] src/mapper.py:42 — TODO: add domain-specific fields
+
+No gaps found.  ← (if clean)
+```
+
+If no gaps: proceed to step 4.
+
+**3. If gaps exist, offer resolution:**
+
+```python
+AskUserQuestion(questions=[{
+    "question": "Completeness audit found {N} gap(s). How to proceed?",
+    "header": "Gaps",
+    "options": [
+        {"label": "Add to plan", "description": "Create tasks for the gaps, continue working"},
+        {"label": "Defer all", "description": "Record as deferred, proceed to close"},
+        {"label": "Triage each", "description": "Decide per gap: add task, defer, or dismiss"},
+    ],
+    "multiSelect": false,
+}])
+```
+
+- **Add to plan:** inject new tasks into `.plan` via `inject-tasks`,
+  continue execution (loop back to Step 2)
+- **Defer all:** record each gap via `plan_manager.py defer`, proceed
+- **Triage each:** walk through gaps one at a time via `AskUserQuestion`
+  (add/defer/dismiss per gap)
+
+**4. Route to next step:**
 
 ```bash
 python3 ~/.claude/skills/project/ctx.py

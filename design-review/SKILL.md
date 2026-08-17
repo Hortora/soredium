@@ -407,6 +407,117 @@ Omit rows for killed dimensions and for cross-cutting if it was skipped.
 
 Do NOT substitute a narrative summary for this template.
 
+## Step 8b — Triage and incorporate findings
+
+After presenting the results table, triage unresolved findings into the spec.
+This step runs for ALL degrees — light reviews surface raw findings that need
+user triage; standard+ reviews may have surviving unresolved items.
+
+**1. Collect unresolved findings**
+
+Read each dimension's tracker.md. Extract findings that are NOT already
+marked `accepted` or `rejected` by the adversarial rounds. For light reviews,
+this is typically ALL findings (single round = no verification pass).
+
+**2. Present all findings, then triage**
+
+First, show every finding with full context — dimension, priority, and summary.
+The user needs to see everything before deciding how to handle them:
+
+```
+## Review Findings — {N} unresolved
+
+1. [coherence/P1] Missing error handling for X
+   {2-3 sentence explanation from the tracker — what's wrong and why it matters}
+
+2. [structure/P2] Component Y has circular dependency
+   {explanation}
+
+3. [robustness/P1] No fallback when Z fails
+   {explanation}
+
+...
+```
+
+Then present the triage choice via `AskUserQuestion`:
+
+```python
+AskUserQuestion(questions=[{
+    "question": "How should these findings be handled?",
+    "header": "Triage",
+    "options": [
+        {"label": "Incorporate all", "description": "Accept every finding and update the spec"},
+        {"label": "Triage each", "description": "Walk through each finding — accept, reject, or defer"},
+        {"label": "Skip", "description": "Leave findings in tracker only, no spec changes"},
+    ],
+    "multiSelect": false,
+}])
+```
+
+**If "Incorporate all":** accept every finding, proceed to step 3.
+
+**If "Triage each":** walk through findings one at a time using `AskUserQuestion`.
+For each finding, show the full context and ask:
+
+```python
+AskUserQuestion(questions=[{
+    "question": "[{dimension}/{priority}] {title} — {summary}. Accept this finding?",
+    "header": "Finding {i}/{N}",
+    "options": [
+        {"label": "Accept", "description": "Incorporate into the spec"},
+        {"label": "Reject", "description": "False positive or not applicable"},
+        {"label": "Defer", "description": "Valid but out of scope for this iteration"},
+    ],
+    "multiSelect": false,
+}])
+```
+
+Batch up to 4 findings per `AskUserQuestion` call (the tool supports 1-4
+questions). Each question is one finding. This reduces round trips while
+keeping the per-finding granularity.
+
+**If "Skip":** no spec changes. Record all findings as "unresolved" in
+decisions.md and end.
+
+If zero unresolved findings (all resolved during adversarial rounds): skip
+this step and proceed to "Resuming a failed/interrupted review" or end.
+
+**3. Apply accepted findings**
+
+For each accepted finding:
+- Update the spec directly — add missing sections, fix inconsistencies,
+  strengthen error handling, add constraints. The finding describes the gap;
+  the fix goes into the spec prose, not as a comment or annotation.
+- If a finding requires a design DECISION (multiple valid approaches), do NOT
+  auto-resolve — flag it for brainstorming or add it to a `## Open Questions`
+  section in the spec.
+
+**4. Record decisions**
+
+Write a `decisions.md` file in the review workspace (alongside tracker.md):
+
+```markdown
+# Review Decisions — {title}
+
+## Accepted
+- [coherence/P1] Missing error handling for X — added §Error Handling
+- [robustness/P1] No fallback when Z fails — added retry + circuit breaker
+
+## Rejected
+- [structure/P2] Circular dependency — false positive, dependency is unidirectional
+
+## Deferred
+- [coherence/P2] Pagination not specified — out of scope for this iteration
+```
+
+**5. Commit the updated spec**
+
+If any findings were accepted and the spec was modified:
+- Stage the spec file
+- Commit with message: `docs: incorporate {degree} design review findings Refs #N`
+
+If no findings were accepted (all rejected/deferred/skipped): no commit needed.
+
 ## Resuming a failed/interrupted review
 
 If the user says "resume the review" or a prior run was interrupted:

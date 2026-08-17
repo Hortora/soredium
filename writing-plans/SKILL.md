@@ -80,6 +80,35 @@ deliverable needs them; split only where a reviewer could meaningfully
 reject one task while approving its neighbor. Each task ends with an
 independently testable deliverable.
 
+## Batch Grouping
+
+Group related tasks into **batches** — each batch is a safe wrap point
+where the session can end without leaving the codebase in a broken state.
+
+```markdown
+## Batch 1: [Name — what's working after this batch]
+
+### Task 1: ...
+### Task 2: ...
+
+## Batch 2: [Name — what's added]
+
+### Task 3: ...
+### Task 4: ...
+```
+
+**Batch boundaries** are where:
+- All tasks in the batch produce a coherent, testable increment
+- Tests pass, code compiles, nothing is half-wired
+- A handover makes sense (another session can pick up from here)
+
+**Sizing:** aim for 1-3 tasks per batch. A single-task batch is fine if
+the task is substantial. A batch with 5+ tasks probably needs splitting.
+
+**Single-batch plans:** if the plan has 1-3 tasks total, use one batch.
+The `## Batch 1:` heading is still required — executing-plans keys on it
+for wrap-point detection.
+
 ## Bite-Sized Task Granularity
 
 **Each step is one action (2-5 minutes):**
@@ -123,8 +152,12 @@ requirements implicitly include this section.]
 
 ## Task Structure
 
+Tasks live inside batch sections:
+
 ````markdown
-### Task N: [Component Name]
+## Batch 1: [Increment Name]
+
+### Task 1: [Component Name]
 
 **Files:**
 - Create: `exact/path/to/file.py`
@@ -274,6 +307,21 @@ Commit the plan immediately after writing:
 git -C "$WORKSPACE" add plans/
 git -C "$WORKSPACE" commit -m "wip(plan): implementation plan for #<N> Refs #<N>"
 ```
+
+**Inject task summary into `.plan`:** After writing the plan doc, write
+a task summary into the unified `.plan` so the lifecycle queue shows both
+issue order AND task progress:
+
+```bash
+python3 ~/.claude/skills/work-slot/plan_manager.py inject-tasks <PLAN_PATH> \
+  tasks="<batch1>:<task1>,<batch1>:<task2>,<batch2>:<task3>"
+```
+
+Example: `tasks="Foundation:Create adapter,Foundation:Add validation,Wiring:Connect pipeline"`
+
+This adds indented batch/task checkboxes under the active issue in `.plan`.
+The detail plan doc (`plans/*.md`) remains the executor's reference; the
+`.plan` summary provides the at-a-glance view.
 
 **Default: invoke `executing-plans`** — inline execution with full access
 to skills, IntelliJ MCP, and project context. Review the diff after each
