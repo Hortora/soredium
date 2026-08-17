@@ -273,16 +273,23 @@ not actionable enough to be issues. Append-only with date headers and optional
 
 - **protocol sweep is on by default** — scans the session for project-specific rules worth formalising. Skip it for sessions that worked purely in universal tools with no project-specific rules established or re-enforced. The protocol skill creates `docs/protocols/` if it does not exist — never skip the sweep because the directory is absent.
 - **journal-entry is ON by default when on an epic branch** — check `ls .plan 2>/dev/null` before showing the checklist. If `.meta` exists the session is mid-epic and design reasoning is about to be lost; default journal-entry to ON. If not on an epic branch, default to OFF.
-- **epic hygiene is ON by default when a workspace is configured** — check `**Workspace:**` in CLAUDE.md. Runs these checks and surfaces any issues before the session ends:
-  1. Orphaned `.plan` on main (epic closed without cleanup)
-  2. Workspace/project branch misalignment
-  3. Open epic branches with no commits in the last 7 days (stale)
-  4. Mid-epic: journal exists but has no `§Section` anchors (entries will not merge at close)
+- **epic hygiene** — split into always-run and optional tiers:
+
+  **Always-run (not toggleable — these run even if epic hygiene is toggled off):**
   5. **Project main working tree dirty** — run `git status --short` on the project base branch; any staged or unstaged changes mean an operation was left incomplete
   6. **Project main diverged from remote** — run `git log origin/main..main --oneline` and `git log main..origin/main --oneline`; local commits not on remote = work invisible to next session; remote ahead of local = next session will conflict
   7. **Unrecovered artifacts on closed branches** — for every workspace branch where `is_closed()` returns CLOSED or MERGED_UNSTAMPED, check whether blogs and specs reached workspace main. A closed branch with a blog still on it means work-end's artifact promotion failed or was skipped. For each finding: `⚠️ Blog/Spec <filename> on closed branch <branch> never reached workspace main.` Offer to cherry-pick immediately.
   8. **Unstamped closed branches** — for every workspace branch, check `is_closed()`. Flag MERGED_UNSTAMPED: `⚠️ Branch <branch> is merged but not stamped.` Offer to stamp immediately. Flag STAMPED_UNMERGED: `⚠️ Branch <branch> is stamped but content not merged — investigate.`
+
+  **Optional (ON by default, toggleable via the checklist):**
+  1. Orphaned `.plan` on main (epic closed without cleanup)
+  2. Workspace/project branch misalignment
+  3. Open epic branches with no commits in the last 7 days (stale)
+  4. Mid-epic: journal exists but has no `§Section` anchors (entries will not merge at close)
+
   Report findings — do not auto-fix, just surface them so they can be addressed or noted in the handover.
+
+  **Persistence:** `hygiene_scan.py` writes findings to `$WORKSPACE/.audit/findings.json`. Open findings carry forward — `work_health.py` reads them at session entry and surfaces unresolved items. Findings accumulate until addressed (fixed, filed as an issue, or dismissed).
 - **arc42 stale scan is ON by default when ARC42STORIES.MD exists** — read `HAS_ARC42STORIES` from ctx.py output (already run in Path Resolution). Catches stale status drift that accumulates from cross-session and cross-repo work — the three failure modes it targets are: (a) layer/chapter status not updated when the issue closed in a different session, (b) external blocker references (cross-repo issues, foundation PRs) that shipped but were never cleared, (c) forward-tense issue references ("will migrate", "#N will...") where the referenced issue is now CLOSED. Run after epic hygiene so any just-surfaced issues are also reflected. See **Step 2c — ARC42STORIES.MD stale scan** below.
 - **"all":** if all are on → turn all off; if any are off → turn all on
 - **Numbers:** toggle individual items

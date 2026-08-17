@@ -367,7 +367,7 @@ def commit_transition(
 _DEFAULT_EXCLUDES = [
     '.idea/', 'target/', 'build/', 'node_modules/',
     '__pycache__/', '*.iml', '.worktrees/', 'slots/',
-    '.pytest_cache/', '*.pyc', 'design/',
+    '.pytest_cache/', '*.pyc', 'design/', '.claude/',
 ]
 
 
@@ -436,7 +436,8 @@ def _check_untracked(
 
 def _matches_exclude(filepath: str, pattern: str) -> bool:
     if pattern.endswith('/'):
-        return filepath.startswith(pattern) or f'/{pattern}' in filepath
+        bare = pattern.rstrip('/')
+        return filepath.startswith(pattern) or filepath == bare or f'/{pattern}' in filepath
     if pattern.startswith('*.'):
         return filepath.endswith(pattern[1:])
     return pattern in filepath

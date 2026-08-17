@@ -424,6 +424,23 @@ def check_close_gate(project, workspace, branch):
     return f"CHECK=close_gate STATUS=fail DETAIL=branch state is {state.value} VERIFIED=no"
 
 
+def check_prior_findings(project, workspace):
+    findings_path = Path(workspace) / ".audit" / "findings.json"
+    if not findings_path.exists():
+        return "CHECK=prior_findings STATUS=ok"
+    try:
+        import json as _json
+        findings = _json.loads(findings_path.read_text())
+        open_findings = [f for f in findings if f.get("status") == "open"]
+        if not open_findings:
+            return "CHECK=prior_findings STATUS=ok"
+        details = "; ".join(f"{f['check']}: {f['detail']}" for f in open_findings[:5])
+        suffix = f" (+{len(open_findings) - 5} more)" if len(open_findings) > 5 else ""
+        return f"CHECK=prior_findings STATUS=warn DETAIL={len(open_findings)} open finding(s): {details}{suffix}"
+    except (ValueError, KeyError):
+        return "CHECK=prior_findings STATUS=ok"
+
+
 ENTRY_CHECKS = [
     lambda p, w: check_meta_consistency(p, w),
     lambda p, w: check_pause_stack(p, w),
@@ -436,6 +453,7 @@ ENTRY_CHECKS = [
     lambda p, w: check_partial_resume(p, w),
     lambda p, w: check_branch_closure(p, w),
     lambda p, w: check_recent_notes(p, w),
+    lambda p, w: check_prior_findings(p, w),
 ]
 
 

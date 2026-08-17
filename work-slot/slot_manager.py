@@ -9,6 +9,7 @@ Subcommands:
   scan-ready <family-root>
   merge-slot <family-root> slot=<N>
   archive-slot <family-root> slot=<N> [--force]
+  restore-slot <family-root> slot=<N>
   check-cross-deps <family-root> slot=<N>
   sync-isx [<slot-dir>] [slot=<N>]
   migrate-remotes <family-root>
@@ -1634,6 +1635,44 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
     print(f"ARCHIVED={slot_num}")
 
 
+def restore_slot(family_root: Path, slot_num: int) -> None:
+    attic_dir = family_root / SLOT_DIR_NAME / "attic" / str(slot_num)
+    if not attic_dir.exists():
+        legacy = family_root / LEGACY_SLOT_DIR_NAME / "attic" / str(slot_num)
+        if legacy.exists():
+            attic_dir = legacy
+        else:
+            print(f"ERROR=slot_not_in_attic slot={slot_num}")
+            sys.exit(1)
+    dest = attic_dir.parent.parent / str(slot_num)
+    if dest.exists():
+        print(f"ERROR=active_slot_exists slot={slot_num}")
+        print(f"ERROR_DETAIL=slots/{slot_num}/ already exists — cannot restore on top of it")
+        sys.exit(1)
+    slot_file = attic_dir / ".slot"
+    if not slot_file.exists():
+        print(f"WARN=no_slot_file slot={slot_num}")
+    moved = relocate_claude_projects(attic_dir, dest)
+    shutil.move(str(attic_dir), str(dest))
+    if attic_dir.exists():
+        if not _cleanup_remnant_dir(attic_dir):
+            print(f"WARN=remnant_dir_persists path={attic_dir}")
+    if moved:
+        print(f"CLAUDE_PROJECTS_MOVED={moved}")
+    ensure_clone_layout(dest)
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            _wl.record_slot_create(
+                _conn, slot_num, str(family_root),
+                branch="restored", repos="", issue=0,
+            )
+            _conn.close()
+        except Exception:
+            pass
+    print(f"RESTORED={slot_num}")
+
+
 def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
     slots = []
     seen: set[int] = set()
@@ -2030,6 +2069,14 @@ def main() -> None:
             sys.exit(1)
         force = "--force" in sys.argv
         archive_slot(family_root, slot_num, force=force)
+
+    elif subcommand == "restore-slot":
+        family_root = Path(args.get("target", "."))
+        slot_num = int(args.get("slot", "0"))
+        if slot_num == 0:
+            print("ERROR=missing_slot_number")
+            sys.exit(1)
+        restore_slot(family_root, slot_num)
 
     elif subcommand == "ensure-clone-layout":
         family_root = Path(args.get("target", "."))
