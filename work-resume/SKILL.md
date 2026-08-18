@@ -113,9 +113,15 @@ echo "$OUTPUT" | grep -q "CHECKED_OUT=yes" || { echo "⚠️ Branch checkout fai
 `read_state()` defaults to `active`, but the transition table expects `paused`.
 This one-time write fixes the field permanently.
 
-**Lifecycle transition:** Fire `transition(plan_path, 'work_resume')`. This
-validates `paused → active` and returns effects `[pop_stack, reset_wip, context_resume]`.
-Execute effects (Steps 5-7 below), then `commit_transition()`.
+**Lifecycle transition:**
+```bash
+python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_resume
+```
+Read `EFFECTS=` from output. Validates `paused → active` and returns effects
+`[pop_stack, reset_wip, context_resume]`. Execute effects (Steps 5-7 below), then:
+```bash
+python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=paused new_state=active event=work_resume
+```
 
 ---
 

@@ -52,10 +52,17 @@ COVERS=$(grep "^covers:" "$PLAN_PATH" | sed 's/covers: //')
 
 Must be on a branch where `.plan` exists.
 
-**Lifecycle transition:** Fire `transition(plan_path, 'work_pause')`. This validates
-the transition (`active → paused`) and returns effects `[wip_commit]` with
-post-commit effects `[switch_to_main, push_stack]`. Execute pre-commit effects
-(Steps 2-3 below), then `commit_transition()`, then post-commit effects (Step 4).
+**Lifecycle transition:**
+```bash
+python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_pause
+```
+Read `EFFECTS=` and `POST_COMMIT_EFFECTS=` from output. Validates the transition
+(`active → paused`), returns effects `[wip_commit]` with post-commit effects
+`[switch_to_main, push_stack]`. Execute pre-commit effects (Steps 2-3 below), then:
+```bash
+python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=active new_state=paused event=work_pause
+```
+Then execute post-commit effects (Step 4).
 
 ---
 

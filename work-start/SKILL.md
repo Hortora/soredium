@@ -79,9 +79,9 @@ The lifecycle state machine replaces the previous 6-state inference logic.
 |-------------|---------------|--------|
 | empty | main | New branch path (Steps 0–12 below) |
 | empty | non-main | "On `<branch>` with no scaffold. Continue here (y) or switch to main (n)?" y → Steps 0, 2, 3, 11 only |
-| `scaffolded` | branch | Auto-resolve: fire `transition(meta, 'auto_setup')`, run context setup, `commit_transition()` → state becomes `active` |
+| `scaffolded` | branch | Auto-resolve: `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_setup`, run context setup, `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=scaffolded new_state=active event=auto_setup` → state becomes `active` |
 | `active` | branch | Resume path |
-| `transitioning` | branch | Auto-resolve: fire `transition(meta, 'auto_refresh')`, run context refresh, `commit_transition()` → state becomes `active` |
+| `transitioning` | branch | Auto-resolve: `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_refresh`, run context refresh, `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=transitioning new_state=active event=auto_refresh` → state becomes `active` |
 | `paused` | branch | Should not reach work-start — work-resume handles this |
 | `closing:*` | branch | Close in progress — offer to continue or abort |
 

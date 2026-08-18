@@ -548,3 +548,103 @@ def migrate_legacy_paused(meta_path: Path) -> bool:
         return False
     write_state(meta_path, 'paused')
     return True
+
+
+
+def _parse_cli_args(argv: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for arg in argv:
+        if "=" in arg:
+            k, _, v = arg.partition("=")
+            result[k] = v
+    return result
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("ERROR=MISSING_SUBCOMMAND")
+        print("Usage: lifecycle.py <transition|commit-transition|read-state> ...")
+        return 1
+
+    cmd = sys.argv[1]
+
+    if cmd == "read-state":
+        if len(sys.argv) < 3:
+            print("ERROR=MISSING_ARGS")
+            return 1
+        plan_path = Path(sys.argv[2])
+        state = read_state(plan_path) or "idle"
+        print(f"STATE={state}")
+        return 0
+
+    if cmd == "transition":
+        if len(sys.argv) < 4:
+            print("ERROR=MISSING_ARGS")
+            print("Usage: lifecycle.py transition <plan_path> <event> [project=<p>] [workspace=<w>]")
+            return 1
+        plan_path = Path(sys.argv[2])
+        event = sys.argv[3]
+        opts = _parse_cli_args(sys.argv[4:])
+        project = Path(opts["project"]) if "project" in opts else None
+        workspace = Path(opts["workspace"]) if "workspace" in opts else None
+        try:
+            result = transition(plan_path, event, project=project, workspace=workspace)
+        except InvalidTransition as e:
+            print(f"ERROR=INVALID_TRANSITION")
+            print(f"FROM_STATE={e.from_state}")
+            print(f"EVENT={e.event}")
+            print(f"DETAIL={e}")
+            return 1
+        except InvalidState as e:
+            print(f"ERROR=INVALID_STATE")
+            print(f"STATE={e.state}")
+            print(f"VIOLATIONS={";".join(e.violations)}")
+            return 1
+        print(f"FROM_STATE={result.from_state}")
+        print(f"NEW_STATE={result.new_state}")
+        print(f"EVENT={result.event}")
+        print(f"EFFECTS={",".join(result.effects)}")
+        print(f"POST_COMMIT_EFFECTS={",".join(result.post_commit_effects)}")
+        return 0
+
+    if cmd == "commit-transition":
+        if len(sys.argv) < 3:
+            print("ERROR=MISSING_ARGS")
+            return 1
+        plan_path = Path(sys.argv[2])
+        opts = _parse_cli_args(sys.argv[3:])
+        from_state = opts.get("from_state", "")
+        new_state = opts.get("new_state", "")
+        event = opts.get("event", "")
+        repo_path = opts.get("repo_path")
+        if not from_state or not new_state or not event:
+            print("ERROR=MISSING_ARGS")
+            print("Required: from_state=, new_state=, event=")
+            return 1
+        result = TransitionResult(
+            from_state=from_state,
+            new_state=new_state,
+            event=event,
+        )
+        try:
+            commit_transition(plan_path, result, repo_path=repo_path)
+        except ConcurrentModification as e:
+            print(f"ERROR=CONCURRENT_MODIFICATION")
+            print(f"EXPECTED={e.expected}")
+            print(f"ACTUAL={e.actual}")
+            return 1
+        except StateError as e:
+            print(f"ERROR=STATE_ERROR")
+            print(f"DETAIL={e}")
+            return 1
+        print("COMMITTED=yes")
+        print(f"STATE={new_state}")
+        return 0
+
+    print(f"ERROR=UNKNOWN_COMMAND")
+    print(f"DETAIL={cmd}")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

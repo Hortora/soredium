@@ -61,15 +61,24 @@ active → closing:review → closing:verified → closing:promoted → closing:
 ```
 
 **On entry:** Read `META_STATE` from ctx.py. If already `closing:*`,
-offer to continue from that gate. If `active`, fire
-`transition(meta, 'work_end')` to enter `closing:review`.
+offer to continue from that gate. If `active`:
+```bash
+python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_end
+```
+Enters `closing:review`.
 
-**At each gate:** fire `transition()` for the corresponding event,
-execute effects, then `commit_transition()`.
+**At each gate:**
+```bash
+python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> <event>
+# execute effects, then:
+python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=<FROM> new_state=<NEW> event=<EVENT>
+```
 
-**Abort:** from `closing:review` or `closing:verified` only. Fire
-`transition(meta, 'abort_close')` to return to `active`.
-Post-promotion states are forward-only.
+**Abort:** from `closing:review` or `closing:verified` only:
+```bash
+python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> abort_close
+```
+Returns to `active`. Post-promotion states are forward-only.
 
 ---
 

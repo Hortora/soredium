@@ -189,12 +189,19 @@ If `HAS_PLAN=yes` and queue has remaining items, annotate the end option:
 
 **On continue (option 1):**
 
-**Lifecycle:** Fire `transition(plan_path, 'work_continue')` — validates
-branch is `active`, emits worklog event. No state change (self-transition).
+**Lifecycle:** Fire transition:
+```bash
+python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_continue
+```
+Validates branch is `active`, emits worklog event. No state change (self-transition).
 
 When `HAS_HANDOFF=yes` (subsequent session):
 1. Read `$HANDOFF_PATH` — summarise last session's narrative
-2. Run `work_health.py --scope entry --owner-repo $OWNER_REPO` — syncs `.plan` with GitHub, validates workspace state
+2. Run health check:
+   ```bash
+   python3 ~/.claude/skills/project/work_health.py --scope entry --owner-repo $OWNER_REPO
+   ```
+   Syncs `.plan` with GitHub, validates workspace state.
 3. If `HAS_PLAN=yes`: read `.plan` at `$PLAN_PATH` for queue progress and
    active issue. Display:
    ```
@@ -215,7 +222,10 @@ When `HAS_HANDOFF=yes` (subsequent session):
 When `HAS_HANDOFF=no` (first session, or HANDOFF.md missing):
 1. Run work-start resume path (Steps 0, 2, 3, 3b, 3c, 11)
    for platform coherence, protocols, spec loading, and IntelliJ pre-checks
-2. Run `work_health.py --scope entry --owner-repo $OWNER_REPO`
+2. Run health check:
+   ```bash
+   python3 ~/.claude/skills/project/work_health.py --scope entry --owner-repo $OWNER_REPO
+   ```
 3. If `HAS_PLAN=yes` or `IN_SLOT=yes`: read .plan/slot context as above
 4. Done-detection auto-suggest (D3)
 5. Begin working — the branch and scaffold already exist.
@@ -253,15 +263,22 @@ branch and slot mode — the `.plan` file is the single source of truth.
 Steps:
 
 1. Run `ctx.py` to resolve paths. Read `PLAN_PATH` from output.
-2. Fire `transition(plan_path, 'work_next')` — validates the transition,
-   returns effects `[advance_issue, tick_github]`.
+2. Fire transition:
+   ```bash
+   python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_next
+   ```
+   Read `EFFECTS=` from output — validates the transition, returns effects.
 3. Execute effects:
    - `advance_issue`: Call `plan_manager.advance(<PLAN_PATH>)`.
      The function atomically checks off the current issue and moves the
      `← active` marker to the next leaf issue.
    - `tick_github`: Check off the completed issue's checkbox on the
      GitHub epic body (if the completed issue was an epic child).
-4. Call `commit_transition(plan_path, result)` — writes `state: transitioning`.
+4. Commit transition:
+   ```bash
+   python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=<FROM> new_state=<NEW> event=work_next
+   ```
+   Writes `state: transitioning`.
 5. If `has_deferred` in the result → deferred items exist and the agreed
    queue is complete. Read deferred items:
    ```bash
@@ -294,10 +311,16 @@ Steps:
 6. If `queue_complete` and not `has_deferred` → report: "All issues done. Run work end."
 7. If `batch_complete` and not `queue_complete` → log: "Batch N complete.
    Safe exit point — run work end to close, or continue."
-8. **Context refresh (auto-resolve):** Fire `transition(plan_path, 'auto_refresh')`,
-   execute context refresh effects (garden search with new issue keywords,
-   load specs matching new issue, check protocols), then
-   `commit_transition(plan_path, result)`. The branch transitions back to `active`.
+8. **Context refresh (auto-resolve):**
+   ```bash
+   python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_refresh
+   ```
+   Execute context refresh effects (garden search with new issue keywords,
+   load specs matching new issue, check protocols), then:
+   ```bash
+   python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=transitioning new_state=active event=auto_refresh
+   ```
+   The branch transitions back to `active`.
 9. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
 
 ---

@@ -921,3 +921,145 @@ class TestIsClosed:
         self._rebase_merge_branch(repo, "feature-10")
         self._stamp_branch(repo, "feature-10", "deadbeefdeadbeef")
         assert is_closed(str(repo), "feature-10") == ClosureState.CLOSED
+
+
+# --- CLI interface ---
+
+
+LIFECYCLE_SCRIPT = Path(__file__).parent.parent / "project" / "lifecycle.py"
+
+
+def _run_lifecycle(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(LIFECYCLE_SCRIPT), *args],
+        capture_output=True, text=True, timeout=10,
+    )
+
+
+def _parse_output(stdout: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            result[k.strip()] = v.strip()
+    return result
+
+
+class TestCLITransition:
+    def test_transition_outputs_key_value(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        result = _run_lifecycle("transition", str(plan), "work_pause")
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["FROM_STATE"] == "active"
+        assert out["NEW_STATE"] == "paused"
+        assert out["EVENT"] == "work_pause"
+
+    def test_transition_from_idle(self, tmp_path):
+        plan = tmp_path / ".plan"
+        result = _run_lifecycle("transition", str(plan), "work")
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["FROM_STATE"] == "idle"
+        assert out["NEW_STATE"] == "scaffolded"
+        assert "build_plan" in out.get("EFFECTS", "")
+
+    def test_transition_invalid_event_exits_nonzero(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        result = _run_lifecycle("transition", str(plan), "nonexistent_event")
+        assert result.returncode == 1
+        assert "ERROR" in result.stdout
+
+    def test_transition_outputs_effects(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        result = _run_lifecycle("transition", str(plan), "work_end")
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["NEW_STATE"] == "closing:review"
+
+    def test_transition_closing_sequence(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:review")
+        result = _run_lifecycle("transition", str(plan), "review_pass")
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["NEW_STATE"] == "closing:verified"
+
+
+class TestCLICommitTransition:
+    def test_commit_writes_state(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        result = _run_lifecycle(
+            "commit-transition", str(plan),
+            "from_state=active", "new_state=paused", "event=work_pause",
+        )
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["COMMITTED"] == "yes"
+        assert read_state(plan) == "paused"
+
+    def test_commit_detects_concurrent_modification(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:review")
+        result = _run_lifecycle(
+            "commit-transition", str(plan),
+            "from_state=active", "new_state=paused", "event=work_pause",
+        )
+        assert result.returncode == 1
+        assert "ERROR" in result.stdout
+        assert "concurrent" in result.stdout.lower() or "CONCURRENT" in result.stdout
+
+    def test_commit_idle_to_scaffolded(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="scaffolded")
+        result = _run_lifecycle(
+            "commit-transition", str(plan),
+            "from_state=idle", "new_state=scaffolded", "event=work",
+        )
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["COMMITTED"] == "yes"
+
+
+class TestCLIReadState:
+    def test_read_existing_state(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        result = _run_lifecycle("read-state", str(plan))
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["STATE"] == "active"
+
+    def test_read_missing_plan_returns_idle(self, tmp_path):
+        plan = tmp_path / ".plan"
+        result = _run_lifecycle("read-state", str(plan))
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["STATE"] == "idle"
+
+    def test_read_closing_state(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:verified")
+        result = _run_lifecycle("read-state", str(plan))
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["STATE"] == "closing:verified"
+
+
+class TestCLIBadArgs:
+    def test_no_args(self):
+        result = _run_lifecycle()
+        assert result.returncode == 1
+
+    def test_unknown_subcommand(self):
+        result = _run_lifecycle("unknown")
+        assert result.returncode == 1
+
+    def test_transition_missing_event(self, tmp_path):
+        plan = tmp_path / ".plan"
+        result = _run_lifecycle("transition", str(plan))
+        assert result.returncode == 1
