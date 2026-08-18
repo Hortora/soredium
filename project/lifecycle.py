@@ -568,6 +568,17 @@ def main() -> int:
 
     cmd = sys.argv[1]
 
+    if cmd == "show-transitions":
+        if len(sys.argv) < 3:
+            print("ERROR=MISSING_ARGS")
+            return 1
+        plan_path = Path(sys.argv[2])
+        state = read_state(plan_path) or "idle"
+        valid = sorted(ev for (st, ev) in TRANSITION_TABLE if st == state)
+        print(f"STATE={state}")
+        print(f"VALID_EVENTS={",".join(valid)}")
+        return 0
+
     if cmd == "read-state":
         if len(sys.argv) < 3:
             print("ERROR=MISSING_ARGS")

@@ -189,7 +189,18 @@ If `HAS_PLAN=yes` and queue has remaining items, annotate the end option:
 
 **On continue (option 1):**
 
-**Lifecycle:** Fire transition:
+**Lifecycle — auto-resolve transient states first:**
+
+Read `META_STATE` from the ctx.py output (already run in Step 1b).
+If the state is transient, resolve it before firing `work_continue`:
+
+| `META_STATE` | Action |
+|-------------|--------|
+| `scaffolded` | `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_setup` then `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=scaffolded new_state=active event=auto_setup` |
+| `transitioning` | `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_refresh` then `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=transitioning new_state=active event=auto_refresh` |
+| `active` | No auto-resolve needed — proceed directly |
+
+Then fire:
 ```bash
 python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_continue
 ```
@@ -199,7 +210,7 @@ When `HAS_HANDOFF=yes` (subsequent session):
 1. Read `$HANDOFF_PATH` — summarise last session's narrative
 2. Run health check:
    ```bash
-   python3 ~/.claude/skills/project/work_health.py --scope entry --owner-repo $OWNER_REPO
+   python3 ~/.claude/skills/project/work_health.py --scope entry --project $PROJECT --workspace $WORKSPACE --owner-repo $OWNER_REPO
    ```
    Syncs `.plan` with GitHub, validates workspace state.
 3. If `HAS_PLAN=yes`: read `.plan` at `$PLAN_PATH` for queue progress and
@@ -224,7 +235,7 @@ When `HAS_HANDOFF=no` (first session, or HANDOFF.md missing):
    for platform coherence, protocols, spec loading, and IntelliJ pre-checks
 2. Run health check:
    ```bash
-   python3 ~/.claude/skills/project/work_health.py --scope entry --owner-repo $OWNER_REPO
+   python3 ~/.claude/skills/project/work_health.py --scope entry --project $PROJECT --workspace $WORKSPACE --owner-repo $OWNER_REPO
    ```
 3. If `HAS_PLAN=yes` or `IN_SLOT=yes`: read .plan/slot context as above
 4. Done-detection auto-suggest (D3)

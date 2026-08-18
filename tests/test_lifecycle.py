@@ -1050,6 +1050,40 @@ class TestCLIReadState:
         assert out["STATE"] == "closing:verified"
 
 
+class TestCLIShowTransitions:
+    def test_shows_valid_events_for_active(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        result = _run_lifecycle("show-transitions", str(plan))
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["STATE"] == "active"
+        events = out["VALID_EVENTS"].split(",")
+        assert "work_continue" in events
+        assert "work_end" in events
+        assert "work_pause" in events
+
+    def test_shows_valid_events_for_scaffolded(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="scaffolded")
+        result = _run_lifecycle("show-transitions", str(plan))
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["STATE"] == "scaffolded"
+        events = out["VALID_EVENTS"].split(",")
+        assert "auto_setup" in events
+        assert "work_continue" not in events
+
+    def test_shows_valid_events_for_idle(self, tmp_path):
+        plan = tmp_path / ".plan"
+        result = _run_lifecycle("show-transitions", str(plan))
+        assert result.returncode == 0
+        out = _parse_output(result.stdout)
+        assert out["STATE"] == "idle"
+        events = out["VALID_EVENTS"].split(",")
+        assert "work" in events
+
+
 class TestCLIBadArgs:
     def test_no_args(self):
         result = _run_lifecycle()
