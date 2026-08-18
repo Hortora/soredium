@@ -852,6 +852,54 @@ class TestSafetyStash:
         assert untracked.exists(), "Untracked file should be restored after stash pop"
 
 
+class TestArchiveSlot:
+    def _make_slot(self, tmp_path: Path, slot_num: int = 42) -> Path:
+        """Create a minimal landed slot structure."""
+        family = tmp_path / "family"
+        family.mkdir()
+        slot_dir = family / "slots" / str(slot_num)
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            f"slot: {slot_num}\nbranch: issue-{slot_num}-test\n"
+        )
+        (slot_dir / ".landed").write_text("landed=yes\n")
+        repo = slot_dir / "myrepo"
+        repo.mkdir()
+        (repo / "file.txt").write_text("content\n")
+        return family
+
+    def test_archive_slot_moves_to_attic(self, tmp_path: Path) -> None:
+        family = self._make_slot(tmp_path)
+        result = _run_execute(
+            "archive-slot",
+            f"slot_path={family / 'slots' / '42'}",
+            f"family_root={family}",
+            "slot_num=42",
+            "force=yes",
+        )
+        assert result.returncode == 0, f"archive failed: {result.stdout}\n{result.stderr}"
+        assert "ARCHIVED=yes" in result.stdout
+        assert (family / "slots" / "attic" / "42").exists()
+        assert not (family / "slots" / "42").exists()
+
+    def test_archive_slot_missing_args(self) -> None:
+        result = _run_execute("archive-slot", "slot_num=42")
+        assert result.returncode == 1
+        assert "MISSING_ARGS" in result.stdout
+
+    def test_archive_unlanded_slot_fails(self, tmp_path: Path) -> None:
+        family = self._make_slot(tmp_path)
+        (family / "slots" / "42" / ".landed").unlink()
+        result = _run_execute(
+            "archive-slot",
+            f"slot_path={family / 'slots' / '42'}",
+            f"family_root={family}",
+            "slot_num=42",
+        )
+        assert result.returncode == 1
+        assert "ARCHIVE_FAILED" in result.stdout or "not_landed" in result.stdout
+
+
 class TestCloseIssues:
     def test_missing_repo(self) -> None:
         result = _run_execute("close-issues", "covers=42")

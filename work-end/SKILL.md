@@ -346,15 +346,14 @@ python3 work-end/verify_slot_close.py <PROJ> branch=<BRANCH> workspace=<WS> cove
 
 ### 5.1 Archive slot (slot mode only)
 
-Prompt before archiving:
+If `IN_SLOT=yes`, archive the slot:
 
-> Slot `<N>` (`<branch-name>`) landed and verified.
-> Archive to `slots/attic/<N>/`? **(y/n)**
+```bash
+python3 work-end/work_end_execute.py archive-slot slot_path=<SLOT_PATH> family_root=<FAMILY_ROOT> slot_num=<N>
+```
 
-- **y** → archive via `slot_manager.py remove-slot`
-- **n** → leave slot active (user may want to inspect artifacts or continue work)
-
-Do not archive without explicit confirmation.
+Read `ARCHIVED=yes` from output. If `ERROR=`: report and offer retry or `force=yes`
+to skip SHA verification.
 
 ### 5.2 Return to base branches
 

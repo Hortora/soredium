@@ -531,9 +531,47 @@ def cmd_verify_ledger(opts: dict[str, str]) -> int:
     return 1 if lost > 0 else 0
 
 
+def cmd_archive_slot(opts: dict[str, str]) -> int:
+    slot_path = opts.get("slot_path", "")
+    family_root = opts.get("family_root", "")
+    slot_num = opts.get("slot_num", "")
+
+    if not slot_path or not family_root or not slot_num:
+        print("ERROR=MISSING_ARGS")
+        print("ERROR_DETAIL=slot_path=, family_root=, and slot_num= are required")
+        return 1
+
+    if not Path(slot_path).is_dir():
+        print("ERROR=BAD_PATH")
+        print(f"ERROR_DETAIL=slot_path={slot_path} not found")
+        return 1
+
+    force = opts.get("force", "no") == "yes"
+
+    slot_mgr = Path(__file__).parent.parent / "work-slot" / "slot_manager.py"
+    cmd = [sys.executable, str(slot_mgr), "archive-slot", family_root, f"slot={slot_num}"]
+    if force:
+        cmd.append("--force")
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=60,
+    )
+
+    for line in result.stdout.splitlines():
+        print(line)
+
+    if result.returncode != 0:
+        print("ERROR=ARCHIVE_FAILED")
+        if result.stderr.strip():
+            print(f"ERROR_DETAIL={result.stderr.strip()}")
+        return 1
+
+    print("ARCHIVED=yes")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
-        print("Usage: work_end_execute.py <promote|rebase|land|write-marker|verify-ledger> key=value ...",
+        print("Usage: work_end_execute.py <promote|rebase|land|archive-slot|write-marker|verify-ledger> key=value ...",
               file=sys.stderr)
         return 1
 
@@ -548,13 +586,15 @@ def main() -> int:
         return cmd_land(opts)
     elif command == "close-issues":
         return cmd_close_issues(opts)
+    elif command == "archive-slot":
+        return cmd_archive_slot(opts)
     elif command == "write-marker":
         return cmd_write_marker(opts)
     elif command == "verify-ledger":
         return cmd_verify_ledger(opts)
     else:
         print("ERROR=UNKNOWN_COMMAND")
-        print(f"ERROR_DETAIL=unknown command '{command}' — use promote, rebase, land, close-issues, write-marker, or verify-ledger")
+        print(f"ERROR_DETAIL=unknown command '{command}' — use promote, rebase, land, archive-slot, close-issues, write-marker, or verify-ledger")
         return 1
 
 
