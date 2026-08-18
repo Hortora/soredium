@@ -358,7 +358,7 @@ def _write_slot_settings(slot_dir: Path) -> Path:
     return settings_path
 
 
-def setup_maven_config(repo_worktree: Path, m2_path: Path) -> None:
+def setup_slot_repo(repo_worktree: Path, m2_path: Path) -> bool:
     slot_dir = m2_path.parent
     slot_settings = _write_slot_settings(slot_dir)
 
@@ -392,15 +392,26 @@ def setup_maven_config(repo_worktree: Path, m2_path: Path) -> None:
         config_file.write_text(content)
     else:
         config_file.write_text(repo_line + "\n" + settings_line + "\n")
+    BASELINE_PATTERNS = [
+        ".mvn/maven.config",
+        ".mvn/slot-settings.xml",
+        ".worktrees",
+        ".worktrees/",
+        ".claude",
+        ".claude/",
+    ]
     gitignore = repo_worktree / ".gitignore"
-    gi_entries = [".mvn/maven.config", ".mvn/slot-settings.xml"]
     if gitignore.exists():
-        content = gitignore.read_text()
-        to_add = [e for e in gi_entries if e not in content]
+        existing_lines = {line.strip() for line in gitignore.read_text().splitlines()}
+        to_add = [p for p in BASELINE_PATTERNS if p not in existing_lines]
         if to_add:
-            gitignore.write_text(content.rstrip() + "\n" + "\n".join(to_add) + "\n")
+            content = gitignore.read_text().rstrip()
+            gitignore.write_text(content + "\n" + "\n".join(to_add) + "\n")
+            return True
+        return False
     else:
-        gitignore.write_text("\n".join(gi_entries) + "\n")
+        gitignore.write_text("\n".join(BASELINE_PATTERNS) + "\n")
+        return True
 
 
 def _unignore_subdir(ws_clone: Path, subdir_name: str) -> None:
@@ -579,7 +590,11 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         configure_slot_remotes(clone_dest, repo_path)
         configure_update_instead(repo_path)
 
-        setup_maven_config(clone_dest, m2_dir)
+        gi_changed = setup_slot_repo(clone_dest, m2_dir)
+        if gi_changed:
+            run_cmd(["git", "-C", str(clone_dest), "add", ".gitignore"])
+            run_cmd(["git", "-C", str(clone_dest), "commit", "-m",
+                     "chore: add slot infrastructure to .gitignore"])
 
         ws_info = resolve_workspace_source(repo_path)
         if ws_info:
@@ -733,7 +748,11 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
 
     _exclude_symlinks(clone_dest)
     _symlink_gitignored_assets(repo_path, clone_dest)
-    setup_maven_config(clone_dest, m2_dir)
+    gi_changed = setup_slot_repo(clone_dest, m2_dir)
+    if gi_changed:
+        run_cmd(["git", "-C", str(clone_dest), "add", ".gitignore"])
+        run_cmd(["git", "-C", str(clone_dest), "commit", "-m",
+                 "chore: add slot infrastructure to .gitignore"])
 
     slot_info = parse_slot_md(slot_dir)
     if slot_info.get("isolation_type") == "isx":
