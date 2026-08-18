@@ -1398,3 +1398,60 @@ class TestCodeModeHelpers:
     def test_verify_code_changed_empty(self) -> None:
         result = verify_code_changed("")
         assert result.section_changed is False
+
+
+class TestLegacyModeViaType:
+    """--type should accept legacy mode names (final-review, code-review, etc.)
+    and normalize them to the correct dimension + mode."""
+
+    def test_type_final_review_accepted(self) -> None:
+        with patch("sys.argv", ["review.py", "--type", "final-review",
+                                "--title", "test", "--source-dirs", "/tmp"]):
+            args = parse_args()
+            assert args.mode == "final-review"
+            assert args.review_type == "readiness"
+
+    def test_type_code_review_accepted(self) -> None:
+        with patch("sys.argv", ["review.py", "--type", "code-review",
+                                "--title", "test", "--source-dirs", "/tmp",
+                                "--spec", "/tmp/spec.md"]):
+            args = parse_args()
+            assert args.mode == "code-review"
+            assert args.review_type == "conformance"
+
+    def test_type_pre_review_accepted(self) -> None:
+        with patch("sys.argv", ["review.py", "--type", "pre-review",
+                                "--spec", "/tmp/spec.md", "--title", "test",
+                                "--source-dirs", "/tmp"]):
+            args = parse_args()
+            assert args.mode == "pre-review"
+            assert args.review_type == "coherence"
+
+    def test_type_spec_review_accepted(self) -> None:
+        with patch("sys.argv", ["review.py", "--type", "spec-review",
+                                "--spec", "/tmp/spec.md", "--title", "test",
+                                "--source-dirs", "/tmp"]):
+            args = parse_args()
+            assert args.mode == "spec-review"
+            assert args.review_type == "structure"
+
+    def test_type_coherence_unchanged(self) -> None:
+        with patch("sys.argv", ["review.py", "--type", "coherence",
+                                "--spec", "/tmp/spec.md", "--title", "test",
+                                "--source-dirs", "/tmp"]):
+            args = parse_args()
+            assert args.review_type == "coherence"
+            assert args.mode == "coherence"
+
+    def test_legacy_type_sets_default_degree(self) -> None:
+        with patch("sys.argv", ["review.py", "--type", "final-review",
+                                "--title", "test", "--source-dirs", "/tmp"]):
+            args = parse_args()
+            assert args.degree == "standard"
+
+    def test_explicit_degree_overrides_legacy_default(self) -> None:
+        with patch("sys.argv", ["review.py", "--type", "final-review",
+                                "--degree", "deep",
+                                "--title", "test", "--source-dirs", "/tmp"]):
+            args = parse_args()
+            assert args.degree == "deep"

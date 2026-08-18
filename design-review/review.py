@@ -1632,7 +1632,7 @@ DEPTH_PRESETS: Final = {
     "deep":     {"max_rounds": 5, "min_rounds": 3, "budget_per_session": 8.0},
 }
 
-REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness", "crosscutting", "decision")
+REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness", "crosscutting", "decision", "final-review", "code-review", "pre-review", "spec-review")
 
 DEGREE_PRESETS: Final = {
     "light":       {"max_rounds": 1,  "min_rounds": 1, "budget_per_session": 1.5},
@@ -1720,7 +1720,14 @@ def parse_args() -> argparse.Namespace:
     if args.review_type and args.mode:
         parser.error("--type and --mode are mutually exclusive")
     if args.review_type:
-        args.mode = TYPE_TO_MODE[args.review_type]
+        if args.review_type in MODE_TO_TYPE:
+            args.mode = args.review_type
+            mapped_type, mapped_degree = MODE_TO_TYPE[args.review_type]
+            args.review_type = mapped_type
+            if not args.degree:
+                args.degree = mapped_degree
+        else:
+            args.mode = TYPE_TO_MODE[args.review_type]
     elif args.mode:
         mapped = MODE_TO_TYPE.get(args.mode)
         if mapped:
