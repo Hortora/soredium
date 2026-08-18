@@ -1847,24 +1847,31 @@ class TestMigrateWorktreeIdeCleanup:
 
 
 class TestArchiveSlotDoubleArchive:
-    def test_blocks_when_attic_slot_already_exists(self, tmp_path, capsys):
-        """archive_slot must refuse if attic/<N>/ already exists — prevents nesting."""
+    def test_merges_when_attic_slot_already_exists(self, tmp_path, capsys):
+        """archive_slot merges into existing attic entry — handles restore-then-rearchive."""
         family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
         slot_manager.merge_slot(family, 1)
 
         # First archive — should succeed
         slot_manager.archive_slot(family, 1)
-        assert (family / "slots" / "attic" / "1").exists()
+        attic = family / "slots" / "attic" / "1"
+        assert attic.exists()
 
-        # Recreate slot dir (simulates remnant ghost)
+        # Recreate slot dir with new content (simulates restore + rework + reland)
         (family / "slots" / "1").mkdir()
-        (family / "slots" / "1" / ".slot").write_text("ghost")
+        (family / "slots" / "1" / ".slot").write_text("restored")
+        (family / "slots" / "1" / ".landed").write_text("re-landed")
 
-        # Second archive — should error, not nest
-        with pytest.raises(SystemExit):
-            slot_manager.archive_slot(family, 1, force=True)
+        # Second archive — should merge, not error
+        slot_manager.archive_slot(family, 1, force=True)
         captured = capsys.readouterr()
-        assert "ERROR=attic_slot_exists" in captured.out
+        assert "WARN=attic_slot_exists" in captured.out
+        assert "ARCHIVED=1" in captured.out
+        # New content merged into attic
+        assert (attic / ".landed").read_text() == "re-landed"
+        assert (attic / ".slot").read_text() == "restored"
+        # Original slot dir removed
+        assert not (family / "slots" / "1").exists()
 
 
 class TestArchiveSlotCleanup:

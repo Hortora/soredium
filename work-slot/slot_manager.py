@@ -1594,15 +1594,25 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
     attic_dir = slot_dir.parent / "attic"
     attic_dir.mkdir(exist_ok=True)
     dest = attic_dir / str(slot_num)
-    if dest.exists():
-        print(f"ERROR=attic_slot_exists slot={slot_num}")
-        print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
-        sys.exit(1)
+    merge_into_existing = dest.exists()
+    if merge_into_existing:
+        print(f"WARN=attic_slot_exists slot={slot_num} — merging into existing attic entry")
     moved = relocate_claude_projects(slot_dir, dest)
     escaped, cwd_offset = _escape_slot_cwd(slot_dir, family_root)
     if escaped:
         print(f"CWD_ESCAPED={family_root}")
-    shutil.move(str(slot_dir), str(dest))
+    if merge_into_existing:
+        for item in sorted(slot_dir.iterdir()):
+            target = dest / item.name
+            if target.exists():
+                if item.is_dir() and target.is_dir():
+                    shutil.rmtree(target)
+                elif item.is_file() or item.is_symlink():
+                    target.unlink()
+            shutil.move(str(item), str(target))
+        _cleanup_remnant_dir(slot_dir)
+    else:
+        shutil.move(str(slot_dir), str(dest))
     if slot_dir.exists():
         if not _cleanup_remnant_dir(slot_dir):
             print(f"WARN=remnant_dir_persists path={slot_dir}")
