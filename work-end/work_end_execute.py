@@ -234,10 +234,6 @@ def cmd_land(opts: dict[str, str]) -> int:
         print("ERROR_DETAIL=project= and branch= are required")
         return 1
 
-    safety_stash(project, "land")
-    if workspace:
-        safety_stash(workspace, "land-workspace")
-
     progress_path = (
         Path(workspace) / ".execute-progress"
         if workspace

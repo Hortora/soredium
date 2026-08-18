@@ -797,8 +797,9 @@ class TestSafetyStash:
         stash_list = _git(project, "stash", "list")
         assert stash_list == ""
 
-    def test_land_stashes_dirty_project(self, tmp_path: Path) -> None:
-        """cmd_land should stash dirty project tree before checkout/merge."""
+    def test_land_does_not_stash(self, tmp_path: Path) -> None:
+        """cmd_land should NOT stash — dirty files at land time are lifecycle
+        artifacts, not cross-session work. Stashing them causes pop conflicts."""
         remote = _init_bare(tmp_path / "remote.git")
         project = _init_repo(tmp_path / "project")
         workspace = _init_repo(tmp_path / "workspace")
@@ -813,8 +814,6 @@ class TestSafetyStash:
         _git(project, "commit", "-m", "feat: land stash test")
         _git(project, "checkout", "main")
 
-        (project / "other-session-work.txt").write_text("from another session\n")
-
         _git(workspace, "checkout", "-b", branch)
 
         result = _run_execute(
@@ -824,10 +823,7 @@ class TestSafetyStash:
             "base_branch=main",
             f"workspace={workspace}",
         )
-        assert "SAFETY_STASH=" in result.stdout
-
-        stash_list = _git(project, "stash", "list")
-        assert "work-end safety stash before land" in stash_list
+        assert "SAFETY_STASH=" not in result.stdout
 
     def test_stash_preserves_untracked_files(self, tmp_path: Path) -> None:
         """Untracked files must be included in the stash (the -u flag)."""
