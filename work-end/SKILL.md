@@ -60,8 +60,18 @@ work-end uses the lifecycle state machine to track closing progress:
 active → closing:review → closing:verified → closing:promoted → closing:pushed → closing:merged → closing:stamped → idle
 ```
 
-**On entry:** Read `META_STATE` from ctx.py. If already `closing:*`,
-offer to continue from that gate. If `active`:
+**On entry:** Read `META_STATE` from ctx.py.
+
+Auto-resolve transient states first (same as `work continue`):
+
+| `META_STATE` | Action |
+|-------------|--------|
+| `scaffolded` | `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_setup` then `commit-transition ... from_state=scaffolded new_state=active event=auto_setup` |
+| `transitioning` | `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_refresh` then `commit-transition ... from_state=transitioning new_state=active event=auto_refresh` |
+| `active` | Ready — proceed below |
+| `closing:*` | Already closing — offer to continue from that gate |
+
+Then fire:
 ```bash
 python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_end
 ```

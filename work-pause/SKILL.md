@@ -52,6 +52,14 @@ COVERS=$(grep "^covers:" "$PLAN_PATH" | sed 's/covers: //')
 
 Must be on a branch where `.plan` exists.
 
+**Auto-resolve transient states first:**
+
+| `META_STATE` | Action |
+|-------------|--------|
+| `scaffolded` | `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_setup` then `commit-transition ... from_state=scaffolded new_state=active event=auto_setup` |
+| `transitioning` | `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_refresh` then `commit-transition ... from_state=transitioning new_state=active event=auto_refresh` |
+| `active` | Ready — proceed below |
+
 **Lifecycle transition:**
 ```bash
 python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_pause
