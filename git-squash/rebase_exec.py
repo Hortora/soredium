@@ -38,6 +38,19 @@ def git(project: str, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+def safety_stash(project: str, operation: str) -> bool:
+    status = git(project, "status", "--porcelain")
+    if status.returncode != 0 or not status.stdout.strip():
+        return False
+    msg = f"git-squash safety stash before {operation}"
+    result = git(project, "stash", "push", "-u", "-m", msg)
+    if result.returncode == 0:
+        print(f"SAFETY_STASH={operation}|msg={msg}")
+        return True
+    print(f"SAFETY_STASH_WARN=stash failed: {result.stderr.strip()}", file=sys.stderr)
+    return False
+
+
 def count_commits(project: str, range_spec: str) -> int:
     r = git(project, "rev-list", "--count", range_spec)
     if r.returncode != 0:
@@ -47,6 +60,7 @@ def count_commits(project: str, range_spec: str) -> int:
 
 def cmd_single(project: str) -> None:
     """Fast path: squash HEAD~1 into HEAD."""
+    safety_stash(project, "squash-single")
     # Verify at least 2 commits exist
     r = git(project, "rev-parse", "HEAD~1")
     if r.returncode != 0:
@@ -84,6 +98,8 @@ def cmd_multi(project: str, args: list[str]) -> None:
         print("ERROR=missing_args")
         print("ERROR_DETAIL=base and todo-file are required")
         sys.exit(1)
+
+    safety_stash(project, "squash-multi")
 
     # Count commits before
     head_sha = git(project, "rev-parse", "HEAD").stdout.strip()
