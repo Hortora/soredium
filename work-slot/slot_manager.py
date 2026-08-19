@@ -880,10 +880,8 @@ def is_project_repo(name: str) -> bool:
 def is_workspace_clone(repo_path: Path) -> bool:
     """Detect whether a repo clone is a workspace (not a project repo).
 
-    Three signals, any one sufficient:
-    - .workspace marker file (new system from #239)
-    - proj symlink (workspace convention — workspaces point back to project)
-    - Name starts with work- or is exactly work (naming convention)
+    Primary: .workspace marker file (#239, #255).
+    Transition fallback (remove after #255 Phase 3): proj symlink, work-* naming.
     """
     if not repo_path.is_dir():
         return False

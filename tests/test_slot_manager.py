@@ -2182,6 +2182,20 @@ class TestIsWorkspaceClone:
         (ws / "proj").symlink_to("/path/to/platform")
         assert slot_manager.is_workspace_clone(ws) is True
 
+    def test_wsp_prefix_without_marker_is_project(self, tmp_path):
+        """wsp-casehub-connectors without .workspace marker is a project repo
+        (name alone is not a detection signal)."""
+        repo = tmp_path / "wsp-casehub-connectors"
+        repo.mkdir()
+        assert slot_manager.is_workspace_clone(repo) is False
+
+    def test_wsp_prefix_with_marker_is_workspace(self, tmp_path):
+        """wsp-casehub-connectors with .workspace marker is detected."""
+        ws = tmp_path / "wsp-casehub-connectors"
+        ws.mkdir()
+        (ws / ".workspace").touch()
+        assert slot_manager.is_workspace_clone(ws) is True
+
 
 class TestGetSlotReposFiltersWorkspaces:
     def test_excludes_workspace_by_name(self, tmp_path):
@@ -2212,6 +2226,27 @@ class TestGetSlotReposFiltersWorkspaces:
         repos = slot_manager.get_slot_repos(slot)
         assert "engine" in repos
         assert "my-workspace" not in repos
+
+    def test_excludes_wsp_prefix_workspace_by_marker(self, tmp_path):
+        """New naming: wsp-casehub-connectors with .workspace marker is excluded."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        init_repo(slot / "connectors")
+        ws = init_repo(slot / "wsp-casehub-connectors")
+        (ws / ".workspace").touch()
+        repos = slot_manager.get_slot_repos(slot)
+        assert "connectors" in repos
+        assert "wsp-casehub-connectors" not in repos
+
+    def test_wsp_prefix_without_marker_included_as_project(self, tmp_path):
+        """Without .workspace marker, wsp-prefixed dir passes as project repo."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        init_repo(slot / "connectors")
+        init_repo(slot / "wsp-casehub-connectors")  # no marker
+        repos = slot_manager.get_slot_repos(slot)
+        assert "connectors" in repos
+        assert "wsp-casehub-connectors" in repos
 
     def test_get_all_still_returns_workspaces(self, tmp_path):
         slot = tmp_path / "slot"

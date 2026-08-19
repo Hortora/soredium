@@ -884,6 +884,12 @@ git -C "<project-path>" commit -m "chore: ignore wksp symlink"
 `proj` is already covered by the workspace `.gitignore` written in Step 7.
 Neither symlink is tracked by git in either repo.
 
+**Marker catch-up:** If the workspace repo exists but lacks `.workspace`,
+place the marker (idempotent catch-up for repos created before #255):
+```bash
+[ ! -f "<BASE>/.workspace" ] && touch "<BASE>/.workspace" && git -C "<BASE>" add .workspace && git -C "<BASE>" commit -m "chore: add .workspace marker"
+```
+
 ### Step 7c — Install git hooks in project repo
 
 Check which hooks are available and offer to install them into `.githooks/`
@@ -951,7 +957,17 @@ Run: `python3 ~/.claude/skills/workspace-init/workspace_create.py init-repo <BAS
 
 Read output: `REPO_URL=<url>` on success, `ERROR=` on failure.
 
-If `ERROR=already_initialized` — the workspace already has a `.git` directory; skip this step.
+**After successful init (or if already initialized):** place the
+`.workspace` marker for structural detection (#255):
+```bash
+touch <BASE>/.workspace
+git -C <BASE> add .workspace
+git -C <BASE> diff --cached --quiet || git -C <BASE> commit -m "chore: add .workspace marker"
+```
+This is idempotent — if `.workspace` already exists, `touch` is a no-op
+and `diff --cached --quiet` skips the commit.
+
+If `ERROR=already_initialized` — the workspace already has a `.git` directory; skip init but still place the `.workspace` marker above.
 If `ERROR=gh_failed` — git init succeeded but GitHub remote creation failed. Report the error detail and tell the user:
 > Remote not configured. When ready (using your chosen tag `<REPO_NAME>`):
 > ```bash
