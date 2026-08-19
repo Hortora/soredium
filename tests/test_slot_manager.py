@@ -80,26 +80,60 @@ class TestAllocateSlotNumber:
 
 
 class TestResolveWorkspaceSource:
-    def test_shared_workspace(self, tmp_path):
-        shared_ws = init_repo(tmp_path / "public" / "casehub")
-        (shared_ws / "engine").mkdir()
+    def test_resolves_to_child_not_parent(self, tmp_path):
+        """When child workspace is nested inside a parent git repo,
+        resolve to the child (the actual workspace repo)."""
+        parent = init_repo(tmp_path / "public" / "casehub")
+        child = init_repo(parent / "engine")
+        subprocess.run(["git", "-C", str(child), "remote", "add", "origin",
+                         "https://github.com/mdproctor/wsp-casehub-engine.git"],
+                        capture_output=True, check=True)
         repo = tmp_path / "casehub" / "engine"
         repo.mkdir(parents=True)
-        (repo / "wksp").symlink_to(shared_ws / "engine")
+        (repo / "wksp").symlink_to(child)
 
         src, name = slot_manager.resolve_workspace_source(repo)
-        assert src == shared_ws
-        assert name == "work"
+        assert src == child
+        assert name == "wsp-casehub-engine"
 
-    def test_external_workspace(self, tmp_path):
+    def test_name_from_remote_url(self, tmp_path):
+        """Slot name derived from workspace repo's origin remote URL."""
+        ws_repo = init_repo(tmp_path / "workspace")
+        subprocess.run(["git", "-C", str(ws_repo), "remote", "add", "origin",
+                         "https://github.com/mdproctor/wsp-casehub-connectors.git"],
+                        capture_output=True, check=True)
+        repo = tmp_path / "project"
+        repo.mkdir(parents=True)
+        (repo / "wksp").symlink_to(ws_repo)
+
+        src, name = slot_manager.resolve_workspace_source(repo)
+        assert src == ws_repo
+        assert name == "wsp-casehub-connectors"
+
+    def test_fallback_name_when_no_remote(self, tmp_path):
+        """When workspace repo has no remote, construct name from path."""
+        ws_repo = init_repo(tmp_path / "public" / "casehub" / "connectors")
+        repo = tmp_path / "project"
+        repo.mkdir(parents=True)
+        (repo / "wksp").symlink_to(ws_repo)
+
+        src, name = slot_manager.resolve_workspace_source(repo)
+        assert src == ws_repo
+        assert name == "wsp-casehub-connectors"
+
+    def test_external_workspace_single_repo(self, tmp_path):
+        """External workspace (no parent git repo) resolves directly."""
         ext_ws = init_repo(tmp_path / "public" / "casehub-iot")
+        subprocess.run(["git", "-C", str(ext_ws), "remote", "add", "origin",
+                         "https://github.com/mdproctor/wsp-casehub-iot.git"],
+                        capture_output=True, check=True)
         repo = tmp_path / "casehub" / "iot"
         repo.mkdir(parents=True)
         (repo / "wksp").symlink_to(ext_ws)
 
         src, name = slot_manager.resolve_workspace_source(repo)
         assert src == ext_ws
-        assert name == "work-casehub-iot"
+        assert name == "wsp-casehub-iot"
 
     def test_no_wksp_symlink(self, tmp_path):
         repo = tmp_path / "casehub" / "engine"
@@ -107,158 +141,88 @@ class TestResolveWorkspaceSource:
         result = slot_manager.resolve_workspace_source(repo)
         assert result is None
 
+    def test_wksp_points_to_nonexistent(self, tmp_path):
+        repo = tmp_path / "project"
+        repo.mkdir(parents=True)
+        (repo / "wksp").symlink_to(tmp_path / "nonexistent")
+        result = slot_manager.resolve_workspace_source(repo)
+        assert result is None
+
 
 class TestWorkspaceNameCollision:
     @patch("slot_manager.run_cmd")
-    def test_deconflicts_workspace_name_with_repo_name(self, mock_cmd, tmp_path):
-        """When a repo is named 'work' and the shared workspace would also
-        clone as 'work', create_slot must deconflict the names."""
+    def test_collision_detected_when_workspace_name_matches_repo(self, mock_cmd, tmp_path):
+        """When resolve_workspace_source returns a name that collides with
+        an existing directory (e.g., a repo clone), create_slot errors."""
         family = tmp_path / "casehub"
         family.mkdir()
         work_repo = init_repo(family / "work")
-        shared_ws = init_repo(tmp_path / "public" / "casehub")
-        (shared_ws / "work").mkdir()
-        (work_repo / "wksp").symlink_to(shared_ws / "work")
+        ws_repo = init_repo(tmp_path / "public" / "casehub" / "work")
+        (work_repo / "wksp").symlink_to(ws_repo)
 
         mock_cmd.return_value = (0, "", "")
 
-        result = slot_manager.create_slot(
-            family_root=family,
-            repos=["work"],
-            branch="issue-99-test",
-            issue="99",
-            issue_repo="casehubio/parent",
-            covers="99",
-            context="Test collision",
-        )
-
-        slot_dir = family / "slots" / str(result["slot_number"])
-        assert (slot_dir / ".slot").exists()
-        # The workspace clone must NOT be at slot_dir/work (that's the repo)
-        # It should be at slot_dir/work-casehub (deconflicted)
-        assert not any(
-            c.args[0] == "git" and "clone" in c.args and str(slot_dir / "work") == c.args[-1]
-            for c in mock_cmd.call_args_list
-            if len(c.args[0]) > 3 and isinstance(c.args[0], list)
-        ), "workspace clone tried to use same path as repo clone"
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_repo, "work")
+            with pytest.raises(SystemExit):
+                slot_manager.create_slot(
+                    family_root=family,
+                    repos=["work"],
+                    branch="issue-99-test",
+                    issue="99",
+                    issue_repo="casehubio/parent",
+                    covers="99",
+                    context="Test collision",
+                )
 
 
 class TestCrossOrgWorkspaceWiring:
     @patch("slot_manager.run_cmd")
     def test_cross_org_repos_get_separate_workspace_clones(self, mock_cmd, tmp_path):
-        """When a slot mixes repos from different families, each family's
-        workspace must be cloned separately — not collide on 'work'."""
+        """When a slot mixes repos from different families, each gets its
+        own workspace clone with a unique name from resolve_workspace_source."""
         family = tmp_path / "hortora"
         family.mkdir()
 
-        # Two workspace repos from different orgs
-        ws_hortora = init_repo(tmp_path / "public" / "hortora")
-        ws_casehub = init_repo(tmp_path / "public" / "casehub")
+        ws_trellis = init_repo(tmp_path / "public" / "hortora" / "trellis")
+        ws_pages = init_repo(tmp_path / "public" / "casehub" / "pages")
 
-        # Repo A: hortora/trellis -> workspace at public/hortora/trellis
         repo_a = init_repo(family / "trellis")
-        (ws_hortora / "trellis").mkdir()
-        (repo_a / "wksp").symlink_to(ws_hortora / "trellis")
+        (repo_a / "wksp").symlink_to(ws_trellis)
 
-        # Repo B: hortora/pages -> workspace at public/casehub/pages
         repo_b = init_repo(family / "pages")
-        (ws_casehub / "pages").mkdir()
-        (repo_b / "wksp").symlink_to(ws_casehub / "pages")
+        (repo_b / "wksp").symlink_to(ws_pages)
 
         mock_cmd.return_value = (0, "", "")
 
-        result = slot_manager.create_slot(
-            family_root=family,
-            repos=["trellis", "pages"],
-            branch="issue-200-test",
-            issue="200",
-            issue_repo="Hortora/soredium",
-            covers="200",
-            context="Cross-org test",
-        )
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.side_effect = [
+                (ws_trellis, "wsp-hortora-trellis"),
+                (ws_pages, "wsp-casehub-pages"),
+            ]
+            result = slot_manager.create_slot(
+                family_root=family,
+                repos=["trellis", "pages"],
+                branch="issue-200-test",
+                issue="200",
+                issue_repo="Hortora/soredium",
+                covers="200",
+                context="Cross-org test",
+            )
 
         slot_dir = family / "slots" / str(result["slot_number"])
 
-        # Collect all clone destinations from the mock calls
         clone_dests = []
         for c in mock_cmd.call_args_list:
             args = c.args[0] if c.args else c[0]
             if isinstance(args, list) and len(args) >= 2 and args[0] == "git" and "clone" in args:
                 clone_dests.append(args[-1])
 
-        # Must have cloned both workspace repos to different directories
-        ws_dests = [d for d in clone_dests if "work" in Path(d).name]
-        assert len(ws_dests) >= 2, (
-            f"Expected 2 workspace clones for cross-org repos, got {len(ws_dests)}: {ws_dests}"
+        ws_dests = [d for d in clone_dests if "wsp-" in Path(d).name]
+        assert len(ws_dests) == 2, (
+            f"Expected 2 workspace clones, got {len(ws_dests)}: {ws_dests}"
         )
-        # Directories must be distinct
-        assert len(set(ws_dests)) == len(ws_dests), (
-            f"Workspace clone directories collided: {ws_dests}"
-        )
-
-
-    @patch("slot_manager.run_cmd")
-    def test_add_repo_cross_org_disambiguates(self, mock_cmd, tmp_path):
-        """add_repo must detect that an existing work/ belongs to a different
-        family and clone the new workspace as work-<name> instead."""
-        family = tmp_path / "hortora"
-        family.mkdir()
-
-        ws_hortora = init_repo(tmp_path / "public" / "hortora")
-        ws_casehub = init_repo(tmp_path / "public" / "casehub")
-
-        repo_a = init_repo(family / "trellis")
-        (ws_hortora / "trellis").mkdir()
-        (repo_a / "wksp").symlink_to(ws_hortora / "trellis")
-
-        repo_b = init_repo(family / "pages")
-        (ws_casehub / "pages").mkdir()
-        (repo_b / "wksp").symlink_to(ws_casehub / "pages")
-
-        mock_cmd.return_value = (0, "", "")
-
-        # Create slot with repo A only
-        result = slot_manager.create_slot(
-            family_root=family,
-            repos=["trellis"],
-            branch="issue-200-test",
-            issue="200",
-            issue_repo="Hortora/soredium",
-            covers="200",
-            context="Base slot",
-        )
-
-        slot_dir = family / "slots" / str(result["slot_number"])
-
-        # Simulate the work/ directory existing from create_slot
-        (slot_dir / "work").mkdir(exist_ok=True)
-        subprocess.run(["git", "init"], cwd=str(slot_dir / "work"), capture_output=True)
-        subprocess.run(["git", "-C", str(slot_dir / "work"), "remote", "add", "origin", str(ws_hortora)], capture_output=True)
-
-        # Write .slot so add_repo can find it
-        slot_file = slot_dir / ".slot"
-        slot_file.write_text("# Slot\n## Repos\n- trellis (primary)\n")
-
-        mock_cmd.reset_mock()
-        mock_cmd.return_value = (0, "", "")
-
-        # Add repo B from different family
-        slot_manager.add_repo(family, result["slot_number"], "pages",
-                              "issue-200-test")
-
-        # The casehub workspace clone must NOT go into work/ (that's hortora's)
-        clone_dests = []
-        for c in mock_cmd.call_args_list:
-            args = c.args[0] if c.args else c[0]
-            if isinstance(args, list) and len(args) >= 2 and args[0] == "git" and "clone" in args:
-                clone_dests.append(args[-1])
-
-        ws_dests = [d for d in clone_dests if "work" in Path(d).name]
-        if ws_dests:
-            for d in ws_dests:
-                assert Path(d).name != "work", (
-                    f"add_repo cloned casehub workspace into 'work/' which belongs to hortora: {d}"
-                )
+        assert len(set(ws_dests)) == 2, f"Workspace clone directories collided: {ws_dests}"
 
 
 class TestWriteSlotSettings:
@@ -594,21 +558,22 @@ class TestCreateSlot:
         family = tmp_path / "casehub"
         family.mkdir()
         engine = init_repo(family / "engine")
-        shared_ws = init_repo(tmp_path / "public" / "casehub")
-        (shared_ws / "engine").mkdir()
-        (engine / "wksp").symlink_to(shared_ws / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
 
         mock_cmd.return_value = (0, "", "")
 
-        result = slot_manager.create_slot(
-            family_root=family,
-            repos=["engine"],
-            branch="issue-42-spi",
-            issue="42",
-            issue_repo="casehubio/engine",
-            covers="42",
-            context="Add SPI layer",
-        )
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result = slot_manager.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-42-spi",
+                issue="42",
+                issue_repo="casehubio/engine",
+                covers="42",
+                context="Add SPI layer",
+            )
 
         assert result["slot_number"] == 1
         slot_dir = family / "slots" / "1"
@@ -622,41 +587,41 @@ class TestCreateSlot:
         family = tmp_path / "casehub"
         family.mkdir(parents=True)
         engine = init_repo(family / "engine")
-        shared_ws = init_repo(tmp_path / "public" / "casehub")
-        (shared_ws / "engine").mkdir()
-        (engine / "wksp").symlink_to(shared_ws / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
 
         mock_cmd.return_value = (0, "", "")
 
-        result1 = slot_manager.create_slot(
-            family_root=family,
-            repos=["engine"],
-            branch="issue-42-spi",
-            issue="42",
-            issue_repo="casehubio/engine",
-            covers="42",
-            context="First slot",
-        )
-        assert result1["slot_number"] == 1
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result1 = slot_manager.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-42-spi",
+                issue="42",
+                issue_repo="casehubio/engine",
+                covers="42",
+                context="First slot",
+            )
+            assert result1["slot_number"] == 1
 
-        result2 = slot_manager.create_slot(
-            family_root=family,
-            repos=["engine"],
-            branch="issue-55-ledger",
-            issue="55",
-            issue_repo="casehubio/engine",
-            covers="55",
-            context="Fix ledger",
-        )
-        assert result2["slot_number"] == 2
+            result2 = slot_manager.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-55-ledger",
+                issue="55",
+                issue_repo="casehubio/engine",
+                covers="55",
+                context="Fix ledger",
+            )
+            assert result2["slot_number"] == 2
 
     @patch("slot_manager.run_cmd")
     def test_clone_failure_exits(self, mock_cmd, tmp_path, capsys):
         family = tmp_path / "casehub"
         engine = init_repo(family / "engine")
-        shared_ws = init_repo(tmp_path / "public" / "casehub")
-        (shared_ws / "engine").mkdir()
-        (engine / "wksp").symlink_to(shared_ws / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
 
         mock_cmd.side_effect = [
             (0, "", ""),  # fetch
@@ -667,16 +632,18 @@ class TestCreateSlot:
             (1, "", "fatal: clone failed"),  # clone fails
         ]
 
-        with pytest.raises(SystemExit):
-            slot_manager.create_slot(
-                family_root=family,
-                repos=["engine"],
-                branch="issue-42-spi",
-                issue="42",
-                issue_repo="casehubio/engine",
-                covers="42",
-                context="test",
-            )
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            with pytest.raises(SystemExit):
+                slot_manager.create_slot(
+                    family_root=family,
+                    repos=["engine"],
+                    branch="issue-42-spi",
+                    issue="42",
+                    issue_repo="casehubio/engine",
+                    covers="42",
+                    context="test",
+                )
         captured = capsys.readouterr()
         assert "ERROR=clone_failed" in captured.out
 
@@ -3473,28 +3440,29 @@ class TestGetFamilyRepoNames:
 
 class TestCreateSlotCollisionFamily:
     @patch("slot_manager.run_cmd")
-    def test_collision_detected_against_family_repo_not_in_slot(self, mock_cmd, tmp_path):
-        """Family has repo 'work' but slot only has 'engine'.
-        Workspace clone default name 'work' must be deconflicted."""
+    def test_workspace_name_from_remote_avoids_family_collision(self, mock_cmd, tmp_path):
+        """With per-repo workspace naming from remote URL, family repo names
+        like 'work' cannot collide — workspace gets 'wsp-casehub-engine'."""
         family = tmp_path / "casehub"
         family.mkdir()
         engine = init_repo(family / "engine")
-        init_repo(family / "work")  # exists in family but NOT in this slot
-        shared_ws = init_repo(tmp_path / "public" / "casehub")
-        (shared_ws / "engine").mkdir()
-        (engine / "wksp").symlink_to(shared_ws / "engine")
+        init_repo(family / "work")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
 
         mock_cmd.return_value = (0, "", "")
 
-        result = slot_manager.create_slot(
-            family_root=family,
-            repos=["engine"],
-            branch="issue-99-test",
-            issue="99",
-            issue_repo="casehubio/parent",
-            covers="99",
-            context="Test collision",
-        )
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result = slot_manager.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-99-test",
+                issue="99",
+                issue_repo="casehubio/parent",
+                covers="99",
+                context="Test no collision",
+            )
 
         slot_dir = family / "slots" / str(result["slot_number"])
         clone_dests = []
@@ -3502,12 +3470,9 @@ class TestCreateSlotCollisionFamily:
             args = c.args[0] if c.args else c[0]
             if isinstance(args, list) and len(args) >= 2 and args[0] == "git" and "clone" in args:
                 dest = Path(args[-1])
-                if dest.parent == slot_dir and "work" in dest.name:
+                if dest.parent == slot_dir:
                     clone_dests.append(dest.name)
-        for name in clone_dests:
-            assert name != "work", (
-                f"workspace clone used name 'work' which collides with family repo"
-            )
+        assert "wsp-casehub-engine" in clone_dests
 
 
 class TestValidateSlotWksp:
@@ -3670,9 +3635,8 @@ class TestAddRepoWorkspaceRemotes:
         init_repo(slot_dir / "engine")
 
         repo_b = init_repo(family / "iot")
-        ws = init_repo(tmp_path / "public" / "casehub")
-        (ws / "iot").mkdir()
-        (repo_b / "wksp").symlink_to(ws / "iot")
+        ws_iot = init_repo(tmp_path / "public" / "casehub" / "iot")
+        (repo_b / "wksp").symlink_to(ws_iot)
 
         slot_manager.write_slot_md(
             slot_dir, 1, ["engine"], "test-branch", "42",
@@ -3681,11 +3645,14 @@ class TestAddRepoWorkspaceRemotes:
 
         mock_cmd.return_value = (0, "", "")
         mock_configure.return_value = {"origin": "", "upstream": "", "local": ""}
-        slot_manager.add_repo(family, 1, "iot", "test-branch")
+
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_iot, "wsp-casehub-iot")
+            slot_manager.add_repo(family, 1, "iot", "test-branch")
 
         ws_calls = [
             c for c in mock_configure.call_args_list
-            if "work" in str(c.args[0])
+            if "wsp-" in str(c.args[0])
         ]
         assert len(ws_calls) >= 1, (
             "add_repo did not call configure_slot_remotes on workspace clone"

@@ -311,12 +311,21 @@ def resolve_workspace_source(repo_path: Path) -> tuple[Path, str] | None:
     if not wksp.is_symlink():
         return None
     target = wksp.resolve()
-    parent = target.parent
-    if (parent / ".git").exists() or (parent / ".git").is_file():
-        return parent, "work"
-    if (target / ".git").exists() or (target / ".git").is_file():
-        return target, f"work-{target.name}"
-    return None
+    if not target.is_dir():
+        return None
+
+    rc, stdout, _ = run_cmd(["git", "-C", str(target), "rev-parse", "--show-toplevel"])
+    if rc != 0:
+        return None
+    ws_root = Path(stdout.strip())
+
+    rc, url_out, _ = run_cmd(["git", "-C", str(ws_root), "remote", "get-url", "origin"])
+    if rc == 0 and url_out.strip():
+        name = Path(url_out.strip().rstrip("/")).stem
+        return ws_root, name
+
+    parent_name = ws_root.parent.name
+    return ws_root, f"wsp-{parent_name}-{ws_root.name}"
 
 
 def _write_slot_settings(slot_dir: Path) -> Path:
@@ -562,9 +571,6 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
     m2_dir = slot_dir / ".m2"
     m2_dir.mkdir()
 
-    ws_created: dict[str, Path] = {}
-    family_repo_names = _get_family_repo_names(family_root)
-
     for repo_name in repos:
         repo_path = family_root / repo_name
         if not repo_path.is_dir():
@@ -599,47 +605,34 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         ws_info = resolve_workspace_source(repo_path)
         if ws_info:
             ws_source, ws_name = ws_info
-            if ws_name in family_repo_names:
-                ws_name = f"work-{ws_source.name}"
-            ws_key = str(ws_source)
-            # Disambiguate when different workspace sources resolve to the same name
-            if ws_key not in ws_created and (slot_dir / ws_name).exists():
-                ws_name = f"work-{ws_source.name}"
             ws_slot_dir = slot_dir / ws_name
 
-            if ws_key not in ws_created:
-                sync_main(str(ws_source))
-                rc, _, stderr = run_cmd([
-                    "git", "clone", "--shared", "--branch", "main",
-                    str(ws_source), str(ws_slot_dir),
-                ])
-                if rc != 0:
-                    print(f"ERROR=workspace_clone_failed ws={ws_name} stderr={stderr.strip()}")
-                    sys.exit(1)
-                rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
-                if rc != 0:
-                    print(f"ERROR=workspace_branch_failed ws={ws_name}")
-                    sys.exit(1)
-                _exclude_symlinks(ws_slot_dir)
-                configure_slot_remotes(ws_slot_dir, ws_source)
-                configure_update_instead(ws_source)
-                ws_created[ws_key] = ws_slot_dir
+            if ws_slot_dir.exists():
+                print(f"ERROR=workspace_name_collision ws={ws_name} repo={repo_name}")
+                print(f"ERROR_DETAIL=Workspace clone name '{ws_name}' already exists in slot. "
+                      f"Two project repos may share a workspace, or a naming collision occurred.")
+                sys.exit(1)
 
-            wksp_target = repo_path / "wksp"
-            if wksp_target.is_symlink():
-                orig_target = wksp_target.resolve()
-                try:
-                    rel_subdir = orig_target.relative_to(ws_source)
-                    ws_subdir = ws_slot_dir / rel_subdir
-                except ValueError:
-                    ws_subdir = ws_slot_dir
+            sync_main(str(ws_source))
+            rc, _, stderr = run_cmd([
+                "git", "clone", "--shared", "--branch", "main",
+                str(ws_source), str(ws_slot_dir),
+            ])
+            if rc != 0:
+                print(f"ERROR=workspace_clone_failed ws={ws_name} stderr={stderr.strip()}")
+                sys.exit(1)
+            rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
+            if rc != 0:
+                print(f"ERROR=workspace_branch_failed ws={ws_name}")
+                sys.exit(1)
+            _exclude_symlinks(ws_slot_dir)
+            configure_slot_remotes(ws_slot_dir, ws_source)
+            configure_update_instead(ws_source)
+            (ws_slot_dir / ".workspace").touch()
 
-                ws_subdir.mkdir(parents=True, exist_ok=True)
-                if rel_subdir != Path("."):
-                    _unignore_subdir(ws_slot_dir, str(rel_subdir.parts[0]))
-                repoint_wksp(clone_dest, ws_subdir)
-                create_proj_symlink(ws_subdir, clone_dest)
-                replicate_claude_md(repo_path, ws_subdir, clone_dest)
+            repoint_wksp(clone_dest, ws_slot_dir)
+            create_proj_symlink(ws_slot_dir, clone_dest)
+            replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
 
     primary_repo = repos[0]
     primary_wksp = slot_dir / primary_repo / "wksp"
