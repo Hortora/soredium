@@ -55,7 +55,7 @@ contains 1-3 tasks and ends at a safe wrap point.
    semantic refactoring (`ide_refactor_rename`, `ide_move_file`) for
    cross-cutting changes, text edits (Edit tool) for non-structural
    files.
-4. Run verification-before-completion: execute the verification command,
+4. Run evidence-before-claims: execute the verification command,
    read the full output, confirm it supports the claim that the task is
    complete.
 5. Mark as completed
@@ -205,7 +205,7 @@ the design-implementation norms).
 - Follow plan steps exactly
 - Follow TDD for every implementation task
 - Use ide-tooling for code operations
-- Run verification-before-completion after each task
+- Run evidence-before-claims after each task
 - Stop when blocked, don't guess
 - Never start implementation on main/master branch without explicit
   user consent
@@ -228,7 +228,7 @@ Plan execution is complete when:
   when subagent overhead isn't justified)
 
 **Invokes:**
-- `verification-before-completion` — after each task, verify before
+- `evidence-before-claims` — after each task, verify before
   marking done
 - `work-end` — after all tasks complete (handles code-review, squash, push)
 - `code-review` — via `work-end` Step 3c, mandatory review before merge

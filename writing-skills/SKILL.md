@@ -273,5 +273,5 @@ untested skills = deploying untested code.
 **Complements:**
 - `test-driven-development` — this skill IS TDD applied to
   documentation. Same Iron Law, same cycle, same principles.
-- `verification-before-completion` — after writing and testing, verify
+- `evidence-before-claims` — after writing and testing, verify
   validators pass before claiming done.

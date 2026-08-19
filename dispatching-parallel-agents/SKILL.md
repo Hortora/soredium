@@ -169,5 +169,5 @@ After agents return:
 
 **Complements:**
 - `test-driven-development` — each dispatched agent follows TDD for its fixes
-- `verification-before-completion` — after integration, verify the whole before claiming done
+- `evidence-before-claims` — after integration, verify the whole before claiming done
 - `ide-tooling` — dispatched agents use Navigate tools for investigation and Edit tools for fixes

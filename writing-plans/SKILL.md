@@ -368,5 +368,5 @@ Plan is complete when:
 - `ide-tooling` — plans note structural editing as the preferred code
   authoring approach. Implementers use Navigate tools for understanding
   code, Edit tools for writing it.
-- `verification-before-completion` — after each task in the plan, verify
+- `evidence-before-claims` — after each task in the plan, verify
   before marking done.

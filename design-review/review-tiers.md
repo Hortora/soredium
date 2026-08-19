@@ -11,7 +11,7 @@ automatically when 2+ dimensions complete.
 |-----------|------|------------|----------|
 | Post-spec | After spec written and approved | Coherence, Structure, Robustness + cross-cutting | Coherence heavy, Structure heavy, Robustness medium |
 | Post-brainstorming | After approach selected, before spec | Decision | Approach fitness, prior art, platform conformance |
-| Post-implementation | After code written, before merge | *(future — conformance, robustness, structure, coherence)* | — |
+| Post-implementation | After code written, before merge | Implemented by: `branch-audit` (conformance, coherence, structure, robustness) | Inline single-pass; see branch-audit/SKILL.md |
 | Pre-ship | Before release | *(future — robustness, readiness)* | — |
 
 ## Dimensions

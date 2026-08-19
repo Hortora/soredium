@@ -606,6 +606,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 |------|------|
 | [validate-schema-vs-validate-pr.md](docs/protocols/validate-schema-vs-validate-pr.md) | GE frontmatter validation belongs in validate_pr.py, not validate_schema.py |
 | [externalised-scripts-require-tests.md](docs/protocols/externalised-scripts-require-tests.md) | Every externalised .py script ships with meaningful unit tests |
+| [evidence-before-claims.md](docs/protocols/evidence-before-claims.md) | Run the command, read the output, THEN claim the result — at every completion boundary |
 | [taxonomy-rename-idempotent-script.md](docs/protocols/taxonomy-rename-idempotent-script.md) | Taxonomy rename operations must be idempotent |
 | [taxonomy-values-reflect-content-character.md](docs/protocols/taxonomy-values-reflect-content-character.md) | Taxonomy values describe content character, not form |
 | [write-content-three-layer-taxonomy.md](docs/protocols/write-content-three-layer-taxonomy.md) | Three-layer taxonomy for write-content |
@@ -631,9 +632,12 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `harvest` -- MERGE (via integrate_entry.py), DEDUPE, REVIEW -- dedicated maintenance sessions
 - `protocol` -- CAPTURE, SWEEP, SEARCH, HEALTH -- project-level protocol management
 
+**Branch-level review:**
+- `branch-audit` -- holistic branch-level review across four dimensions (Conformance, Coherence, Structure, Robustness); runs at work-end Step 2.2; fills the post-implementation lifecycle point in review-tiers.md
+
 **Router skills** (dispatch to per-language content files -- never load cross-language content):
-- `code-review` -- Java/TS/Python review via `java.md`, `typescript.md`, `python.md`
-- `security-audit` -- Java/TS/Python OWASP audit, same pattern
+- `code-review` -- Java/TS/Python per-line checklist via `java.md`, `typescript.md`, `python.md`
+- `security-audit` -- Java/TS/Python OWASP audit, same pattern; escalated by branch-audit Robustness dimension
 - `dependency-update` -- Maven/npm/pip management via `maven.md`, `npm.md`, `pip.md`
 - `git-commit` -- routes to `java.md`, `custom.md`, or generic
 - `quick-fix` -- lands small changes on main via ephemeral branch; auto-detects rescue for unpushed commits; used by fix-ci

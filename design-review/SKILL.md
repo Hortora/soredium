@@ -578,10 +578,8 @@ Design review is complete when:
 - User directly (`/design-review`, "review this design",
   "pre-review this", "tear this spec apart")
 - `writing-plans` — conditionally, when review depth prompt selects a review (not Skip)
-- `subagent-driven-development` — after implementation, SDD may invoke
-  design-review `--mode final-review` for adversarial review
-- `work-end` — before branch closure, work-end may invoke design-review
-  for final validation
+- `subagent-driven-development` — after implementation, for adversarial
+  spec review
 
 **Invokes:** None — runs an external Python orchestration script; does not
 delegate to other skills
@@ -589,13 +587,17 @@ delegate to other skills
 **Complements:**
 - `brainstorming` — brainstorming creates the spec; design-review validates it
   (pre-review mode for approach, spec-review mode for detail)
-- `verification-before-completion` — run VBC after design-review resolves
-  all issues and before committing the updated spec
+- `branch-audit` — fills the post-implementation lifecycle point with a
+  simpler execution model. Shares four-dimension vocabulary.
 - `code-review` — different scope. design-review is multi-round adversarial
-  review of design specs. code-review is routine pre-commit checklist review
+  review of design specs. code-review is routine per-commit checklist review
   of staged changes
+- Follow `evidence-before-claims` protocol after design-review resolves
+  all issues and before committing the updated spec
 
-**Boundary with code-review:** design-review --mode code-review checks whether implementation matches the spec. code-review checks code quality, safety, and style on staged changes.
+**Boundary with branch-audit:** design-review reviews specs (multi-round
+adversarial). branch-audit reviews code (single-pass inline). Both use
+the same four dimensions (Conformance, Coherence, Structure, Robustness).
 
 **Reads from:** User-provided spec path, CLAUDE.md for source directories,
 `.spec-path` and `progress.log` in the workspace for resume

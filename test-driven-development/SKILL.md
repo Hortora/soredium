@@ -277,7 +277,7 @@ the red-green-refactor cycle:
 - `ide_file_structure` — find existing test methods to understand coverage
 
 **Complements:**
-- `verification-before-completion` — TDD verifies each unit.
+- `evidence-before-claims` — TDD verifies each unit.
   VBC verifies the whole before completion claims.
 - `systematic-debugging` — bug found → write failing test (this skill's
   bug fix workflow) → then apply root-cause methodology.

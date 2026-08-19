@@ -79,12 +79,12 @@ delete, and restructure freely.
 automatic); `git-commit` after approval if user wants to commit
 
 **Complements:**
+- `branch-audit` — different scope. branch-audit is holistic branch-level
+  review (four dimensions: conformance, coherence, structure, robustness).
+  code-review is per-line checklist. Both run at work-end.
 - `design-review` — different scope. design-review is multi-round adversarial
   review of design specs. This skill reviews code.
-- `design-review --mode final-review` — branch-level adversarial review.
-  Use code-review for per-commit checklist review; use final-review for
-  pre-merge production readiness checks on structural changes.
-- `requesting-code-review` — deprecated independent subagent review;
-  superseded by `design-review` `--mode final-review`
 
-**Boundary with design-review:** code-review is a pre-commit checklist for staged changes. design-review --mode code-review is spec-vs-implementation conformance checking.
+**Boundary with branch-audit:** code-review is a per-line checklist (safety,
+types, async). branch-audit is holistic (did we build the right thing,
+coherently, with good structure, robustly?).

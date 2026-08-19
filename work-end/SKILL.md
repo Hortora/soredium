@@ -12,8 +12,9 @@ Closes the current branch cleanly. Five steps: Context → Sweep → Execute →
 Verify → Close.
 
 <HARD-GATE>
-**Code review is mandatory before any push.** Invoke `code-review` on the
-branch diff before Execute pushes anything. No exempt branches.
+**Review is mandatory before any push.** Step 2 runs code-review,
+branch-audit, loose ends sweep, and forcing function before Execute
+pushes anything. No exempt branches.
 
 **Doc sync is mandatory.** `update-claude-md` and `implementation-doc-sync`
 default to ON in the Sweep. They catch convention drift.
@@ -135,7 +136,114 @@ pass `confirm-partial` to close the branch with remaining work."
 
 ---
 
-## Step 2 — Sweep
+## Step 2 — Review
+
+Code review, branch audit, loose ends sweep, and forcing function.
+All four sub-steps are hard gates — Step 2 does not complete until
+the forcing function has resolved all findings.
+
+### 2.1 Code review
+
+Invoke `code-review` on the branch diff. Per-line checklist (safety,
+types, async, testing, performance).
+
+**Security-audit suppression:** Do NOT offer security-audit escalation —
+branch-audit Step 2.2 Robustness dimension handles security escalation.
+During per-commit development review (outside work-end), code-review
+continues to offer security-audit escalation as today.
+
+After Step 2.1 completes, persist any unresolved findings to
+`$WORKSPACE/.audit/findings.jsonl` via `append_finding` from
+`project/findings.py` with `category: "review"` and `source: "code-review"`.
+
+### 2.2 Branch audit
+
+Invoke `branch-audit` on the full branch diff. Four dimensions:
+Conformance, Coherence, Structure, Robustness.
+
+Findings are appended to `findings.jsonl` after each dimension completes
+(not batched). This ensures partial progress survives session interruption.
+
+### 2.3 Loose ends sweep
+
+```bash
+python3 work-end/loose_ends_sweep.py workspace=<WS> project=<PROJ> branch=<BRANCH> cycle_start=<ISO>
+```
+
+Pass `cycle_start` as the timestamp when Step 2 started — this filters
+out findings just written by Steps 2.1 and 2.2 to prevent double-counting.
+
+The LLM supplements script output with conversation-context items
+("I'll come back to this") and appends those to `findings.jsonl`.
+
+### 2.4 Forcing function (HARD GATE)
+
+Read all open findings from `$WORKSPACE/.audit/findings.jsonl` via
+`read_findings` from `project/findings.py`. Present grouped by category:
+
+```
+Open findings — N items require resolution before branch close
+
+AUDIT (branch-audit):
+  1. [conformance/WARNING] ...
+  2. [robustness/NOTE] ...
+
+REVIEW (code-review):
+  3. [WARNING] ...
+
+LOOSE-END:
+  4. [WARNING] ...
+
+HYGIENE:
+  5. [WARNING] ...
+
+Prior sessions (accumulated):
+  6. [WARNING] ...
+```
+
+**Triage filtering:** Only present findings whose status is `open` after
+the review process. Findings already rejected by verification (reviewer
+raised it, implementor proved it invalid) are not presented.
+
+**Resolution options per finding:**
+
+| Option | What happens |
+|--------|-------------|
+| **Fix** | Fix the issue now. Status → `resolved`, resolution includes commit SHA |
+| **File** | Create a GitHub issue. Status → `filed`, resolution includes issue number |
+| **Dismiss** | Not a real problem. Status → `dismissed`, resolution includes reason |
+
+**Severity constraints:**
+
+| Severity | Fix | File | Dismiss |
+|----------|-----|------|---------|
+| CRITICAL | Yes | Yes  | No      |
+| WARNING  | Yes | Yes  | Yes     |
+| NOTE     | Yes | Yes  | Yes     |
+
+**Re-review after fixes:** When "Fix" creates new commits, re-run
+code-review on those commits only. New findings join the queue.
+Branch-audit does not re-run — fixes are scoped responses.
+
+**Batch operations:**
+- "File all remaining as single issue" — one issue with checklist
+- "File each remaining" — one issue per finding
+- "Dismiss all NOTEs" — blanket dismiss with user-provided reason
+
+Each resolution is persisted to `findings.jsonl` immediately. If the
+session aborts mid-forcing-function, already-resolved findings remain
+resolved. Restart reads `findings.jsonl` and presents only remaining
+`open` findings.
+
+No finding survives branch close with status `open`.
+
+**Duration estimate:** 10–30 minutes depending on branch size and
+accumulated findings. code-review: 2–5 min, branch-audit: 5–10 min,
+loose ends sweep: 1–2 min, forcing function: 2–15 min.
+
+---
+
+## Step 3 — Sweep
 
 Present the pre-close checklist with all items ON:
 
@@ -174,7 +282,7 @@ impl-doc-sync per-repo (primary then secondaries). Session-bound items
 
 ---
 
-## Step 3 — Execute
+## Step 4 — Execute
 
 The LLM orchestrates script calls and subagent dispatches. Scripts handle
 the mechanical per-repo loop.
@@ -182,30 +290,23 @@ the mechanical per-repo loop.
 ### Sequence
 
 ```
-1. Code review          — LLM subagent gate (HARD GATE — must pass)
-2. Promote artifacts    — work_end_execute.py promote (once per workspace)
-3. Phase A: Rebase      — work_end_execute.py rebase (all repos)
-4. Phase B: Squash      — LLM per-repo loop (writes .squash-plan-<repo>.json)
-5. Phase C: Land        — work_end_execute.py land (all repos: push, stamp)
+1. Promote artifacts    — work_end_execute.py promote (once per workspace)
+2. Phase A: Rebase      — work_end_execute.py rebase (all repos)
+3. Phase B: Squash      — LLM per-repo loop (writes .squash-plan-<repo>.json)
+4. Phase C: Land        — work_end_execute.py land (all repos: push, stamp)
 ```
 
 **Lifecycle transitions at Execute milestones:**
 
 | After | Fire | New state |
 |-------|------|-----------|
-| Code review pass | `review_pass` | `closing:verified` |
+| Review pass (Step 2) | `review_pass` | `closing:verified` |
 | Promote done | `promote_pass` | `closing:promoted` |
 | Land done (push) | `push_pass` | `closing:pushed` |
 | Land done (merge) | `merge_pass` | `closing:merged` |
 | Land done (stamp) | `stamp_pass` | `closing:stamped` |
 
-### 3.1 Code review (HARD GATE)
-
-Invoke `code-review` on the branch diff. If critical findings: fix, re-run.
-For structural diffs (new modules, major refactors): use
-`design-review --mode final-review` instead.
-
-### 3.2 Promote artifacts
+### 4.1 Promote artifacts
 
 ```bash
 python3 work-end/work_end_execute.py promote workspace=<WS> project=<PROJ> branch=<BRANCH>
@@ -217,7 +318,7 @@ deduplicates: each workspace promoted once, not per-repo. Never passes
 
 After success: fire `promote_pass` lifecycle transition.
 
-### 3.2b Trajectory capture (enrichment)
+### 4.1b Trajectory capture (enrichment)
 
 After artifacts are promoted and before the branch is pushed. Non-blocking —
 if this step fails or the user declines, continue to Phase A.
@@ -245,7 +346,7 @@ if this step fails or the user declines, continue to Phase A.
    declines, continue to Phase A. Enrichment capture is valuable but
    never gates branch closure.
 
-### 3.3 Phase A — Rebase
+### 4.2 Phase A — Rebase
 
 ```bash
 python3 work-end/work_end_execute.py rebase project=<PROJ> branch=<BRANCH> base_branch=<BASE>
@@ -253,7 +354,13 @@ python3 work-end/work_end_execute.py rebase project=<PROJ> branch=<BRANCH> base_
 
 If `REBASE_CONFLICT`: user resolves, re-runs.
 
-### 3.4 Phase B — Squash analysis (LLM loop)
+**Post-rebase re-review:** If rebase was non-fast-forward (conflicts
+resolved), re-run code-review on the conflict resolution diff only.
+If findings: mini-gate with Fix/File/Dismiss (same severity constraints
+as Step 2.4). Persist to `findings.jsonl`. All findings must be resolved
+before proceeding to Step 4.3.
+
+### 4.3 Phase B — Squash analysis (LLM loop)
 
 For each repo: spawn a squash analysis subagent that classifies commits
 and writes `.squash-plan-<repo>.json`. Repos with existing plan files
@@ -269,7 +376,7 @@ This writes `.phase-a-complete` to the slot root, enabling `merge-slot`
 in Phase C. Read `MARKER_WRITTEN=` from output. If error, report and
 offer to retry — the squash is already done, only the marker failed.
 
-### 3.5 Phase C — Land
+### 4.4 Phase C — Land
 
 **Branch mode (IN_SLOT=no):**
 
@@ -300,7 +407,7 @@ two-hop push (slot clone → original repo → GitHub), SHA verification,
 
 ---
 
-## Step 4 — Verify
+## Step 5 — Verify
 
 ```bash
 python3 work-end/verify_slot_close.py <PROJ> branch=<BRANCH> workspace=<WS> [covers=<CSV>] [slot_dir=<SLOT_PATH>]
@@ -314,14 +421,14 @@ main pushed. Checks workspace: stamped.
 originals), archive status. Original repo paths resolved from slot
 clone `local` remote URLs.
 
-**Hard gate:** `VERIFIED=no` blocks Step 5. Present per-check failures
+**Hard gate:** `VERIFIED=no` blocks Step 6. Present per-check failures
 and offer recovery (re-run the failing Execute sub-step).
 
 After success: fire `cleanup_pass` lifecycle transition.
 
 ---
 
-## Step 4b — Close Issues
+## Step 5b — Close Issues
 
 After verify passes, close all covered GitHub issues. This is a mechanical
 gate — not optional, not LLM-dependent.
@@ -332,7 +439,7 @@ python3 work-end/work_end_execute.py close-issues repo=<OWNER_REPO> covers=<COVE
 
 Read `CLOSED=N` from output. If `ERROR=`: report and offer retry.
 
-**Verify gate:** Step 4 (verify_slot_close.py) checks `issues_closed` when
+**Verify gate:** Step 5 (verify_slot_close.py) checks `issues_closed` when
 `covers=` and `issue_repo=` are passed. If issues are still open after
 close-issues, verify will catch it.
 
@@ -342,9 +449,9 @@ python3 work-end/verify_slot_close.py <PROJ> branch=<BRANCH> workspace=<WS> cove
 
 ---
 
-## Step 5 — Close
+## Step 6 — Close
 
-### 5.1 Archive slot (slot mode only)
+### 6.1 Archive slot (slot mode only)
 
 If `IN_SLOT=yes`, archive the slot:
 
@@ -355,13 +462,13 @@ python3 work-end/work_end_execute.py archive-slot slot_path=<SLOT_PATH> family_r
 Read `ARCHIVED=yes` from output. If `ERROR=`: report and offer retry or `force=yes`
 to skip SHA verification.
 
-### 5.2 Return to base branches
+### 6.2 Return to base branches
 
 ```bash
 python3 work-end/branch_cleanup.py checkout-main <PROJECT> <WORKSPACE>
 ```
 
-### 5.2b Scaffold cleanup
+### 6.2b Scaffold cleanup
 
 Remove `.plan` and `JOURNAL.md` from workspace to prevent stale state
 detection in subsequent sessions.
@@ -370,19 +477,19 @@ detection in subsequent sessions.
 python3 work-end/branch_cleanup.py cleanup-scaffold <WORKSPACE>
 ```
 
-### 5.3 Stack cleanup
+### 6.3 Stack cleanup
 
 If the closed branch was in `.pause-stack`, remove it.
 
-### 5.4 ARC42 stale scan
+### 6.4 ARC42 stale scan
 
 If `ARC42STORIES.MD` exists, scan for stale statuses and fix.
 
-### 5.5 Session rename
+### 6.5 Session rename
 
 Suggest a descriptive session name if auto-generated.
 
-### 5.6 Garden retrieval feedback
+### 6.6 Garden retrieval feedback
 
 Record which garden entries retrieved during this session were actually useful.
 Non-blocking — if the MCP server is unavailable, skip silently and continue.
@@ -403,7 +510,7 @@ Non-blocking — if the MCP server is unavailable, skip silently and continue.
    refused, timeout), log a single warning and continue — never block
    work-end completion. Do not retry.
 
-### 5.7 Session close summary
+### 6.7 Session close summary
 
 ```
 Session close complete.
@@ -417,7 +524,7 @@ Session close complete.
 ✅ Branch closed     <branch-name>
 ```
 
-### 5.8 Notes — surface and offer to append
+### 6.8 Notes — surface and offer to append
 
 If `$WORKSPACE/.notes/NOTES.md` exists and has content, surface the most
 recent date section after the close summary:
@@ -469,16 +576,17 @@ Skip silently if no `.notes/` directory exists.
 - `subagent-driven-development` — final close step
 
 **Invokes:**
-- `code-review` — Step 3.1, mandatory gate
-- `design-review` — Step 3.1 (`--mode final-review`), for structural diffs
-- `forage` — SWEEP (Step 2)
-- `protocol` — SWEEP (Step 2)
-- `update-claude-md` — Step 2
-- `implementation-doc-sync` — Step 2
-- `adr` — Step 2
-- `write-content` — Step 2 (last)
-- `publish-blog` — Step 3.2 (via close_artifacts.py)
-- `git-squash` — Step 3.4 squash analysis
+- `code-review` — Step 2.1, mandatory gate
+- `branch-audit` — Step 2.2, mandatory gate (four dimensions)
+- `loose-ends-sweep` — Step 2.3, via `loose_ends_sweep.py`
+- `forage` — SWEEP (Step 3)
+- `protocol` — SWEEP (Step 3)
+- `update-claude-md` — Step 3
+- `implementation-doc-sync` — Step 3
+- `adr` — Step 3
+- `write-content` — Step 3 (last)
+- `publish-blog` — Step 4.1 (via close_artifacts.py)
+- `git-squash` — Step 4.3 squash analysis
 
 **Complements:**
 - `work` — routing entry point
@@ -487,8 +595,8 @@ Skip silently if no `.notes/` directory exists.
 - `work-slot` — slot detection triggers per-repo loop in Execute
 - `using-git-worktrees` — worktree isolation before plan execution;
   work-end closes the branch regardless of isolation method
-- `verification-before-completion` — verification gate before claiming
-  work is done; work-end runs the full close sequence after verification
+- `evidence-before-claims` (protocol) — per-boundary evidence gate;
+  the forcing function at Step 2.4 is additive, not a replacement
 
 **Reads from:** `ctx.py`, `.plan`, `.pause-stack`, CLAUDE.md, `.execute-progress`,
-`.squash-plan-*.json`, `verify_slot_close.py` output
+`.squash-plan-*.json`, `verify_slot_close.py` output, `findings.jsonl`

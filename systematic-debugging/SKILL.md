@@ -308,7 +308,7 @@ From debugging sessions:
 
 **Complements:**
 - `test-driven-development` — Phase 4 uses TDD's bug fix workflow (failing test → fix → verify). TDD defines HOW to write the regression test; this skill defines WHEN and WHY.
-- `verification-before-completion` — after the fix, verify the whole before claiming done.
+- `evidence-before-claims` — after the fix, verify the whole before claiming done.
 - `ide-tooling` — Phase 1 uses Navigate tools for code tracing. Phase 4 uses Edit tools for structural fixes.
 - `dispatching-parallel-agents` — Phase 1 Step 6: when investigation reveals 2+ independent root causes, dispatch parallel agents.
 - `fix-ci` — for CI-specific failures, use fix-ci which specialises in local reproduction and CI-specific patterns.

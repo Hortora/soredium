@@ -32,7 +32,7 @@ Process skills enforce discipline. They come before implementation skills — al
 | **brainstorming** | No implementation without approved design | "Let's build X", any creative work |
 | **systematic-debugging** | No fix without root cause | "Fix this bug", unexpected behaviour |
 | **test-driven-development** | No production code without failing test | Any implementation task |
-| **verification-before-completion** | No "done" claim without evidence | Before any commit, PR, or completion claim |
+| **evidence-before-claims** | No "done" claim without evidence | Before any commit, PR, or completion claim |
 | **writing-plans** | No execution without detailed plan | After brainstorming, before implementation |
 
 ## Common Flows
@@ -40,8 +40,8 @@ Process skills enforce discipline. They come before implementation skills — al
 These are the typical skill chains. Flows compose — Fix then Close is normal.
 
 - **Build:** brainstorming → writing-plans → executing-plans (default; subagent-driven-development only for genuinely parallel tasks) → work-end
-- **Fix:** systematic-debugging → test-driven-development → domain skill → verification-before-completion → git-commit
-- **Multi-failure:** systematic-debugging → dispatching-parallel-agents → verification-before-completion → git-commit
+- **Fix:** systematic-debugging → test-driven-development → domain skill → evidence-before-claims → git-commit
+- **Multi-failure:** systematic-debugging → dispatching-parallel-agents → evidence-before-claims → git-commit
 - **Close:** work-end (includes verification, code-review, squash, and push internally)
 
 ## Lifecycle Integration
@@ -50,7 +50,7 @@ Skills fire at specific lifecycle points — not only on user request:
 
 - **Session start:** work (detects state, routes to work-start or work-resume)
 - **Mid-session:** forage SWEEP and protocol SWEEP for knowledge capture at natural pauses
-- **Pre-commit:** code-review, verification-before-completion
+- **Pre-commit:** code-review, evidence-before-claims
 - **Branch close:** work-end (includes artifact promotion, review gate, issue closure)
 
 ## Red Flags
@@ -80,7 +80,7 @@ These thoughts mean STOP — you're rationalizing:
 - `brainstorming` — process gate: no implementation without approved design
 - `systematic-debugging` — process gate: no fix without root cause
 - `test-driven-development` — process gate: no production code without failing test
-- `verification-before-completion` — process gate: no "done" claim without evidence
+- `evidence-before-claims` — process gate: no "done" claim without evidence
 - `writing-plans` — process gate: no execution without detailed plan
 - `subagent-driven-development` — Build flow execution
 - `executing-plans` — Build flow execution (alternative to SDD)

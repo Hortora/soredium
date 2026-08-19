@@ -78,7 +78,7 @@ flowchart TD
     REVIEW["Run review-package, dispatch task reviewer"]
     APPROVED{"Reviewer: spec ✅ and quality approved?"}
     FIX["Dispatch fix subagent for Critical/Important findings"]
-    VBC["Run verification-before-completion"]
+    VBC["Run evidence-before-claims"]
     DONE["Mark task complete in ledger and todo list"]
     MORE{"More tasks remain?"}
     QUEUE{"Queue has\nmore issues?"}
@@ -215,7 +215,7 @@ re-review.
 ## Verification Gate
 
 After the task reviewer approves both spec compliance and code quality,
-run verification-before-completion before marking the task done:
+run evidence-before-claims before marking the task done:
 
 1. Run the verification command (test suite, build, diagnostics)
 2. Read the full output
@@ -373,7 +373,7 @@ Do NOT dispatch a separate final review before invoking work-end.
   consent
 - Skip task review, or accept a report missing either verdict (spec
   compliance AND task quality are both required)
-- Skip verification-before-completion after review approval
+- Skip evidence-before-claims after review approval
 - Proceed with unfixed issues
 - Dispatch multiple implementation subagents in parallel (conflicts)
 - Make a subagent read the whole plan file (hand it its task brief —
@@ -425,7 +425,7 @@ Do NOT dispatch a separate final review before invoking work-end.
 - `test-driven-development` — implementer subagents follow TDD for each
   task. The implementer prompt references TDD as the development
   discipline.
-- `verification-before-completion` — third stage of the per-task gate,
+- `evidence-before-claims` — third stage of the per-task gate,
   after spec compliance and code quality review pass. Evidence-based
   verification before marking done.
 - `ide-tooling` — implementer subagents use Navigate + Edit tools for

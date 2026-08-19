@@ -215,13 +215,13 @@ No performative agreement. Technical rigor always.
 ## Skill Chaining
 
 **Invoked by:**
-- `requesting-code-review` — after a review is dispatched and findings
-  come back, this skill governs how to handle the feedback.
+- `design-review` — after an adversarial review dispatches findings,
+  this skill governs how to handle the feedback.
 
 **Complements:**
-- `requesting-code-review` — that skill dispatches the review; this
+- `design-review` — that skill dispatches the review; this
   skill handles the response.
 - `protocol` — SEARCH for relevant protocols before implementing
   suggestions that change architectural patterns or conventions.
-- `verification-before-completion` — after implementing review fixes,
-  verify before claiming done.
+- Follow `evidence-before-claims` protocol after implementing review
+  fixes — verify before claiming done.

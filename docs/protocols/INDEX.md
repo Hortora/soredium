@@ -21,6 +21,12 @@ Standing rules and principles for the soredium skill collection and garden tooli
 |------|---------|------------|
 | [write-content-three-layer-taxonomy.md](write-content-three-layer-taxonomy.md) | form files carry what/why only; mode files carry how; voice files carry register and anti-slop | write-content/forms/, modes/, voice/ |
 
+## Verification
+
+| File | Summary | Applies to |
+|------|---------|------------|
+| [evidence-before-claims.md](evidence-before-claims.md) | Run the command, read the output, THEN claim the result — at every completion boundary | Any completion claim: commits, PRs, task completion, agent delegation |
+
 ## Skill Script Externalisation
 
 | File | Summary | Applies to |

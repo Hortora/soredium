@@ -468,7 +468,7 @@ Also apply all rules from **`ide-tooling`**: IntelliJ MCP tool guide — which t
 ## Skill Chaining
 
 - **Process layer:** `test-driven-development` defines HOW to work (test first, watch fail, minimal code, refactor). This skill defines WHAT tools to use (JUnit 5, AssertJ, @QuarkusTest). Follow TDD for all implementation work.
-- **After implementation, before review:** invoke `verification-before-completion` to compile-check and run diagnostics
+- **After implementation, before review:** invoke `evidence-before-claims` to compile-check and run diagnostics
 - **Before committing:** invoke `code-review` to catch safety, concurrency, and performance issues
 - **After implementing or refactoring:** if the user wants to commit, invoke
   `git-commit`, which will also sync ARC42STORIES.MD via `update-design`
