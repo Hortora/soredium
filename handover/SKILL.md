@@ -240,31 +240,33 @@ Present this exactly:
 ```
 Session wrap — create before writing the handover?
 
-[x] 1  write-content    capture this session's work as a diary entry
-[x] 2  update-claude-md  sync any new workflow conventions
-[x] 3  forage sweep      check for gotchas, techniques, undocumented
-[x] 4  protocol sweep    check for project rules worth formalising
-[?] 5  journal-entry     document any design changes this session not yet in JOURNAL.md  ← ON if mid-epic (.plan exists), OFF otherwise
-[?] 6  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
-[?] 7  arc42 stale scan  check ARC42STORIES.MD for stale statuses, resolved blockers, closed-issue forward refs  ← ON if ARC42STORIES.MD exists
-[x] 8  notes             anything to note for later? (appends to $WORKSPACE/.notes/NOTES.md)
+[x] 1  Loose ends sweep  capture deferred/skipped/missing items
+[x] 2  write-content     capture this session's work as a diary entry
+[x] 3  update-claude-md  sync any new workflow conventions
+[x] 4  forage sweep      check for gotchas, techniques, undocumented
+[x] 5  protocol sweep    check for project rules worth formalising
+[?] 6  journal-entry     document any design changes this session not yet in JOURNAL.md  ← ON if mid-epic (.plan exists), OFF otherwise
+[?] 7  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
+[?] 8  arc42 stale scan  check ARC42STORIES.MD for stale statuses, resolved blockers, closed-issue forward refs  ← ON if ARC42STORIES.MD exists
+[x] 9  notes             anything to note for later? (appends to $WORKSPACE/.notes/NOTES.md)
 
-Type numbers to toggle (e.g. "2 6"), "all" to toggle all on/off, or "go" to proceed:
+Type numbers to toggle (e.g. "2 7"), "all" to toggle all on/off, or "go" to proceed:
 ```
 
-- **Default:** write-content (diary), update-claude-md, forage sweep, protocol sweep ticked; journal-entry depends on epic state (see below).
+- **Default:** loose ends sweep, write-content (diary), update-claude-md, forage sweep, protocol sweep ticked; journal-entry depends on epic state (see below).
 
 <SESSION-BOUND-ITEMS>
-**Items 1, 3, 4 (write-content, forage sweep, protocol sweep) are session-bound.**
+**Items 1, 2, 4, 5 (loose ends sweep, write-content, forage sweep, protocol sweep) are session-bound.**
 They depend on conversation context that does not survive to the next session.
 They cannot be deferred — "defer to next session" means "lose forever." The user
 may skip them explicitly, but the skill must never offer "defer" as an option.
 Write-content can write a partial diary draft (the next session can append to it).
+Loose ends sweep captures deferred findings from conversation context (LLM checks).
 
-Items 2, 5, 6, 7 (update-claude-md, journal-entry, epic hygiene, arc42 stale scan)
+Items 3, 6, 7, 8 (update-claude-md, journal-entry, epic hygiene, arc42 stale scan)
 work from file state and git history — they can be deferred if needed.
 
-Item 8 (notes) captures persistent scratch items to `$WORKSPACE/.notes/NOTES.md` —
+Item 9 (notes) captures persistent scratch items to `$WORKSPACE/.notes/NOTES.md` —
 things to come back to later, observations that span sessions and branches, notes
 not actionable enough to be issues. Append-only with date headers and optional
 `[repo]` tags. Committed to the orphan `notes` branch at wrap time. Not session-bound
@@ -296,14 +298,21 @@ not actionable enough to be issues. Append-only with date headers and optional
 - **"go" (or "ok", "yes", blank Enter if the UI allows it):** proceed with current selections
 
 Run checked items **in this order** before continuing:
-1. Epic hygiene — run first so any issues surface early and can be mentioned in blog/handover
-2. Forage sweep — done while context is full (findings may feed the blog)
-3. Protocol sweep — done while context is full; catches project-specific rules before context is lost
-4. update-claude-md — sync new conventions first
-5. journal-entry — write any missing JOURNAL.md entries before the handover
-6. arc42 stale scan — run after journal-entry so any layer completions just written are already reflected
-7. write-content (diary) — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
-8. notes — prompt "anything to note for later?" If yes, append entries to
+1. Loose ends sweep — run first while session context is full; captures deferred/skipped items to `findings.jsonl`
+   ```bash
+   python3 work-end/loose_ends_sweep.py workspace=<WS> project=<PROJ> branch=<BRANCH>
+   ```
+   The LLM supplements script output with conversation-context items ("I'll come back to this")
+   and appends those to `findings.jsonl` via `append_finding` from `project/findings.py`.
+   Capture only — no forcing function at handover.
+2. Epic hygiene — run early so any issues surface and can be mentioned in blog/handover
+3. Forage sweep — done while context is full (findings may feed the blog)
+4. Protocol sweep — done while context is full; catches project-specific rules before context is lost
+5. update-claude-md — sync new conventions first
+6. journal-entry — write any missing JOURNAL.md entries before the handover
+7. arc42 stale scan — run after journal-entry so any layer completions just written are already reflected
+8. write-content (diary) — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
+9. notes — prompt "anything to note for later?" If yes, append entries to
    `$WORKSPACE/.notes/NOTES.md` under today's date header. Optional `[repo]`
    prefix for repo-specific notes (no prefix = primary). Commit to orphan branch:
    `git -C $WORKSPACE/.notes add NOTES.md && git -C $WORKSPACE/.notes commit -m "notes: wrap"`.
@@ -552,6 +561,7 @@ After the commit, output a single tick-list summary showing what was done and wh
 ```
 Session wrap complete.
 
+✅ Loose ends sweep      N new findings, M prior open  (or: nothing found)
 ✅ Epic hygiene          (or ⏭ skipped — [reason])
 ✅ Forage sweep          N entries submitted  (or: nothing garden-worthy found)
 ✅ Protocol sweep        N protocols captured (or: nothing new)
@@ -654,6 +664,7 @@ flowchart TD
 Handover is complete when:
 
 - ✅ Wrap checklist shown and user selections confirmed
+- ✅ Loose ends sweep performed (if checked) — deferred/skipped/missing items captured to `findings.jsonl`
 - ✅ Forage sweep performed — all four categories checked (gotchas, techniques, undocumented, conventions)
 - ✅ Any garden-worthy entries submitted via forage CAPTURE before writing the handover
 - ✅ Protocol sweep performed (if checked) — session scanned for project-specific rules worth formalising; confirmed entries captured and committed
