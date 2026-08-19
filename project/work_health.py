@@ -425,16 +425,27 @@ def check_close_gate(project, workspace, branch):
 
 
 def check_prior_findings(project, workspace):
-    findings_path = Path(workspace) / ".audit" / "findings.json"
+    from findings import read_findings
+
+    findings_path = Path(workspace) / ".audit" / "findings.jsonl"
     if not findings_path.exists():
         return "CHECK=prior_findings STATUS=ok"
     try:
-        import json as _json
-        findings = _json.loads(findings_path.read_text())
-        open_findings = [f for f in findings if f.get("status") == "open"]
+        all_findings = read_findings(findings_path)
+        open_findings = [f for f in all_findings if f.get("status") == "open"]
         if not open_findings:
             return "CHECK=prior_findings STATUS=ok"
-        details = "; ".join(f"{f['check']}: {f['detail']}" for f in open_findings[:5])
+
+        def _fmt(f):
+            cat = f.get("category", "unknown")
+            dim = f.get("dimension")
+            sev = (f.get("severity") or "warning").upper()
+            tag = f"{cat}/{dim}/{sev}" if dim else f"{cat}/{sev}"
+            detail = f.get("detail", f.get("check", ""))
+            source = f.get("source", "")
+            return f"[{tag}] {detail}" + (f" ({source})" if source else "")
+
+        details = "; ".join(_fmt(f) for f in open_findings[:5])
         suffix = f" (+{len(open_findings) - 5} more)" if len(open_findings) > 5 else ""
         return f"CHECK=prior_findings STATUS=warn DETAIL={len(open_findings)} open finding(s): {details}{suffix}"
     except (ValueError, KeyError):

@@ -249,6 +249,59 @@ class TestSubdirectoryWorkspace:
         assert "entry.md" in files
 
 
+class TestPersistFindings:
+    def test_writes_jsonl_format(self, tmp_path):
+        """persist_findings writes JSONL with extended format fields."""
+        from hygiene_scan import persist_findings
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        result = {
+            "unrecovered_artifacts": [
+                {"type": "blog", "file": "entry.md", "branch": "issue-100"}
+            ],
+            "unstamped_branches": [
+                {"branch": "issue-200", "closure_state": "merged_unstamped"}
+            ],
+            "stale_branches": [
+                {"branch": "issue-300", "last_commit_age": "45 days"}
+            ],
+        }
+        persist_findings(str(workspace), result)
+        path = workspace / ".audit" / "findings.jsonl"
+        assert path.exists(), "should write to findings.jsonl not findings.json"
+        lines = [l for l in path.read_text().strip().split("\n") if l]
+        assert len(lines) == 3
+        for line in lines:
+            entry = json.loads(line)
+            assert entry["category"] == "hygiene"
+            assert "location" in entry
+            assert "severity" in entry
+            assert entry["severity"] == "warning"
+            assert entry["source"] == "hygiene-scan"
+
+    def test_location_format(self, tmp_path):
+        """Location uses artifact:file:branch or branch:name format."""
+        from hygiene_scan import persist_findings
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        result = {
+            "unrecovered_artifacts": [
+                {"type": "blog", "file": "entry.md", "branch": "issue-100"}
+            ],
+            "unstamped_branches": [],
+            "stale_branches": [
+                {"branch": "issue-300", "last_commit_age": "45 days"}
+            ],
+        }
+        persist_findings(str(workspace), result)
+        path = workspace / ".audit" / "findings.jsonl"
+        lines = [json.loads(l) for l in path.read_text().strip().split("\n") if l]
+        artifact = [f for f in lines if f["check"] == "unrecovered_artifact"][0]
+        assert artifact["location"] == "artifact:entry.md:issue-100"
+        stale = [f for f in lines if f["check"] == "stale_branch"][0]
+        assert stale["location"] == "branch:issue-300"
+
+
 class TestIntegration:
     SCRIPT = Path(__file__).parent.parent / "work-end" / "hygiene_scan.py"
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for project/work_health.py — unified work state validation."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from work_health import (
     check_partial_resume,
     check_pause_stack,
     check_plan_state,
+    check_prior_findings,
     check_workspace_alignment,
     format_resume_display,
     run_checks,
@@ -374,6 +376,91 @@ class TestResumeDisplay:
         health_output = "CHECK=plan_state STATUS=changed DETAIL=#55 now CLOSED"
         output = format_resume_display(str(workspace), health_output)
         assert "work_health: #55 now CLOSED" in output
+
+
+class TestCheckPriorFindingsJsonl:
+
+    def test_reads_jsonl_format(self, tmp_path):
+        """check_prior_findings reads findings.jsonl with extended format."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        workspace = tmp_path / "wksp"
+        audit = workspace / ".audit"
+        audit.mkdir(parents=True)
+        finding = json.dumps({
+            "category": "audit", "dimension": "conformance",
+            "severity": "warning", "check": "missing-req",
+            "location": "spec:req-3",
+            "detail": "Requirement 3 not implemented",
+            "source": "branch-audit", "branch": "issue-123",
+            "status": "open", "timestamp": "2026-08-19T10:00:00Z",
+        })
+        (audit / "findings.jsonl").write_text(finding + "\n")
+        result = check_prior_findings(str(project), str(workspace))
+        assert "STATUS=warn" in result
+        assert "1 open finding" in result
+
+    def test_shows_severity_and_category(self, tmp_path):
+        """Enhanced display includes category/dimension/severity."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        workspace = tmp_path / "wksp"
+        audit = workspace / ".audit"
+        audit.mkdir(parents=True)
+        finding = json.dumps({
+            "category": "audit", "dimension": "conformance",
+            "severity": "critical", "check": "missing-req",
+            "location": "spec:req-3",
+            "detail": "Requirement 3 not implemented",
+            "source": "branch-audit", "branch": "issue-123",
+            "status": "open", "timestamp": "2026-08-19T10:00:00Z",
+        })
+        (audit / "findings.jsonl").write_text(finding + "\n")
+        result = check_prior_findings(str(project), str(workspace))
+        assert "audit/conformance/CRITICAL" in result
+
+    def test_no_file_returns_ok(self, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        workspace = tmp_path / "wksp"
+        workspace.mkdir()
+        result = check_prior_findings(str(project), str(workspace))
+        assert "STATUS=ok" in result
+
+    def test_all_resolved_returns_ok(self, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        workspace = tmp_path / "wksp"
+        audit = workspace / ".audit"
+        audit.mkdir(parents=True)
+        finding = json.dumps({
+            "category": "audit", "check": "missing-req",
+            "location": "spec:req-3", "detail": "done",
+            "status": "resolved", "resolution": "fixed",
+            "timestamp": "2026-08-19T10:00:00Z",
+        })
+        (audit / "findings.jsonl").write_text(finding + "\n")
+        result = check_prior_findings(str(project), str(workspace))
+        assert "STATUS=ok" in result
+
+    def test_dimension_omitted_when_null(self, tmp_path):
+        """Hygiene findings have no dimension — display omits it."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        workspace = tmp_path / "wksp"
+        audit = workspace / ".audit"
+        audit.mkdir(parents=True)
+        finding = json.dumps({
+            "category": "hygiene", "check": "stale_branch",
+            "location": "branch:issue-100",
+            "detail": "issue-100 stale", "severity": "warning",
+            "source": "hygiene-scan",
+            "status": "open", "timestamp": "2026-08-19T10:00:00Z",
+        })
+        (audit / "findings.jsonl").write_text(finding + "\n")
+        result = check_prior_findings(str(project), str(workspace))
+        assert "hygiene/WARNING" in result
+        assert "hygiene/None" not in result
 
 
 class TestRunChecksIntegration:

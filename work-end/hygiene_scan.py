@@ -244,47 +244,43 @@ def main() -> int:
 
 
 def persist_findings(workspace: str, result: dict) -> None:
-    audit_dir = Path(workspace) / ".audit"
-    audit_dir.mkdir(exist_ok=True)
-    findings_path = audit_dir / "findings.json"
+    from findings import append_finding
+
+    findings_path = Path(workspace) / ".audit" / "findings.jsonl"
     stamp = datetime.now(timezone.utc).isoformat()
-    findings = []
     for entry in result.get("unrecovered_artifacts", []):
-        findings.append({
+        append_finding(findings_path, {
             "category": "hygiene",
             "check": "unrecovered_artifact",
+            "location": f"artifact:{entry['file']}:{entry['branch']}",
             "detail": f"{entry['type']} {entry['file']} on closed branch {entry['branch']}",
+            "severity": "warning",
+            "source": "hygiene-scan",
             "status": "open",
             "timestamp": stamp,
         })
     for entry in result.get("unstamped_branches", []):
-        findings.append({
+        append_finding(findings_path, {
             "category": "hygiene",
             "check": "unstamped_branch",
+            "location": f"branch:{entry['branch']}",
             "detail": f"{entry['branch']} is {entry['closure_state']}",
+            "severity": "warning",
+            "source": "hygiene-scan",
             "status": "open",
             "timestamp": stamp,
         })
     for entry in result.get("stale_branches", []):
-        findings.append({
+        append_finding(findings_path, {
             "category": "hygiene",
             "check": "stale_branch",
+            "location": f"branch:{entry['branch']}",
             "detail": f"{entry['branch']} — last commit {entry['last_commit_age']} ago",
+            "severity": "warning",
+            "source": "hygiene-scan",
             "status": "open",
             "timestamp": stamp,
         })
-    if findings:
-        existing = []
-        if findings_path.exists():
-            try:
-                existing = json.loads(findings_path.read_text())
-            except (json.JSONDecodeError, ValueError):
-                existing = []
-        existing_keys = {(f["check"], f["detail"]) for f in existing if f.get("status") == "open"}
-        for f in findings:
-            if (f["check"], f["detail"]) not in existing_keys:
-                existing.append(f)
-        findings_path.write_text(json.dumps(existing, indent=2) + "\n")
 
 
 if __name__ == "__main__":
