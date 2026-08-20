@@ -556,9 +556,13 @@ Non-blocking — if the MCP server is unavailable, skip silently and continue.
      for the project's current stack versions (requires `stack` parameter)
 5. Group GE-IDs by outcome and call `gardenFeedback` once per group:
    ```
-   gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
-   gardenFeedback(geIds: "GE-...", outcome: "OUTDATED", stack: "quarkus:3.36.1|jdk:26")
+   gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT",
+       issueRepo: "<OWNER_REPO>", issueNumber: <ISSUE_N>)
+   gardenFeedback(geIds: "GE-...", outcome: "OUTDATED",
+       stack: "quarkus:3.36.1|jdk:26",
+       issueRepo: "<OWNER_REPO>", issueNumber: <ISSUE_N>)
    ```
+   Always pass `issueRepo` and `issueNumber` from context.
    Get stack versions from pom.xml, package.json, or CLAUDE.md.
 6. If the call fails (MCP unavailable, server not responding, connection
    refused, timeout), log a single warning and continue — never block

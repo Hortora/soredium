@@ -183,12 +183,17 @@ writing-plans.
   versions, use OUTDATED with the stack — this is stronger than
   NOT_RELEVANT and flags the entry for revision during harvest:
   ```
-  gardenFeedback(geIds: "GE-...|GE-...", outcome: "HIGHLY_RELEVANT")
-  gardenFeedback(geIds: "GE-...|GE-...", outcome: "NOT_RELEVANT")
-  gardenFeedback(geIds: "GE-...", outcome: "OUTDATED", stack: "quarkus:3.36.1|jdk:26")
+  gardenFeedback(geIds: "GE-...|GE-...", outcome: "HIGHLY_RELEVANT",
+      issueRepo: "<from .plan>", issueNumber: <from .plan>)
+  gardenFeedback(geIds: "GE-...|GE-...", outcome: "NOT_RELEVANT",
+      issueRepo: "<from .plan>", issueNumber: <from .plan>)
+  gardenFeedback(geIds: "GE-...", outcome: "OUTDATED",
+      stack: "quarkus:3.36.1|jdk:26",
+      issueRepo: "<from .plan>", issueNumber: <from .plan>)
   ```
-  Get the stack versions from the project's pom.xml, package.json, or
-  CLAUDE.md. Non-blocking — if unavailable, warn once and continue.
+  Always pass `issueRepo` and `issueNumber` from `.plan` when available.
+  Get stack versions from pom.xml, package.json, or CLAUDE.md.
+  Non-blocking — if unavailable, warn once and continue.
 - Run protocol SEARCH with keywords from the idea — surface project rules
   and architectural constraints that may shape or constrain the design.
 - **SOURCES.md coherence check:** If SOURCES.md exists (inlined via
