@@ -552,10 +552,14 @@ Non-blocking — if the MCP server is unavailable, skip silently and continue.
    - **RELEVANT** — useful and informed the work
    - **PARTIALLY_RELEVANT** — tangentially related but not central
    - **NOT_RELEVANT** — appeared in results but wasn't useful for this task
+   - **OUTDATED** — entry found the right topic but its advice no longer applies
+     for the project's current stack versions (requires `stack` parameter)
 5. Group GE-IDs by outcome and call `gardenFeedback` once per group:
    ```
    gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
+   gardenFeedback(geIds: "GE-...", outcome: "OUTDATED", stack: "quarkus:3.36.1|jdk:26")
    ```
+   Get stack versions from pom.xml, package.json, or CLAUDE.md.
 6. If the call fails (MCP unavailable, server not responding, connection
    refused, timeout), log a single warning and continue — never block
    work-end completion. Do not retry.

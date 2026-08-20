@@ -338,12 +338,16 @@ Non-blocking — if the MCP server is unavailable, skip silently and continue.
    - **RELEVANT** — useful and informed the work
    - **PARTIALLY_RELEVANT** — tangentially related but not central
    - **NOT_RELEVANT** — appeared in results but wasn't useful
+   - **OUTDATED** — entry found the right topic but its advice no longer applies
+     for the project's current stack versions (requires `stack` parameter)
    - **DEFERRED** — can't judge yet; usefulness depends on how the work concludes
 4. Group GE-IDs by outcome and call `gardenFeedback` once per group
    (skip DEFERRED — those go to HANDOFF.md):
    ```
    gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
+   gardenFeedback(geIds: "GE-...", outcome: "OUTDATED", stack: "quarkus:3.36.1|jdk:26")
    ```
+   Get stack versions from pom.xml, package.json, or CLAUDE.md.
    If the call fails (MCP unavailable), log a single warning and continue.
 5. Read any existing `## Garden Entries Consulted` section from the current
    HANDOFF.md (prior sessions may have propagated GE-IDs).

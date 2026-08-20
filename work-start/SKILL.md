@@ -187,11 +187,15 @@ and continue — provenance recording is never a gate on work.
 
 **Record retrieval feedback:** The selection is the feedback signal. Call
 `gardenFeedback` grouped by outcome — selected entries are RELEVANT,
-unselected entries from search results are NOT_RELEVANT:
+unselected entries from search results are NOT_RELEVANT. If an entry's
+advice no longer applies for the project's current stack versions, use
+OUTDATED with the stack:
 ```
 gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
 gardenFeedback(geIds: "GE-...|GE-...", outcome: "NOT_RELEVANT")
+gardenFeedback(geIds: "GE-...", outcome: "OUTDATED", stack: "quarkus:3.36.1|jdk:26")
 ```
+Get stack versions from pom.xml, package.json, or CLAUDE.md.
 Non-blocking — if unavailable, warn once and continue.
 
 If no results: proceed silently.

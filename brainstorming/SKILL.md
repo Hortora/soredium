@@ -178,13 +178,17 @@ writing-plans.
   once and continue — provenance recording is never a gate on work.
 - **Record retrieval feedback** — the selection is the feedback signal.
   Selected entries are RELEVANT or HIGHLY_RELEVANT; unselected entries
-  from the search results are NOT_RELEVANT or PARTIALLY_RELEVANT. Call
-  `gardenFeedback` grouped by outcome:
+  from the search results are NOT_RELEVANT or PARTIALLY_RELEVANT.
+  If an entry's advice no longer applies for the project's current stack
+  versions, use OUTDATED with the stack — this is stronger than
+  NOT_RELEVANT and flags the entry for revision during harvest:
   ```
   gardenFeedback(geIds: "GE-...|GE-...", outcome: "HIGHLY_RELEVANT")
   gardenFeedback(geIds: "GE-...|GE-...", outcome: "NOT_RELEVANT")
+  gardenFeedback(geIds: "GE-...", outcome: "OUTDATED", stack: "quarkus:3.36.1|jdk:26")
   ```
-  Non-blocking — if unavailable, warn once and continue.
+  Get the stack versions from the project's pom.xml, package.json, or
+  CLAUDE.md. Non-blocking — if unavailable, warn once and continue.
 - Run protocol SEARCH with keywords from the idea — surface project rules
   and architectural constraints that may shape or constrain the design.
 - **SOURCES.md coherence check:** If SOURCES.md exists (inlined via
