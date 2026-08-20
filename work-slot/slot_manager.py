@@ -232,6 +232,48 @@ def _truncate_instance_name(name: str, max_len: int = 63) -> str:
     return name[:max_len].rstrip("-")
 
 
+def _repack_broken_alternates(slot_dir: Path, family_root: Path) -> int:
+    """Scan sibling slots for git alternates referencing slot_dir; repack to sever.
+
+    Before archiving a slot (which moves it from slots/N/ to slots/attic/N/),
+    any sibling slot whose repos share objects via alternates will get broken
+    references. This function finds those references, repacks the affected
+    repos to internalize all borrowed objects, and removes the alternates entry.
+
+    Returns the number of repos repacked.
+    """
+    slot_prefix = str(slot_dir) + "/"
+    slots_root = slot_dir.parent
+    repacked = 0
+
+    for sibling in sorted(slots_root.iterdir()):
+        if not sibling.is_dir() or sibling.name == "attic" or sibling == slot_dir:
+            continue
+        for repo_dir in sorted(sibling.iterdir()):
+            alt_file = repo_dir / ".git" / "objects" / "info" / "alternates"
+            if not alt_file.exists():
+                continue
+            lines = alt_file.read_text().strip().splitlines()
+            remaining = [ln for ln in lines if not ln.startswith(slot_prefix)]
+            if len(remaining) == len(lines):
+                continue
+            rc, _, err = run_cmd(
+                ["git", "repack", "-a", "-d", "-l"],
+                cwd=str(repo_dir),
+            )
+            if rc != 0:
+                print(f"WARN=repack_failed repo={repo_dir} err={err.strip()}")
+                continue
+            if remaining:
+                alt_file.write_text("\n".join(remaining) + "\n")
+            else:
+                alt_file.unlink()
+            repacked += 1
+            print(f"REPACKED={repo_dir.relative_to(slots_root)} (severed alternate to slot {slot_dir.name})")
+
+    return repacked
+
+
 def _teardown_isx(slot_dir: Path) -> None:
     info = parse_slot_md(slot_dir)
     if info.get("isolation_type") != "isx":
@@ -1397,6 +1439,10 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
                         print("WARN=github_unreachable_for_checkbox_verify")
                 except (ImportError, Exception):
                     print("WARN=github_unreachable_for_checkbox_verify")
+
+    repacked = _repack_broken_alternates(slot_dir, family_root)
+    if repacked:
+        print(f"ALTERNATES_REPACKED={repacked}")
 
     _teardown_isx(slot_dir)
 

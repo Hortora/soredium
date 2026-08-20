@@ -85,6 +85,16 @@ The lifecycle state machine replaces the previous 6-state inference logic.
 | `paused` | branch | Should not reach work-start — work-resume handles this |
 | `closing:*` | branch | Close in progress — offer to continue or abort |
 
+**Legacy `.meta` auto-migration** (from ctx.py `HAS_META=yes` and `HAS_PLAN=no`):
+If a `.meta` exists but no `.plan`, auto-migrate before proceeding:
+```bash
+python3 ~/.claude/skills/project/migrate_meta.py <WORKSPACE>
+```
+Read `ACTION=` from output. If `migrated`: commit the migration, re-run ctx.py
+to pick up the new `.plan`. If `deleted`: the `.meta` was vestigial (`.plan`
+already existed elsewhere) — commit and continue. If `skipped`: proceed with
+the `.meta` fallback as before.
+
 **Orphaned `.plan` on main** (from ctx.py `BRANCH_MISMATCH=yes` when on main):
 Hard stop. Offer to switch to the surviving branch or remove `.plan`.
 
@@ -191,10 +201,15 @@ unselected entries from search results are NOT_RELEVANT. If an entry's
 advice no longer applies for the project's current stack versions, use
 OUTDATED with the stack:
 ```
-gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
-gardenFeedback(geIds: "GE-...|GE-...", outcome: "NOT_RELEVANT")
-gardenFeedback(geIds: "GE-...", outcome: "OUTDATED", stack: "quarkus:3.36.1|jdk:26")
+gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT",
+    issueRepo: "<ISSUE_REPO>", issueNumber: <ISSUE_N>)
+gardenFeedback(geIds: "GE-...|GE-...", outcome: "NOT_RELEVANT",
+    issueRepo: "<ISSUE_REPO>", issueNumber: <ISSUE_N>)
+gardenFeedback(geIds: "GE-...", outcome: "OUTDATED",
+    stack: "quarkus:3.36.1|jdk:26",
+    issueRepo: "<ISSUE_REPO>", issueNumber: <ISSUE_N>)
 ```
+Always pass `issueRepo` and `issueNumber` from Step 4 when available.
 Get stack versions from pom.xml, package.json, or CLAUDE.md.
 Non-blocking — if unavailable, warn once and continue.
 

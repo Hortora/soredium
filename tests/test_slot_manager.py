@@ -3628,6 +3628,93 @@ class TestListSlotsWkspHealth:
         assert slots[0]["wksp_ok"] is False
 
 
+class TestRepackBrokenAlternates:
+    """_repack_broken_alternates severs git alternates referencing a slot before archiving."""
+
+    def test_repacks_repo_with_alternate_to_target_slot(self, tmp_path, capsys):
+        slots = tmp_path / "slots"
+        slot_a = slots / "10"
+        slot_b = slots / "20"
+        repo_a = init_repo(slot_a / "engine")
+        repo_b = init_repo(slot_b / "engine")
+        alt_file = repo_b / ".git" / "objects" / "info" / "alternates"
+        alt_file.parent.mkdir(parents=True, exist_ok=True)
+        alt_file.write_text(str(repo_a / ".git" / "objects") + "\n")
+
+        count = slot_manager._repack_broken_alternates(slot_a, tmp_path)
+
+        assert count == 1
+        assert not alt_file.exists()
+        out = capsys.readouterr().out
+        assert "REPACKED=" in out
+
+    def test_preserves_unrelated_alternates(self, tmp_path):
+        slots = tmp_path / "slots"
+        slot_a = slots / "10"
+        slot_b = slots / "20"
+        other = tmp_path / "other-objects"
+        other.mkdir(parents=True)
+        init_repo(slot_a / "engine")
+        repo_b = init_repo(slot_b / "engine")
+        alt_file = repo_b / ".git" / "objects" / "info" / "alternates"
+        alt_file.parent.mkdir(parents=True, exist_ok=True)
+        alt_file.write_text(
+            str(slot_a / "engine" / ".git" / "objects") + "\n"
+            + str(other) + "\n"
+        )
+
+        slot_manager._repack_broken_alternates(slot_a, tmp_path)
+
+        assert alt_file.exists()
+        remaining = alt_file.read_text().strip().splitlines()
+        assert len(remaining) == 1
+        assert str(other) in remaining[0]
+
+    def test_skips_slot_with_no_alternates(self, tmp_path):
+        slots = tmp_path / "slots"
+        slot_a = slots / "10"
+        slot_b = slots / "20"
+        init_repo(slot_a / "engine")
+        init_repo(slot_b / "engine")
+
+        count = slot_manager._repack_broken_alternates(slot_a, tmp_path)
+
+        assert count == 0
+
+    def test_skips_attic_directory(self, tmp_path):
+        slots = tmp_path / "slots"
+        slot_a = slots / "10"
+        attic_slot = slots / "attic" / "5"
+        init_repo(slot_a / "engine")
+        repo_attic = init_repo(attic_slot / "engine")
+        alt_file = repo_attic / ".git" / "objects" / "info" / "alternates"
+        alt_file.parent.mkdir(parents=True, exist_ok=True)
+        alt_file.write_text(str(slot_a / "engine" / ".git" / "objects") + "\n")
+
+        count = slot_manager._repack_broken_alternates(slot_a, tmp_path)
+
+        assert count == 0
+        assert alt_file.exists()
+
+    def test_handles_multiple_repos_in_slot(self, tmp_path, capsys):
+        slots = tmp_path / "slots"
+        slot_a = slots / "10"
+        slot_b = slots / "20"
+        init_repo(slot_a / "engine")
+        init_repo(slot_a / "work")
+        repo_b1 = init_repo(slot_b / "engine")
+        repo_b2 = init_repo(slot_b / "work")
+        for repo_b in [repo_b1, repo_b2]:
+            name = repo_b.name
+            alt_file = repo_b / ".git" / "objects" / "info" / "alternates"
+            alt_file.parent.mkdir(parents=True, exist_ok=True)
+            alt_file.write_text(str(slot_a / name / ".git" / "objects") + "\n")
+
+        count = slot_manager._repack_broken_alternates(slot_a, tmp_path)
+
+        assert count == 2
+
+
 class TestAddRepoWorkspaceRemotes:
     @patch("slot_manager.configure_slot_remotes")
     @patch("slot_manager.run_cmd")
