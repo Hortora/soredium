@@ -405,6 +405,11 @@ def main() -> int:
         if not ws.is_dir():
             print(f"Review not found: {ws}", flush=True)
             return 1
+        if not (ws / "context.md").exists():
+            print(f"ERROR: {ws} is not a review workspace (missing context.md).", flush=True)
+            print("  --workspace is for resuming an existing review, not specifying the project root.", flush=True)
+            print("  Use --source-dirs to specify project directories.", flush=True)
+            return 1
         mode_file = ws / ".mode"
         if mode_file.exists():
             saved_mode = mode_file.read_text().strip()
