@@ -517,6 +517,31 @@ Surface `.plan`'s `## State`:
    Project: <branch>  Workspace: <branch>
 ```
 
+**Slot orientation:** When `IN_SLOT=yes`, read `.slot` to enumerate all
+repos. Surface the full scope so the session knows what it owns:
+
+```
+Slot <N> scope:
+  connectors/ (primary) ← workspace: wsp-casehub-connectors/
+  pages/                ← workspace: wsp-casehub-pages/
+  examples/             ← workspace: wsp-casehub-examples/
+
+Write access: all repos. Issue routing: follow .plan [repo] tags.
+Artifacts: each repo's workspace. Cross-cutting: primary workspace.
+```
+
+Discover workspace pairs by following each project clone's `wksp`
+symlink — `.slot` lists project repos, not workspaces.
+
+**Slot migration check:** If `IN_SLOT=yes`, check whether the slot
+needs migration (old family-workspace-clone structure):
+```bash
+python3 scripts/migrate_slot_workspace.py <SLOT_DIR> <FAMILY_ROOT> --dry-run
+```
+If `would_migrate`: offer migration before work begins. If accepted,
+run without `--dry-run`. Migration is idempotent and creates symlink
+bridges for backwards compatibility.
+
 Run Steps 0, 2, 3, 3b, 3c, 3d, 11 only. Skip all branch creation steps.
 
 ### Step 3c — Load existing specs (MANDATORY — do not skip)

@@ -325,19 +325,40 @@ nothing and enable branch hygiene scans, blog recovery, and stamp verification.
 ## How slots work
 
 - **Self-contained.** Everything under `slots/<N>/` — repo clones,
-  workspace clone, isolated `.m2`, `.slot` context file, `.plan` queue.
+  per-repo workspace clones, isolated `.m2`, `.slot` context file,
+  `.plan` queue.
+- **Per-repo workspaces.** Each project repo has its own workspace clone
+  named by its git remote (e.g., `wsp-casehub-connectors/`). No family
+  workspace clone. Skills follow `wksp` and see the same structure as
+  outside a slot.
 - **Isolated .m2.** Every slot gets its own Maven local repo via
   `.mvn/maven.config`. No cross-contamination with the originals.
-- **Symlinks re-pointed.** `wksp`/`proj` symlinks point to the slot's
-  workspace, not the originals. ctx.py follows them transparently.
+- **Symlinks re-pointed.** `wksp`/`proj` symlinks point to sibling
+  workspace clones. ctx.py follows them transparently.
 - **Scaffold pre-created.** `.plan` and `JOURNAL.md` exist in the slot.
   work-start detects state 2 (scaffold exists) and runs the resume path.
+
+### Slot Scope
+
+A session in a slot owns ALL repos in that slot. The session can and
+should write to any cloned repo — that is the point of slots.
+
+- **Issue routing:** `.plan` entries are tagged with their target repo
+  (e.g., `[pages]`). Work goes in the tagged repo, regardless of which
+  repo the session was started in.
+- **Artifact routing:** Each repo's workspace artifacts go in that repo's
+  workspace clone. Cross-cutting artifacts go in the primary workspace,
+  tagged for scope.
+- **CWD is not scope:** Starting in `slots/138/connectors/` does not
+  limit the session to connectors. It means connectors is the shell's
+  working directory — nothing more.
 
 ### What happens in the slot
 
 1. Human opens a CLI session in `slots/<N>/<primary-repo>`
-2. Runs work-start — detects existing scaffold, runs resume path
-3. Does the work (implementation, tests, etc.)
+2. Runs work-start — detects existing scaffold, runs resume path,
+   surfaces all repos and workspace paths from `.slot`
+3. Does the work (implementation, tests, etc.) across any repo in the slot
 4. Runs work-end — detects slot mode, runs the full close sequence
    (review, promote, squash, push, merge to original, stamp, archive)
 

@@ -460,6 +460,11 @@ python3 scripts/integrate_entry.py <entry_file> ${HORTORA_GARDEN:-~/.hortora/gar
 # First-time garden clone (sparse blobless)
 bash scripts/garden-setup.sh
 
+# Slot workspace migration (#255)
+python3 scripts/place_workspace_markers.py <family-root>         # bootstrap .workspace markers on all slots
+python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root>  # migrate old-structure slot to per-repo workspaces
+python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root> --dry-run  # preview migration
+
 # Ecosystem mining pipeline
 python3 scripts/run_pipeline.py          # orchestrate: registry -> extract -> cluster -> delta -> report
 python3 scripts/validate_candidates.py   # human validation gate (accept/reject/skip candidates)
