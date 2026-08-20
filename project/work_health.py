@@ -66,7 +66,7 @@ def _parse_yaml_intent(path):
         return {"_parse_error": True}
 
 
-def check_meta_consistency(project, workspace):
+def check_meta_consistency(project, workspace, base_branch="main"):
     plan_path = Path(workspace) / ".plan"
     meta_path = Path(workspace) / "design" / ".meta"
     state_file = plan_path if plan_path.exists() else meta_path
@@ -90,11 +90,11 @@ def check_meta_consistency(project, workspace):
     if not meta_branch:
         return "CHECK=meta_consistency STATUS=ok"
     current, _ = _git(workspace, "branch", "--show-current")
-    if current == "main" and meta_branch == "main":
+    if current == base_branch and meta_branch == base_branch:
         return "CHECK=meta_consistency STATUS=ok"
-    if current == "main" and meta_branch != "main":
+    if current == base_branch and meta_branch != base_branch:
         return (f"CHECK=meta_consistency STATUS=warn "
-                f"DETAIL=.plan says branch '{meta_branch}' but on main — orphaned .plan")
+                f"DETAIL=.plan says branch '{meta_branch}' but on {base_branch} — orphaned .plan")
     if current != meta_branch:
         return (f"CHECK=meta_consistency STATUS=warn "
                 f"DETAIL=.plan says '{meta_branch}', git says '{current}'")
@@ -164,9 +164,9 @@ def check_main_divergence(project, workspace):
     return "CHECK=main_divergence STATUS=ok"
 
 
-def check_stale_scaffold_on_main(project, workspace):
+def check_stale_scaffold_on_main(project, workspace, base_branch="main"):
     current, _ = _git(workspace, "branch", "--show-current")
-    if current != "main":
+    if current != base_branch:
         return "CHECK=stale_scaffold_on_main STATUS=ok"
     ws = Path(workspace)
     plan_path = ws / ".plan"
@@ -192,13 +192,13 @@ def check_stale_scaffold_on_main(project, workspace):
     return "CHECK=stale_scaffold_on_main STATUS=ok"
 
 
-def check_dirty_main(project, workspace):
+def check_dirty_main(project, workspace, base_branch="main"):
     current, _ = _git(project, "branch", "--show-current")
-    if current != "main":
+    if current != base_branch:
         return "CHECK=dirty_main STATUS=ok"
     status, _ = _git(project, "status", "--porcelain")
     if status:
-        return "CHECK=dirty_main STATUS=warn DETAIL=project main has uncommitted changes"
+        return f"CHECK=dirty_main STATUS=warn DETAIL=project {base_branch} has uncommitted changes"
     return "CHECK=dirty_main STATUS=ok"
 
 
@@ -468,35 +468,35 @@ def check_prior_findings(project, workspace):
 
 
 ENTRY_CHECKS = [
-    lambda p, w: check_meta_consistency(p, w),
-    lambda p, w: check_pause_stack(p, w),
-    lambda p, w: check_workspace_alignment(p, w),
-    lambda p, w: check_workspace_integrity(p, w),
-    lambda p, w: check_main_divergence(p, w),
-    lambda p, w: check_dirty_main(p, w),
-    lambda p, w: check_stale_scaffold_on_main(p, w),
-    lambda p, w: check_partial_pause(p, w),
-    lambda p, w: check_partial_resume(p, w),
-    lambda p, w: check_branch_closure(p, w),
-    lambda p, w: check_recent_notes(p, w),
-    lambda p, w: check_prior_findings(p, w),
+    lambda p, w, bb: check_meta_consistency(p, w, bb),
+    lambda p, w, bb: check_pause_stack(p, w),
+    lambda p, w, bb: check_workspace_alignment(p, w),
+    lambda p, w, bb: check_workspace_integrity(p, w),
+    lambda p, w, bb: check_main_divergence(p, w),
+    lambda p, w, bb: check_dirty_main(p, w, bb),
+    lambda p, w, bb: check_stale_scaffold_on_main(p, w, bb),
+    lambda p, w, bb: check_partial_pause(p, w),
+    lambda p, w, bb: check_partial_resume(p, w),
+    lambda p, w, bb: check_branch_closure(p, w),
+    lambda p, w, bb: check_recent_notes(p, w),
+    lambda p, w, bb: check_prior_findings(p, w),
 ]
 
 
 WRAP_CHECKS = ENTRY_CHECKS + [
-    lambda p, w: check_stale_branches(p, w),
+    lambda p, w, bb: check_stale_branches(p, w),
 ]
 
 
-def run_checks(scope, project, workspace, branch=None, owner_repo=None):
+def run_checks(scope, project, workspace, branch=None, owner_repo=None, base_branch="main"):
     if scope == "entry":
         checks = list(ENTRY_CHECKS)
         if owner_repo:
-            checks.append(lambda p, w: check_plan_state(p, w, owner_repo))
+            checks.append(lambda p, w, bb: check_plan_state(p, w, owner_repo))
     elif scope == "wrap":
         checks = list(WRAP_CHECKS)
         if owner_repo:
-            checks.append(lambda p, w: check_plan_state(p, w, owner_repo))
+            checks.append(lambda p, w, bb: check_plan_state(p, w, owner_repo))
     elif scope == "close":
         result = check_close_gate(project, workspace, branch)
         print(result)
@@ -512,7 +512,7 @@ def run_checks(scope, project, workspace, branch=None, owner_repo=None):
     errors = 0
 
     for check_fn in checks:
-        result = check_fn(project, workspace)
+        result = check_fn(project, workspace, base_branch)
         print(result)
         if "STATUS=fix" in result or "STATUS=changed" in result:
             fixed += 1
@@ -531,9 +531,10 @@ def main():
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--branch", default=None)
     parser.add_argument("--owner-repo", default=None)
+    parser.add_argument("--base-branch", default="main")
     args = parser.parse_args()
     run_checks(args.scope, args.project, args.workspace, args.branch,
-               owner_repo=args.owner_repo)
+               owner_repo=args.owner_repo, base_branch=args.base_branch)
 
 
 if __name__ == "__main__":
