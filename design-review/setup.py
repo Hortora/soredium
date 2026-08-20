@@ -301,7 +301,6 @@ def build_claude_command(
             "--ide",
             "--resume", session_id,
             "--append-system-prompt-file", str(combined_file),
-            "--max-budget-usd", str(budget),
             "--effort", effort,
             "--output-format", "json",
             prompt,
@@ -320,7 +319,6 @@ def build_claude_command(
     cmd.extend([
         "--model", model,
         "--permission-mode", "acceptEdits",
-        "--max-budget-usd", str(budget),
         "--effort", effort,
         "--disallowedTools", "Skill",
         "--output-format", "json",
