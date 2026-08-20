@@ -564,6 +564,7 @@ Skip silently if no `.notes/` directory exists.
 | Recommend skipping sweep | Loses session-bound content | Present defaults ON |
 | Stamp before squash | SHAs become unreachable | Execute enforces stamp-after-squash |
 | Push main without verify | Broken content on remote | Verify gate blocks close |
+| Stamp without verified push | Branch falsely marked "landed" when content never reached remote | `cmd_stamp` verifies SHA on remote before writing stamp |
 | Skip workspace stamp | Branch looks live to hygiene | land subcommand stamps both |
 | `git reset --hard` to clean dirty tree | Destroys uncommitted work from other sessions | `git stash push -u -m "..."` — ALWAYS stash, NEVER reset |
 

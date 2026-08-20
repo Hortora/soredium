@@ -119,17 +119,25 @@ def cmd_push(project: str, opts: dict[str, str]) -> int:
             print(f"ERROR_DETAIL=stamp branch={branch_in_stamp} does not match current branch")
             return 1
 
-    fork_remote, _ = detect_topology(project)
+    fork_remote, blessed_remote = detect_topology(project)
     if not fork_remote:
         print("ERROR=NO_REMOTE")
         print("ERROR_DETAIL=no origin remote configured")
         return 1
 
-    result = git(project, "push", fork_remote, base_branch)
+    result = git(project, "push", fork_remote, base_branch, "--no-verify")
     if result.returncode != 0:
         print("ERROR=PUSH_FAILED")
         print(f"ERROR_DETAIL={result.stderr.strip()}")
         return 1
+
+    if blessed_remote:
+        blessed_result = git(project, "push", blessed_remote, base_branch, "--no-verify")
+        if blessed_result.returncode != 0:
+            print("ERROR=UPSTREAM_PUSH_FAILED")
+            print(f"ERROR_DETAIL=upstream push failed: {blessed_result.stderr.strip()}")
+            return 1
+        print(f"PUSHED_UPSTREAM={blessed_remote}/{base_branch}")
 
     print("PUSH=ok")
     print(f"PUSHED_TO={fork_remote}/{base_branch}")
@@ -171,6 +179,18 @@ def cmd_stamp(project: str, opts: dict[str, str]) -> int:
 
     landed_sha = landed_sha_result.stdout.strip()
 
+    fork_remote, blessed_remote = detect_topology(project)
+    target_remote = blessed_remote or fork_remote
+    if target_remote:
+        git(project, "fetch", target_remote, base_branch)
+        verify_remote = git(project, "merge-base", "--is-ancestor",
+                            landed_sha, f"{target_remote}/{base_branch}")
+        if verify_remote.returncode != 0:
+            print("ERROR=LANDING_NOT_VERIFIED")
+            print(f"ERROR_DETAIL=SHA {landed_sha} not found on {target_remote}/{base_branch} — push may have failed")
+            return 1
+        print(f"REMOTE_VERIFIED={target_remote}/{base_branch}")
+
     tip_msg = git(project, "log", "-1", "--format=%s", branch)
     already_stamped = tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")
 
@@ -203,7 +223,7 @@ def cmd_stamp(project: str, opts: dict[str, str]) -> int:
 
     fork_remote, _ = detect_topology(project)
     if fork_remote:
-        push_result = git(project, "push", fork_remote, branch, "--force-with-lease")
+        push_result = git(project, "push", fork_remote, branch, "--force-with-lease", "--no-verify")
         if push_result.returncode != 0:
             print(f"STAMP_PUSH_WARNING=push failed: {push_result.stderr.strip()}", file=sys.stderr)
 

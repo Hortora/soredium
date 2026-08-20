@@ -330,9 +330,18 @@ syncs the workspace repo. All failures are non-fatal — warnings are printed
 but the script always returns success. Stale main is suboptimal but not a
 gate — the branch can still be created and rebased later at merge time.
 
+**Unpushed commit protection:** Before rebasing, the script checks if local
+main is ahead of the remote (`rev-list remote/main..main --count`). If ahead,
+it pushes local commits to the remote first — preventing rebase from rewriting
+unpushed merges that would be silently lost on the next sync.
+
 `--force-with-lease` is used for fork pushes because squash-merged PRs create
 different SHAs on the blessed repo, causing the fork to diverge even though
 content is identical.
+
+`--no-verify` is used on all landing and sync pushes because the pre-push hook
+checks for squash candidates — which conflicts with work-end pushes that always
+contain merged commits.
 
 ---
 

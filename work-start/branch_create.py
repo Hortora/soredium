@@ -137,6 +137,20 @@ def commit_scaffold(workspace: str, branch: str) -> int:
     return 0
 
 
+def _check_ahead_and_push(repo: str, remote: str, base: str, warnings: list[str]) -> None:
+    """If local base is ahead of remote, push before rebasing to avoid losing commits."""
+    ok, count_str = run_git(repo, "rev-list", f"{remote}/{base}..{base}", "--count")
+    if ok and count_str.strip() and int(count_str.strip()) > 0:
+        ahead = int(count_str.strip())
+        print(f"AHEAD={ahead} repo={Path(repo).name} remote={remote}/{base}")
+        push_ok, _ = run_git(repo, "push", remote, base, "--no-verify")
+        if push_ok:
+            print(f"PUSHED_AHEAD={ahead} repo={Path(repo).name}")
+        else:
+            warnings.append(f"push_ahead_failed_{Path(repo).name}")
+            print(f"WARN=push_ahead_failed repo={Path(repo).name} ahead={ahead}")
+
+
 def sync_main(project: str, workspace: str, base: str) -> int:
     """Sync local base branch with remote before branch creation."""
     warnings: list[str] = []
@@ -150,12 +164,13 @@ def sync_main(project: str, workspace: str, base: str) -> int:
         if not ok:
             warnings.append("fetch_upstream_failed")
         else:
+            _check_ahead_and_push(project, "upstream", base, warnings)
             ok, _ = run_git(project, "rebase", f"upstream/{base}")
             if not ok:
                 run_git(project, "rebase", "--abort")
                 warnings.append("rebase_upstream_failed")
             else:
-                ok, _ = run_git(project, "push", "origin", base, "--force-with-lease")
+                ok, _ = run_git(project, "push", "origin", base, "--force-with-lease", "--no-verify")
                 if not ok:
                     warnings.append("push_origin_failed")
     elif has_fork:
@@ -164,12 +179,13 @@ def sync_main(project: str, workspace: str, base: str) -> int:
         if not ok:
             warnings.append("fetch_origin_failed")
         else:
+            _check_ahead_and_push(project, "origin", base, warnings)
             ok, _ = run_git(project, "rebase", f"origin/{base}")
             if not ok:
                 run_git(project, "rebase", "--abort")
                 warnings.append("rebase_origin_failed")
             else:
-                ok, _ = run_git(project, "push", "fork", f"origin/{base}:{base}", "--force-with-lease")
+                ok, _ = run_git(project, "push", "fork", f"origin/{base}:{base}", "--force-with-lease", "--no-verify")
                 if not ok:
                     warnings.append("push_fork_failed")
     else:
@@ -178,6 +194,7 @@ def sync_main(project: str, workspace: str, base: str) -> int:
         if not ok:
             warnings.append("fetch_origin_failed")
         else:
+            _check_ahead_and_push(project, "origin", base, warnings)
             ok, _ = run_git(project, "rebase", f"origin/{base}")
             if not ok:
                 run_git(project, "rebase", "--abort")
@@ -187,6 +204,7 @@ def sync_main(project: str, workspace: str, base: str) -> int:
     if not ws_ok:
         warnings.append("workspace_fetch_failed")
     else:
+        _check_ahead_and_push(workspace, "origin", "main", warnings)
         ws_ok, _ = run_git(workspace, "rebase", "origin/main")
         if not ws_ok:
             run_git(workspace, "rebase", "--abort")
