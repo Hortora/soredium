@@ -248,7 +248,8 @@ Session wrap — create before writing the handover?
 [?] 6  journal-entry     document any design changes this session not yet in JOURNAL.md  ← ON if mid-epic (.plan exists), OFF otherwise
 [?] 7  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
 [?] 8  arc42 stale scan  check ARC42STORIES.MD for stale statuses, resolved blockers, closed-issue forward refs  ← ON if ARC42STORIES.MD exists
-[x] 9  notes             anything to note for later? (appends to $WORKSPACE/.notes/NOTES.md)
+[x] 9  garden feedback    record retrieval feedback + propagate GE-IDs for work-end
+[x] 10 notes             anything to note for later? (appends to $WORKSPACE/.notes/NOTES.md)
 
 Type numbers to toggle (e.g. "2 7"), "all" to toggle all on/off, or "go" to proceed:
 ```
@@ -256,7 +257,7 @@ Type numbers to toggle (e.g. "2 7"), "all" to toggle all on/off, or "go" to proc
 - **Default:** loose ends sweep, write-content (diary), update-claude-md, forage sweep, protocol sweep ticked; journal-entry depends on epic state (see below).
 
 <SESSION-BOUND-ITEMS>
-**Items 1, 2, 4, 5 (loose ends sweep, write-content, forage sweep, protocol sweep) are session-bound.**
+**Items 1, 2, 4, 5, 9 (loose ends sweep, write-content, forage sweep, protocol sweep, garden feedback) are session-bound.**
 They depend on conversation context that does not survive to the next session.
 They cannot be deferred — "defer to next session" means "lose forever." The user
 may skip them explicitly, but the skill must never offer "defer" as an option.
@@ -312,13 +313,52 @@ Run checked items **in this order** before continuing:
 6. journal-entry — write any missing JOURNAL.md entries before the handover
 7. arc42 stale scan — run after journal-entry so any layer completions just written are already reflected
 8. write-content (diary) — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
-9. notes — prompt "anything to note for later?" If yes, append entries to
+9. garden feedback — record retrieval feedback while context is fresh, propagate GE-IDs for work-end (see **Step 0g** below)
+10. notes — prompt "anything to note for later?" If yes, append entries to
    `$WORKSPACE/.notes/NOTES.md` under today's date header. Optional `[repo]`
    prefix for repo-specific notes (no prefix = primary). Commit to orphan branch:
    `git -C $WORKSPACE/.notes add NOTES.md && git -C $WORKSPACE/.notes commit -m "notes: wrap"`.
    If `.notes/` worktree doesn't exist, skip with: "No notes worktree — run workspace-init to set up."
 
 After all checked items complete, continue to Step 1.
+
+#### Step 0g — Garden retrieval feedback
+
+Record retrieval feedback for garden entries used this session, and propagate
+GE-IDs to HANDOFF.md so work-end can make the final judgment on entries from
+earlier sessions.
+
+Non-blocking — if the MCP server is unavailable, skip silently and continue.
+
+1. Review `gardenSearch` results from this session's conversation context.
+   Collect all GE-IDs that appeared in search results.
+2. If no garden entries were retrieved this session, skip to step 5.
+3. For each retrieved GE-ID, assess its relevance to the work so far:
+   - **HIGHLY_RELEVANT** — directly solved a problem or was the key context
+   - **RELEVANT** — useful and informed the work
+   - **PARTIALLY_RELEVANT** — tangentially related but not central
+   - **NOT_RELEVANT** — appeared in results but wasn't useful
+   - **DEFERRED** — can't judge yet; usefulness depends on how the work concludes
+4. Group GE-IDs by outcome and call `gardenFeedback` once per group
+   (skip DEFERRED — those go to HANDOFF.md):
+   ```
+   gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
+   ```
+   If the call fails (MCP unavailable), log a single warning and continue.
+5. Read any existing `## Garden Entries Consulted` section from the current
+   HANDOFF.md (prior sessions may have propagated GE-IDs).
+6. Merge this session's DEFERRED GE-IDs with any propagated ones. Write the
+   combined list to HANDOFF.md's `## Garden Entries Consulted` section
+   (Step 5 will include it when writing HANDOFF.md):
+   ```markdown
+   ## Garden Entries Consulted
+
+   GE-IDs retrieved across sessions, pending final feedback at work-end.
+
+   - GE-20260620-a1b2c3 — "Hibernate lazy loading gotcha" (session 1, brainstorming)
+   - GE-20260621-d4e5f6 — "CDI producer pattern" (session 2, implementation)
+   ```
+   Include a brief title and which session/phase retrieved it for context.
 
 ---
 

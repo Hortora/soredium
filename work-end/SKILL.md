@@ -492,22 +492,26 @@ Suggest a descriptive session name if auto-generated.
 
 ### 6.6 Garden retrieval feedback
 
-Record which garden entries retrieved during this session were actually useful.
+Record which garden entries were useful — both from this session and from
+earlier sessions that propagated GE-IDs through HANDOFF.md.
 Non-blocking — if the MCP server is unavailable, skip silently and continue.
 
-1. Review `gardenSearch` results from this session's conversation context.
-   Collect all GE-IDs that appeared in search results.
-2. If no garden entries were retrieved this session, skip silently.
-3. For each retrieved GE-ID, assess its relevance to the work completed:
+1. **This session's entries:** Review `gardenSearch` results from this
+   session's conversation context. Collect all GE-IDs that appeared.
+2. **Propagated entries:** Read the `## Garden Entries Consulted` section
+   from HANDOFF.md (if it exists). These are GE-IDs from earlier sessions
+   whose usefulness was deferred to work-end.
+3. Combine both lists. If empty, skip silently.
+4. For each GE-ID, assess its relevance to the completed work:
    - **HIGHLY_RELEVANT** — directly solved the problem or was the key piece of context
    - **RELEVANT** — useful and informed the work
    - **PARTIALLY_RELEVANT** — tangentially related but not central
    - **NOT_RELEVANT** — appeared in results but wasn't useful for this task
-4. Group GE-IDs by outcome and call `gardenFeedback` once per group:
+5. Group GE-IDs by outcome and call `gardenFeedback` once per group:
    ```
    gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
    ```
-5. If the call fails (MCP unavailable, server not responding, connection
+6. If the call fails (MCP unavailable, server not responding, connection
    refused, timeout), log a single warning and continue — never block
    work-end completion. Do not retry.
 

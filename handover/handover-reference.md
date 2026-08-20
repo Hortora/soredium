@@ -29,6 +29,11 @@ Single specific action.
 Only if active cross-repo blockers exist with tracked issues.
 Omit entirely if none.
 
+## Garden Entries Consulted
+
+GE-IDs retrieved across sessions, pending final feedback at work-end.
+Omit entirely if none. Written by handover Step 0g, consumed by work-end Step 6.6.
+
 ## References
 
 Paths only, no content inline.
