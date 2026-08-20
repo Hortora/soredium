@@ -12,6 +12,19 @@ description: >
 Reads the project type, then loads the appropriate language-specific
 review checklist. Universal review principles apply to all types.
 
+## Budget Limits
+
+If you are running low on context or output budget during a review, **do not
+stop**. Complete the review with the findings you have. Append a warning to
+the output:
+
+> ⚠️ Review budget limit reached — coverage may be incomplete.
+> Checked: [list categories completed]. Remaining: [list skipped].
+
+Budget exhaustion is a notification, never a gate. Partial review with
+findings is always better than no review. The forcing function processes
+whatever findings were collected.
+
 ## Step 0 — Load universal principles
 
 **Load `~/.hortora/garden/approaches/code-review.md`** before proceeding.

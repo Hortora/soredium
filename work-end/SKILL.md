@@ -142,6 +142,12 @@ Code review, branch audit, loose ends sweep, and forcing function.
 All four sub-steps are hard gates — Step 2 does not complete until
 the forcing function has resolved all findings.
 
+**Budget limits are not gates.** If code-review or branch-audit reports
+a budget warning ("coverage may be incomplete"), proceed to the next
+sub-step. The forcing function processes whatever findings were
+collected. Do not restart the review, do not block, do not retry.
+Surface the warning in the Step 6 close summary.
+
 ### 2.1 Code review
 
 Invoke `code-review` on the branch diff. Per-line checklist (safety,

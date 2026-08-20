@@ -18,6 +18,19 @@ code-review (Step 2.1) and before the forcing function (Step 2.4).
 No branch closes without a branch audit.
 </HARD-GATE>
 
+## Budget Limits
+
+If you are running low on context or output budget during a branch audit,
+**do not stop**. Complete as many dimensions as you can and report what
+was covered:
+
+> ⚠️ Branch audit budget limit reached — coverage may be incomplete.
+> Completed: [dimensions finished]. Skipped: [dimensions not reached].
+
+Budget exhaustion is a notification, never a gate. Persist findings
+from completed dimensions to `findings.jsonl` before reporting. The
+forcing function processes whatever findings were collected.
+
 ## Dimensions
 
 Each dimension includes (but is not limited to) the listed sub-concerns.
