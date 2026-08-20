@@ -242,132 +242,33 @@ def cmd_land(opts: dict[str, str]) -> int:
     progress = read_progress(progress_path)
 
     repo_name = Path(project).name
-
     progress_key = f"{repo_name}:{branch}"
     if progress.get(progress_key) == "stamped":
-        print(f"LANDED=yes")
+        print("LANDED=yes")
         print(f"SKIPPED={repo_name} already stamped")
         return 0
 
-    # Detect topology and sync main from blessed before merging
+    from land_flow import build_branch_batch, land_batch
+
+    ws_path = Path(workspace) if workspace else None
+    descriptors = build_branch_batch(Path(project), ws_path, branch, base_branch)
+
+    result = land_batch(descriptors, branch, progress_path)
+
+    if not result.success:
+        for s in result.repos:
+            if s.error:
+                print(f"ERROR={s.error.upper()}")
+                print(f"ERROR_DETAIL={s.error} for {s.repo_path.name}")
+        return 1
+
+    proj_status = next((s for s in result.repos if s.repo_path == Path(project)), None)
+    landed_sha = proj_status.landed_sha if proj_status else ""
+
     fork_remote, blessed_remote = detect_topology(project)
     push_target = blessed_remote if blessed_remote else fork_remote
+    mirrored = bool(blessed_remote and fork_remote and fork_remote != blessed_remote)
 
-    checkout_result = git(project, "checkout", base_branch)
-    if checkout_result.returncode != 0:
-        print("ERROR=CHECKOUT_FAILED")
-        print(f"ERROR_DETAIL=cannot checkout {base_branch}: {checkout_result.stderr.strip()}")
-        return 1
-
-    # Fetch blessed main and check for local-only commits
-    if push_target:
-        git(project, "fetch", push_target, base_branch)
-        local_only = git(project, "rev-list", f"{push_target}/{base_branch}..{base_branch}")
-        if local_only.returncode == 0 and local_only.stdout.strip():
-            count = len(local_only.stdout.strip().splitlines())
-            print(f"LOCAL_COMMITS={count}")
-            rescue_branch = f"rescue-{branch}"
-            git(project, "branch", rescue_branch, base_branch)
-            git(project, "reset", "--hard", f"{push_target}/{base_branch}")
-            print(f"RESCUED_TO={rescue_branch}")
-            print(f"MAIN_RESET=yes")
-
-    # Save pre-merge position for rollback on push failure
-    pre_merge_result = git(project, "rev-parse", "HEAD")
-    pre_merge_sha = pre_merge_result.stdout.strip() if pre_merge_result.returncode == 0 else ""
-
-    # Merge branch into main (ff-only) before pushing
-    merge_result = git(project, "merge", "--ff-only", branch)
-    if merge_result.returncode != 0:
-        print("ERROR=MERGE_FAILED")
-        print(f"ERROR_DETAIL=ff-only merge of {branch} into {base_branch} failed: {merge_result.stderr.strip()}")
-        return 1
-    write_progress(progress_path, progress_key, "merged")
-
-    # Push main to blessed remote
-    if not push_target:
-        if pre_merge_sha:
-            git(project, "reset", "--hard", pre_merge_sha)
-        print("ERROR=NO_REMOTE")
-        print("ERROR_DETAIL=no origin or upstream remote configured")
-        return 1
-
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        push_result = git(project, "push", push_target, base_branch)
-        if push_result.returncode == 0:
-            break
-        if attempt == max_retries:
-            if pre_merge_sha:
-                git(project, "reset", "--hard", pre_merge_sha)
-                print("MERGE_ROLLED_BACK=yes")
-            print("ERROR=PUSH_FAILED")
-            print(f"ERROR_DETAIL=push {base_branch} to {push_target} failed after {max_retries} attempts: {push_result.stderr.strip()}")
-            return 1
-        print(f"PUSH_RETRY={attempt}")
-        git(project, "fetch", push_target, base_branch)
-        rebase_result = git(project, "rebase", f"{push_target}/{base_branch}")
-        if rebase_result.returncode != 0:
-            git(project, "rebase", "--abort")
-            if pre_merge_sha:
-                git(project, "reset", "--hard", pre_merge_sha)
-                print("MERGE_ROLLED_BACK=yes")
-            print("ERROR=PUSH_RETRY_REBASE_FAILED")
-            print(f"ERROR_DETAIL=rebase onto {push_target}/{base_branch} failed during retry: {rebase_result.stderr.strip()}")
-            return 1
-
-    # Capture the landed SHA before any post-push operations
-    landed_sha_for_verify = git(project, "rev-parse", "HEAD").stdout.strip()
-
-    print(f"PUSHED_TO={push_target}/{base_branch}")
-    write_progress(progress_path, progress_key, "pushed")
-
-    # Post-push verification: confirm the landed SHA exists on the remote
-    if landed_sha_for_verify:
-        git(project, "fetch", push_target, base_branch)
-        verify = git(project, "merge-base", "--is-ancestor",
-                     landed_sha_for_verify, f"{push_target}/{base_branch}")
-        if verify.returncode != 0:
-            print(f"PUSH_VERIFY_WARN=landed SHA {landed_sha_for_verify[:12]} not confirmed on {push_target}/{base_branch}")
-        else:
-            print("PUSH_VERIFIED=yes")
-
-    # Mirror to fork if fork model (fork main tracks blessed)
-    mirrored = False
-    if blessed_remote and fork_remote and fork_remote != blessed_remote:
-        mirror_result = git(project, "push", fork_remote, base_branch, "--force-with-lease")
-        if mirror_result.returncode != 0:
-            print(f"MIRROR_WARN=push to {fork_remote} failed: {mirror_result.stderr.strip()}")
-        else:
-            mirrored = True
-            print(f"MIRRORED_TO={fork_remote}/{base_branch}")
-
-    # Stamp the branch
-    stamp_script = Path(__file__).parent / "land_branch.py"
-    stamp_result = subprocess.run(
-        [sys.executable, str(stamp_script), "stamp", project,
-         f"branch={branch}", f"base_branch={base_branch}"],
-        capture_output=True, text=True,
-        timeout=30,
-    )
-
-    stamp_ok = False
-    landed_sha = ""
-    for line in stamp_result.stdout.splitlines():
-        if line.startswith("STAMP=ok"):
-            stamp_ok = True
-        if line.startswith("LANDED_SHA="):
-            landed_sha = line.split("=", 1)[1]
-        print(line)
-
-    if not stamp_ok:
-        print("ERROR=STAMP_FAILED")
-        if stamp_result.stderr.strip():
-            print(stamp_result.stderr.strip(), file=sys.stderr)
-        return 1
-    write_progress(progress_path, progress_key, "stamped")
-
-    # Record to land ledger
     append_ledger(workspace, {
         "event": "land",
         "repo": repo_name,
@@ -379,37 +280,30 @@ def cmd_land(opts: dict[str, str]) -> int:
         "stamped": True,
     })
 
-    # Merge and stamp workspace branch
-    if workspace:
-        ws_branch_exists = git(workspace, "branch", "--list", branch)
-        if ws_branch_exists.returncode == 0 and ws_branch_exists.stdout.strip():
-            tip_msg = git(workspace, "log", "-1", "--format=%s", branch)
-            if not (tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")):
-                co = git(workspace, "checkout", base_branch)
-                if co.returncode != 0:
-                    print(f"WS_WARN=checkout_{base_branch}_failed:{co.stderr.strip()}")
-                else:
-                    ws_merge = git(workspace, "merge", "--ff-only", branch)
-                    if ws_merge.returncode != 0:
-                        ws_merge = git(workspace, "merge", branch, "--no-edit")
-                        if ws_merge.returncode != 0:
-                            print(f"WS_WARN=merge_failed:{ws_merge.stderr.strip()}")
-                    ws_landed = git(workspace, "rev-parse", "HEAD")
-                    ws_sha = ws_landed.stdout.strip() if ws_landed.returncode == 0 else ""
-                    ws_push_target = detect_topology(workspace)[0]
-                    if ws_push_target:
-                        ws_push = git(workspace, "push", ws_push_target, base_branch)
-                        if ws_push.returncode != 0:
-                            print(f"WS_WARN=push_failed:{ws_push.stderr.strip()}")
-                    ws_stamp = git(workspace, "checkout", branch)
-                    if ws_stamp.returncode == 0:
-                        ws_stamp = git(workspace, "commit", "--allow-empty", "-m",
-                            f"chore: branch closed — landed as {ws_sha} on {base_branch}")
-                        if ws_stamp.returncode != 0:
-                            print(f"WS_WARN=stamp_failed:{ws_stamp.stderr.strip()}")
-                    git(workspace, "checkout", base_branch)
+    if result.rescued:
+        for name, rescue_branch in result.rescued.items():
+            print(f"RESCUED_TO={rescue_branch}")
 
-    print(f"LANDED=yes")
+    # Stamp workspace branch if not in batch (no remote)
+    if workspace:
+        ws_in_batch = any(s.repo_path == Path(workspace) for s in result.repos)
+        if not ws_in_batch:
+            ws_branch_exists = git(workspace, "branch", "--list", branch)
+            if ws_branch_exists.returncode == 0 and ws_branch_exists.stdout.strip():
+                tip_msg = git(workspace, "log", "-1", "--format=%s", branch)
+                if not (tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")):
+                    co = git(workspace, "checkout", base_branch)
+                    if co.returncode == 0:
+                        ws_merge = git(workspace, "merge", "--ff-only", branch)
+                        if ws_merge.returncode != 0:
+                            git(workspace, "merge", branch, "--no-edit")
+                        ws_sha = git(workspace, "rev-parse", "HEAD").stdout.strip()
+                        git(workspace, "checkout", branch)
+                        git(workspace, "commit", "--allow-empty", "-m",
+                            f"chore: branch closed — landed as {ws_sha} on {base_branch}")
+                        git(workspace, "checkout", base_branch)
+
+    print("LANDED=yes")
     print(f"LANDED_SHA={landed_sha}")
     return 0
 

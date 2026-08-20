@@ -2225,63 +2225,62 @@ class TestGetSlotReposFiltersWorkspaces:
         assert "work-casehub" in all_repos
 
 
-class TestMergeSlotSkipsWorkspace:
-    def test_skips_workspace_clones(self, tmp_path, capsys):
-        """merge_slot must not process workspace clones through merge/push."""
-        family, originals, slot, branch = _create_merge_test_repos(
-            tmp_path, ["engine"]
-        )
-        ws_clone = init_repo(slot / "work-casehub")
+class TestMergeSlotIncludesWorkspace:
+    def _add_workspace_to_slot(self, family, slot, branch, ws_name="wsp-casehub-engine"):
+        """Add a properly set up workspace clone to a slot."""
+        ws_orig = _init_repo_with_remote(family / ws_name)
+        slot_manager.configure_update_instead(ws_orig)
+        ws_clone = slot / ws_name
+        bare_path = family / f".{ws_name}-bare.git"
         subprocess.run(
-            ["git", "-C", str(ws_clone), "checkout", "-b", branch],
+            ["git", "clone", "--shared", "--branch", "main",
+             str(ws_orig), str(ws_clone)],
             capture_output=True, check=True,
         )
+        subprocess.run(["git", "-C", str(ws_clone), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws_clone), "config", "user.email", "test@test.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws_clone), "checkout", "-b", branch], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws_clone), "remote", "rename", "origin", "local"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws_clone), "remote", "add", "origin", str(bare_path)], capture_output=True)
+        subprocess.run(["git", "-C", str(ws_clone), "fetch", "origin"], capture_output=True)
+        (ws_clone / ".workspace").touch()
         (ws_clone / "blog.md").write_text("# Blog entry\n")
-        subprocess.run(
-            ["git", "-C", str(ws_clone), "add", "."],
-            capture_output=True, check=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(ws_clone), "commit", "-m", "blog entry"],
-            capture_output=True, check=True,
-        )
+        subprocess.run(["git", "-C", str(ws_clone), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws_clone), "commit", "-m", "blog entry"], capture_output=True, check=True)
+        return ws_orig
 
-        exit_code = slot_manager.merge_slot(family, 1)
-        assert exit_code == 0
-
-        captured = capsys.readouterr().out
-        assert "SKIPPED_WORKSPACE=work-casehub" in captured
-
-        landed = (slot / ".landed").read_text()
-        assert "work-casehub" not in landed
-        assert "engine:" in landed
-
-    def test_skips_workspace_with_marker(self, tmp_path, capsys):
-        """Workspace detected by .workspace marker is skipped."""
+    def test_workspace_clones_are_merged(self, tmp_path):
+        """merge_slot processes workspace clones (convergence fix)."""
         family, originals, slot, branch = _create_merge_test_repos(
             tmp_path, ["engine"]
         )
-        ws_clone = init_repo(slot / "custom-ws")
-        (ws_clone / ".workspace").write_text("project: /path/to/proj\n")
-        subprocess.run(
-            ["git", "-C", str(ws_clone), "checkout", "-b", branch],
-            capture_output=True, check=True,
-        )
+        ws_orig = self._add_workspace_to_slot(family, slot, branch)
 
         exit_code = slot_manager.merge_slot(family, 1)
         assert exit_code == 0
 
-        captured = capsys.readouterr().out
-        assert "custom-ws" in captured
         landed = (slot / ".landed").read_text()
-        assert "custom-ws" not in landed
+        assert "engine:" in landed
+        assert (ws_orig / "blog.md").exists()
 
-    def test_project_repos_still_merge(self, tmp_path):
-        """Project repos still merge normally after workspace filtering."""
+    def test_workspace_with_marker_is_merged(self, tmp_path):
+        """Workspace detected by .workspace marker is processed."""
+        family, originals, slot, branch = _create_merge_test_repos(
+            tmp_path, ["engine"]
+        )
+        ws_orig = self._add_workspace_to_slot(family, slot, branch, "custom-ws")
+
+        exit_code = slot_manager.merge_slot(family, 1)
+        assert exit_code == 0
+
+        assert (ws_orig / "blog.md").exists()
+
+    def test_project_repos_still_merge_with_workspace(self, tmp_path):
+        """Project repos merge normally alongside workspace repos."""
         family, originals, slot, branch = _create_merge_test_repos(
             tmp_path, ["engine", "iot"]
         )
-        init_repo(slot / "work-casehub")
+        self._add_workspace_to_slot(family, slot, branch)
 
         exit_code = slot_manager.merge_slot(family, 1)
         assert exit_code == 0
@@ -3271,54 +3270,60 @@ class TestMergeSlotDualPush:
 
         return family, slot_dir, proj_orig, ws_orig
 
-    def test_workspace_repo_skipped_by_merge(self, tmp_path, capsys):
-        """Workspace repos are skipped — artifacts promoted via close_artifacts, not merge-slot."""
+    def test_workspace_repo_merged_by_slot(self, tmp_path, capsys):
+        """Workspace repos are now processed by merge_slot (convergence)."""
         family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
         result = slot_manager.merge_slot(family, 1)
 
         assert result == 0
         captured = capsys.readouterr().out
-        assert "SKIPPED_WORKSPACE=work-hub" in captured
+        assert "SKIPPED_WORKSPACE" not in captured
 
         rc, ws_log, _ = slot_manager.run_cmd(
             ["git", "-C", str(ws_orig), "log", "--oneline"])
-        assert "journal" not in ws_log.lower()
+        assert "journal" in ws_log.lower()
 
         landed = (slot_dir / ".landed").read_text()
-        assert "work-hub" not in landed
         assert "engine:" in landed
 
-    def test_github_push_failure_is_warning_not_error(self, tmp_path):
+    def test_github_push_failure_is_warning_not_error(self, tmp_path, capsys):
         """If original can't push to GitHub, local push succeeded — warn, don't block."""
         family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
-        original_run_cmd = slot_manager.run_cmd
+        import land_flow
+        original_git = land_flow._git
 
-        def mock_github_fail(args, cwd=None):
+        def mock_github_fail(repo, *args):
+            repo_str = str(repo)
             if "push" in args and "origin" in args and "main" in args:
-                path = args[2] if len(args) > 2 else ""
-                if str(family / "engine") in path or str(family / "work-hub") in path:
-                    return (1, "", "network error")
-            return original_run_cmd(args, cwd)
+                if str(family / "engine") in repo_str or str(family / "work-hub") in repo_str:
+                    import subprocess
+                    return subprocess.CompletedProcess(
+                        args=["git"], returncode=1, stdout="", stderr="network error",
+                    )
+            return original_git(repo, *args)
 
-        with patch("slot_manager.run_cmd", side_effect=mock_github_fail):
+        with patch.object(land_flow, "_git", side_effect=mock_github_fail):
             result = slot_manager.merge_slot(family, 1)
 
         assert result == 0
-        rc, log, _ = original_run_cmd(
-            ["git", "-C", str(proj_orig), "log", "--oneline"])
-        assert "feature" in log.lower()
+        captured = capsys.readouterr().out
+        assert "github_push_failed" in captured
 
     def test_local_push_failure_blocks(self, tmp_path):
         """If slot can't push to original, hard stop — work not landed."""
         family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
-        original_run_cmd = slot_manager.run_cmd
+        import land_flow
+        original_git = land_flow._git
 
-        def mock_local_fail(args, cwd=None):
+        def mock_local_fail(repo, *args):
             if "push" in args and "local" in args and "main" in args:
-                return (1, "", "rejected")
-            return original_run_cmd(args, cwd)
+                import subprocess
+                return subprocess.CompletedProcess(
+                    args=["git"], returncode=1, stdout="", stderr="rejected",
+                )
+            return original_git(repo, *args)
 
-        with patch("slot_manager.run_cmd", side_effect=mock_local_fail):
+        with patch.object(land_flow, "_git", side_effect=mock_local_fail):
             result = slot_manager.merge_slot(family, 1)
 
         assert result == 1

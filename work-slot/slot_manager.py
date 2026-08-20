@@ -1185,231 +1185,33 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         print("ERROR=no_branch_in_marker")
         return 1
 
-    all_repos = get_slot_repos(slot_dir)
-    skipped_ws = [
-        d.name for d in sorted(slot_dir.iterdir())
-        if d.is_dir() and (d / ".git").exists()
-        and d.name not in (".m2", "attic")
-        and d.name not in all_repos
-    ]
-    if skipped_ws:
-        print(f"SKIPPED_WORKSPACE={','.join(skipped_ws)}")
-    if not all_repos:
+    # Build batch and land via shared flow
+    from land_flow import build_slot_batch, land_batch
+
+    descriptors = build_slot_batch(slot_dir)
+    if not descriptors:
         print("ERROR=no_repos_in_slot")
         return 1
 
-    # Preflight: check originals and sync their main with GitHub.
-    print("STAGE=preflight")
-    preflight_ok = True
-    for repo_name in all_repos:
-        slot_repo = slot_dir / repo_name
-        original = resolve_original_repo(slot_repo)
-        if not original.is_dir():
-            print(f"ERROR=original_not_found repo={repo_name} path={original}")
-            preflight_ok = False
-            continue
+    progress_file = slot_dir / ".execute-progress"
+    result = land_batch(descriptors, branch, progress_file)
 
-        # Unresolved merge conflicts block everything
-        rc, status_out, _ = run_cmd(
-            ["git", "-C", str(original), "status", "--porcelain"])
-        if rc == 0 and status_out.strip():
-            unmerged = {"UU", "AA", "DD", "AU", "UA", "DU", "UD"}
-            has_unmerged = any(line[:2] in unmerged
-                              for line in status_out.strip().splitlines())
-            if has_unmerged:
-                print(f"ERROR=unmerged_conflict repo={repo_name} path={original}")
-                preflight_ok = False
-                continue
-            rc2, cur_branch, _ = run_cmd(
-                ["git", "-C", str(original), "branch", "--show-current"])
-            cur_branch = cur_branch.strip() if rc2 == 0 else ""
-            if cur_branch == "main":
-                print(f"ERROR=dirty_worktree repo={repo_name} path={original}")
-                preflight_ok = False
-                continue
-
-        # Sync original's main with GitHub — detect ahead/behind
-        rc_has_origin, _, _ = run_cmd(
-            ["git", "-C", str(original), "remote", "get-url", "origin"])
-        if rc_has_origin != 0:
-            continue
-        run_cmd(["git", "-C", str(original), "fetch", "origin", "main"])
-        rc, behind_out, _ = run_cmd(
-            ["git", "-C", str(original), "rev-list", "main..origin/main", "--count"])
-        behind = int(behind_out.strip()) if rc == 0 and behind_out.strip() else 0
-        rc, ahead_out, _ = run_cmd(
-            ["git", "-C", str(original), "rev-list", "origin/main..main", "--count"])
-        ahead = int(ahead_out.strip()) if rc == 0 and ahead_out.strip() else 0
-
-        if behind > 0 and ahead > 0:
-            print(f"ERROR=diverged_main repo={repo_name} path={original} ahead={ahead} behind={behind}")
-            preflight_ok = False
-        elif ahead > 0:
-            rc, _, stderr = run_cmd(
-                ["git", "-C", str(original), "push", "origin", "main"])
-            if rc != 0:
-                print(f"ERROR=cannot_push_original repo={repo_name} err={stderr.strip()}")
-                preflight_ok = False
-            else:
-                print(f"SYNC=pushed repo={repo_name} commits={ahead}")
-        elif behind > 0:
-            rc2, cur_branch, _ = run_cmd(
-                ["git", "-C", str(original), "branch", "--show-current"])
-            cur_branch = cur_branch.strip() if rc2 == 0 else ""
-            if cur_branch == "main":
-                run_cmd(["git", "-C", str(original), "rebase", "origin/main"])
-            else:
-                run_cmd(["git", "-C", str(original), "fetch", "origin", "main:main"])
-            print(f"SYNC=pulled repo={repo_name} commits={behind}")
-
-    if not preflight_ok:
-        print("STAGE=preflight STATUS=fail")
-        return 1
-    print("STAGE=preflight STATUS=pass")
-
-    # Phase 1: Rebase all feature branches
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
-        print(f"STAGE=rebase ATTEMPT={attempt}")
-        rebase_failed = False
-        for repo_name in all_repos:
-            slot_repo = slot_dir / repo_name
-            rc, _, _ = run_cmd(
-                ["git", "-C", str(slot_repo), "remote", "get-url", "upstream"])
-            rebase_remote = "upstream" if rc == 0 else "origin"
-            run_cmd(["git", "-C", str(slot_repo), "fetch", rebase_remote, "main"])
-            rc, _, _ = run_cmd(
-                ["git", "-C", str(slot_repo), "rebase", f"{rebase_remote}/main"])
-            if rc != 0:
-                run_cmd(["git", "-C", str(slot_repo), "rebase", "--abort"])
-                print(f"ERROR=conflict repo={repo_name}")
-                rebase_failed = True
-                break
-        if rebase_failed:
-            if attempt < max_attempts:
-                continue
-            print("STAGE=rebase STATUS=fail")
-            return 1
-        print("STAGE=rebase STATUS=pass")
-        break
-
-    # Phase 2: Merge, push, verify (per repo)
-    print("STAGE=push")
-    results: dict[str, tuple[str, str]] = {}
-    landed_shas: dict[str, str] = {}
-
-    for repo_name in all_repos:
-        slot_repo = slot_dir / repo_name
-
-        run_cmd(["git", "-C", str(slot_repo), "checkout", "main"])
-        rc, _, _ = run_cmd(
-            ["git", "-C", str(slot_repo), "fetch", "origin", "main"])
-        if rc == 0:
-            rc_ff, _, _ = run_cmd(
-                ["git", "-C", str(slot_repo), "merge", "--ff-only", "origin/main"])
-            if rc_ff != 0:
-                run_cmd(["git", "-C", str(slot_repo), "merge", "origin/main", "--no-edit"])
-
-        rc, _, _ = run_cmd(
-            ["git", "-C", str(slot_repo), "merge", "--ff-only", branch])
-        if rc != 0:
-            rc2, _, stderr = run_cmd(
-                ["git", "-C", str(slot_repo), "merge", branch, "--no-edit"])
-            if rc2 != 0:
-                results[repo_name] = ("merge_failed", "")
-                print(f"ERROR=merge_failed repo={repo_name} stderr={stderr.strip()}")
-                continue
-
-        rc, sha_out, _ = run_cmd(
-            ["git", "-C", str(slot_repo), "rev-parse", "main"])
-        slot_sha = sha_out.strip() if rc == 0 else "unknown"
-
-        # Push to original — updateInstead handles checked-out main
-        original = resolve_original_repo(slot_repo)
-        rc_has_local, _, _ = run_cmd(
-            ["git", "-C", str(slot_repo), "remote", "get-url", "local"])
-        if rc_has_local == 0:
-            local_push_remote = "local"
-        else:
-            rc_origin, origin_url, _ = run_cmd(
-                ["git", "-C", str(slot_repo), "remote", "get-url", "origin"])
-            if rc_origin == 0 and Path(origin_url.strip()).is_dir():
-                local_push_remote = "origin"
-            else:
-                local_push_remote = None
-
-        if local_push_remote:
-            rc, _, stderr = run_cmd(
-                ["git", "-C", str(slot_repo), "push", local_push_remote, "main"])
-            if rc != 0:
-                results[repo_name] = ("local_push_failed", slot_sha)
-                print(f"ERROR=local_push_failed repo={repo_name} err={stderr.strip()}")
-                continue
-
-            rc, local_sha_out, _ = run_cmd(
-                ["git", "-C", str(original), "rev-parse", "main"])
-            local_sha = local_sha_out.strip() if rc == 0 else ""
-            if local_sha != slot_sha:
-                results[repo_name] = ("local_verify_failed", slot_sha)
-                print(f"ERROR=local_verify_failed repo={repo_name}")
-                continue
-
-        # Push from original to GitHub — standard push through the original
-        rc_has_origin, _, _ = run_cmd(
-            ["git", "-C", str(original), "remote", "get-url", "origin"])
-        if rc_has_origin == 0:
-            rc, _, stderr = run_cmd(
-                ["git", "-C", str(original), "push", "origin", "main"])
-            if rc != 0:
-                results[repo_name] = ("github_push_failed", slot_sha)
-                print(f"WARN=github_push_failed repo={repo_name} err={stderr.strip()}")
-                landed_shas[repo_name] = slot_sha
-                continue
-
-            rc, ls_out, _ = run_cmd(
-                ["git", "-C", str(original), "ls-remote", "origin", "main"])
-            github_sha = ls_out.split()[0] if rc == 0 and ls_out.strip() else ""
-            if github_sha != slot_sha:
-                results[repo_name] = ("github_verify_failed", slot_sha)
-                print(f"WARN=github_verify_failed repo={repo_name} expected={slot_sha} got={github_sha}")
-                landed_shas[repo_name] = slot_sha
-                continue
-
-        results[repo_name] = ("ok", slot_sha)
-        landed_shas[repo_name] = slot_sha
-
-    push_failures = [r for r, (status, _) in results.items()
-                     if status in ("local_push_failed", "local_verify_failed", "merge_failed")]
-    if push_failures:
-        print("STAGE=push STATUS=fail")
-        for repo_name in all_repos:
-            status, sha = results.get(repo_name, ("unknown", ""))
-            icon = "FAIL" if status in ("local_push_failed", "local_verify_failed", "merge_failed") \
-                   else "WARN" if "github" in status else "OK"
-            print(f"RESULT={repo_name} STATUS={status} SHA={sha} ICON={icon}")
-        print(f"ERROR=push_incomplete failed={','.join(push_failures)}")
+    if not result.success:
+        for s in result.repos:
+            if s.error:
+                print(f"ERROR={s.error} repo={s.repo_path.name}")
         return 1
 
+    # Write .landed marker
+    project_repos = [d.repo_path.name for d in descriptors if not d.is_workspace]
+    landed_shas = {s.repo_path.name: s.landed_sha for s in result.repos if s.landed_sha}
     shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
     (slot_dir / ".landed").write_text(
         f"branch={branch}\n"
-        f"repos={','.join(all_repos)}\n"
+        f"repos={','.join(project_repos)}\n"
         f"landed_shas={shas_str}\n"
         f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
     )
-
-    # Phase 3: Stamp all feature branches
-    for repo_name in all_repos:
-        slot_repo = slot_dir / repo_name
-        if not slot_repo.is_dir() or not (slot_repo / ".git").exists():
-            continue
-        sha = landed_shas.get(repo_name, "unknown")
-        run_cmd(["git", "-C", str(slot_repo), "checkout", branch])
-        run_cmd([
-            "git", "-C", str(slot_repo), "commit", "--allow-empty",
-            "-m", f"chore: branch closed — landed as {sha} on main",
-        ])
-        run_cmd(["git", "-C", str(slot_repo), "push", "origin", branch, "--force-with-lease"])
 
     if _wl:
         try:
@@ -1436,15 +1238,12 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
             except (ImportError, Exception):
                 print("WARN=epic_tick_skipped")
 
-    # Phase 4: Report propagation summary
-    print("STAGE=push STATUS=pass")
-    for repo_name in all_repos:
-        status, sha = results.get(repo_name, ("unknown", ""))
-        icon = "OK" if status == "ok" else "WARN" if "github" in status else "FAIL"
-        print(f"RESULT={repo_name} STATUS={status} SHA={sha} ICON={icon}")
-    ok_count = sum(1 for s, _ in results.values() if s == "ok")
-    warn_count = sum(1 for s, _ in results.values() if "github" in s)
-    print(f"SUMMARY=ok:{ok_count} warn:{warn_count} fail:0")
+    # Report
+    for s in result.repos:
+        icon = "OK" if not s.error else "FAIL"
+        print(f"RESULT={s.repo_path.name} STATUS={'ok' if not s.error else s.error} SHA={s.landed_sha} ICON={icon}")
+    ok_count = sum(1 for s in result.repos if not s.error)
+    print(f"SUMMARY=ok:{ok_count} warn:0 fail:0")
     print(f"LANDED_SHAS={shas_str}")
     return 0
 

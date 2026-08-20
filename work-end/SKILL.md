@@ -397,10 +397,11 @@ Requires `.phase-a-complete` marker (written in Step 3.4). Do NOT call
 python3 work-slot/slot_manager.py merge-slot <SLOT_PATH>
 ```
 
-merge-slot handles: per-repo rebase (no-op if already rebased in Phase A),
-two-hop push (slot clone → original repo → GitHub), SHA verification,
-`.landed` marker with SHA audit trail, branch stamps on all repos
-(project + workspace via `get_all_slot_repos()`).
+merge-slot delegates to the shared land flow (`land_flow.py`). Builds
+a batch of `RepoDescriptor`s for all repos in the slot (project +
+workspace) and calls `land_batch()` — same 5-step flow used by branch
+mode: preflight, rebase, merge+push, stamp. Two-hop transport
+(clone → original → GitHub), SHA verification, `.landed` marker.
 
 **Lifecycle:** After land returns, fire `push_pass`, `merge_pass`,
 `stamp_pass` in rapid succession.

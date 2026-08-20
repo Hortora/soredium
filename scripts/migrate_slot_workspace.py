@@ -92,6 +92,7 @@ def _replay_branch_commits(family_ws_clone: Path, subdir_name: str,
 
         r = _run(["git", "-C", str(new_ws_clone), "am"] + [str(p) for p in patches])
         if r.returncode != 0:
+            _run(["git", "-C", str(new_ws_clone), "am", "--abort"])
             errors.append(f"git am failed for {subdir_name}: {r.stderr.strip()}")
 
     return errors
