@@ -2,12 +2,13 @@
 name: work
 description: >
   Use when the user says "work", "work end", "work pause", "work resume",
-  "work continue", or "work next" — detects current branch state and routes
-  to the correct work lifecycle skill automatically. "work" alone starts new
-  work or shows the pause stack. "work end" closes the branch. "work pause"
-  saves state. "work continue" keeps working on the current branch.
+  "work continue", "work next", or "work find" — detects current branch state
+  and routes to the correct work lifecycle skill automatically. "work" alone
+  starts new work or shows the pause stack. "work end" closes the branch.
+  "work pause" saves state. "work continue" keeps working on the current branch.
   "work resume" restores a paused branch from the stack.
   "work next" advances to the next issue in the .plan queue.
+  "work find" discovers and populates the queue with new work.
 ---
 
 # work
@@ -26,27 +27,44 @@ correct skill — developer says `work` to begin, `work end` to close,
 |------------|---------|
 | `work end` | → **work-end** immediately (no router needed) |
 | `work pause` | → **work-pause** immediately (no router needed) |
-| `work next` | → advance to next issue in `.plan` queue (Step 5) |
-| `work resume` / `resume` | → **work-resume** (pause-stack only; error if on active branch — see Step 1c) |
-| `work continue` / `continue` | → run router → Step 4 `continue` action directly (error if on main — see Step 1c) |
+| `work next` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
+| `work resume` / `resume` | → **work-resume** (pause-stack only; error if on active branch — see Step 1d) |
+| `work continue` / `continue` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
+| `work find` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
 | `work` / `work start` | → run router (Step 1b) |
 | `resume handover` | → handover skill directly (manual invocation) |
 
 For `work end` and `work pause`, route immediately — no state
-detection needed.
+detection needed. For `continue`, `next`, `end`, and `find`, the
+Python chaining engine (`work_chain.py`) determines the directive.
 
-**Step 1c — Wrong-context error handling (D4)**
+**Step 1c — Bidirectional chaining**
 
-Before dispatching to a sub-skill or executing an internal action,
-check for wrong-context invocations:
+For `continue`, `next`, `end`, and `find`: read `CHAIN_DIRECTIVE` from
+the ctx.py output. The Python chaining engine (`work_chain.py`) has
+already evaluated the current state and determined the correct action.
+Follow the directive:
+
+| DIRECTIVE | Action |
+|-----------|--------|
+| `proceed` | Continue with the invoked command |
+| `chain_to_next` | Redirect to `work next` (Step 5) |
+| `chain_to_end` | Redirect to **work-end** |
+| `chain_to_find` | Redirect to `work find` (Step 6) |
+| `guard_continue` | "Issue #ACTIVE_ISSUE still open. Continue working." → run continue path |
+| `guard_next` | "Queue has remaining items or unfinished work. Continue or advance?" → present choice |
+| `no_work_found` | "No work found." → stay in current state |
+
+The chaining engine handles all context detection — main vs branch,
+issue state, queue state, drained state. The LLM never makes these
+routing decisions itself.
+
+**Step 1d — Wrong-context error handling (work resume only)**
 
 | Invocation | Condition | Action |
 |------------|-----------|--------|
 | `work resume` | `ON_MAIN=no` (on feature branch, not paused) | Error: "Not paused — use `continue` to keep working, or `work pause` first." |
 | `work resume` | `ON_MAIN=yes` + `STACK_DEPTH=0` | Error: "Nothing to resume — pause stack is empty. Use `work` to start new work." |
-| `work continue` | `ON_MAIN=yes` + `STACK_DEPTH=0` | Error: "No active branch — use `work` to start new work." |
-| `work continue` | `ON_MAIN=yes` + `STACK_DEPTH>0` | Error: "No active branch — use `work` to start new work or `work resume` to return to a paused branch." |
-| `work continue` | `ROUTE=workspace_dirty` | Error: "Workspace is on a stale branch — run `work` to clean up." |
 | `work start` | `ROUTE=resume_branch` | Redirect → `continue` + note: "Already on `<branch>` — continuing." |
 
 **Step 1b — Run the router**
@@ -69,6 +87,7 @@ this state with additional tool calls.
 | `resume_stack` | → show stack picker (Step 3), then **work-resume** |
 | `resume_branch` | → contextual options (Step 4) |
 | `workspace_dirty` | → warn and offer to reset (Step 2b) |
+| `drained` | → "Queue drained. Run `work find` to discover new work, or `work start #N` for a specific issue." |
 
 **Step 2a — What-next recommendation (when no issue specified)**
 
@@ -337,6 +356,33 @@ Steps:
    The branch transitions back to `active`.
 9. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
 
+**Step 6 — `work find` (discover and populate queue)**
+
+Discovers candidate work items and appends them to the `.plan` queue.
+Runs the enrichment/what-next pipeline (previously Step 2a).
+
+1. Run ctx.py. Read `CHAIN_DIRECTIVE` — if not `proceed`, follow the
+   directive (Step 1c). The chaining engine guards against calling find
+   when there is unfinished work.
+2. Refresh the GitHub cache:
+   ```bash
+   python3 scripts/enrichment.py refresh --repo $OWNER_REPO
+   ```
+3. Query for recommendations:
+   ```bash
+   python3 scripts/enrichment.py what-next --repo $OWNER_REPO --mode general --limit 5
+   ```
+4. Also check HANDOFF.md What's Next section if available.
+5. Present candidates. User selects items.
+6. If items selected:
+   - Append to queue: `python3 ~/.claude/skills/work-slot/plan_manager.py append <PLAN_PATH> issues=<N>:<title>,...`
+   - If no `.plan` exists, create one with `branch: main`, `state: active`
+   - If state is `drained`: fire `work_find` transition (`drained → transitioning`)
+   - Then `auto_refresh` (`transitioning → active`) with full context loading
+     (garden search, load specs, check protocols)
+7. If zero items selected or enrichment returns nothing:
+   Stay in current state. Report: "No work found."
+
 ---
 
 ## Skill Chaining
@@ -344,7 +390,7 @@ Steps:
 **Routes to:**
 - `work-start` — when beginning new work from main
 - `work-resume` — when returning to a paused branch from main
-- `work-end` — when closing a completed branch (includes full wrap + HANDOFF.md)
+- `work-end` — when closing a completed branch or main work (includes full wrap + HANDOFF.md)
 - `work-pause` — when saving state to switch to something else
 - `handover` — when ending the session but keeping the branch open (mid-work wrap)
 
@@ -352,5 +398,10 @@ Steps:
 - `quick-fix` — lands small changes on main without a feature branch;
   work routes to work-start for branch-based work
 
+**Depends on:**
+- `work_chain.py` — Python chaining engine that determines all routing
+  directives. The skill reads directives, never makes routing decisions.
+
 **This skill does not implement the lifecycle itself** — it detects state and
-delegates. All logic lives in the individual lifecycle skills.
+delegates. All logic lives in the individual lifecycle skills and the
+Python chaining engine.

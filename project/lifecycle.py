@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 VALID_STATES = frozenset({
-    'idle', 'scaffolded', 'active', 'transitioning', 'paused',
+    'idle', 'scaffolded', 'active', 'transitioning', 'paused', 'drained',
     'closing:review', 'closing:verified', 'closing:promoted',
     'closing:pushed', 'closing:merged', 'closing:stamped',
 })
@@ -102,6 +102,8 @@ TRANSITION_TABLE: dict[tuple[str, str], tuple[str, list[str], list[str]]] = {
     ('closing:pushed', 'merge_pass'):        ('closing:merged',    ['verify_content_landed'],                                          []),
     ('closing:merged', 'stamp_pass'):        ('closing:stamped',   ['write_stamp'],                                                    []),
     ('closing:stamped', 'cleanup_pass'):     ('idle',              ['write_plan_closed'],                                               ['return_to_main', 'write_handoff']),
+    ('closing:stamped', 'cleanup_main'):    ('drained',           ['write_plan_drained'],                                              ['write_handoff']),
+    ('drained', 'work_find'):               ('transitioning',     ['queue_populated'],                                                  []),
     # Abort (pre-artifact only)
     ('closing:review', 'abort_close'):       ('active',            ['clear_closing_markers'],                                           []),
     ('closing:verified', 'abort_close'):     ('active',            ['clear_closing_markers'],                                           []),
@@ -130,6 +132,12 @@ INVALID_MESSAGES: dict[tuple[str, str], str] = {
     ('closing:pushed', 'abort_close'):   "Cannot abort — artifacts already workspace-promoted and project-promoted. Branch pushed — continue forward.",
     ('closing:merged', 'abort_close'):   "Cannot abort — content already merged to main. Continue forward.",
     ('closing:stamped', 'abort_close'):  "Cannot abort — branch already stamped. Only cleanup remains.",
+    ('drained', 'work_end'):       "Already drained. Use `work find` to discover new work.",
+    ('drained', 'work_pause'):     "Nothing active to pause.",
+    ('drained', 'work_resume'):    "Nothing to resume. Use `work find` to discover new work.",
+    ('drained', 'work_next'):      "Queue is empty. Use `work find` to discover new work.",
+    ('drained', 'work_continue'):  "Queue is drained. Use `work find` to discover new work.",
+    ('drained', 'work'):           "Queue is drained. Use `work find` to discover new work, or `work start #N` for a specific issue.",
 }
 
 
@@ -261,6 +269,7 @@ _LIFECYCLE_TO_WORKLOG: dict[str, str | None] = {
     'transitioning': 'active',
     'paused': 'paused',
     'idle': 'ended',
+    'drained': 'idle',
 }
 
 

@@ -176,6 +176,15 @@ writing-plans.
   ```
   If `gardenRecordProvenance` is unavailable (engine not running), warn
   once and continue — provenance recording is never a gate on work.
+- **Record retrieval feedback** — the selection is the feedback signal.
+  Selected entries are RELEVANT or HIGHLY_RELEVANT; unselected entries
+  from the search results are NOT_RELEVANT or PARTIALLY_RELEVANT. Call
+  `gardenFeedback` grouped by outcome:
+  ```
+  gardenFeedback(geIds: "GE-...|GE-...", outcome: "HIGHLY_RELEVANT")
+  gardenFeedback(geIds: "GE-...|GE-...", outcome: "NOT_RELEVANT")
+  ```
+  Non-blocking — if unavailable, warn once and continue.
 - Run protocol SEARCH with keywords from the idea — surface project rules
   and architectural constraints that may shape or constrain the design.
 - **SOURCES.md coherence check:** If SOURCES.md exists (inlined via

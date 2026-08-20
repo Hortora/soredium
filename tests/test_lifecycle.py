@@ -61,7 +61,7 @@ def tmp_meta(tmp_path):
 
 class TestStateConstants:
     def test_valid_states_count(self):
-        assert len(VALID_STATES) == 11
+        assert len(VALID_STATES) == 12
 
     def test_transient_states_are_subset(self):
         assert TRANSIENT_STATES <= VALID_STATES
@@ -1097,3 +1097,94 @@ class TestCLIBadArgs:
         plan = tmp_path / ".plan"
         result = _run_lifecycle("transition", str(plan))
         assert result.returncode == 1
+
+
+# --- drained state (#261) ---
+
+
+class TestDrainedState:
+    def test_drained_in_valid_states(self):
+        assert "drained" in VALID_STATES
+
+    def test_drained_is_resting(self):
+        assert "drained" in RESTING_STATES
+
+    def test_drained_is_not_transient(self):
+        assert "drained" not in TRANSIENT_STATES
+        assert is_transient("drained") is False
+
+    def test_drained_is_not_closing(self):
+        assert "drained" not in CLOSING_STATES
+        assert is_closing("drained") is False
+
+    def test_valid_states_count_after_drained(self):
+        assert len(VALID_STATES) == 12
+
+    def test_cleanup_main_transitions_to_drained(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:stamped", branch="main")
+        result = transition(plan, "cleanup_main")
+        assert result.from_state == "closing:stamped"
+        assert result.new_state == "drained"
+        assert "write_plan_drained" in result.effects
+        assert "write_handoff" in result.post_commit_effects
+        assert "return_to_main" not in result.post_commit_effects
+
+    def test_work_find_transitions_drained_to_transitioning(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="drained", branch="main")
+        result = transition(plan, "work_find")
+        assert result.from_state == "drained"
+        assert result.new_state == "transitioning"
+        assert "queue_populated" in result.effects
+
+    def test_drained_rejects_work_end(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="drained", branch="main")
+        with pytest.raises(InvalidTransition, match="Already drained"):
+            transition(plan, "work_end")
+
+    def test_drained_rejects_work_pause(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="drained", branch="main")
+        with pytest.raises(InvalidTransition, match="Nothing active to pause"):
+            transition(plan, "work_pause")
+
+    def test_drained_rejects_work_resume(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="drained", branch="main")
+        with pytest.raises(InvalidTransition, match="work find"):
+            transition(plan, "work_resume")
+
+    def test_drained_rejects_work_next(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="drained", branch="main")
+        with pytest.raises(InvalidTransition, match="Queue is empty"):
+            transition(plan, "work_next")
+
+    def test_drained_rejects_work_continue(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="drained", branch="main")
+        with pytest.raises(InvalidTransition, match="drained"):
+            transition(plan, "work_continue")
+
+    def test_drained_rejects_work(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="drained", branch="main")
+        with pytest.raises(InvalidTransition, match="drained"):
+            transition(plan, "work")
+
+    def test_read_drained_state(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="drained", branch="main")
+        assert read_state(plan) == "drained"
+
+    def test_write_drained_state(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active", branch="main")
+        write_state(plan, "drained")
+        assert read_state(plan) == "drained"
+
+    def test_drained_worklog_mapping(self):
+        from lifecycle import _LIFECYCLE_TO_WORKLOG
+        assert _LIFECYCLE_TO_WORKLOG["drained"] == "idle"

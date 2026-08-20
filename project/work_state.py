@@ -45,11 +45,11 @@ def _run(*cmd: str, cwd: str | None = None) -> str:
     ).stdout.strip()
 
 
-def detect(topo: Topology) -> WorkState:
+def detect(topo: Topology, base_branch: str = "main") -> WorkState:
     workspace = str(topo.workspace)
     project = str(topo.project)
     current_branch = _run("git", "-C", workspace, "branch", "--show-current")
-    on_main = current_branch == "main"
+    on_main = current_branch == base_branch
     in_slot = topo.layout == "slot"
 
     # Pause stack
@@ -122,7 +122,12 @@ def detect(topo: Topology) -> WorkState:
     )
 
     if on_main:
-        route = "resume_stack" if stack_depth > 0 else "start"
+        if meta_state == "drained":
+            route = "drained"
+        elif stack_depth > 0:
+            route = "resume_stack"
+        else:
+            route = "start"
     elif workspace_dirty:
         route = "workspace_dirty"
     else:

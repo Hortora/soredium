@@ -90,6 +90,8 @@ def check_meta_consistency(project, workspace):
     if not meta_branch:
         return "CHECK=meta_consistency STATUS=ok"
     current, _ = _git(workspace, "branch", "--show-current")
+    if current == "main" and meta_branch == "main":
+        return "CHECK=meta_consistency STATUS=ok"
     if current == "main" and meta_branch != "main":
         return (f"CHECK=meta_consistency STATUS=warn "
                 f"DETAIL=.plan says branch '{meta_branch}' but on main — orphaned .plan")
@@ -167,6 +169,19 @@ def check_stale_scaffold_on_main(project, workspace):
     if current != "main":
         return "CHECK=stale_scaffold_on_main STATUS=ok"
     ws = Path(workspace)
+    plan_path = ws / ".plan"
+    if plan_path.exists():
+        from lifecycle import read_state
+        state = read_state(plan_path)
+        if state in ("drained", "active"):
+            stale = []
+            for name in (".meta", ".epic", "JOURNAL.md", ".execute-progress"):
+                if (ws / name).exists():
+                    stale.append(name)
+            if stale:
+                return (f"CHECK=stale_scaffold_on_main STATUS=warn "
+                        f"DETAIL=workspace main has stale scaffold: {', '.join(stale)} — run cleanup-scaffold")
+            return "CHECK=stale_scaffold_on_main STATUS=ok"
     stale = []
     for name in (".plan", ".meta", ".epic", "JOURNAL.md", ".execute-progress"):
         if (ws / name).exists():

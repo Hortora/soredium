@@ -185,6 +185,15 @@ gardenRecordProvenance(
 If `gardenRecordProvenance` is unavailable (engine not running), warn once
 and continue — provenance recording is never a gate on work.
 
+**Record retrieval feedback:** The selection is the feedback signal. Call
+`gardenFeedback` grouped by outcome — selected entries are RELEVANT,
+unselected entries from search results are NOT_RELEVANT:
+```
+gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT")
+gardenFeedback(geIds: "GE-...|GE-...", outcome: "NOT_RELEVANT")
+```
+Non-blocking — if unavailable, warn once and continue.
+
 If no results: proceed silently.
 
 **Skip** if the garden is not configured or the work description has no

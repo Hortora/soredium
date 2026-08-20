@@ -3,7 +3,8 @@ name: work-end
 description: >
   Use when the current branch is complete and ready to close — user says
   "work end", "close this branch", or "wrap up this issue". Must be invoked
-  from the working branch, not main. Replaces "epic close".
+  from a branch with active work or from main with a .plan. On main, skips
+  branch-specific steps (merge, stamp, rebase, squash). Replaces "epic close".
 ---
 
 # work-end
@@ -90,6 +91,38 @@ python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from
 python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> abort_close
 ```
 Returns to `active`. Post-promotion states are forward-only.
+
+---
+
+## Main-mode detection
+
+Read `ON_MAIN` from ctx.py. If `ON_MAIN=yes`, work-end runs in
+**main mode** — same ceremony minus branch-specific steps:
+
+| Step | Branch mode | Main mode |
+|------|-------------|-----------|
+| 1. Context | Check branch alignment | Check .plan exists |
+| 2. Review | Diff against base branch | Diff against `drained-sha` from `.plan` |
+| 3. Sweep | Identical | Identical |
+| 4.1 Promote | Identical | Identical |
+| 4.2 Rebase | Rebase onto base | **Skip** |
+| 4.3 Squash | Classify branch commits | **Skip** |
+| 4.4 Land | Push, stamp, merge | Push only |
+| 5. Verify | Check merged + stamped | Check pushed |
+| 5b. Close issues | Identical | Identical |
+| 6.2 Checkout main | Switch to main | **Skip** (already there) |
+| 6.2b Cleanup | Remove .plan | Keep .plan, fire `cleanup_main` (→ `drained`) |
+
+**Main-mode diff base:** Read `drained-sha` from `.plan`'s `## State`.
+Diff against this SHA: `git -C "$PROJECT" diff <drained-sha>..HEAD`.
+If no `drained-sha` exists (first close), diff against `project-sha`.
+
+**Main-mode cleanup:** Fire `cleanup_main` event instead of
+`cleanup_pass`. This transitions state to `drained` (plan persists,
+can be re-activated via `work find`).
+
+Textual guidance when work is done on main: "Consider a feature branch
+for non-trivial work (`work start #N`). `quick-fix` for small changes."
 
 ---
 
@@ -431,7 +464,9 @@ clone `local` remote URLs.
 **Hard gate:** `VERIFIED=no` blocks Step 6. Present per-check failures
 and offer recovery (re-run the failing Execute sub-step).
 
-After success: fire `cleanup_pass` lifecycle transition.
+After success: fire lifecycle transition:
+- **Branch mode:** `cleanup_pass` (→ `idle`)
+- **Main mode:** `cleanup_main` (→ `drained` — plan persists)
 
 ---
 
@@ -477,12 +512,16 @@ python3 work-end/branch_cleanup.py checkout-main <PROJECT> <WORKSPACE>
 
 ### 6.2b Scaffold cleanup
 
-Remove `.plan` and `JOURNAL.md` from workspace to prevent stale state
-detection in subsequent sessions.
+**Branch mode:** Remove `.plan` and `JOURNAL.md` from workspace to
+prevent stale state detection in subsequent sessions.
 
 ```bash
 python3 work-end/branch_cleanup.py cleanup-scaffold <WORKSPACE>
 ```
+
+**Main mode:** Keep `.plan` (state is already `drained` from the
+`cleanup_main` transition). Remove only `JOURNAL.md` and other
+non-plan scaffold files.
 
 ### 6.3 Stack cleanup
 

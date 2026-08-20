@@ -93,8 +93,6 @@ def resolve(cwd=None) -> dict[str, str]:
         except ImportError:
             pass
 
-    state = ws_detect(topo)
-
     # CLAUDE.md — ALL fields from topo.project (F2/F5 fix)
     claude_md = topo.project / "CLAUDE.md"
     claude_text = claude_md.read_text() if claude_md.exists() else ""
@@ -105,6 +103,8 @@ def resolve(cwd=None) -> dict[str, str]:
 
     m = re.search(r"Project base branch:\s*`([^`]+)`", claude_text_clean)
     base_branch = m.group(1) if m else "main"
+
+    state = ws_detect(topo, base_branch=base_branch)
 
     claude_ok = "yes" if "## Project Type" in claude_text else "no"
 
