@@ -1020,6 +1020,43 @@ def main() -> int:
             print("HAS_PLAN=no")
         return 0
 
+    elif command == "append":
+        issues_str = opts.get("issues", "")
+        if not issues_str:
+            print("ERROR=issues is required (format: 42:title,43:title)",
+                  file=_sys.stderr)
+            return 1
+        items = []
+        for entry in issues_str.split(","):
+            entry = entry.strip()
+            if ":" not in entry:
+                continue
+            num, title = entry.split(":", 1)
+            items.append(QueueItem(
+                issue_number=int(num.strip()),
+                title=title.strip(),
+            ))
+        if not items:
+            print("ERROR=no valid items parsed", file=_sys.stderr)
+            return 1
+        append_to_queue(plan_path, items)
+        for item in items:
+            print(f"APPENDED=#{item.issue_number} — {item.title}")
+        print(f"APPENDED_COUNT={len(items)}")
+        return 0
+
+    elif command == "set-state":
+        key = opts.get("key", "")
+        value = opts.get("value", "")
+        if not key:
+            print("ERROR=key is required", file=_sys.stderr)
+            return 1
+        tree = parse_plan(plan_path)
+        tree.state[key] = value
+        rewrite_plan(plan_path, tree)
+        print(f"SET={key}={value}")
+        return 0
+
     else:
         print(f"Unknown command: {command}", file=_sys.stderr)
         return 1
