@@ -117,14 +117,21 @@ If prior entries exist with matching `series:` (branch name):
 - Enough genuinely new content exists to stand alone as its own narrative
 - The work direction changed significantly since the last entry
 
-Present the decision:
+Present the decision with a recommendation and reasoning:
 ```
 Prior entry found: <filename>
   "<title>" — <date>, <word-count> words
 
-  [R] Revise — update this entry with new content   ← default
-  [N] New — create a separate entry in the series
+  [R] Revise (Recommended) — <1-2 sentence reason, e.g. "this session
+      continued the same work; a new entry would largely repeat the
+      existing one">
+  [N] New — <when this would be better, e.g. "choose this if the work
+      direction changed enough to warrant a separate narrative">
 ```
+
+Always recommend one option. The default-to-Revise and default-to-New
+rules above determine which to recommend — surface that reasoning in
+the prompt so the user can verify the judgment.
 
 If **Revise**: carry the existing file path forward as `REVISE_PATH`. Step 2
 gathers new content. Step 3 drafts an updated version that integrates the

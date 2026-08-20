@@ -330,14 +330,20 @@ The full classification procedure is in [`classification-procedure.md`](classifi
 
 ### Step 4 — Show summary
 
-**Ordering principle:** When presenting the squash plan, order by
-recommendation — the option that best preserves semantic intent is
-presented first. Prefer keeping separate commits when they represent
-genuinely different concerns (feat vs fix vs docs for different
-subsystems, different issue refs). Aggressive single-commit squash
-is available but never the default recommendation. The user
-typically picks option 1, so option 1 must be the best balance of
-clean history and meaningful commit boundaries.
+**Ordering principle:** When presenting squash options, recommend one
+with reasoning. The user typically picks option 1, so option 1 must
+be the best choice — explain why. For each alternative, briefly state
+when it would be better and why it isn't here. Example:
+
+> Option 1 (Recommended): 5 commits — one per batch. Preserves the
+> implementation narrative; each batch is a distinct capability.
+> Option 2: 2 commits — appropriate if the batches were tightly coupled.
+> Option 3: 1 commit — only for trivial branches where history doesn't matter.
+
+Prefer keeping separate commits when they represent genuinely different
+concerns (feat vs fix vs docs for different subsystems, different issue
+refs). Aggressive single-commit squash is available but never the
+default recommendation.
 
 ```
 Commit squash analysis — <N> commits in range

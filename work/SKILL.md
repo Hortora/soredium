@@ -139,9 +139,12 @@ Present:
 > ⚠️ Workspace is on `$WORKSPACE_BRANCH` (project is on main).
 > Another session left the workspace on this branch.
 >
-> Options:
-> 1. **reset** — switch workspace to main and start new work
-> 2. **continue** — stay on this workspace branch (advanced)
+> 1. **reset** (Recommended) — switch workspace to main and start fresh.
+>    The stale branch has no matching project branch, so continuing on it
+>    risks misaligned state.
+> 2. **continue** — stay on this workspace branch. Choose this only if you
+>    know the workspace branch has uncommitted work you need to preserve
+>    before resetting.
 
 - **reset** → `git -C "$WORKSPACE" checkout main`, then route to **work-start**
 - **continue** → route to **work-start** (user takes responsibility for alignment)
