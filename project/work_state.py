@@ -19,7 +19,7 @@ if str(_slot_dir) not in sys.path:
     sys.path.insert(0, str(_slot_dir))
 
 from topology import Topology, find_design_file
-from lifecycle import read_state as _read_state, is_transient as _is_transient
+from lifecycle import read_state as _read_state, is_transient as _is_transient, CorruptedState
 
 
 @dataclass
@@ -108,9 +108,12 @@ def detect(topo: Topology, base_branch: str = "main") -> WorkState:
 
     # Lifecycle state — from .plan (unified) or .meta (legacy, pre-migration)
     state_file = plan_file or find_design_file(".meta", topo)
-    meta_state = _read_state(state_file) if state_file else ""
-    meta_state = meta_state or ""
-    meta_is_transient = bool(meta_state and _is_transient(meta_state))
+    try:
+        meta_state = _read_state(state_file) if state_file else ""
+        meta_state = meta_state or ""
+    except CorruptedState as e:
+        meta_state = f"corrupted:{e.raw_value}"
+    meta_is_transient = bool(meta_state and not meta_state.startswith("corrupted:") and _is_transient(meta_state))
 
     # Routing
     project_branch = _run("git", "-C", project, "branch", "--show-current") if project != workspace else current_branch

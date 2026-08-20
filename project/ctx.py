@@ -25,6 +25,7 @@ if str(_slot_dir) not in sys.path:
 
 from topology import resolve as topo_resolve, find_design_file, _run
 from work_state import detect as ws_detect
+from corruption import diagnose as _diagnose
 
 
 def _parse_meta(meta_path: Path) -> dict[str, str]:
@@ -177,6 +178,19 @@ def resolve(cwd=None) -> dict[str, str]:
     project_branch = _run("git", "-C", project, "branch", "--show-current") if not single_repo else workspace_branch
     current_branch = workspace_branch
 
+    # Corruption detection
+    _plan_file = Path(state.plan_path) if state.plan_path else None
+    corruption_findings = _diagnose(
+        plan_path=_plan_file,
+        meta_state=state.meta_state,
+        project=topo.project,
+        workspace=topo.workspace,
+        base_branch=base_branch,
+        current_branch=current_branch,
+        on_main=state.on_main,
+        owner_repo=owner_repo,
+    )
+
     # Branch mismatch — guard against empty strings from git failure (F6)
     branch_mismatch = "no"
     mismatch_detail = ""
@@ -294,6 +308,12 @@ def resolve(cwd=None) -> dict[str, str]:
         "HAS_PROTOCOLS_DIR": has_protocols_dir,
         "HAS_SOURCES": has_sources,
         "SOURCES_PATH": sources_path,
+        # Corruption detection
+        "CORRUPTION_COUNT": str(len(corruption_findings)),
+        **{f"CORRUPTION_{i}": f.scenario for i, f in enumerate(corruption_findings)},
+        **{f"CORRUPTION_{i}_SEVERITY": f.severity for i, f in enumerate(corruption_findings)},
+        **{f"CORRUPTION_{i}_DETAIL": f.detail for i, f in enumerate(corruption_findings)},
+        **{f"CORRUPTION_{i}_ACTIONS": ",".join(f.actions) for i, f in enumerate(corruption_findings)},
     }
 
 

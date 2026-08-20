@@ -79,6 +79,43 @@ ctx.py outputs all KEY=VALUE lines. Read them all — they determine
 the route AND provide context for the options menu. Do NOT re-derive
 this state with additional tool calls.
 
+**Step 1b-pre — Corruption triage (before normal routing)**
+
+If `CORRUPTION_COUNT` > 0, enter triage flow instead of normal routing:
+
+```
+⚠️ Lifecycle corruption detected (N finding(s)):
+
+  1. [SEVERITY] SCENARIO — DETAIL
+     Actions:
+       a. action_1 (Recommended)
+       b. action_2
+       c. action_3
+
+Pick actions (e.g. "1a 2a") or describe what you want:
+```
+
+After the user confirms actions, execute them:
+
+| Action | Command |
+|--------|---------|
+| `accept_default` | No-op — continue with defaulted state |
+| `write_active` | `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=idle new_state=active event=work` |
+| `write_scaffolded` | Same pattern with `new_state=scaffolded` |
+| `switch_to_plan_branch` | Branch Switch Helper from work-start |
+| `update_plan_branch` | `python3 ~/.claude/skills/work-slot/plan_manager.py set-state <PLAN_PATH> key=branch value=<current_branch>` |
+| `remove_plan` | `rm <PLAN_PATH>` and commit |
+| `continue_close` | Route to work-end at current gate |
+| `rollback_to_active` | `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=<current> new_state=active event=abort_close` |
+| `transition_to_drained` | Route to work-end |
+| `sync_plan_with_github` | `python3 project/work_health.py --scope entry --project $PROJECT --workspace $WORKSPACE --owner-repo $OWNER_REPO` |
+| `fetch_and_checkout` | `git -C $PROJECT fetch origin <branch> && git -C $PROJECT checkout <branch>` |
+| `recreate_branch` | Route to work-start with the issue number |
+| `ignore` | No-op — continue normally |
+
+After executing actions, re-run `ctx.py` to verify corruption is resolved.
+If `CORRUPTION_COUNT` is still > 0, report remaining findings.
+
 **Step 2 — Route based on output**
 
 | `ROUTE` | Action |
