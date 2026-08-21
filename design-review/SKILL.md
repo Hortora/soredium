@@ -221,9 +221,12 @@ Tell the user BEFORE running:
 2. When structure completes (background task notification):
    - Read structure's tracker.md for findings summary
    - Present results to user
-   - Ask: "Continue to coherence? (y/n)"
+   - Ask: "Continue to coherence? (auto-continues in 5 min if no response)"
+   - Write auto-continue gate file (epoch + `ordered` + coherence launch command below).
+     Format: `printf '%s\nordered\n%s\n' "$(date +%s)" "<command>" > ~/reviews/.gate-{title}`
+   - If user responds: remove gate file first, then honor their choice
    - If no: stop the pipeline, present structure results as final
-   - If yes: launch coherence with structure's tracker:
+   - If yes (or auto-continued by watchdog): launch coherence with structure's tracker:
    ```bash
    python3 ~/.claude/skills/design-review/review.py \
      --spec {spec_path} --title {title}-coherence \
@@ -233,8 +236,10 @@ Tell the user BEFORE running:
    ```
 
 3. When coherence completes:
-   - Present results, ask "Continue to robustness? (y/n)"
-   - If yes: launch robustness with both trackers:
+   - Present results, ask "Continue to robustness? (auto-continues in 5 min)"
+   - Write auto-continue gate file (epoch + `ordered` + robustness launch command below)
+   - If user responds: remove gate file first, honor choice
+   - If yes (or auto-continued): launch robustness with both trackers:
    ```bash
    python3 ~/.claude/skills/design-review/review.py \
      --spec {spec_path} --title {title}-robustness \
@@ -245,7 +250,10 @@ Tell the user BEFORE running:
    ```
 
 4. When robustness completes:
-   - Launch cross-cutting with all three trackers
+   - Present results, ask "Launch cross-cutting? (auto-continues in 5 min)"
+   - Write auto-continue gate file (epoch + `ordered` + cross-cutting launch command)
+   - If user responds: remove gate file first, honor choice
+   - If yes (or auto-continued): launch cross-cutting with all three trackers
    - Present unified results when complete
 
 **Workspace path tracking:** Each review.py invocation creates a timestamped
@@ -256,8 +264,11 @@ patterns — use the explicit paths.
 
 **Watchdog in ordered mode:** The watchdog monitors a single active
 dimension. Checkpoint 1 (round 1 early-HIL) does not apply — results
-are presented between dimensions. The watchdog's role is health
-monitoring only: stalls, failures, timeouts.
+are presented between dimensions. The watchdog handles health monitoring
+(stalls, failures, timeouts) AND auto-continue gates for inter-dimension
+prompts. When the main session writes a gate file at an inter-dimension
+boundary, the watchdog auto-continues after 5 minutes if the user has
+not responded.
 
 ## Step 5 — Set up HIL watchdog
 
@@ -270,8 +281,30 @@ keep running between checkpoints — they are never stopped and restarted.
 
 Use `CronCreate` with `recurring: true` and this prompt:
 
-> Check progress of the post-spec review for {title}. Read the last 20
-> lines of each progress log:
+> **AUTO-CONTINUE GATE (check first, every tick):**
+>
+> Check for a gate file: `cat ~/reviews/.gate-{title} 2>/dev/null`
+>
+> If the file exists:
+>   - Line 1 = epoch timestamp when the gate was written
+>   - Run `date +%s` to get current time
+>   - If `current - timestamp > 300` (5 minutes elapsed):
+>     - Read line 2 for gate type (`cp1`, `cp2`, or `ordered`)
+>     - `cp1` → Log "⏱ No response for 5 min — auto-continuing: Accept all".
+>       Dimensions are already running — do nothing else. Remove gate file.
+>     - `cp2` → Log "⏱ No response for 5 min — auto-continuing: Run cross-cutting".
+>       Launch cross-cutting using the command template below. Remove gate file.
+>     - `ordered` → Log "⏱ No response for 5 min — auto-continuing next dimension".
+>       Read line 3 for the full launch command. Execute in background. Remove gate file.
+>   - If < 300 seconds: gate still waiting. Continue to progress check below.
+>
+> If file absent: no pending gate. Continue normally.
+>
+> ---
+>
+> **Progress check:**
+>
+> Read the last 20 lines of each progress log:
 > - `~/reviews/*/{title}-coherence-*/progress.log`
 > - `~/reviews/*/{title}-structure-*/progress.log`
 > - `~/reviews/*/{title}-robustness-*/progress.log`
@@ -302,6 +335,10 @@ Use `CronCreate` with `recurring: true` and this prompt:
 >   keep running — they never stopped)
 > - **Discuss** — read tracker entries for specific findings, discuss,
 >   then re-present the options
+>
+> After presenting options, write a gate marker for auto-continue:
+> `printf '%s\ncp1\n' "$(date +%s)" > ~/reviews/.gate-{title}`
+> If the user responds before timeout, remove the gate file before acting.
 >
 > To kill a dimension: use `TaskStop` on its background task ID, or
 > find the PID from progress.log and kill it.
@@ -335,7 +372,12 @@ Use `CronCreate` with `recurring: true` and this prompt:
 >   results using the template in Step 8.
 > - **Skip** — present final results from dimensions only (Step 8).
 >
-> **When done (all results presented):** delete this cron.
+> After presenting options, write a gate marker for auto-continue:
+> `printf '%s\ncp2\n' "$(date +%s)" > ~/reviews/.gate-{title}`
+> If the user responds before timeout, remove the gate file before acting.
+>
+> **When done (all results presented):** delete this cron and remove
+> any gate file (`rm -f ~/reviews/.gate-{title}`).
 >
 > **Failure handling:**
 > - `REVIEW PAUSED` — needs human input. Tell the user.
