@@ -1093,6 +1093,20 @@ def main() -> int:
         print(f"SET={key}={value}")
         return 0
 
+    elif command == "advance":
+        repo = opts.get("repo", "")
+        result = advance(plan_path, repo_path=repo if repo else None)
+        print(f"COMPLETED={result.completed}")
+        if result.next_issue:
+            print(f"NEXT_ISSUE={result.next_issue}")
+            if result.next_title:
+                print(f"NEXT_TITLE={result.next_title}")
+        print(f"BATCH_COMPLETE={result.batch_complete}")
+        print(f"EPIC_COMPLETE={result.epic_complete}")
+        print(f"SAFE_EXIT={result.safe_exit}")
+        print(f"HAS_DEFERRED={result.has_deferred}")
+        return 0
+
     else:
         print(f"Unknown command: {command}", file=_sys.stderr)
         return 1
