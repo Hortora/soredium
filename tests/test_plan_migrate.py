@@ -30,7 +30,7 @@ class TestMigrateMetaPlusOldPlan:
         plan.write_text(
             "# Work Plan — issue-42-fix-auth\n\n"
             "## Queue\n"
-            "- [ ] #42 — Fix auth ← active\n\n"
+            "- [ ] Hortora/soredium#42 — Fix auth ← active\n\n"
             "## Session State\n"
             "Current: #42 — Fix auth\n"
             "Started: 2026-08-14\n"
@@ -50,10 +50,10 @@ class TestMigrateMetaPlusOldPlan:
         design = tmp_path / "design"
         design.mkdir()
         (design / ".meta").write_text(
-            "branch: test\nstate: active\nissue: 42\nplan: yes\ncovers: 42\n"
+            "branch: test\nstate: active\nissue: 42\nplan: yes\ncovers: 42\nissue-repo: test/repo\n"
         )
         (design / ".plan").write_text(
-            "# Work Plan — test\n\n## Queue\n- [ ] #42 — Fix ← active\n\n"
+            "# Work Plan — test\n\n## Queue\n- [ ] test/repo#42 — Fix ← active\n\n"
             "## Session State\nStarted: 2026-08-14\n"
         )
         migrate_if_needed(design)
@@ -65,10 +65,10 @@ class TestMigrateMetaPlusOldPlan:
     def test_preserves_queue_structure(self, tmp_path):
         design = tmp_path / "design"
         design.mkdir()
-        (design / ".meta").write_text("branch: test\nstate: active\ncovers: 42,43\n")
+        (design / ".meta").write_text("branch: test\nstate: active\ncovers: 42,43\nissue-repo: test/repo\n")
         (design / ".plan").write_text(
             "# Work Plan — test\n\n## Queue\n"
-            "- [x] #42 — Done\n- [ ] #43 — Next ← active\n\n"
+            "- [x] test/repo#42 — Done\n- [ ] test/repo#43 — Next ← active\n\n"
             "## Session State\nStarted: 2026-08-14\n"
         )
         migrate_if_needed(design)
@@ -131,7 +131,7 @@ class TestMigrateMetaAlone:
         design = tmp_path / "design"
         design.mkdir()
         (design / ".meta").write_text(
-            "branch: test\nstate: closing:review\ncovers: 42\n"
+            "branch: test\nstate: closing:review\ncovers: 42\nissue-repo: test/repo\n"
         )
         migrate_if_needed(design)
         tree = plan_manager.parse_plan(design / ".plan")
@@ -188,7 +188,7 @@ class TestMigrateWithEpic:
         design = tmp_path / "design"
         design.mkdir()
         (design / ".meta").write_text(
-            "branch: issue-50-epic\nstate: active\ncovers: 50\n"
+            "branch: issue-50-epic\nstate: active\ncovers: 50\nissue-repo: test/repo\n"
         )
         (design / ".epic").write_text(
             "# Epic — issue-50\n\n"
@@ -234,7 +234,7 @@ class TestMigrateToRoot:
         ws.mkdir()
         design = ws / "design"
         design.mkdir()
-        (design / ".meta").write_text("branch: issue-42\nstate: active\ncovers: 42\n")
+        (design / ".meta").write_text("branch: issue-42\nstate: active\ncovers: 42\nissue-repo: test/repo\n")
         assert migrate_to_root(ws) is True
         assert (ws / ".plan").exists()
         assert not (design / ".meta").exists()
@@ -245,7 +245,7 @@ class TestMigrateToRoot:
         design = ws / "design"
         design.mkdir()
         (design / ".epic").write_text("- [ ] #1 — test\n")
-        (design / ".meta").write_text("branch: test\nstate: active\ncovers: 1\n")
+        (design / ".meta").write_text("branch: test\nstate: active\ncovers: 1\nissue-repo: test/repo\n")
         migrate_to_root(ws)
         assert not (design / ".epic").exists()
         assert not (design / ".meta").exists()

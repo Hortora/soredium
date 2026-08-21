@@ -34,7 +34,7 @@ def _has_state_section(plan_path: Path) -> bool:
     return False
 
 
-def _queue_items_from_covers(covers: str):
+def _queue_items_from_covers(covers: str, repo: str = ""):
     from plan_manager import QueueItem
     items = []
     for i, part in enumerate(covers.split(",")):
@@ -44,16 +44,17 @@ def _queue_items_from_covers(covers: str):
                 issue_number=int(num),
                 title=f"Issue #{num}",
                 active=(i == 0),
+                repo=repo,
             ))
     return items
 
 
 _EPIC_ITEM_RE = re.compile(
-    r'^(\s*)- \[([ x])\] #(\d+)\s*—\s*(.+?)(?:\s*←\s*(?:active|current))?$'
+    r'^(\s*)- \[([ x])\] (?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)\s*—\s*(.+?)(?:\s*←\s*(?:active|current))?$'
 )
 
 
-def _queue_items_from_epic(epic_path: Path):
+def _queue_items_from_epic(epic_path: Path, repo: str = ""):
     from plan_manager import QueueItem
     items = []
     first_uncompleted = True
@@ -61,12 +62,13 @@ def _queue_items_from_epic(epic_path: Path):
         m = _EPIC_ITEM_RE.match(line)
         if m:
             completed = m.group(2) == "x"
-            issue_num = int(m.group(3))
-            title = m.group(4).strip()
+            item_repo = m.group(3) or repo
+            issue_num = int(m.group(4))
+            title = m.group(5).strip()
             active = not completed and first_uncompleted
             if active:
                 first_uncompleted = False
-            items.append(QueueItem(issue_num, title, completed=completed, active=active))
+            items.append(QueueItem(issue_num, title, completed=completed, active=active, repo=item_repo))
     return items
 
 
@@ -137,7 +139,7 @@ def migrate_if_needed(design_dir: Path) -> bool:
     meta.pop("issue", None)
     meta.pop("plan", None)
 
-    from plan_manager import parse_plan, build_plan_content, rewrite_plan
+    from plan_manager import parse_plan, build_plan_content, rewrite_plan, _backfill_repo
 
     if plan_path.exists():
         tree = parse_plan(plan_path)
@@ -146,18 +148,24 @@ def migrate_if_needed(design_dir: Path) -> bool:
             tree.state["date"] = tree.started
         if tree.last_wrap:
             tree.state["last-wrap"] = tree.last_wrap
+        # Backfill repo from freshly-set state (old plans had bare #N)
+        issue_repo = meta.get("issue-repo", "")
+        if issue_repo:
+            _backfill_repo(tree.queue, issue_repo)
         rewrite_plan(plan_path, tree)
     elif epic_path.exists():
-        items = _queue_items_from_epic(epic_path)
+        issue_repo = meta.get("issue-repo", "")
+        items = _queue_items_from_epic(epic_path, repo=issue_repo)
         if not items:
-            items = _queue_items_from_covers(meta.get("covers", ""))
+            items = _queue_items_from_covers(meta.get("covers", ""), repo=issue_repo)
         content = build_plan_content(
             meta.get("branch", "migrated"), items,
             meta.get("date", ""), state=meta)
         plan_path.write_text(content)
         epic_path.unlink()
     else:
-        items = _queue_items_from_covers(meta.get("covers", ""))
+        issue_repo = meta.get("issue-repo", "")
+        items = _queue_items_from_covers(meta.get("covers", ""), repo=issue_repo)
         content = build_plan_content(
             meta.get("branch", "migrated"), items,
             meta.get("date", ""), state=meta)

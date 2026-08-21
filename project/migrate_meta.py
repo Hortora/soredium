@@ -104,7 +104,13 @@ def migrate(root: Path) -> int:
         elif key == "covers" and issue:
             state_lines.append(f"covers: {issue}")
 
-    queue_line = f"- [ ] #{issue} — Issue #{issue} ← active" if issue else ""
+    issue_repo = fields.get("issue-repo", "")
+    if issue and issue_repo:
+        queue_line = f"- [ ] {issue_repo}#{issue} — Issue #{issue} ← active"
+    elif issue:
+        queue_line = f"- [ ] #{issue} — Issue #{issue} ← active"
+    else:
+        queue_line = ""
 
     plan_content = f"# Work Plan — {branch}\n\n## State\n"
     plan_content += "\n".join(state_lines) + "\n"

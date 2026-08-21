@@ -14,7 +14,7 @@ SINGLE_ISSUE_PLAN = """\
 # Work Plan — issue-42-fix-login
 
 ## Queue
-- [ ] #42 — Fix login validation ← active
+- [ ] test/repo#42 — Fix login validation ← active
 
 ## Session State
 Current: #42 — Fix login validation
@@ -25,12 +25,12 @@ MULTI_ISSUE_PLAN = """\
 # Work Plan — issue-42-batch-work
 
 ## Queue
-- [x] #42 — Fix login validation
-- [ ] #50 — Weighted profiles (epic)
-  - [x] #108 — Add weight field
-  - [ ] #109 — Update scoring ← active
-  - [ ] #110 — Migration script
-- [ ] #32 — Update API docs
+- [x] test/repo#42 — Fix login validation
+- [ ] test/repo#50 — Weighted profiles (epic)
+  - [x] test/repo#108 — Add weight field
+  - [ ] test/repo#109 — Update scoring ← active
+  - [ ] test/repo#110 — Migration script
+- [ ] test/repo#32 — Update API docs
 
 ## Session State
 Current: #109 — Update scoring
@@ -41,14 +41,14 @@ NESTED_EPIC_PLAN = """\
 # Work Plan — issue-42-nested
 
 ## Queue
-- [ ] #42 — Fix login ← active
-- [ ] #50 — Weighted profiles (epic)
-  - [ ] #51 — Add weight field
-  - [ ] #52 — Scoring subsystem (epic)
-    - [ ] #60 — Score calculator
-    - [ ] #61 — Score migration
-  - [ ] #53 — API endpoints
-- [ ] #32 — Update API docs
+- [ ] test/repo#42 — Fix login ← active
+- [ ] test/repo#50 — Weighted profiles (epic)
+  - [ ] test/repo#51 — Add weight field
+  - [ ] test/repo#52 — Scoring subsystem (epic)
+    - [ ] test/repo#60 — Score calculator
+    - [ ] test/repo#61 — Score migration
+  - [ ] test/repo#53 — API endpoints
+- [ ] test/repo#32 — Update API docs
 
 ## Session State
 Current: #42 — Fix login
@@ -59,13 +59,13 @@ BATCH_PLAN = """\
 # Work Plan — issue-50-weighted
 
 ## Queue
-- [ ] #50 — Weighted profiles (epic)
+- [ ] test/repo#50 — Weighted profiles (epic)
   ### Batch 1 — Data model ← current
-  - [ ] #108 — Add weight field ← active
-  - [ ] #109 — Migration script
+  - [ ] test/repo#108 — Add weight field ← active
+  - [ ] test/repo#109 — Migration script
   ### Batch 2 — Scoring logic
-  - [ ] #110 — Update scoring algorithm
-  - [ ] #111 — Recalculate existing scores
+  - [ ] test/repo#110 — Update scoring algorithm
+  - [ ] test/repo#111 — Recalculate existing scores
 
 ## Session State
 Current: #108 — Add weight field
@@ -260,43 +260,43 @@ class TestWritePlan:
 
 class TestBuildPlanContent:
     def test_builds_single_issue(self):
-        items = [plan_manager.QueueItem(42, "Fix login", active=True)]
+        items = [plan_manager.QueueItem(42, "Fix login", active=True, repo="test/repo")]
         content = plan_manager.build_plan_content("issue-42-fix-login", items, "2026-08-04")
         assert "# Work Plan — issue-42-fix-login" in content
-        assert "- [ ] #42 — Fix login ← active" in content
-        assert "Current: #42 — Fix login" in content
+        assert "- [ ] test/repo#42 — Fix login ← active" in content
+        assert "Current: test/repo#42 — Fix login" in content
 
     def test_builds_epic_with_children(self):
         children = [
-            plan_manager.QueueItem(108, "Add weight field", active=True),
-            plan_manager.QueueItem(109, "Update scoring"),
+            plan_manager.QueueItem(108, "Add weight field", active=True, repo="test/repo"),
+            plan_manager.QueueItem(109, "Update scoring", repo="test/repo"),
         ]
-        items = [plan_manager.QueueItem(50, "Weighted profiles", is_epic=True, children=children)]
+        items = [plan_manager.QueueItem(50, "Weighted profiles", is_epic=True, children=children, repo="test/repo")]
         content = plan_manager.build_plan_content("issue-50-weighted", items, "2026-08-04")
         assert "(epic)" in content
-        assert "  - [ ] #108 — Add weight field ← active" in content
-        assert "  - [ ] #109 — Update scoring" in content
+        assert "  - [ ] test/repo#108 — Add weight field ← active" in content
+        assert "  - [ ] test/repo#109 — Update scoring" in content
 
     def test_builds_empty_queue(self):
         content = plan_manager.build_plan_content("improve-scoring", [], "2026-08-04")
         assert "(empty" in content
 
     def test_builds_nested_epic(self):
-        inner = [plan_manager.QueueItem(60, "Calculator"), plan_manager.QueueItem(61, "Migration")]
+        inner = [plan_manager.QueueItem(60, "Calculator", repo="test/repo"), plan_manager.QueueItem(61, "Migration", repo="test/repo")]
         children = [
-            plan_manager.QueueItem(51, "Weight field", active=True),
-            plan_manager.QueueItem(52, "Scoring subsystem", is_epic=True, children=inner),
+            plan_manager.QueueItem(51, "Weight field", active=True, repo="test/repo"),
+            plan_manager.QueueItem(52, "Scoring subsystem", is_epic=True, children=inner, repo="test/repo"),
         ]
-        items = [plan_manager.QueueItem(50, "Weighted profiles", is_epic=True, children=children)]
+        items = [plan_manager.QueueItem(50, "Weighted profiles", is_epic=True, children=children, repo="test/repo")]
         content = plan_manager.build_plan_content("issue-50-test", items, "2026-08-04")
-        assert "    - [ ] #60 — Calculator" in content  # double-indented
+        assert "    - [ ] test/repo#60 — Calculator" in content  # double-indented
 
 
 class TestAppendToQueue:
     def test_appends_to_existing(self, tmp_path):
         plan_file = tmp_path / ".plan"
         plan_file.write_text(SINGLE_ISSUE_PLAN)
-        plan_manager.append_to_queue(plan_file, [plan_manager.QueueItem(99, "New issue")])
+        plan_manager.append_to_queue(plan_file, [plan_manager.QueueItem(99, "New issue", repo="test/repo")])
         tree = plan_manager.parse_plan(plan_file)
         assert len(tree.queue) == 2
         assert tree.queue[1].issue_number == 99
@@ -304,7 +304,7 @@ class TestAppendToQueue:
     def test_appends_to_empty(self, tmp_path):
         plan_file = tmp_path / ".plan"
         plan_file.write_text(EMPTY_PLAN)
-        plan_manager.append_to_queue(plan_file, [plan_manager.QueueItem(42, "First issue", active=True)])
+        plan_manager.append_to_queue(plan_file, [plan_manager.QueueItem(42, "First issue", active=True, repo="test/repo")])
         tree = plan_manager.parse_plan(plan_file)
         assert len(tree.queue) == 1
         assert tree.queue[0].active is True
@@ -313,8 +313,8 @@ class TestAppendToQueue:
         plan_file = tmp_path / ".plan"
         plan_file.write_text(SINGLE_ISSUE_PLAN)
         plan_manager.append_to_queue(plan_file, [
-            plan_manager.QueueItem(99, "Issue A"),
-            plan_manager.QueueItem(100, "Issue B"),
+            plan_manager.QueueItem(99, "Issue A", repo="test/repo"),
+            plan_manager.QueueItem(100, "Issue B", repo="test/repo"),
         ])
         tree = plan_manager.parse_plan(plan_file)
         assert len(tree.queue) == 3
@@ -331,7 +331,7 @@ class TestAdvance:
         return plan_file, meta
 
     def test_linear_advance(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] test/repo#42 — A ← active\n- [ ] test/repo#43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
         result = plan_manager.advance(plan_file)
         assert result.completed == 42
@@ -350,7 +350,7 @@ class TestAdvance:
         assert result.batch_complete is False
 
     def test_epic_last_child_completes_parent(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  - [x] #108 — A\n  - [ ] #109 — B ← active\n- [ ] #32 — C\n\n## Session State\nCurrent: #109 — B\nStarted: 2026-08-04\n"
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] test/repo#50 — Epic (epic)\n  - [x] test/repo#108 — A\n  - [ ] test/repo#109 — B ← active\n- [ ] test/repo#32 — C\n\n## Session State\nCurrent: #109 — B\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
         result = plan_manager.advance(plan_file)
         assert result.completed == 109
@@ -359,7 +359,7 @@ class TestAdvance:
         assert tree.queue[0].completed is True
 
     def test_nested_epic_completes(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  - [ ] #52 — Nested (epic)\n    - [x] #60 — A\n    - [ ] #61 — B ← active\n  - [ ] #53 — C\n\n## Session State\nCurrent: #61 — B\nStarted: 2026-08-04\n"
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] test/repo#50 — Epic (epic)\n  - [ ] test/repo#52 — Nested (epic)\n    - [x] test/repo#60 — A\n    - [ ] test/repo#61 — B ← active\n  - [ ] test/repo#53 — C\n\n## Session State\nCurrent: #61 — B\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
         result = plan_manager.advance(plan_file)
         assert result.completed == 61
@@ -368,7 +368,7 @@ class TestAdvance:
         assert tree.queue[0].children[0].completed is True
 
     def test_queue_exhausted(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [x] #42 — A\n- [ ] #43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
+        plan = "# Work Plan — test\n\n## Queue\n- [x] test/repo#42 — A\n- [ ] test/repo#43 — B ← active\n\n## Session State\nCurrent: #43 — B\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
         result = plan_manager.advance(plan_file)
         assert result.completed == 43
@@ -376,7 +376,7 @@ class TestAdvance:
         assert result.epic_complete is True
 
     def test_batch_boundary_safe_exit(self, tmp_path):
-        plan = "# Work Plan — test\n\n## Queue\n- [ ] #50 — Epic (epic)\n  ### Batch 1 — Model\n  - [x] #108 — A\n  - [ ] #109 — B ← active\n  ### Batch 2 — Logic\n  - [ ] #110 — C\n\n## Session State\nCurrent: #109 — B\nStarted: 2026-08-04\n"
+        plan = "# Work Plan — test\n\n## Queue\n- [ ] test/repo#50 — Epic (epic)\n  ### Batch 1 — Model\n  - [x] test/repo#108 — A\n  - [ ] test/repo#109 — B ← active\n  ### Batch 2 — Logic\n  - [ ] test/repo#110 — C\n\n## Session State\nCurrent: #109 — B\nStarted: 2026-08-04\n"
         plan_file, meta = self._setup(tmp_path, plan)
         result = plan_manager.advance(plan_file)
         assert result.batch_complete is True
@@ -387,7 +387,7 @@ class TestAdvance:
         design = tmp_path / "design"
         design.mkdir()
         plan_file = design / ".plan"
-        plan_file.write_text("# Work Plan — test\n\n## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n")
+        plan_file.write_text("# Work Plan — test\n\n## Queue\n- [ ] test/repo#42 — A ← active\n- [ ] test/repo#43 — B\n\n## Session State\nCurrent: #42 — A\nStarted: 2026-08-04\n")
         result = plan_manager.advance_issue(plan_file)
         assert result.completed == 42
 
@@ -435,9 +435,9 @@ class TestBuildQueue:
         """Helper: epics is a dict of issue_number -> list of child numbers (or None for leaf)."""
         def fake_detect(n, repo):
             if n in epics and epics[n] is not None:
-                children = [plan_manager.QueueItem(c, f"Child {c}") for c in epics[n]]
-                return plan_manager.QueueItem(n, f"Epic {n}", is_epic=True, children=children)
-            return plan_manager.QueueItem(n, f"Issue {n}")
+                children = [plan_manager.QueueItem(c, f"Child {c}", repo=repo) for c in epics[n]]
+                return plan_manager.QueueItem(n, f"Epic {n}", is_epic=True, children=children, repo=repo)
+            return plan_manager.QueueItem(n, f"Issue {n}", repo=repo)
         return fake_detect
 
     def test_flat_list(self):
@@ -457,11 +457,11 @@ class TestBuildQueue:
         def cyclic_detect(n, repo):
             if n == 50:
                 return plan_manager.QueueItem(50, "Epic 50", is_epic=True,
-                    children=[plan_manager.QueueItem(99, "Child 99")])
+                    children=[plan_manager.QueueItem(99, "Child 99", repo=repo)], repo=repo)
             if n == 99:
                 return plan_manager.QueueItem(99, "Epic 99", is_epic=True,
-                    children=[plan_manager.QueueItem(50, "Cycle back")])
-            return plan_manager.QueueItem(n, f"Issue {n}")
+                    children=[plan_manager.QueueItem(50, "Cycle back", repo=repo)], repo=repo)
+            return plan_manager.QueueItem(n, f"Issue {n}", repo=repo)
 
         with unittest.mock.patch.object(plan_manager, 'detect_epic', side_effect=cyclic_detect):
             queue = plan_manager.build_queue([50], "Org/repo")
@@ -723,11 +723,11 @@ class TestCreateMainPlan:
             {"number": 170, "title": "pre-merge hook"},
             {"number": 95, "title": "mechanize LLM ops"},
         ]
-        plan_path = plan_manager.create_main_plan(workspace, items, "soredium")
+        plan_path = plan_manager.create_main_plan(workspace, items, "soredium", issue_repo="test/repo")
         assert plan_path.exists()
         content = plan_path.read_text()
-        assert "#170" in content
-        assert "#95" in content
+        assert "test/repo#170" in content
+        assert "test/repo#95" in content
         assert "← active" in content
         assert "Work Plan — soredium" in content
 
@@ -738,7 +738,7 @@ class TestCreateMainPlan:
             {"number": 10, "title": "first"},
             {"number": 20, "title": "second"},
         ]
-        plan_manager.create_main_plan(workspace, items, "test")
+        plan_manager.create_main_plan(workspace, items, "test", issue_repo="test/repo")
         tree = plan_manager.parse_plan(workspace / ".plan")
         leaves = plan_manager.flatten_leaves(tree)
         assert leaves[0].active is True
@@ -748,7 +748,7 @@ class TestCreateMainPlan:
         workspace = tmp_path / "wksp"
         workspace.mkdir()
         items = [{"number": 42, "title": "some issue"}]
-        plan_manager.create_main_plan(workspace, items, "test")
+        plan_manager.create_main_plan(workspace, items, "test", issue_repo="test/repo")
         result = plan_manager.detect(workspace)
         assert result is not None
         assert result["active_issue"] == 42
@@ -757,7 +757,7 @@ class TestCreateMainPlan:
         workspace = tmp_path / "wksp"
         workspace.mkdir()
         items = [{"number": 1, "title": "test"}]
-        plan_manager.create_main_plan(workspace, items)
+        plan_manager.create_main_plan(workspace, items, issue_repo="test/repo")
         assert (workspace / ".plan").exists()
 
 
@@ -768,25 +768,24 @@ class TestCreateMainPlan:
 PLAN_WITH_DEFERRED = """\
 # Work Plan — issue-95-mechanize
 
+## State
+issue-repo: test/repo
+
 ## Queue
-- [x] #95 — Mechanize inline operations
-- [ ] #83 — Delegate handover subagents ← active
+- [x] test/repo#95 — Mechanize inline operations
+- [ ] test/repo#83 — Delegate handover subagents ← active
 
 ## Deferred
 - [ ] Extract push retry logic (S / Low) [soredium]
 - [ ] Add restore-slot command (M / Med) [soredium]
 - [ ] Fix portal resolutions in blocks-ui (S / Low) [blocks-ui]
-
-## Session State
-Current: #83 — Delegate handover subagents
-Started: 2026-08-06
 """
 
 PLAN_NO_DEFERRED = """\
 # Work Plan — issue-42-fix
 
 ## Queue
-- [ ] #42 — Fix login ← active
+- [ ] test/repo#42 — Fix login ← active
 
 ## Session State
 Current: #42 — Fix login
@@ -814,7 +813,7 @@ class TestDeferredParsing:
     def test_deferred_with_multiple_repos(self, tmp_path):
         plan = tmp_path / ".plan"
         plan.write_text(
-            "# Work Plan — test\n\n## Queue\n- [ ] #1 — Work ← active\n\n"
+            "# Work Plan — test\n\n## Queue\n- [ ] test/repo#1 — Work ← active\n\n"
             "## Deferred\n- [ ] Cross-repo fix (M / High) [engine, iot]\n\n"
             "## Session State\nCurrent: #1 — Work\nStarted: 2026-08-06\n"
         )
@@ -911,8 +910,8 @@ class TestAdvanceWithDeferred:
     def test_advance_signals_deferred_when_queue_done(self, tmp_path):
         plan = tmp_path / ".plan"
         plan.write_text(
-            "# Work Plan — test\n\n## Queue\n- [x] #1 — First\n"
-            "- [ ] #2 — Last ← active\n\n"
+            "# Work Plan — test\n\n## Queue\n- [x] test/repo#1 — First\n"
+            "- [ ] test/repo#2 — Last ← active\n\n"
             "## Deferred\n- [ ] Follow-up (S / Low) [soredium]\n\n"
             "## Session State\nCurrent: #2 — Last\nStarted: 2026-08-06\n"
         )
@@ -926,7 +925,7 @@ class TestAdvanceWithDeferred:
         plan = tmp_path / ".plan"
         plan.write_text(
             "# Work Plan — test\n\n## Queue\n"
-            "- [ ] #1 — First ← active\n- [ ] #2 — Second\n\n"
+            "- [ ] test/repo#1 — First ← active\n- [ ] test/repo#2 — Second\n\n"
             "## Deferred\n- [ ] Follow-up (S / Low) [soredium]\n\n"
             "## Session State\nCurrent: #1 — First\nStarted: 2026-08-06\n"
         )
@@ -941,7 +940,7 @@ class TestDeferredReason:
     def test_parses_reason(self, tmp_path):
         plan = tmp_path / ".plan"
         plan.write_text(
-            "# Work Plan — test\n\n## Queue\n- [ ] #1 — Work ← active\n\n"
+            "# Work Plan — test\n\n## Queue\n- [ ] test/repo#1 — Work ← active\n\n"
             "## Deferred\n"
             "- [ ] Schema migration (M / High) [engine] — blocked by #55 upstream release\n"
             "- [ ] Quick cleanup (XS / Low) [soredium]\n\n"
@@ -955,7 +954,7 @@ class TestDeferredReason:
     def test_reason_survives_roundtrip(self, tmp_path):
         plan = tmp_path / ".plan"
         plan.write_text(
-            "# Work Plan — test\n\n## Queue\n- [ ] #1 — Work ← active\n\n"
+            "# Work Plan — test\n\n## Queue\n- [ ] test/repo#1 — Work ← active\n\n"
             "## Deferred\n"
             "- [ ] Schema migration (M / High) [engine] — needs API v2 first\n\n"
             "## Session State\nCurrent: #1 — Work\nStarted: 2026-08-06\n"
@@ -1029,11 +1028,10 @@ class TestPromoteSelected:
     def test_issue_numbers_dont_collide(self, tmp_path):
         plan = tmp_path / ".plan"
         plan.write_text(
-            "# Work Plan — test\n\n## Queue\n"
-            "- [x] #9000 — Previously promoted\n"
-            "- [x] #9001 — Also promoted\n\n"
-            "## Deferred\n- [ ] New item (S / Low) [soredium]\n\n"
-            "## Session State\nCurrent: none\nStarted: 2026-08-06\n"
+            "# Work Plan — test\n\n## State\nissue-repo: test/repo\n\n## Queue\n"
+            "- [x] test/repo#9000 — Previously promoted\n"
+            "- [x] test/repo#9001 — Also promoted\n\n"
+            "## Deferred\n- [ ] New item (S / Low) [soredium]\n"
         )
         promoted = plan_manager.promote_selected(plan, [0])
         tree = plan_manager.parse_plan(plan)
@@ -1083,7 +1081,7 @@ class TestStateSectionParsing:
 class TestStateSectionWriting:
     def test_build_plan_content_with_state(self):
         state = {"branch": "issue-42", "state": "active", "date": "2026-08-14", "covers": "42"}
-        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True)]
+        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True, repo="test/repo")]
         content = plan_manager.build_plan_content("issue-42", items, "2026-08-14", state=state)
         assert "## State" in content
         assert "branch: issue-42" in content
@@ -1092,14 +1090,14 @@ class TestStateSectionWriting:
         assert "← active" in content
 
     def test_build_plan_content_without_state(self):
-        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True)]
+        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True, repo="test/repo")]
         content = plan_manager.build_plan_content("issue-42", items, "2026-08-14")
         assert "## State" not in content
         assert "## Queue" in content
 
     def test_roundtrip_preserves_state(self, tmp_path):
         state = {"branch": "issue-42", "state": "active", "date": "2026-08-14", "covers": "42"}
-        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True)]
+        items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True, repo="test/repo")]
         content = plan_manager.build_plan_content("issue-42", items, "2026-08-14", state=state)
         plan_file = tmp_path / ".plan"
         plan_file.write_text(content)
@@ -1152,14 +1150,14 @@ PLAN_WITH_TASKS = """\
 # Work Plan — issue-242-merge-slot
 
 ## Queue
-- [x] #240 — Previous work
-- [ ] #242 — Merge slot workspace ← active
+- [x] test/repo#240 — Previous work
+- [ ] test/repo#242 — Merge slot workspace ← active
   - [ ] Batch 1: Detection
     - [ ] Task 1: Add is_workspace_clone
     - [ ] Task 2: Update get_slot_repos
   - [ ] Batch 2: Integration
     - [ ] Task 3: Change merge_slot
-- [ ] #243 — Reconciliation
+- [ ] test/repo#243 — Reconciliation
 
 ## Session State
 Current: #242 — Merge slot workspace
@@ -1269,7 +1267,7 @@ class TestCheckTask:
 
     def test_error_on_no_active_issue(self, tmp_path):
         plan = tmp_path / ".plan"
-        plan.write_text("# Work Plan — test\n\n## Queue\n- [x] #42 — Done\n")
+        plan.write_text("# Work Plan — test\n\n## Queue\n- [x] test/repo#42 — Done\n")
         result = plan_manager.check_task(plan, "Some task")
         assert "error" in result
 

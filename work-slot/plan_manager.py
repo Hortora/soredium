@@ -30,6 +30,7 @@ class QueueItem:
     children: list['QueueItem'] = field(default_factory=list)
     batch: str | None = None
     tasks: list[TaskItem] = field(default_factory=list)
+    repo: str = ""
 
 
 @dataclass
@@ -61,6 +62,7 @@ class LeafItem:
     active: bool
     parent_epic: int | None
     batch: str | None
+    repo: str = ""
 
 
 @dataclass
@@ -75,7 +77,7 @@ class AdvanceResult:
 
 
 _ITEM_RE = re.compile(
-    r'^(\s*)- \[([ x])\] #(\d+)\s*—\s*(.+?)(?:\s*\(epic\))?(?:\s*←\s*active)?$'
+    r'^(\s*)- \[([ x])\] (?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)\s*—\s*(.+?)(?:\s*\(epic\))?(?:\s*←\s*active)?$'
 )
 _EPIC_MARKER_RE = re.compile(r'\(epic\)')
 _ACTIVE_MARKER_RE = re.compile(r'←\s*active')
@@ -85,7 +87,7 @@ _DEFERRED_RE = re.compile(
 )
 _TASK_BATCH_RE = re.compile(r'^\s*- \[([ x])\]\s*Batch\s+\d+:\s*(.+)')
 _TASK_ITEM_RE = re.compile(r'^\s*- \[([ x])\]\s*Task\s+\d+:\s*(.+)')
-_CURRENT_RE = re.compile(r'^Current:\s*#(\d+)')
+_CURRENT_RE = re.compile(r'^Current:\s*(?:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#(\d+)')
 _STARTED_RE = re.compile(r'^Started:\s*(.+)')
 _LAST_WRAP_RE = re.compile(r'^Last wrap:\s*(.+)')
 
@@ -137,6 +139,14 @@ def _emit_issue_events(plan_path: Path, repo_path: str,
 
 def _indent_level(line: str) -> int:
     return len(line) - len(line.lstrip())
+
+
+def _backfill_repo(items: list[QueueItem], default_repo: str) -> None:
+    for item in items:
+        if not item.repo:
+            item.repo = default_repo
+        if item.children:
+            _backfill_repo(item.children, default_repo)
 
 
 def parse_plan(plan_path: Path) -> PlanTree:
@@ -216,6 +226,10 @@ def parse_plan(plan_path: Path) -> PlanTree:
     queue = _parse_queue_lines(queue_lines)
     deferred = _parse_deferred_lines(deferred_lines)
 
+    default_repo = state_dict.get("issue-repo", "")
+    if default_repo:
+        _backfill_repo(queue, default_repo)
+
     if state_dict and not started:
         started = state_dict.get("date", "")
     if state_dict and not last_wrap:
@@ -248,8 +262,9 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
         if item_m:
             indent = len(item_m.group(1))
             completed = item_m.group(2) == "x"
-            issue_num = int(item_m.group(3))
-            title_raw = item_m.group(4).strip()
+            repo = item_m.group(3) or ""
+            issue_num = int(item_m.group(4))
+            title_raw = item_m.group(5).strip()
             title = _EPIC_MARKER_RE.sub("", title_raw).strip()
             title = _ACTIVE_MARKER_RE.sub("", title).strip()
             is_epic = bool(_EPIC_MARKER_RE.search(item_m.group(0)))
@@ -262,6 +277,7 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
                 active=active,
                 is_epic=is_epic,
                 batch=current_batch,
+                repo=repo,
             )
 
             if is_epic:
@@ -358,6 +374,7 @@ def _flatten_items(items: list[QueueItem], result: list[LeafItem],
                 active=item.active,
                 parent_epic=parent_epic,
                 batch=item.batch,
+                repo=item.repo,
             ))
 
 
@@ -409,7 +426,8 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
         lines.append("## Session State")
         active_leaf = _find_active_leaf(items)
         if active_leaf:
-            lines.append(f"Current: #{active_leaf.issue_number} — {active_leaf.title}")
+            ref = f"{active_leaf.repo}#{active_leaf.issue_number}" if active_leaf.repo else f"#{active_leaf.issue_number}"
+            lines.append(f"Current: {ref} — {active_leaf.title}")
         else:
             lines.append("Current: none")
         lines.append(f"Started: {date}")
@@ -421,11 +439,16 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
 
 
 def _write_item(item: QueueItem, lines: list[str], indent: int) -> None:
+    if not item.repo:
+        raise ValueError(
+            f"QueueItem #{item.issue_number} has no repo — "
+            f"every issue reference must be repo-qualified (owner/repo#N)"
+        )
     prefix = "  " * indent
     check = "x" if item.completed else " "
     epic_marker = " (epic)" if item.is_epic else ""
     active_marker = " ← active" if item.active else ""
-    lines.append(f"{prefix}- [{check}] #{item.issue_number} — {item.title}{epic_marker}{active_marker}")
+    lines.append(f"{prefix}- [{check}] {item.repo}#{item.issue_number} — {item.title}{epic_marker}{active_marker}")
 
     if item.is_epic and item.children:
         current_batch = None
@@ -627,10 +650,11 @@ def check_task(plan_path: Path, task_name: str) -> dict:
 
 
 def create_main_plan(workspace_path: Path, items: list[dict],
-                     project_name: str = "project") -> Path:
+                     project_name: str = "project",
+                     issue_repo: str = "") -> Path:
     """Create a main .plan on workspace main with the given issues.
 
-    items: list of {"number": int, "title": str}
+    items: list of {"number": int, "title": str, "repo": str (optional)}
     Returns path to created .plan file.
     """
     from datetime import date
@@ -641,6 +665,7 @@ def create_main_plan(workspace_path: Path, items: list[dict],
             issue_number=item["number"],
             title=item["title"],
             active=(i == 0),
+            repo=item.get("repo", issue_repo),
         ))
     content = build_plan_content(project_name, queue_items, str(date.today()))
     plan_path.write_text(content)
@@ -708,10 +733,12 @@ def promote_deferred(plan_path: Path,
     for existing in tree.queue:
         if existing.issue_number >= next_issue_num:
             next_issue_num = existing.issue_number + 1
+    issue_repo = tree.state.get("issue-repo", "") if tree.state else ""
     for d in to_promote:
         tree.queue.append(QueueItem(
             issue_number=next_issue_num,
             title=d.title,
+            repo=issue_repo,
         ))
         next_issue_num += 1
 
@@ -744,10 +771,12 @@ def promote_selected(plan_path: Path,
     for existing in tree.queue:
         if existing.issue_number >= next_issue_num:
             next_issue_num = existing.issue_number + 1
+    issue_repo = tree.state.get("issue-repo", "") if tree.state else ""
     for d in to_promote:
         tree.queue.append(QueueItem(
             issue_number=next_issue_num,
             title=d.title,
+            repo=issue_repo,
         ))
         next_issue_num += 1
 
@@ -850,11 +879,11 @@ def detect_epic(issue_number: int, issue_repo: str) -> QueueItem:
                 if not checked:
                     if not child_title:
                         child_title = _gh_issue_title(child_num, issue_repo)
-                    children.append(QueueItem(child_num, child_title))
+                    children.append(QueueItem(child_num, child_title, repo=issue_repo))
 
     if children:
-        return QueueItem(issue_number, title, is_epic=True, children=children)
-    return QueueItem(issue_number, title)
+        return QueueItem(issue_number, title, is_epic=True, children=children, repo=issue_repo)
+    return QueueItem(issue_number, title, repo=issue_repo)
 
 
 def build_queue(issue_numbers: list[int], issue_repo: str,
@@ -1031,17 +1060,24 @@ def main() -> int:
             entry = entry.strip()
             if ":" not in entry:
                 continue
-            num, title = entry.split(":", 1)
+            ref, title = entry.split(":", 1)
+            ref = ref.strip()
+            m = re.match(r'^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$', ref)
+            if not m:
+                print(f"ERROR=bare issue number '{ref}' — use owner/repo#N format",
+                      file=_sys.stderr)
+                return 1
             items.append(QueueItem(
-                issue_number=int(num.strip()),
+                issue_number=int(m.group(2)),
                 title=title.strip(),
+                repo=m.group(1),
             ))
         if not items:
             print("ERROR=no valid items parsed", file=_sys.stderr)
             return 1
         append_to_queue(plan_path, items)
         for item in items:
-            print(f"APPENDED=#{item.issue_number} — {item.title}")
+            print(f"APPENDED={item.repo}#{item.issue_number} — {item.title}")
         print(f"APPENDED_COUNT={len(items)}")
         return 0
 

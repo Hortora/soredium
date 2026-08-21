@@ -135,7 +135,7 @@ def _build_epic_plan(branch: str, issue_repo: str, cover_list: list[str],
             "--json", "title", "--jq", ".title",
         ])
         title = title_out.strip() if rc == 0 and title_out.strip() else f"Issue #{num}"
-        items.append(QueueItem(issue_number=num, title=title))
+        items.append(QueueItem(issue_number=num, title=title, repo=issue_repo))
     if not items:
         return None
     items[0].active = True
