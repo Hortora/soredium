@@ -13,6 +13,7 @@ Subcommands:
   check-cross-deps <family-root> slot=<N>
   sync-isx [<slot-dir>] [slot=<N>]
   migrate-remotes <family-root>
+  repair-claude-projects <family-root>
 
 Note: remove-slot always archives to slots/attic/. --force skips the .landed check.
 
@@ -1301,7 +1302,12 @@ def _claude_project_matches(proj_name: str, slot_path_encoded: str) -> bool:
 
 
 def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
-    """Move .claude/projects/ directories to match the slot's new attic path."""
+    """Move .claude/projects/ directories to match the slot's new attic path.
+
+    Leaves a forwarding symlink at the old location so the active Claude Code
+    session's subsequent writes land at the relocated path instead of recreating
+    the directory at the old name.
+    """
     claude_projects = Path.home() / ".claude" / "projects"
     if not claude_projects.is_dir():
         return 0
@@ -1310,16 +1316,74 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
     dest_path_encoded = str(dest_dir.resolve()).replace("/", "-")
     moved = 0
 
-    for proj_dir in claude_projects.iterdir():
-        if not proj_dir.is_dir():
+    for proj_dir in list(claude_projects.iterdir()):
+        if not proj_dir.is_dir() or proj_dir.is_symlink():
             continue
         if _claude_project_matches(proj_dir.name, slot_path_encoded):
             new_name = proj_dir.name.replace(slot_path_encoded, dest_path_encoded, 1)
             new_path = claude_projects / new_name
+            if new_path.is_symlink():
+                new_path.unlink()
             if not new_path.exists():
                 shutil.move(str(proj_dir), str(new_path))
+                try:
+                    proj_dir.symlink_to(new_path)
+                except OSError:
+                    pass
                 moved += 1
     return moved
+
+
+def repair_claude_projects(family_root: Path) -> int:
+    """Scan archived slots and merge orphaned project dirs left by active sessions.
+
+    When a slot is archived during an active Claude Code session, the session
+    may recreate the project dir at the old (pre-archive) path after the move.
+    This function finds those orphans and merges their content into the correct
+    attic-keyed project dir, then replaces the orphan with a forwarding symlink.
+    """
+    claude_projects = Path.home() / ".claude" / "projects"
+    if not claude_projects.is_dir():
+        return 0
+
+    repaired = 0
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        attic_dir = family_root / dir_name / "attic"
+        if not attic_dir.is_dir():
+            continue
+        for slot_entry in sorted(attic_dir.iterdir()):
+            if not slot_entry.is_dir() or not slot_entry.name.isdigit():
+                continue
+            slot_num = slot_entry.name
+            old_slot_path = family_root / dir_name / slot_num
+            old_encoded = str(old_slot_path.resolve()).replace("/", "-")
+            attic_encoded = str(slot_entry.resolve()).replace("/", "-")
+
+            for proj_dir in list(claude_projects.iterdir()):
+                if proj_dir.is_symlink() or not proj_dir.is_dir():
+                    continue
+                if not _claude_project_matches(proj_dir.name, old_encoded):
+                    continue
+                new_name = proj_dir.name.replace(old_encoded, attic_encoded, 1)
+                new_path = claude_projects / new_name
+                if new_path.is_symlink():
+                    new_path = new_path.resolve()
+                if new_path.is_dir():
+                    for item in sorted(proj_dir.iterdir()):
+                        target = new_path / item.name
+                        if not target.exists():
+                            shutil.move(str(item), str(target))
+                    shutil.rmtree(str(proj_dir), ignore_errors=True)
+                else:
+                    shutil.move(str(proj_dir), str(new_path))
+                try:
+                    if not proj_dir.exists():
+                        proj_dir.symlink_to(new_path)
+                except OSError:
+                    pass
+                repaired += 1
+                print(f"REPAIRED={proj_dir.name} -> {new_path.name}")
+    return repaired
 
 
 def remove_claude_projects(slot_dir: Path) -> int:
@@ -1968,6 +2032,11 @@ def main() -> None:
         family_root = Path(args.get("target", "."))
         count = migrate_remotes(family_root)
         print(f"COUNT={count}")
+
+    elif subcommand == "repair-claude-projects":
+        family_root = Path(args.get("target", "."))
+        count = repair_claude_projects(family_root)
+        print(f"REPAIRED_COUNT={count}")
 
     elif subcommand == "sync-isx":
         target = args.get("target", "")
