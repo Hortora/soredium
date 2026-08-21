@@ -290,11 +290,12 @@ def check_plan_state(project, workspace, owner_repo=None):
     if not open_issues:
         return "CHECK=plan_state STATUS=ok"
 
-    issue_numbers = [l.issue_number for l in open_issues]
+    issue_repo = tree.state.get("issue-repo", "") if tree.state else ""
+    resolve_repo = issue_repo or owner_repo
 
     try:
         result = subprocess.run(
-            ["gh", "issue", "list", "--repo", owner_repo, "--state", "all",
+            ["gh", "issue", "list", "--repo", resolve_repo, "--state", "all",
              "--json", "number,state,title", "--limit", "500"],
             capture_output=True, text=True, timeout=15,
         )
@@ -306,27 +307,41 @@ def check_plan_state(project, workspace, owner_repo=None):
         return "CHECK=plan_state STATUS=skip DETAIL=GitHub API unavailable"
 
     changed = []
-    unmatched = []
-    for num in issue_numbers:
-        if num in issues:
-            if issues[num]["state"] == "CLOSED":
-                mark_completed(plan_path, num)
-                changed.append(f"#{num} now CLOSED")
-        else:
-            unmatched.append(num)
-
-    for num in unmatched:
-        try:
-            result = subprocess.run(
-                ["gh", "issue", "view", str(num), "--repo", owner_repo,
-                 "--json", "state", "--jq", ".state"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0 and result.stdout.strip() == "CLOSED":
-                mark_completed(plan_path, num)
-                changed.append(f"#{num} now CLOSED")
-        except subprocess.TimeoutExpired:
-            pass
+    for leaf in open_issues:
+        num = leaf.issue_number
+        gh = issues.get(num)
+        if gh and gh["state"] == "CLOSED":
+            if leaf.title and gh.get("title"):
+                plan_t = leaf.title.lower()
+                gh_t = gh["title"].lower()
+                if plan_t not in gh_t and gh_t not in plan_t:
+                    continue
+            mark_completed(plan_path, num)
+            changed.append(f"#{num} now CLOSED")
+        elif not gh:
+            try:
+                result = subprocess.run(
+                    ["gh", "issue", "view", str(num), "--repo", resolve_repo,
+                     "--json", "state,title",
+                     "--jq", "[.state, .title] | @tsv"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode != 0:
+                    continue
+                parts = result.stdout.strip().split("\t", 1)
+                if len(parts) != 2:
+                    continue
+                gh_state, gh_title = parts
+                if gh_state == "CLOSED":
+                    if leaf.title and gh_title:
+                        plan_t = leaf.title.lower()
+                        gh_t = gh_title.lower()
+                        if plan_t not in gh_t and gh_t not in plan_t:
+                            continue
+                    mark_completed(plan_path, num)
+                    changed.append(f"#{num} now CLOSED")
+            except subprocess.TimeoutExpired:
+                pass
 
     if changed:
         return f"CHECK=plan_state STATUS=changed DETAIL={', '.join(changed)}"
