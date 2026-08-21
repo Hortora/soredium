@@ -7,13 +7,23 @@ Three phases:
   2. strategy — propose actions for each divergence
   3. execute  — apply approved actions (quarantine, not delete)
 
+GitHub check (--check-github):
+  Detect active slots whose GitHub issues are already closed.
+  Classify as superseded (work on main) or obsolete (never started).
+  Prompt for confirmation before archiving.
+
 Usage:
     python3 scripts/reconcile_slots.py <family-root>              # audit only
     python3 scripts/reconcile_slots.py <family-root> --strategy   # audit + strategy
     python3 scripts/reconcile_slots.py <family-root> --execute    # audit + strategy + execute
+    python3 scripts/reconcile_slots.py <family-root> --check-github          # detect + classify
+    python3 scripts/reconcile_slots.py <family-root> --check-github --execute  # detect + archive
 """
 
+import json
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -311,6 +321,168 @@ def execute(actions: list[dict], family_root: Path) -> list[dict]:
     return results
 
 
+def _parse_slot_file(slot_path: Path) -> dict | None:
+    """Extract issue repo, number, branch, and primary repo dir from .slot file."""
+    slot_file = slot_path / ".slot"
+    if not slot_file.exists():
+        return None
+    text = slot_file.read_text()
+    issue_match = re.search(r"^(\S+)#(\d+)", text, re.MULTILINE)
+    if not issue_match:
+        return None
+    branch_match = re.search(r"branch:\s*(\S+)", text)
+    repos_section = re.search(r"## Repos\n(.*?)(?:\n##|\Z)", text, re.DOTALL)
+    primary_repo = None
+    if repos_section:
+        for line in repos_section.group(1).strip().splitlines():
+            line = line.strip().lstrip("- ")
+            if "(primary)" in line:
+                primary_repo = line.replace("(primary)", "").strip()
+                break
+            if primary_repo is None:
+                primary_repo = line.strip()
+    return {
+        "issue_repo": issue_match.group(1),
+        "issue_number": int(issue_match.group(2)),
+        "branch": branch_match.group(1) if branch_match else None,
+        "primary_repo": primary_repo,
+    }
+
+
+def _gh_issue_state(issue_repo: str, issue_number: int) -> str | None:
+    """Query GitHub for issue state. Returns 'OPEN', 'CLOSED', or None on error."""
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "view", str(issue_number), "--repo", issue_repo,
+             "--json", "state", "--jq", ".state"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return None
+
+
+def _classify_resolution(slot_path: Path, slot_info: dict) -> tuple[str, str]:
+    """Determine if a closed-issue slot is superseded or obsolete.
+
+    Returns (resolution, evidence) tuple.
+    """
+    repo_dir = slot_path / slot_info["primary_repo"] if slot_info["primary_repo"] else None
+    branch = slot_info["branch"]
+    issue_number = slot_info["issue_number"]
+
+    if repo_dir is None or not repo_dir.exists():
+        return "obsolete", "no primary repo directory found"
+
+    try:
+        subprocess.run(
+            ["git", "-C", str(repo_dir), "fetch", "origin"],
+            capture_output=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    branch_ahead = 0
+    if branch:
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "log", "--oneline",
+             f"origin/main..{branch}", "--"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            branch_ahead = len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_dir), "log", "--oneline",
+         "origin/main", f"--grep=#{issue_number}", "--"],
+        capture_output=True, text=True, timeout=10,
+    )
+    on_main = len(result.stdout.strip().splitlines()) if result.returncode == 0 and result.stdout.strip() else 0
+
+    if on_main > 0 and branch_ahead == 0:
+        return "superseded", f"{on_main} commit(s) on main, 0 on branch"
+    if on_main > 0 and branch_ahead > 0:
+        return "superseded", f"{on_main} commit(s) on main, {branch_ahead} stale on branch"
+    if on_main == 0 and branch_ahead == 0:
+        return "obsolete", "0 commits on main, 0 on branch — never started"
+    # Work on branch but not on main — needs investigation
+    return "needs-review", f"0 on main, {branch_ahead} on branch — unmerged work"
+
+
+def check_github(family_root: Path) -> list[dict]:
+    """Detect active slots whose GitHub issues are already closed."""
+    disk = _scan_disk(family_root)
+    db = _scan_db(str(family_root))
+    findings = []
+
+    for num in sorted(disk.keys()):
+        d = disk[num]
+        if d["location"] != "active" or not d["has_slot_file"]:
+            continue
+        db_entry = db.get(num)
+        if db_entry and db_entry["state"] not in ("active", "pending", "ready"):
+            continue
+
+        slot_path = Path(d["path"])
+        slot_info = _parse_slot_file(slot_path)
+        if slot_info is None:
+            continue
+
+        state = _gh_issue_state(slot_info["issue_repo"], slot_info["issue_number"])
+        if state != "CLOSED":
+            continue
+
+        resolution, evidence = _classify_resolution(slot_path, slot_info)
+        findings.append({
+            "slot": num,
+            "issue_repo": slot_info["issue_repo"],
+            "issue_number": slot_info["issue_number"],
+            "branch": slot_info["branch"],
+            "resolution": resolution,
+            "evidence": evidence,
+            "disk_path": d["path"],
+        })
+
+    return findings
+
+
+def execute_github_actions(findings: list[dict], family_root: Path) -> list[dict]:
+    """Archive slots with confirmed resolutions. Move to attic, update DB."""
+    results = []
+    for f in findings:
+        if f["resolution"] == "needs-review":
+            results.append({"slot": f["slot"], "action": "skip",
+                            "status": "needs-review", "detail": f["evidence"]})
+            continue
+        try:
+            if _wl:
+                conn = _wl.connect()
+                _wl.record_slot_archive(conn, f["slot"], str(family_root),
+                                        resolution=f["resolution"])
+                conn.close()
+
+            attic = family_root / "slots" / "attic"
+            attic.mkdir(parents=True, exist_ok=True)
+            dest = attic / str(f["slot"])
+            if dest.exists():
+                results.append({"slot": f["slot"], "action": "archive",
+                                "status": "skipped", "detail": "attic dest exists"})
+                continue
+            shutil.move(f["disk_path"], str(dest))
+
+            if remove_claude_projects:
+                remove_claude_projects(Path(f["disk_path"]))
+
+            results.append({"slot": f["slot"], "action": "archive",
+                            "status": "done", "resolution": f["resolution"]})
+        except Exception as e:
+            results.append({"slot": f["slot"], "action": "archive",
+                            "status": "error", "detail": str(e)})
+    return results
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -320,6 +492,9 @@ def main() -> int:
     if not family_root.is_dir():
         print(f"ERROR: {family_root} is not a directory")
         return 1
+
+    if "--check-github" in sys.argv:
+        return _main_check_github(family_root)
 
     phase = "audit"
     if "--execute" in sys.argv:
@@ -356,6 +531,71 @@ def main() -> int:
     for r in results:
         status_detail = f"  ({r['detail']})" if r.get("detail") else ""
         print(f"  SLOT {r['slot']:>3}  {r['action']}  {r['status']}{status_detail}")
+    return 0
+
+
+def _main_check_github(family_root: Path) -> int:
+    """Check GitHub issue state for active slots and prompt for archival."""
+    print("Checking GitHub issue state for active slots...\n")
+    findings = check_github(family_root)
+
+    if not findings:
+        print("All active slots have open issues — nothing to reconcile.")
+        return 0
+
+    print(f"Found {len(findings)} slot(s) with closed GitHub issues:\n")
+    for f in findings:
+        marker = "NEEDS REVIEW" if f["resolution"] == "needs-review" else f["resolution"]
+        print(f"  Slot {f['slot']:>3} | {f['issue_repo']}#{f['issue_number']} CLOSED "
+              f"| {f['evidence']} → {marker}")
+    print()
+
+    actionable = [f for f in findings if f["resolution"] != "needs-review"]
+    review_needed = [f for f in findings if f["resolution"] == "needs-review"]
+
+    if review_needed:
+        print("Slots needing manual review (not auto-archivable):")
+        for f in review_needed:
+            print(f"  Slot {f['slot']:>3} | {f['evidence']}")
+        print()
+
+    if not actionable:
+        print("No slots can be auto-archived.")
+        return 0
+
+    if "--execute" not in sys.argv:
+        print(f"{len(actionable)} slot(s) can be archived. Run with --execute to apply.")
+        return 0
+
+    print(f"Archive {len(actionable)} slot(s) with proposed resolutions? [Y/n/edit] ", end="")
+    sys.stdout.flush()
+    answer = input().strip().lower()
+
+    if answer == "edit":
+        for f in actionable:
+            print(f"\n  Slot {f['slot']} — proposed: {f['resolution']} ({f['evidence']})")
+            print(f"  Override? [superseded/obsolete/skip] (default: {f['resolution']}): ", end="")
+            sys.stdout.flush()
+            override = input().strip().lower()
+            if override == "skip":
+                f["resolution"] = "needs-review"
+            elif override in ("superseded", "obsolete"):
+                f["resolution"] = override
+        actionable = [f for f in actionable if f["resolution"] != "needs-review"]
+        if not actionable:
+            print("\nAll slots skipped.")
+            return 0
+        print()
+
+    if answer == "n":
+        print("Aborted.")
+        return 0
+
+    results = execute_github_actions(actionable, family_root)
+    print(f"\nARCHIVED: {len(results)} action(s)\n")
+    for r in results:
+        detail = f"  ({r.get('detail', r.get('resolution', ''))})"
+        print(f"  Slot {r['slot']:>3}  {r['status']}{detail}")
     return 0
 
 

@@ -1,7 +1,9 @@
 """Tests for scripts/reconcile_slots.py — three-phase reconciliation."""
 
+import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -190,3 +192,161 @@ class TestExecute:
             "SELECT state FROM slots WHERE slot_number=1 AND family_root=?", (norm,)
         ).fetchone()
         assert row["state"] == "archived"
+
+
+class TestParseSlotFile:
+    def test_parses_standard_slot(self, tmp_path):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text(
+            "# Slot 124 — issue-139-eidos-annotations\n\n"
+            "## Issue\ncasehubio/eidos#139\nCovers: 139\n\n"
+            "## Repos\n- eidos (primary)\n\n"
+            "## Created\n2026-08-15, branch: issue-139-eidos-annotations\n"
+        )
+        result = reconcile_slots._parse_slot_file(slot_dir)
+        assert result["issue_repo"] == "casehubio/eidos"
+        assert result["issue_number"] == 139
+        assert result["branch"] == "issue-139-eidos-annotations"
+        assert result["primary_repo"] == "eidos"
+
+    def test_parses_multi_repo_slot(self, tmp_path):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text(
+            "# Slot 118\n\n## Issue\ncasehubio/engine#110\nCovers: 110,114\n\n"
+            "## Repos\n- engine (primary)\n- blocks\n\n"
+            "## Created\n2026-08-12, branch: issue-110-goal-decomposition\n"
+        )
+        result = reconcile_slots._parse_slot_file(slot_dir)
+        assert result["issue_repo"] == "casehubio/engine"
+        assert result["issue_number"] == 110
+        assert result["primary_repo"] == "engine"
+
+    def test_returns_none_without_slot_file(self, tmp_path):
+        assert reconcile_slots._parse_slot_file(tmp_path) is None
+
+    def test_returns_none_without_issue(self, tmp_path):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("# Slot 1\nno issue here\n")
+        assert reconcile_slots._parse_slot_file(slot_dir) is None
+
+
+class TestCheckGitHub:
+    def _make_slot(self, family, num, issue_repo, issue_num, branch="main"):
+        slot_dir = family / "slots" / str(num)
+        slot_dir.mkdir(parents=True, exist_ok=True)
+        (slot_dir / ".slot").write_text(
+            f"# Slot {num}\n\n## Issue\n{issue_repo}#{issue_num}\n\n"
+            f"## Repos\n- engine (primary)\n\n"
+            f"## Created\n2026-01-01, branch: {branch}\n"
+        )
+        return slot_dir
+
+    def test_detects_closed_issue(self, tmp_path, db):
+        family = tmp_path / "family"
+        self._make_slot(family, 1, "org/repo", 42, "issue-42")
+        norm = worklog._norm(str(family))
+        db.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (1, ?, 'active', '2026-01-01')", (norm,),
+        )
+        db.commit()
+
+        def mock_run(cmd, **kwargs):
+            if "gh" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="CLOSED\n", stderr="")
+            if "fetch" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if "log" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=mock_run):
+            findings = reconcile_slots.check_github(family)
+
+        assert len(findings) == 1
+        assert findings[0]["slot"] == 1
+        assert findings[0]["resolution"] == "obsolete"
+
+    def test_skips_open_issue(self, tmp_path, db):
+        family = tmp_path / "family"
+        self._make_slot(family, 1, "org/repo", 42, "issue-42")
+        norm = worklog._norm(str(family))
+        db.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (1, ?, 'active', '2026-01-01')", (norm,),
+        )
+        db.commit()
+
+        def mock_run(cmd, **kwargs):
+            if "gh" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="OPEN\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=mock_run):
+            findings = reconcile_slots.check_github(family)
+
+        assert len(findings) == 0
+
+    def test_skips_already_archived(self, tmp_path, db):
+        family = tmp_path / "family"
+        self._make_slot(family, 1, "org/repo", 42, "issue-42")
+        norm = worklog._norm(str(family))
+        db.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at, archived_at) "
+            "VALUES (1, ?, 'archived', '2026-01-01', '2026-01-02')", (norm,),
+        )
+        db.commit()
+
+        def mock_run(cmd, **kwargs):
+            if "gh" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="CLOSED\n", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=mock_run):
+            findings = reconcile_slots.check_github(family)
+
+        assert len(findings) == 0
+
+
+class TestExecuteGitHubActions:
+    def test_archives_superseded_slot(self, tmp_path, db):
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "10"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot 10\n")
+        norm = worklog._norm(str(family))
+        worklog.ensure_repo(db, "/repo/engine", family_root=str(family))
+        worklog.record_slot_create(db, 10, str(family), ["/repo/engine"],
+                                   "issue-42", 42, "org/engine")
+
+        findings = [{
+            "slot": 10, "issue_repo": "org/engine", "issue_number": 42,
+            "branch": "issue-42", "resolution": "superseded",
+            "evidence": "1 commit on main", "disk_path": str(slot_dir),
+        }]
+        results = reconcile_slots.execute_github_actions(findings, family)
+
+        assert results[0]["status"] == "done"
+        assert results[0]["resolution"] == "superseded"
+        assert not slot_dir.exists()
+        assert (family / "slots" / "attic" / "10").exists()
+
+        row = db.execute(
+            "SELECT state, resolution FROM slots WHERE slot_number=10 AND family_root=?",
+            (norm,),
+        ).fetchone()
+        assert row["state"] == "archived"
+        assert row["resolution"] == "superseded"
+
+    def test_skips_needs_review(self, tmp_path, db):
+        family = tmp_path / "family"
+        findings = [{
+            "slot": 11, "issue_repo": "org/engine", "issue_number": 99,
+            "branch": "issue-99", "resolution": "needs-review",
+            "evidence": "unmerged work", "disk_path": str(family / "slots/11"),
+        }]
+        results = reconcile_slots.execute_github_actions(findings, family)
+        assert results[0]["status"] == "needs-review"
