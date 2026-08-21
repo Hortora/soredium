@@ -104,7 +104,7 @@ class TestTopologyResolve:
         assert topo.layout == "single"
         assert topo.slot_dir is None
 
-    def test_worktree_resolves_symlinks_from_main(self, tmp_path):
+    def test_worktree_falls_back_to_main_when_no_local_wksp(self, tmp_path):
         project = init_repo(tmp_path / "project")
         workspace = init_repo(tmp_path / "workspace")
         (project / "wksp").symlink_to(workspace)
@@ -117,6 +117,37 @@ class TestTopologyResolve:
         topo = _resolve(str(wt))
         assert topo.in_worktree is True
         assert topo.workspace == workspace.resolve()
+
+    def test_worktree_uses_own_wksp_when_present(self, tmp_path):
+        project = init_repo(tmp_path / "project")
+        main_workspace = init_repo(tmp_path / "main-workspace")
+        slot_workspace = init_repo(tmp_path / "slot-workspace")
+        (project / "wksp").symlink_to(main_workspace)
+        wt = tmp_path / "wt" / "feat"
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "-C", str(project), "worktree", "add", str(wt), "-b", "feat"],
+            capture_output=True, check=True,
+        )
+        (wt / "wksp").symlink_to(slot_workspace)
+        topo = _resolve(str(wt))
+        assert topo.in_worktree is True
+        assert topo.workspace == slot_workspace.resolve()
+
+    def test_worktree_falls_back_when_local_wksp_dangling(self, tmp_path):
+        project = init_repo(tmp_path / "project")
+        main_workspace = init_repo(tmp_path / "main-workspace")
+        (project / "wksp").symlink_to(main_workspace)
+        wt = tmp_path / "wt" / "feat"
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "-C", str(project), "worktree", "add", str(wt), "-b", "feat"],
+            capture_output=True, check=True,
+        )
+        (wt / "wksp").symlink_to("/nonexistent/workspace")
+        topo = _resolve(str(wt))
+        assert topo.in_worktree is True
+        assert topo.workspace == main_workspace.resolve()
 
     def test_broken_symlink_outside_git_returns_single(self, tmp_path):
         project = init_repo(tmp_path / "project")
