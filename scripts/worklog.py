@@ -12,7 +12,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DEFAULT_DB = os.path.expanduser("~/.hortora/worklog.db")
 
@@ -116,6 +116,10 @@ CREATE INDEX IF NOT EXISTS idx_enrichment_decay ON issue_enrichment(decay);
 CREATE INDEX IF NOT EXISTS idx_enrichment_readiness ON issue_enrichment(readiness);
 """
 
+SCHEMA_V3 = """
+ALTER TABLE slots ADD COLUMN resolution TEXT;
+"""
+
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -131,6 +135,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.executescript(SCHEMA_V1)
     if current < 2:
         conn.executescript(SCHEMA_V2)
+    if current < 3:
+        conn.executescript(SCHEMA_V3)
     if current < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
@@ -440,7 +446,7 @@ def record_slot_merge(conn: sqlite3.Connection, slot_number: int,
     sid = _find_slot(conn, slot_number, family_root)
     if sid is None:
         return
-    conn.execute("UPDATE slots SET state='landed' WHERE id=?", (sid,))
+    conn.execute("UPDATE slots SET state='landed', resolution='delivered' WHERE id=?", (sid,))
     conn.execute(
         "UPDATE work_items SET state='ended', ended_at=? WHERE slot_id=?",
         (_now(), sid),
@@ -457,14 +463,26 @@ def record_slot_archive(conn: sqlite3.Connection, slot_number: int,
                         published: list[str] | None = None,
                         publish_dest: str | None = None,
                         archived_from: str | None = None,
-                        archived_to: str | None = None) -> None:
+                        archived_to: str | None = None,
+                        resolution: str | None = None) -> None:
     sid = _find_slot(conn, slot_number, family_root)
     if sid is None:
         return
-    conn.execute(
-        "UPDATE slots SET state='archived', archived_at=? WHERE id=?",
-        (_now(), sid),
-    )
+    if resolution:
+        conn.execute(
+            "UPDATE slots SET state='archived', archived_at=?, resolution=? WHERE id=?",
+            (_now(), resolution, sid),
+        )
+    else:
+        conn.execute(
+            "UPDATE slots SET state='archived', archived_at=? WHERE id=?",
+            (_now(), sid),
+        )
+    if resolution in ("superseded", "obsolete"):
+        conn.execute(
+            "UPDATE work_items SET state='ended', ended_at=? WHERE slot_id=? AND state != 'ended'",
+            (_now(), sid),
+        )
     meta: dict = {}
     if promoted:
         meta["promoted"] = promoted
@@ -476,6 +494,8 @@ def record_slot_archive(conn: sqlite3.Connection, slot_number: int,
         meta["archived_from"] = archived_from
     if archived_to:
         meta["archived_to"] = archived_to
+    if resolution:
+        meta["resolution"] = resolution
     _log_event(conn, "slot-archive", slot_id=sid,
                metadata=meta if meta else None)
     conn.commit()

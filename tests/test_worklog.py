@@ -43,7 +43,7 @@ class TestConnect:
         db = tmp_path / "worklog.db"
         conn = worklog.connect(str(db))
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 2
+        assert ver == worklog.SCHEMA_VERSION
         conn.close()
 
     def test_idempotent_connect(self, tmp_path):
@@ -52,7 +52,7 @@ class TestConnect:
         conn1.close()
         conn2 = worklog.connect(str(db))
         ver = conn2.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 2
+        assert ver == worklog.SCHEMA_VERSION
         conn2.close()
 
 
@@ -829,9 +829,15 @@ class TestV2Migration:
 
     def test_v2_schema_version(self, tmp_path):
         db = tmp_path / "worklog.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript(worklog.SCHEMA_V1)
+        conn.executescript(worklog.SCHEMA_V2)
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+        conn.close()
         conn = worklog.connect(str(db))
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 2
+        assert ver >= 2
         conn.close()
 
     def test_v1_to_v2_upgrade(self, tmp_path):
@@ -847,7 +853,7 @@ class TestV2Migration:
         conn.close()
         conn = worklog.connect(str(db))
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 2
+        assert ver == worklog.SCHEMA_VERSION
         tables = [r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         ).fetchall()]
@@ -870,4 +876,111 @@ class TestV2Migration:
         assert "idx_enrichment_decay" in indexes
         assert "idx_enrichment_readiness" in indexes
         assert "idx_trajectory_issue" in indexes
+        conn.close()
+
+
+class TestV3Migration:
+    def test_v3_schema_version(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        ver = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert ver == 3
+        conn.close()
+
+    def test_resolution_column_exists(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(slots)").fetchall()]
+        assert "resolution" in cols
+        conn.close()
+
+    def test_v2_to_v3_upgrade(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript(worklog.SCHEMA_V1)
+        conn.executescript(worklog.SCHEMA_V2)
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (1, '/family', 'archived', '2026-01-01T00:00:00Z')"
+        )
+        conn.commit()
+        conn.close()
+        conn = worklog.connect(str(db))
+        ver = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert ver == 3
+        row = conn.execute("SELECT resolution FROM slots WHERE slot_number=1").fetchone()
+        assert row["resolution"] is None
+        conn.close()
+
+    def test_archive_with_resolution_superseded(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.ensure_repo(conn, "/repo/engine", family_root="/family")
+        worklog.record_slot_create(conn, 10, "/family", ["/repo/engine"],
+                                   "issue-42-feat", 42, "org/engine")
+        worklog.record_slot_archive(conn, 10, "/family", resolution="superseded")
+        slot = conn.execute(
+            "SELECT state, resolution FROM slots WHERE slot_number=10 AND family_root=?",
+            (worklog._norm("/family"),)
+        ).fetchone()
+        assert slot["state"] == "archived"
+        assert slot["resolution"] == "superseded"
+        wi = conn.execute(
+            "SELECT state FROM work_items WHERE slot_id=?",
+            (conn.execute("SELECT id FROM slots WHERE slot_number=10 AND family_root=?",
+                          (worklog._norm("/family"),)).fetchone()["id"],)
+        ).fetchone()
+        assert wi["state"] == "ended"
+        events = conn.execute(
+            "SELECT metadata FROM events WHERE event_type='slot-archive'"
+        ).fetchall()
+        assert any('"superseded"' in (e["metadata"] or "") for e in events)
+        conn.close()
+
+    def test_archive_with_resolution_obsolete(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.ensure_repo(conn, "/repo/engine", family_root="/family")
+        worklog.record_slot_create(conn, 11, "/family", ["/repo/engine"],
+                                   "issue-99-feat", 99, "org/engine")
+        worklog.record_slot_archive(conn, 11, "/family", resolution="obsolete")
+        slot = conn.execute(
+            "SELECT state, resolution FROM slots WHERE slot_number=11 AND family_root=?",
+            (worklog._norm("/family"),)
+        ).fetchone()
+        assert slot["state"] == "archived"
+        assert slot["resolution"] == "obsolete"
+        conn.close()
+
+    def test_merge_sets_delivered_resolution(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.ensure_repo(conn, "/repo/engine", family_root="/family")
+        worklog.record_slot_create(conn, 12, "/family", ["/repo/engine"],
+                                   "issue-50-feat", 50, "org/engine")
+        worklog.record_slot_merge(conn, 12, "/family",
+                                  landed_shas={"engine": "abc123"})
+        slot = conn.execute(
+            "SELECT state, resolution FROM slots WHERE slot_number=12 AND family_root=?",
+            (worklog._norm("/family"),)
+        ).fetchone()
+        assert slot["state"] == "landed"
+        assert slot["resolution"] == "delivered"
+        conn.close()
+
+    def test_archive_without_resolution_leaves_null(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.ensure_repo(conn, "/repo/engine", family_root="/family")
+        worklog.record_slot_create(conn, 13, "/family", ["/repo/engine"],
+                                   "issue-60-feat", 60, "org/engine")
+        worklog.record_slot_merge(conn, 13, "/family")
+        worklog.record_slot_archive(conn, 13, "/family")
+        slot = conn.execute(
+            "SELECT resolution FROM slots WHERE slot_number=13 AND family_root=?",
+            (worklog._norm("/family"),)
+        ).fetchone()
+        assert slot["resolution"] == "delivered"
         conn.close()
