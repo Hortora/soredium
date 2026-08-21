@@ -14,16 +14,22 @@ LIFECYCLE = Path(__file__).parent.parent / "project" / "lifecycle.py"
 sys.path.insert(0, str(LIFECYCLE.parent))
 from lifecycle import (
     CLOSING_STATES,
+    EVIDENCE_GATES,
     RESTING_STATES,
     TRANSITION_TABLE,
     TRANSIENT_STATES,
     VALID_STATES,
     ConcurrentModification,
     CorruptedState,
+    InvalidEvidence,
     InvalidState,
     InvalidTransition,
+    MissingEvidence,
     StateError,
     TransitionResult,
+    _read_evidence_era,
+    _validate_evidence,
+    _write_evidence_era,
     can_transition,
     commit_transition,
     ClosureState,
@@ -722,30 +728,36 @@ class TestWorklogIntegration:
 
             # closing:review -> closing:verified
             result = transition(meta, "review_pass")
-            commit_transition(meta, result, repo_path=repo_path)
+            commit_transition(meta, result, repo_path=repo_path,
+                              evidence={"review_result": "passed"})
 
             # closing:verified -> closing:promoted
             result = transition(meta, "promote_pass")
-            commit_transition(meta, result, repo_path=repo_path)
+            commit_transition(meta, result, repo_path=repo_path,
+                              evidence={"promoted_files": ["blog.md"], "target_repos": ["org/repo"]})
 
             # closing:promoted -> closing:pushed
             result = transition(meta, "push_pass")
-            commit_transition(meta, result, repo_path=repo_path)
+            commit_transition(meta, result, repo_path=repo_path,
+                              evidence={"pushed_repos": {"project": True}, "pushed_shas": {"project": "abc123"}})
 
             # closing:pushed -> closing:merged
             result = transition(meta, "merge_pass")
             commit_transition(
                 meta, result, repo_path=repo_path,
                 metadata={"landed_sha": "deadbeef"},
+                evidence={"landed_shas": {"project": "deadbeef"}, "verified_on_main": {"project": True}},
             )
 
             # closing:merged -> closing:stamped
             result = transition(meta, "stamp_pass")
-            commit_transition(meta, result, repo_path=repo_path)
+            commit_transition(meta, result, repo_path=repo_path,
+                              evidence={"stamp_shas": {"project": "stamp123"}})
 
             # closing:stamped -> idle
             result = transition(meta, "cleanup_pass")
-            commit_transition(meta, result, repo_path=repo_path)
+            commit_transition(meta, result, repo_path=repo_path,
+                              evidence={"repos_on_main": {"project": True}, "work_items_ended": True})
 
             # Verify event trail
             conn = worklog.connect(db_path)
@@ -766,11 +778,13 @@ class TestWorklogIntegration:
             assert "stamp_pass" in event_types
             assert "cleanup_pass" in event_types
 
-            # Verify merge_pass has landed_sha
+            # Verify merge_pass has landed_sha and evidence
             merge_events = [e for e in events if e["event_type"] == "merge_pass"]
             assert len(merge_events) == 1
             merge_meta = json.loads(merge_events[0]["metadata"])
             assert merge_meta["landed_sha"] == "deadbeef"
+            assert merge_meta["evidence"]["landed_shas"]["project"] == "deadbeef"
+            assert merge_meta["evidence"]["verified_on_main"]["project"] is True
 
             # Verify work item ended
             row = conn.execute(
@@ -1188,3 +1202,166 @@ class TestDrainedState:
     def test_drained_worklog_mapping(self):
         from lifecycle import _LIFECYCLE_TO_WORKLOG
         assert _LIFECYCLE_TO_WORKLOG["drained"] == "idle"
+
+
+class TestEvidenceEra:
+    def test_write_and_read_evidence_era(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        assert _read_evidence_era(plan) is False
+        _write_evidence_era(plan)
+        assert _read_evidence_era(plan) is True
+
+    def test_write_evidence_era_idempotent(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        _write_evidence_era(plan)
+        content_before = plan.read_text()
+        _write_evidence_era(plan)
+        assert plan.read_text() == content_before
+
+    def test_work_end_writes_evidence_era(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        result = transition(plan, "work_end")
+        commit_transition(plan, result)
+        assert _read_evidence_era(plan) is True
+
+    def test_no_evidence_era_on_nonexistent_plan(self, tmp_path):
+        plan = tmp_path / ".plan"
+        assert _read_evidence_era(plan) is False
+
+
+class TestEvidenceValidation:
+    def test_merge_pass_valid(self):
+        evidence = {
+            "landed_shas": {"blocks": "abc123"},
+            "verified_on_main": {"blocks": True},
+        }
+        assert _validate_evidence("merge_pass", evidence) == []
+
+    def test_merge_pass_missing_key(self):
+        evidence = {"landed_shas": {"blocks": "abc123"}}
+        violations = _validate_evidence("merge_pass", evidence)
+        assert any("verified_on_main" in v for v in violations)
+
+    def test_merge_pass_not_on_main(self):
+        evidence = {
+            "landed_shas": {"blocks": "abc123"},
+            "verified_on_main": {"blocks": False},
+        }
+        violations = _validate_evidence("merge_pass", evidence)
+        assert any("blocks" in v for v in violations)
+
+    def test_cleanup_pass_valid(self):
+        evidence = {
+            "repos_on_main": {"engine": True, "blocks": True},
+            "work_items_ended": True,
+        }
+        assert _validate_evidence("cleanup_pass", evidence) == []
+
+    def test_cleanup_pass_work_items_not_ended(self):
+        evidence = {
+            "repos_on_main": {"engine": True},
+            "work_items_ended": False,
+        }
+        violations = _validate_evidence("cleanup_pass", evidence)
+        assert any("work_items_ended" in v for v in violations)
+
+    def test_cleanup_pass_repo_not_on_main(self):
+        evidence = {
+            "repos_on_main": {"engine": True, "blocks": False},
+            "work_items_ended": True,
+        }
+        violations = _validate_evidence("cleanup_pass", evidence)
+        assert any("blocks" in v for v in violations)
+
+    def test_ungated_event_returns_empty(self):
+        assert _validate_evidence("work_end", {}) == []
+
+    def test_review_pass_valid(self):
+        evidence = {"review_result": "passed"}
+        assert _validate_evidence("review_pass", evidence) == []
+
+    def test_promote_pass_valid(self):
+        evidence = {
+            "promoted_files": ["docs/blog/entry.md"],
+            "target_repos": ["blocks"],
+        }
+        assert _validate_evidence("promote_pass", evidence) == []
+
+    def test_stamp_pass_valid(self):
+        evidence = {"stamp_shas": {"blocks": "abc123"}}
+        assert _validate_evidence("stamp_pass", evidence) == []
+
+
+class TestEvidenceGating:
+    def test_gated_transition_requires_evidence_in_era(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:pushed")
+        _write_evidence_era(plan)
+        result = TransitionResult(
+            from_state="closing:pushed", new_state="closing:merged",
+            event="merge_pass",
+        )
+        with pytest.raises(MissingEvidence) as exc_info:
+            commit_transition(plan, result)
+        assert "landed_shas" in str(exc_info.value)
+        assert "verified_on_main" in str(exc_info.value)
+
+    def test_gated_transition_allows_legacy_without_evidence(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:pushed")
+        result = TransitionResult(
+            from_state="closing:pushed", new_state="closing:merged",
+            event="merge_pass",
+        )
+        commit_transition(plan, result)
+        assert read_state(plan) == "closing:merged"
+
+    def test_gated_transition_succeeds_with_valid_evidence(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:pushed")
+        _write_evidence_era(plan)
+        result = TransitionResult(
+            from_state="closing:pushed", new_state="closing:merged",
+            event="merge_pass",
+        )
+        evidence = {
+            "landed_shas": {"blocks": "abc123"},
+            "verified_on_main": {"blocks": True},
+        }
+        commit_transition(plan, result, evidence=evidence)
+        assert read_state(plan) == "closing:merged"
+
+    def test_gated_transition_rejects_invalid_evidence(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:pushed")
+        _write_evidence_era(plan)
+        result = TransitionResult(
+            from_state="closing:pushed", new_state="closing:merged",
+            event="merge_pass",
+        )
+        evidence = {
+            "landed_shas": {"blocks": "abc123"},
+            "verified_on_main": {"blocks": False},
+        }
+        with pytest.raises(InvalidEvidence) as exc_info:
+            commit_transition(plan, result, evidence=evidence)
+        assert "blocks" in str(exc_info.value)
+
+    def test_ungated_transition_ignores_evidence(self, tmp_path):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+        result = TransitionResult(
+            from_state="active", new_state="paused",
+            event="work_pause",
+        )
+        commit_transition(plan, result, evidence={"note": "test"})
+        assert read_state(plan) == "paused"
+
+    def test_all_closing_pass_events_are_gated(self):
+        pass_events = {ev for (_, ev), (ns, _, _) in TRANSITION_TABLE.items()
+                       if ev.endswith("_pass") or ev == "cleanup_main"}
+        for event in pass_events:
+            assert event in EVIDENCE_GATES, f"{event} should be gated"

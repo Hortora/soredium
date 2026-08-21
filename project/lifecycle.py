@@ -81,6 +81,26 @@ class StateError(Exception):
     pass
 
 
+class MissingEvidence(Exception):
+    def __init__(self, event: str, required_keys: list[str]):
+        self.event = event
+        self.required_keys = required_keys
+        super().__init__(
+            f"Gated transition '{event}' requires evidence with keys: "
+            f"{', '.join(required_keys)}"
+        )
+
+
+class InvalidEvidence(Exception):
+    def __init__(self, event: str, violations: list[str]):
+        self.event = event
+        self.violations = violations
+        super().__init__(
+            f"Evidence for '{event}' failed validation: "
+            f"{'; '.join(violations)}"
+        )
+
+
 # --- Transition table ---
 
 # (from_state, event): (new_state, effects, post_commit_effects)
@@ -343,13 +363,120 @@ def _emit_to_worklog(
         print(f"WARN=worklog_error detail={e}")
 
 
+# --- Evidence gating ---
+
+EVIDENCE_GATES: dict[str, list[str]] = {
+    'review_pass':   ['review_result'],
+    'promote_pass':  ['promoted_files', 'target_repos'],
+    'push_pass':     ['pushed_repos', 'pushed_shas'],
+    'merge_pass':    ['landed_shas', 'verified_on_main'],
+    'stamp_pass':    ['stamp_shas'],
+    'cleanup_pass':  ['repos_on_main', 'work_items_ended'],
+    'cleanup_main':  ['work_items_ended'],
+}
+
+
+def _validate_evidence(event: str, evidence: dict) -> list[str]:
+    """Validate evidence for a gated transition. Returns violations."""
+    violations: list[str] = []
+    required = EVIDENCE_GATES.get(event, [])
+    for key in required:
+        if key not in evidence:
+            violations.append(f"missing key: {key}")
+
+    if event == 'merge_pass' and 'verified_on_main' in evidence:
+        vom = evidence['verified_on_main']
+        if isinstance(vom, dict):
+            for repo, on_main in vom.items():
+                if not on_main:
+                    violations.append(f"{repo} not verified on main")
+
+    if event in ('cleanup_pass', 'cleanup_main'):
+        if evidence.get('work_items_ended') is not True:
+            violations.append("work_items_ended must be true")
+    if event == 'cleanup_pass' and 'repos_on_main' in evidence:
+        rom = evidence['repos_on_main']
+        if isinstance(rom, dict):
+            for repo, on_main in rom.items():
+                if not on_main:
+                    violations.append(f"{repo} not on main")
+
+    return violations
+
+
+def _read_evidence_era(plan_path: Path) -> bool:
+    """Check if the current closing sequence was started under the evidence era."""
+    if not plan_path.exists():
+        return False
+    in_state = False
+    for line in plan_path.read_text().splitlines():
+        if line.strip() == '## State':
+            in_state = True
+            continue
+        if line.startswith('## '):
+            in_state = False
+            continue
+        if in_state and line.strip() == 'evidence-era: true':
+            return True
+    return False
+
+
+def _write_evidence_era(plan_path: Path) -> None:
+    """Mark the current closing sequence as evidence-era."""
+    if not plan_path.exists():
+        return
+    content = plan_path.read_text()
+    if 'evidence-era: true' in content:
+        return
+    lines = content.splitlines()
+    in_state = False
+    insert_idx = None
+    for i, line in enumerate(lines):
+        if line.strip() == '## State':
+            in_state = True
+            continue
+        if line.startswith('## '):
+            if in_state:
+                insert_idx = i
+                break
+            in_state = False
+            continue
+        if in_state and line.startswith('state:'):
+            insert_idx = i + 1
+    if insert_idx is not None:
+        lines.insert(insert_idx, 'evidence-era: true')
+        tmp_path = plan_path.parent / '.plan.tmp'
+        tmp_path.write_text('\n'.join(lines) + '\n')
+        tmp_path.replace(plan_path)
+
+
 def commit_transition(
     plan_path: Path,
     result: TransitionResult,
     repo_path: Optional[str] = None,
     metadata: Optional[dict] = None,
+    evidence: Optional[dict] = None,
 ) -> None:
-    """Phase 2: Verify state unchanged, write atomically, emit worklog."""
+    """Phase 2: Verify state unchanged, write atomically, emit worklog.
+
+    For gated transitions (closing sequence), evidence is required when
+    the closing sequence was started under the evidence era. Old closing
+    sequences are allowed through with a warning.
+    """
+    if result.event == 'work_end':
+        _write_evidence_era(plan_path)
+
+    if result.event in EVIDENCE_GATES:
+        era = _read_evidence_era(plan_path)
+        if evidence is None and era:
+            raise MissingEvidence(result.event, EVIDENCE_GATES[result.event])
+        if evidence is None and not era:
+            print(f"WARN=legacy_closing no_evidence event={result.event}")
+        if evidence is not None:
+            violations = _validate_evidence(result.event, evidence)
+            if violations:
+                raise InvalidEvidence(result.event, violations)
+
     if result.from_state == 'idle':
         if not plan_path.exists():
             raise StateError(
@@ -369,8 +496,12 @@ def commit_transition(
         if result.new_state != 'idle':
             write_state(plan_path, result.new_state)
 
+    emit_metadata = dict(metadata) if metadata else {}
+    if evidence is not None:
+        emit_metadata['evidence'] = evidence
+
     if repo_path:
-        _emit_to_worklog(plan_path, result, repo_path, metadata)
+        _emit_to_worklog(plan_path, result, repo_path, emit_metadata or None)
 
 
 _DEFAULT_EXCLUDES = [
@@ -637,6 +768,7 @@ def main() -> int:
         new_state = opts.get("new_state", "")
         event = opts.get("event", "")
         repo_path = opts.get("repo_path")
+        evidence_json = opts.get("evidence")
         if not from_state or not new_state or not event:
             print("ERROR=MISSING_ARGS")
             print("Required: from_state=, new_state=, event=")
@@ -646,8 +778,11 @@ def main() -> int:
             new_state=new_state,
             event=event,
         )
+        import json as _json
+        evidence = _json.loads(evidence_json) if evidence_json else None
         try:
-            commit_transition(plan_path, result, repo_path=repo_path)
+            commit_transition(plan_path, result, repo_path=repo_path,
+                              evidence=evidence)
         except ConcurrentModification as e:
             print(f"ERROR=CONCURRENT_MODIFICATION")
             print(f"EXPECTED={e.expected}")
@@ -656,6 +791,16 @@ def main() -> int:
         except StateError as e:
             print(f"ERROR=STATE_ERROR")
             print(f"DETAIL={e}")
+            return 1
+        except MissingEvidence as e:
+            print(f"ERROR=MISSING_EVIDENCE")
+            print(f"EVENT={e.event}")
+            print(f"REQUIRED_KEYS={','.join(e.required_keys)}")
+            return 1
+        except InvalidEvidence as e:
+            print(f"ERROR=INVALID_EVIDENCE")
+            print(f"EVENT={e.event}")
+            print(f"VIOLATIONS={';'.join(e.violations)}")
             return 1
         print("COMMITTED=yes")
         print(f"STATE={new_state}")
