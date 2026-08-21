@@ -270,7 +270,7 @@ def check_queue_consistency(plan_path: Path, owner_repo: str) -> Optional[Findin
         return None
     content = plan_path.read_text()
     in_queue = False
-    issues: list[tuple[int, bool]] = []
+    issues: list[tuple[int, bool, str]] = []
     for line in content.splitlines():
         if line.strip() == "## Queue":
             in_queue = True
@@ -280,30 +280,49 @@ def check_queue_consistency(plan_path: Path, owner_repo: str) -> Optional[Findin
             continue
         if not in_queue:
             continue
-        m = re.match(r'\s*- \[([ x])\] #(\d+)', line)
+        m = re.match(r'\s*- \[([ x])\] #(\d+)\s*—\s*(.+?)(?:\s*←.*)?$', line)
         if m:
             completed = m.group(1) == "x"
             issue_num = int(m.group(2))
-            issues.append((issue_num, completed))
+            title = m.group(3).strip()
+            issues.append((issue_num, completed, title))
 
     if not issues:
         return None
 
     issue_repo = _read_plan_field(plan_path, "issue-repo") or owner_repo
+
+    covers_raw = _read_plan_field(plan_path, "covers") or ""
+    covers_nums = set()
+    for c in covers_raw.split(","):
+        c = c.strip()
+        if c.isdigit():
+            covers_nums.add(int(c))
+
     inconsistencies: list[str] = []
-    for num, completed in issues:
+    for num, completed, plan_title in issues:
         try:
             result = subprocess.run(
                 ["gh", "issue", "view", str(num), "--repo", issue_repo,
-                 "--json", "state", "--jq", ".state"],
+                 "--json", "state,title", "--jq", "[.state, .title] | @tsv"],
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode != 0:
                 continue
-            gh_state = result.stdout.strip()
+            parts = result.stdout.strip().split("\t", 1)
+            if len(parts) != 2:
+                continue
+            gh_state, gh_title = parts
+
+            if plan_title and gh_title and plan_title.lower() not in gh_title.lower() and gh_title.lower() not in plan_title.lower():
+                if owner_repo != issue_repo:
+                    continue
+
             if not completed and gh_state == "CLOSED":
                 inconsistencies.append(f"#{num} unchecked but CLOSED")
             elif completed and gh_state == "OPEN":
+                if num in covers_nums:
+                    continue
                 inconsistencies.append(f"#{num} checked but OPEN")
         except subprocess.TimeoutExpired:
             return None

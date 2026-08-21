@@ -266,7 +266,7 @@ class TestS8QueueConsistency:
         _write_plan(plan)
 
         def mock_run(*args, **kwargs):
-            return type('R', (), {'stdout': 'OPEN\n', 'returncode': 0})()
+            return type('R', (), {'stdout': 'OPEN\tFix foo\n', 'returncode': 0})()
 
         monkeypatch.setattr("corruption.subprocess.run", mock_run)
         assert check_queue_consistency(plan, owner_repo="Hortora/soredium") is None
@@ -277,13 +277,99 @@ class TestS8QueueConsistency:
         _write_plan(plan)
 
         def mock_run(*args, **kwargs):
-            return type('R', (), {'stdout': 'CLOSED\n', 'returncode': 0})()
+            return type('R', (), {'stdout': 'CLOSED\tFix foo\n', 'returncode': 0})()
 
         monkeypatch.setattr("corruption.subprocess.run", mock_run)
         finding = check_queue_consistency(plan, owner_repo="Hortora/soredium")
         assert finding is not None
         assert finding.scenario == "S8_QUEUE_INCONSISTENT"
         assert "sync_plan_with_github" in finding.actions
+
+    def test_cross_repo_title_mismatch_skips(self, tmp_path, monkeypatch):
+        from corruption import check_queue_consistency
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-42-foo", "state: active",
+            "date: 2026-08-20", "issue-repo: epic-org/epic-repo",
+            "covers: 42", "",
+            "## Queue",
+            "- [ ] #42 — Fix foo ← active",
+            "- [ ] #332 — Local executor base module",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        def mock_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            num = cmd[3]
+            if num == "42":
+                return type('R', (), {'stdout': 'OPEN\tFix foo\n', 'returncode': 0})()
+            if num == "332":
+                return type('R', (), {'stdout': 'CLOSED\tDocs update\n', 'returncode': 0})()
+            return type('R', (), {'stdout': '', 'returncode': 1})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        result = check_queue_consistency(plan, owner_repo="owner-org/project")
+        assert result is None
+
+    def test_covers_issue_checked_but_open_not_flagged(self, tmp_path, monkeypatch):
+        from corruption import check_queue_consistency
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-408-epic", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: 408", "",
+            "## Queue",
+            "- [x] #408 — Epic: big feature",
+            "- [ ] #409 — Subtask one",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        def mock_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            num = cmd[3]
+            if num == "408":
+                return type('R', (), {'stdout': 'OPEN\tEpic: big feature\n', 'returncode': 0})()
+            if num == "409":
+                return type('R', (), {'stdout': 'OPEN\tSubtask one\n', 'returncode': 0})()
+            return type('R', (), {'stdout': '', 'returncode': 1})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        result = check_queue_consistency(plan, owner_repo="Hortora/soredium")
+        assert result is None
+
+    def test_non_covers_checked_but_open_still_flagged(self, tmp_path, monkeypatch):
+        from corruption import check_queue_consistency
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-408-epic", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: 408", "",
+            "## Queue",
+            "- [x] #408 — Epic: big feature",
+            "- [x] #409 — Subtask one",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        def mock_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            num = cmd[3]
+            if num == "408":
+                return type('R', (), {'stdout': 'OPEN\tEpic: big feature\n', 'returncode': 0})()
+            if num == "409":
+                return type('R', (), {'stdout': 'OPEN\tSubtask one\n', 'returncode': 0})()
+            return type('R', (), {'stdout': '', 'returncode': 1})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        result = check_queue_consistency(plan, owner_repo="Hortora/soredium")
+        assert result is not None
+        assert "#409 checked but OPEN" in result.detail
+        assert "#408" not in result.detail
 
 
 class TestDiagnose:
