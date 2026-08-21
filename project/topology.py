@@ -111,7 +111,12 @@ def resolve(cwd: str | None = None) -> Topology:
     )
     main_worktree_path = Path(main_wt_root) if in_worktree and main_wt_root else None
 
-    symlink_root = main_worktree_path if in_worktree else Path(cwd_root)
+    # In a worktree, check CWD first — slot worktrees have their own wksp
+    if in_worktree:
+        cwd_wksp = Path(cwd_root) / "wksp"
+        symlink_root = Path(cwd_root) if (cwd_wksp.is_symlink() and cwd_wksp.is_dir()) else main_worktree_path
+    else:
+        symlink_root = Path(cwd_root)
     proj_symlink = symlink_root / "proj"
     wksp_symlink = symlink_root / "wksp"
 
