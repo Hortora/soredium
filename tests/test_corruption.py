@@ -372,6 +372,58 @@ class TestS8QueueConsistency:
         assert "#408" not in result.detail
 
 
+class TestS9OrphanedWksp:
+    def test_wksp_to_non_git_dir_returns_warning(self, tmp_path):
+        from corruption import check_orphaned_wksp
+        project = tmp_path / "project"
+        project.mkdir()
+        target = tmp_path / "not-a-repo"
+        target.mkdir()
+        (project / "wksp").symlink_to(target)
+        finding = check_orphaned_wksp(project)
+        assert finding is not None
+        assert finding.scenario == "S9_ORPHANED_WKSP"
+        assert finding.severity == "error"
+        assert "repoint_wksp" in finding.actions
+
+    def test_wksp_to_git_repo_returns_none(self, tmp_path):
+        from corruption import check_orphaned_wksp
+        project = tmp_path / "project"
+        project.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".git").mkdir()
+        (project / "wksp").symlink_to(workspace)
+        assert check_orphaned_wksp(project) is None
+
+    def test_wksp_to_subdir_of_git_repo_returns_none(self, tmp_path):
+        from corruption import check_orphaned_wksp
+        project = tmp_path / "project"
+        project.mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".git").mkdir()
+        subdir = workspace / "engine"
+        subdir.mkdir()
+        (project / "wksp").symlink_to(subdir)
+        assert check_orphaned_wksp(project) is None
+
+    def test_no_wksp_symlink_returns_none(self, tmp_path):
+        from corruption import check_orphaned_wksp
+        project = tmp_path / "project"
+        project.mkdir()
+        assert check_orphaned_wksp(project) is None
+
+    def test_dangling_wksp_symlink_returns_warning(self, tmp_path):
+        from corruption import check_orphaned_wksp
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "wksp").symlink_to("/nonexistent/path")
+        finding = check_orphaned_wksp(project)
+        assert finding is not None
+        assert finding.scenario == "S9_ORPHANED_WKSP"
+
+
 class TestDiagnose:
     def test_healthy_state_returns_empty(self, tmp_path, monkeypatch):
         from corruption import diagnose
@@ -394,6 +446,20 @@ class TestDiagnose:
             project=tmp_path, workspace=tmp_path,
         )
         assert findings == []
+
+    def test_orphaned_wksp_detected_without_plan(self, tmp_path):
+        from corruption import diagnose
+        project = tmp_path / "project"
+        project.mkdir()
+        target = tmp_path / "not-a-repo"
+        target.mkdir()
+        (project / "wksp").symlink_to(target)
+        findings = diagnose(
+            plan_path=None, meta_state="",
+            project=project, workspace=project,
+        )
+        assert len(findings) == 1
+        assert findings[0].scenario == "S9_ORPHANED_WKSP"
 
     def test_invalid_state_short_circuits(self, tmp_path, monkeypatch):
         from corruption import diagnose

@@ -587,6 +587,37 @@ Issue tracking: declined
         assert data["ISSUES_STATUS"] == "enabled"
 
 
+class TestWorkspaceOkCrossCheck:
+    """workspace_ok must cross-check with topology — wksp to non-git dir is not OK."""
+
+    def test_wksp_to_non_git_dir_workspace_ok_no(self, tmp_path):
+        """wksp → existing directory not in any git repo → WORKSPACE_OK=no."""
+        project = init_repo(tmp_path / "project")
+        target = tmp_path / "not-a-repo"
+        target.mkdir()
+        (project / "wksp").symlink_to(target)
+        data = parse(run_ctx(project))
+        assert data["WORKSPACE_OK"] == "no"
+
+    def test_wksp_to_git_repo_workspace_ok_yes(self, tmp_path):
+        """wksp → valid git repo → WORKSPACE_OK=yes (regression guard)."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+        data = parse(run_ctx(project))
+        assert data["WORKSPACE_OK"] == "yes"
+
+    def test_wksp_to_non_git_dir_reports_corruption(self, tmp_path):
+        """wksp → non-git dir → CORRUPTION_COUNT > 0 with S9 scenario."""
+        project = init_repo(tmp_path / "project")
+        target = tmp_path / "not-a-repo"
+        target.mkdir()
+        (project / "wksp").symlink_to(target)
+        data = parse(run_ctx(project))
+        assert int(data["CORRUPTION_COUNT"]) > 0
+        assert data.get("CORRUPTION_0") == "S9_ORPHANED_WKSP"
+
+
 class TestProjectType:
     """Test PROJECT_TYPE field extraction."""
 

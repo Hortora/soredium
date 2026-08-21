@@ -337,6 +337,37 @@ def check_queue_consistency(plan_path: Path, owner_repo: str) -> Optional[Findin
     )
 
 
+def _is_in_git_repo(path: Path) -> bool:
+    candidate = path.resolve()
+    while candidate != candidate.parent:
+        if (candidate / ".git").exists() or (candidate / ".git").is_file():
+            return True
+        candidate = candidate.parent
+    return False
+
+
+def check_orphaned_wksp(project: Path) -> Optional[Finding]:
+    wksp = project / "wksp"
+    if not wksp.is_symlink():
+        return None
+    if not wksp.exists():
+        return Finding(
+            scenario="S9_ORPHANED_WKSP",
+            severity="error",
+            detail="wksp symlink is dangling — target does not exist",
+            actions=["repoint_wksp", "remove_wksp"],
+        )
+    resolved = wksp.resolve()
+    if not _is_in_git_repo(resolved):
+        return Finding(
+            scenario="S9_ORPHANED_WKSP",
+            severity="error",
+            detail=f"wksp symlink points to {resolved} which is not inside a git repository",
+            actions=["repoint_wksp", "remove_wksp"],
+        )
+    return None
+
+
 def diagnose(
     plan_path: Optional[Path],
     meta_state: str,
@@ -347,9 +378,14 @@ def diagnose(
     on_main: bool = False,
     owner_repo: str = "",
 ) -> list[Finding]:
-    if plan_path is None or not plan_path.exists():
-        return []
     findings: list[Finding] = []
+
+    s9 = check_orphaned_wksp(project)
+    if s9:
+        findings.append(s9)
+
+    if plan_path is None or not plan_path.exists():
+        return findings
     try:
         s1 = check_missing_state(plan_path)
         if s1:

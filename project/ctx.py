@@ -138,6 +138,10 @@ def resolve(cwd=None) -> dict[str, str]:
         _main = topo.main_worktree_root
         wksp_ok = wksp_ok or ((_main / "wksp").is_symlink() and (_main / "wksp").is_dir())
         proj_ok = proj_ok or ((_main / "proj").is_symlink() and (_main / "proj").is_dir())
+    # Cross-check: if wksp symlink exists but topology fell back to single-repo,
+    # the target is not in a git repo — the symlink is broken
+    if wksp_ok and topo.layout == "single" and not (cwd_path / "proj").is_symlink():
+        wksp_ok = False
     wksp_declined = "workspace: declined" in claude_text
     workspace_ok = "yes" if (wksp_ok or proj_ok or wksp_declined) else "no"
 
