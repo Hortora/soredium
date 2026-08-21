@@ -1637,7 +1637,7 @@ DEPTH_PRESETS: Final = {
     "deep":     {"max_rounds": 5, "min_rounds": 3, "budget_per_session": 8.0},
 }
 
-REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness", "crosscutting", "decision", "final-review", "code-review", "pre-review", "spec-review")
+REVIEW_TYPES: Final = ("coherence", "structure", "robustness", "conformance", "readiness", "crosscutting", "decision", "final-review", "code-review", "pre-review", "spec-review", "spec")
 
 DEGREE_PRESETS: Final = {
     "light":       {"max_rounds": 1,  "min_rounds": 1, "budget_per_session": 1.5},
@@ -1669,6 +1669,7 @@ TYPE_TO_MODE: Final = {
 MODE_TO_TYPE: Final = {
     "pre-review": ("coherence", "light"),
     "spec-review": ("structure", "adversarial"),
+    "spec": ("structure", "adversarial"),
     "code-review": ("conformance", "standard"),
     "final-review": ("readiness", "standard"),
     "decision": ("decision", "standard"),
