@@ -75,7 +75,7 @@ def test_scaffold_covers_defaults_to_issue():
     with tempfile.TemporaryDirectory() as tmp:
         ws = Path(tmp)
         result = scaffold(ws, branch="issue-42", project_sha="abc123",
-                         issue="42")
+                         issue="42", issue_repo="test/repo")
         content = Path(result.plan_path).read_text()
         assert "covers: 42" in content
 
@@ -84,7 +84,7 @@ def test_scaffold_explicit_covers():
     with tempfile.TemporaryDirectory() as tmp:
         ws = Path(tmp)
         result = scaffold(ws, branch="issue-42", project_sha="abc123",
-                         issue="42", covers="42,43,44")
+                         issue="42", issue_repo="test/repo", covers="42,43,44")
         content = Path(result.plan_path).read_text()
         assert "covers: 42,43,44" in content
 

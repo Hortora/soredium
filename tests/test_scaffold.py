@@ -32,6 +32,7 @@ def required_args(**overrides) -> list[str]:
         "branch": "issue-42-auth-flow",
         "project-sha": "abc1234",
         "date": "2026-06-08",
+        "issue-repo": "test/repo",
     }
     defaults.update(overrides)
     return [f"{k}={v}" for k, v in defaults.items()]

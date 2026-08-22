@@ -71,6 +71,15 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
     journal_path = workspace / "JOURNAL.md"
 
     if not force and plan_path.exists() and journal_path.exists():
+        content = plan_path.read_text()
+        if "## State" in content and "\nstate:" not in content:
+            lines = content.splitlines()
+            patched = []
+            for line in lines:
+                patched.append(line)
+                if line.strip() == "## State":
+                    patched.append("state: active")
+            plan_path.write_text("\n".join(patched) + "\n")
         return ScaffoldResult(
             plan_path=str(plan_path),
             journal_path=str(journal_path),
