@@ -1089,10 +1089,12 @@ class TestStateSectionWriting:
         assert "## Queue" in content
         assert "← active" in content
 
-    def test_build_plan_content_without_state(self):
+    def test_build_plan_content_without_state_dict_still_writes_state(self):
         items = [plan_manager.QueueItem(issue_number=42, title="Fix auth", active=True, repo="test/repo")]
         content = plan_manager.build_plan_content("issue-42", items, "2026-08-14")
-        assert "## State" not in content
+        assert "## State" in content
+        assert "state: active" in content
+        assert "branch: issue-42" in content
         assert "## Queue" in content
 
     def test_roundtrip_preserves_state(self, tmp_path):

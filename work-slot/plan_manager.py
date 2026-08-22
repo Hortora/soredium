@@ -423,14 +423,19 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
 
     if not state:
         lines.append("")
-        lines.append("## Session State")
+        lines.append("## State")
+        lines.append(f"branch: {branch_slug}")
+        lines.append("state: active")
         active_leaf = _find_active_leaf(items)
         if active_leaf:
             ref = f"{active_leaf.repo}#{active_leaf.issue_number}" if active_leaf.repo else f"#{active_leaf.issue_number}"
+            if active_leaf.repo:
+                lines.append(f"issue-repo: {active_leaf.repo}")
+            lines.append(f"covers: {active_leaf.issue_number}")
             lines.append(f"Current: {ref} — {active_leaf.title}")
         else:
             lines.append("Current: none")
-        lines.append(f"Started: {date}")
+        lines.append(f"date: {date}")
         if last_wrap:
             lines.append(f"Last wrap: {last_wrap}")
 
