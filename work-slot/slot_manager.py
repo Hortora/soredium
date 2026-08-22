@@ -499,7 +499,7 @@ def create_proj_symlink(ws_subdir: Path, repo_worktree: Path) -> None:
 def _exclude_symlinks(clone_path: Path) -> None:
     exclude_file = clone_path / ".git" / "info" / "exclude"
     exclude_file.parent.mkdir(parents=True, exist_ok=True)
-    entries = {"wksp", "proj"}
+    entries = {"wksp", "proj", ".claude"}
     if exclude_file.exists():
         existing_lines = {
             line.strip() for line in exclude_file.read_text().splitlines()
@@ -1354,8 +1354,7 @@ def repair_claude_projects(family_root: Path) -> int:
         for slot_entry in sorted(attic_dir.iterdir()):
             if not slot_entry.is_dir() or not slot_entry.name.isdigit():
                 continue
-            slot_num = slot_entry.name
-            old_slot_path = family_root / dir_name / slot_num
+            old_slot_path = family_root / dir_name / slot_entry.name
             old_encoded = str(old_slot_path.resolve()).replace("/", "-")
             attic_encoded = str(slot_entry.resolve()).replace("/", "-")
 
