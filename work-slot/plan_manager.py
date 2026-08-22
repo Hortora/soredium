@@ -761,9 +761,14 @@ def remove_from_queue(plan_path: Path, issue_numbers: list[int]) -> list[int]:
     return removed
 
 
-def append_to_queue(plan_path: Path, new_items: list[QueueItem]) -> None:
+def append_to_queue(plan_path: Path, new_items: list[QueueItem],
+                    position: int | None = None) -> None:
     tree = parse_plan(plan_path)
-    tree.queue.extend(new_items)
+    if position is not None:
+        for i, item in enumerate(reversed(new_items)):
+            tree.queue.insert(position, item)
+    else:
+        tree.queue.extend(new_items)
     active = _find_active_leaf(tree.queue)
     if active:
         tree.current_issue = active.issue_number
@@ -1145,10 +1150,14 @@ def main() -> int:
         if not items:
             print("ERROR=no valid items parsed", file=_sys.stderr)
             return 1
-        append_to_queue(plan_path, items)
+        pos_str = opts.get("position")
+        position = int(pos_str) if pos_str else None
+        append_to_queue(plan_path, items, position=position)
         for item in items:
             print(f"APPENDED={item.repo}#{item.issue_number} — {item.title}")
         print(f"APPENDED_COUNT={len(items)}")
+        if position is not None:
+            print(f"POSITION={position}")
         return 0
 
     elif command == "set-state":

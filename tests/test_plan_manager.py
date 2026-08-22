@@ -1343,6 +1343,44 @@ state: active
 """
 
 
+class TestAppendWithPosition:
+    def test_append_at_position_0(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        new_item = plan_manager.QueueItem(issue_number=99, title="Urgent", repo="test/repo")
+        plan_manager.append_to_queue(plan, [new_item], position=0)
+        tree = plan_manager.parse_plan(plan)
+        assert tree.queue[0].issue_number == 99
+
+    def test_append_at_middle_position(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        new_item = plan_manager.QueueItem(issue_number=99, title="Middle", repo="test/repo")
+        plan_manager.append_to_queue(plan, [new_item], position=2)
+        tree = plan_manager.parse_plan(plan)
+        assert tree.queue[2].issue_number == 99
+
+    def test_append_without_position_goes_to_end(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        new_item = plan_manager.QueueItem(issue_number=99, title="Last", repo="test/repo")
+        plan_manager.append_to_queue(plan, [new_item])
+        tree = plan_manager.parse_plan(plan)
+        assert tree.queue[-1].issue_number == 99
+
+    def test_append_multiple_at_position(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        new_items = [
+            plan_manager.QueueItem(issue_number=98, title="A", repo="test/repo"),
+            plan_manager.QueueItem(issue_number=99, title="B", repo="test/repo"),
+        ]
+        plan_manager.append_to_queue(plan, new_items, position=1)
+        tree = plan_manager.parse_plan(plan)
+        assert tree.queue[1].issue_number == 98
+        assert tree.queue[2].issue_number == 99
+
+
 class TestReorderQueue:
     def test_reorders_by_issue_number(self, tmp_path):
         plan = tmp_path / ".plan"
