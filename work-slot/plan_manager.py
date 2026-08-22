@@ -696,6 +696,71 @@ def _mark_parent_epics_if_done(items: list[QueueItem]) -> None:
                 item.completed = True
 
 
+def reorder_queue(plan_path: Path, order: list[int]) -> list[int]:
+    """Reorder top-level queue items by issue number. Returns the new order.
+
+    `order` is a list of issue numbers in the desired sequence.
+    Items not in `order` keep their relative position at the end.
+    The active marker stays on the first uncompleted item.
+    """
+    tree = parse_plan(plan_path)
+    by_issue = {item.issue_number: item for item in tree.queue}
+    reordered: list[QueueItem] = []
+    seen: set[int] = set()
+    for num in order:
+        if num in by_issue and num not in seen:
+            reordered.append(by_issue[num])
+            seen.add(num)
+    for item in tree.queue:
+        if item.issue_number not in seen:
+            reordered.append(item)
+    for item in reordered:
+        item.active = False
+    _set_first_uncompleted_active(reordered)
+    tree.queue = reordered
+    active = _find_active_leaf(tree.queue)
+    tree.current_issue = active.issue_number if active else None
+    rewrite_plan(plan_path, tree)
+    return [item.issue_number for item in reordered]
+
+
+def remove_from_queue(plan_path: Path, issue_numbers: list[int]) -> list[int]:
+    """Remove items from the queue by issue number. Returns removed numbers.
+
+    Refuses to remove the currently active item — advance or complete it first.
+    Recalculates active marker after removal.
+    """
+    tree = parse_plan(plan_path)
+    to_remove = set(issue_numbers)
+    active = _find_active_leaf(tree.queue)
+    if active and active.issue_number in to_remove:
+        raise ValueError(
+            f"Cannot remove active item #{active.issue_number} — "
+            f"advance or complete it first"
+        )
+    removed: list[int] = []
+
+    def _filter(items: list[QueueItem]) -> list[QueueItem]:
+        kept: list[QueueItem] = []
+        for item in items:
+            if item.issue_number in to_remove and not item.children:
+                removed.append(item.issue_number)
+                continue
+            if item.children:
+                item.children = _filter(item.children)
+                if not item.children and item.issue_number in to_remove:
+                    removed.append(item.issue_number)
+                    continue
+            kept.append(item)
+        return kept
+
+    tree.queue = _filter(tree.queue)
+    new_active = _find_active_leaf(tree.queue)
+    tree.current_issue = new_active.issue_number if new_active else None
+    rewrite_plan(plan_path, tree)
+    return removed
+
+
 def append_to_queue(plan_path: Path, new_items: list[QueueItem]) -> None:
     tree = parse_plan(plan_path)
     tree.queue.extend(new_items)
@@ -1096,6 +1161,32 @@ def main() -> int:
         tree.state[key] = value
         rewrite_plan(plan_path, tree)
         print(f"SET={key}={value}")
+        return 0
+
+    elif command == "reorder":
+        order_str = opts.get("order", "")
+        if not order_str:
+            print("ERROR=order is required (format: 245,193,42)", file=_sys.stderr)
+            return 1
+        order = [int(x.strip()) for x in order_str.split(",") if x.strip()]
+        result_order = reorder_queue(plan_path, order)
+        print(f"ORDER={','.join(str(n) for n in result_order)}")
+        return 0
+
+    elif command == "remove":
+        issues_str = opts.get("issues", "")
+        if not issues_str:
+            print("ERROR=issues is required (format: 961,42)", file=_sys.stderr)
+            return 1
+        issue_nums = [int(x.strip()) for x in issues_str.split(",") if x.strip()]
+        try:
+            removed = remove_from_queue(plan_path, issue_nums)
+        except ValueError as e:
+            print(f"ERROR={e}", file=_sys.stderr)
+            return 1
+        for n in removed:
+            print(f"REMOVED={n}")
+        print(f"REMOVED_COUNT={len(removed)}")
         return 0
 
     elif command == "advance":

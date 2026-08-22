@@ -1326,3 +1326,84 @@ class TestTaskWriteFormat:
         plan.write_text(PLAN_WITH_TASKS)
         content = plan.read_text()
         assert "Task" not in content.split("#240")[0]
+
+
+REORDER_PLAN = """\
+# Work Plan — issue-99-multi
+
+## State
+branch: issue-99-multi
+state: active
+
+## Queue
+- [x] test/repo#41 — First done
+- [ ] test/repo#42 — Second ← active
+- [ ] test/repo#43 — Third
+- [ ] test/repo#44 — Fourth
+"""
+
+
+class TestReorderQueue:
+    def test_reorders_by_issue_number(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        result = plan_manager.reorder_queue(plan, [44, 43, 42])
+        assert result == [44, 43, 42, 41]
+        tree = plan_manager.parse_plan(plan)
+        assert [i.issue_number for i in tree.queue] == [44, 43, 42, 41]
+
+    def test_unmentioned_items_appended(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        result = plan_manager.reorder_queue(plan, [44])
+        assert result == [44, 41, 42, 43]
+
+    def test_active_moves_to_first_uncompleted(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        plan_manager.reorder_queue(plan, [44, 43, 42])
+        tree = plan_manager.parse_plan(plan)
+        active = [i for i in tree.queue if i.active]
+        assert len(active) == 1
+        assert active[0].issue_number == 44
+
+    def test_completed_items_stay_completed(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        plan_manager.reorder_queue(plan, [44, 41, 43, 42])
+        tree = plan_manager.parse_plan(plan)
+        item_41 = [i for i in tree.queue if i.issue_number == 41][0]
+        assert item_41.completed is True
+
+
+class TestRemoveFromQueue:
+    def test_removes_item_by_number(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        removed = plan_manager.remove_from_queue(plan, [43])
+        assert removed == [43]
+        tree = plan_manager.parse_plan(plan)
+        nums = [i.issue_number for i in tree.queue]
+        assert 43 not in nums
+        assert 42 in nums
+
+    def test_refuses_to_remove_active_item(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        with pytest.raises(ValueError, match="active"):
+            plan_manager.remove_from_queue(plan, [42])
+
+    def test_removes_multiple_items(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        removed = plan_manager.remove_from_queue(plan, [43, 44])
+        assert set(removed) == {43, 44}
+        tree = plan_manager.parse_plan(plan)
+        nums = [i.issue_number for i in tree.queue]
+        assert nums == [41, 42]
+
+    def test_ignores_nonexistent_items(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(REORDER_PLAN)
+        removed = plan_manager.remove_from_queue(plan, [999])
+        assert removed == []
