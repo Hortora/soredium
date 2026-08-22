@@ -257,10 +257,18 @@ rules:
 |-------------------|-------------|
 | `entry_type: article` | Exact string match |
 | `tags: [quarkus]` | Entry must have at least one of these tags |
+| `project: casehubio/engine` | Org-qualified match — see backward compat rule below |
 | `projects: [soredium]` | Entry must belong to at least one of these projects |
 | Multiple fields | AND logic — all must match |
 | Multiple matching rules | Destinations are unioned |
 | No matching rules | Entry goes to `defaults.destinations` |
+
+**Org-qualified project matching (backward compat):** When a routing rule
+uses `org/repo` format (e.g. `casehubio/engine`), match against the entry's
+`projects:` list using both the qualified name AND the legacy `<org-prefix>-<repo>`
+format. Concretely, `casehubio/engine` matches entries with `projects:` containing
+any of: `casehubio/engine`, `casehub-engine`, or `engine`. This handles entries
+written before the convention change without requiring bulk frontmatter updates.
 
 ---
 

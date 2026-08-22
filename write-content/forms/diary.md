@@ -92,7 +92,9 @@ style files. Load personal style or fall back to `voice/common-voice.md`.
 
 **Determine type:** article or note/diary. Auto-route from invocation
 context when unambiguous. Set frontmatter: `entry_type`, `subtype: diary`
-(for notes), `projects` from CLAUDE.md `**Name:**` field.
+(for notes), `projects` from CLAUDE.md `**Repository:**` field using
+`<github-org>/<repo-name>` format (e.g. `casehubio/engine`). If no
+`**Repository:**` field exists, fall back to CLAUDE.md `**Name:**` field.
 
 **Check prior entries in this series:** if `.meta` exists, scan `<BLOG_DIR>/`
 for entries with matching `series:` frontmatter using the branch name.

@@ -1302,11 +1302,11 @@ def _claude_project_matches(proj_name: str, slot_path_encoded: str) -> bool:
 
 
 def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
-    """Move .claude/projects/ directories to match the slot's new attic path.
+    """Copy .claude/projects/ directories to match the slot's new attic path.
 
-    Leaves a forwarding symlink at the old location so the active Claude Code
-    session's subsequent writes land at the relocated path instead of recreating
-    the directory at the old name.
+    Copies (not moves) so the active Claude Code session can keep writing to the
+    old-keyed dir. The orphaned old dir is cleaned up by sweep_orphaned_claude_projects
+    on the next archival.
     """
     claude_projects = Path.home() / ".claude" / "projects"
     if not claude_projects.is_dir():
@@ -1314,7 +1314,7 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
 
     slot_path_encoded = str(slot_dir.resolve()).replace("/", "-")
     dest_path_encoded = str(dest_dir.resolve()).replace("/", "-")
-    moved = 0
+    copied = 0
 
     for proj_dir in list(claude_projects.iterdir()):
         if not proj_dir.is_dir() or proj_dir.is_symlink():
@@ -1322,31 +1322,39 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
         if _claude_project_matches(proj_dir.name, slot_path_encoded):
             new_name = proj_dir.name.replace(slot_path_encoded, dest_path_encoded, 1)
             new_path = claude_projects / new_name
-            if new_path.is_symlink():
-                new_path.unlink()
             if not new_path.exists():
-                shutil.move(str(proj_dir), str(new_path))
-                try:
-                    proj_dir.symlink_to(new_path)
-                except OSError:
-                    pass
-                moved += 1
-    return moved
+                shutil.copytree(str(proj_dir), str(new_path))
+                copied += 1
+    return copied
 
 
-def repair_claude_projects(family_root: Path) -> int:
-    """Scan archived slots and merge orphaned project dirs left by active sessions.
+_SWEEP_STALENESS_SECONDS = 3600
 
-    When a slot is archived during an active Claude Code session, the session
-    may recreate the project dir at the old (pre-archive) path after the move.
-    This function finds those orphans and merges their content into the correct
-    attic-keyed project dir, then replaces the orphan with a forwarding symlink.
+
+def sweep_orphaned_claude_projects(family_root: Path) -> int:
+    """Delete project dirs orphaned by previous archivals.
+
+    For each slot in attic, check if an old-keyed project dir still exists.
+    If so and it hasn't been modified in the last hour (suggesting no active
+    session), merge any unique content into the attic-keyed dir and delete
+    the orphan. Dirs modified recently are skipped — they'll be swept on
+    the next archival once stale. Also removes stale symlinks.
+
+    Called during each archival — eventually consistent cleanup.
     """
     claude_projects = Path.home() / ".claude" / "projects"
     if not claude_projects.is_dir():
         return 0
 
-    repaired = 0
+    import time
+    now = time.time()
+    swept = 0
+
+    for proj_link in list(claude_projects.iterdir()):
+        if proj_link.is_symlink():
+            proj_link.unlink()
+            swept += 1
+
     for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
         attic_dir = family_root / dir_name / "attic"
         if not attic_dir.is_dir():
@@ -1363,26 +1371,24 @@ def repair_claude_projects(family_root: Path) -> int:
                     continue
                 if not _claude_project_matches(proj_dir.name, old_encoded):
                     continue
+                try:
+                    mtime = proj_dir.stat().st_mtime
+                    if (now - mtime) < _SWEEP_STALENESS_SECONDS:
+                        print(f"SKIPPED={proj_dir.name} (modified {int(now - mtime)}s ago)")
+                        continue
+                except OSError:
+                    continue
                 new_name = proj_dir.name.replace(old_encoded, attic_encoded, 1)
                 new_path = claude_projects / new_name
-                if new_path.is_symlink():
-                    new_path = new_path.resolve()
                 if new_path.is_dir():
                     for item in sorted(proj_dir.iterdir()):
                         target = new_path / item.name
                         if not target.exists():
                             shutil.move(str(item), str(target))
-                    shutil.rmtree(str(proj_dir), ignore_errors=True)
-                else:
-                    shutil.move(str(proj_dir), str(new_path))
-                try:
-                    if not proj_dir.exists():
-                        proj_dir.symlink_to(new_path)
-                except OSError:
-                    pass
-                repaired += 1
-                print(f"REPAIRED={proj_dir.name} -> {new_path.name}")
-    return repaired
+                shutil.rmtree(str(proj_dir), ignore_errors=True)
+                swept += 1
+                print(f"SWEPT={proj_dir.name}")
+    return swept
 
 
 def remove_claude_projects(slot_dir: Path) -> int:
@@ -1516,7 +1522,8 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     merge_into_existing = dest.exists()
     if merge_into_existing:
         print(f"WARN=attic_slot_exists slot={slot_num} — merging into existing attic entry")
-    moved = relocate_claude_projects(slot_dir, dest)
+    copied = relocate_claude_projects(slot_dir, dest)
+    swept = sweep_orphaned_claude_projects(family_root)
     escaped, cwd_offset = _escape_slot_cwd(slot_dir, family_root)
     if escaped:
         print(f"CWD_ESCAPED={family_root}")
@@ -1542,8 +1549,10 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
             print(f"CWD_RELOCATED={relocated}")
         else:
             print(f"CWD_RELOCATED={dest}")
-    if moved:
-        print(f"CLAUDE_PROJECTS_MOVED={moved}")
+    if copied:
+        print(f"CLAUDE_PROJECTS_COPIED={copied}")
+    if swept:
+        print(f"CLAUDE_PROJECTS_SWEPT={swept}")
 
     if _wl:
         try:
@@ -1582,13 +1591,13 @@ def restore_slot(family_root: Path, slot_num: int) -> None:
     slot_file = attic_dir / ".slot"
     if not slot_file.exists():
         print(f"WARN=no_slot_file slot={slot_num}")
-    moved = relocate_claude_projects(attic_dir, dest)
+    copied = relocate_claude_projects(attic_dir, dest)
     shutil.move(str(attic_dir), str(dest))
     if attic_dir.exists():
         if not _cleanup_remnant_dir(attic_dir):
             print(f"WARN=remnant_dir_persists path={attic_dir}")
-    if moved:
-        print(f"CLAUDE_PROJECTS_MOVED={moved}")
+    if copied:
+        print(f"CLAUDE_PROJECTS_COPIED={copied}")
     ensure_clone_layout(dest)
     if _wl:
         try:
@@ -1783,7 +1792,8 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
         print(f"ERROR=attic_slot_exists slot={slot_num}")
         print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
         sys.exit(1)
-    moved = relocate_claude_projects(slot_dir, dest)
+    copied = relocate_claude_projects(slot_dir, dest)
+    swept = sweep_orphaned_claude_projects(family_root)
     shutil.move(str(slot_dir), str(dest))
     if slot_dir.exists():
         if not _cleanup_remnant_dir(slot_dir):
@@ -1795,8 +1805,10 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
             print(f"CWD_RELOCATED={relocated}")
         else:
             print(f"CWD_RELOCATED={dest}")
-    if moved:
-        print(f"CLAUDE_PROJECTS_MOVED={moved}")
+    if copied:
+        print(f"CLAUDE_PROJECTS_COPIED={copied}")
+    if swept:
+        print(f"CLAUDE_PROJECTS_SWEPT={swept}")
     if _wl:
         try:
             _conn = _wl.connect()
@@ -2040,8 +2052,8 @@ def main() -> None:
 
     elif subcommand == "repair-claude-projects":
         family_root = Path(args.get("target", "."))
-        count = repair_claude_projects(family_root)
-        print(f"REPAIRED_COUNT={count}")
+        count = sweep_orphaned_claude_projects(family_root)
+        print(f"SWEPT_COUNT={count}")
 
     elif subcommand == "sync-isx":
         target = args.get("target", "")
