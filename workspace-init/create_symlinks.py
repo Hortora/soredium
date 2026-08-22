@@ -89,6 +89,13 @@ def main() -> int:
         print(f"ERROR=wksp/ symlink created but does not resolve to a directory")
         return 1
 
+    # Untrack wksp if already tracked — .gitignore has no effect on tracked files
+    import subprocess
+    subprocess.run(
+        ["git", "-C", str(project), "rm", "--cached", "-f", "wksp"],
+        capture_output=True,
+    )
+
     # Ensure 'wksp' is in project .gitignore
     gitignore = project / ".gitignore"
     gitignore_updated = False

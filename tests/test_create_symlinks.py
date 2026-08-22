@@ -169,3 +169,45 @@ class TestErrorCases:
             capture_output=True, text=True,
         )
         assert result.returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# Untrack previously tracked wksp
+# ---------------------------------------------------------------------------
+
+class TestUntrackWksp:
+
+    def _init_repo(self, path: Path) -> Path:
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init"], cwd=str(path), capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"],
+                        capture_output=True, check=True)
+        return path
+
+    def test_untracks_previously_committed_wksp(self, tmp_path):
+        ws = self._init_repo(tmp_path / "workspace")
+        proj = self._init_repo(tmp_path / "project")
+        # Simulate the bug: commit wksp symlink to git
+        (proj / "wksp").symlink_to("/nonexistent/old-workspace")
+        subprocess.run(["git", "-C", str(proj), "add", "wksp"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(proj), "commit", "-m", "add wksp"],
+                        capture_output=True, check=True)
+        # Verify it's tracked
+        tracked = subprocess.run(["git", "-C", str(proj), "ls-files", "wksp"],
+                                  capture_output=True, text=True)
+        assert tracked.stdout.strip() == "wksp"
+
+        # Run create_symlinks — should untrack and repoint
+        result = run(ws, proj)
+        assert result.returncode == 0
+
+        # Verify wksp is no longer tracked
+        tracked = subprocess.run(["git", "-C", str(proj), "ls-files", "wksp"],
+                                  capture_output=True, text=True)
+        assert tracked.stdout.strip() == ""
+
+        # Verify symlink now points to the correct workspace
+        assert (proj / "wksp").is_symlink()
+        assert (proj / "wksp").resolve() == ws
