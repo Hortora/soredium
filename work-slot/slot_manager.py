@@ -5,10 +5,10 @@ slot_manager.py — Clone-based slot operations for multi-repo families
 Subcommands:
   create-slot <family-root> repos=<csv> branch=<name> issue=<N> issue-repo=<o/r> [covers=<csv>] [context=<text>]
   list-slots <family-root> [--all]
-  remove-slot <family-root> slot=<N> [--force]
+  remove-slot <family-root> slot=<N> [--force] [resolution=<delivered|superseded|obsolete>]
   scan-ready <family-root>
   merge-slot <family-root> slot=<N>
-  archive-slot <family-root> slot=<N> [--force]
+  archive-slot <family-root> slot=<N> [--force] [resolution=<delivered|superseded|obsolete>]
   restore-slot <family-root> slot=<N>
   check-cross-deps <family-root> slot=<N>
   sync-isx [<slot-dir>] [slot=<N>]
@@ -1456,7 +1456,8 @@ def _fix_stale_checkboxes(slot_path: Path, issues_to_tick: list[int]) -> int:
     return fixed
 
 
-def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
+def archive_slot(family_root: Path, slot_num: int, force: bool = False,
+                  resolution: str | None = None) -> None:
     slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
@@ -1555,6 +1556,7 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
                 publish_dest=pub_dest,
                 archived_from=str(slot_dir),
                 archived_to=str(dest),
+                resolution=resolution,
             )
             _conn.close()
         except Exception:
@@ -1751,7 +1753,8 @@ def _check_drift(family_root: Path, slots: list[dict],
                 print(f"WARN=db_drift type=disk-only slot={num}")
 
 
-def remove_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
+def remove_slot(family_root: Path, slot_num: int, force: bool = False,
+                 resolution: str | None = None) -> None:
     """Archive a slot to attic.  Always archives — never deletes.
 
     --force / --force-delete both skip the .landed check but still
@@ -1803,6 +1806,7 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False) -> None:
                 promoted=promoted, published=published,
                 publish_dest=pub_dest,
                 archived_from=str(slot_dir), archived_to=str(dest),
+                resolution=resolution,
             )
             _conn.close()
         except Exception:
@@ -1974,7 +1978,8 @@ def main() -> None:
             print("ERROR=missing_slot_number")
             sys.exit(1)
         force = "--force" in sys.argv or "--force-delete" in sys.argv
-        remove_slot(family_root, slot_num, force=force)
+        resolution = args.get("resolution")
+        remove_slot(family_root, slot_num, force=force, resolution=resolution)
 
     elif subcommand == "scan-ready":
         family_root = Path(args.get("target", "."))
@@ -1996,7 +2001,8 @@ def main() -> None:
             print("ERROR=missing_slot_number")
             sys.exit(1)
         force = "--force" in sys.argv
-        archive_slot(family_root, slot_num, force=force)
+        resolution = args.get("resolution")
+        archive_slot(family_root, slot_num, force=force, resolution=resolution)
 
     elif subcommand == "restore-slot":
         family_root = Path(args.get("target", "."))
