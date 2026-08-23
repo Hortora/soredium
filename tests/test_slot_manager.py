@@ -1499,7 +1499,25 @@ class TestArchiveSlot:
         assert not (family / "slots" / "1").exists()
         assert (family / "slots" / "attic" / "1").exists()
 
-    def test_relocates_claude_projects(self, tmp_path, monkeypatch):
+    def test_writes_pid_file_on_archive(self, tmp_path, monkeypatch):
+        family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_manager.merge_slot(family, 1)
+
+        fake_home = tmp_path / "home"
+        claude_projects = fake_home / ".claude" / "projects"
+        claude_projects.mkdir(parents=True)
+
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        slot_manager.archive_slot(family, 1)
+
+        attic_path = family / "slots" / "attic" / "1"
+        pid_file = attic_path / ".archived-by-pid"
+        assert pid_file.exists()
+        pid = int(pid_file.read_text().strip())
+        assert pid > 0
+
+    def test_sweep_renames_after_pid_exits(self, tmp_path, monkeypatch):
         family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
         slot_manager.merge_slot(family, 1)
 
@@ -1515,8 +1533,17 @@ class TestArchiveSlot:
 
         slot_manager.archive_slot(family, 1)
 
-        assert not proj_dir.exists()
+        # Project dir still at old path (not renamed yet)
+        assert proj_dir.exists()
+
+        # Write a dead PID to simulate session exit
         attic_path = family / "slots" / "attic" / "1"
+        (attic_path / ".archived-by-pid").write_text("99999999")
+
+        # Sweep should rename
+        swept = slot_manager.sweep_orphaned_claude_projects(family)
+        assert swept >= 1
+        assert not proj_dir.exists()
         dest_encoded = str(attic_path / "engine").replace("/", "-")
         moved_dir = claude_projects / dest_encoded
         assert moved_dir.exists()
@@ -1921,7 +1948,7 @@ class TestArchiveSlotDoubleArchive:
         slot_manager.archive_slot(family, 1, force=True)
         captured = capsys.readouterr()
         assert "WARN=attic_slot_exists" in captured.out
-        assert "ARCHIVED=1" in captured.out
+        assert "ARCHIVING=1" in captured.out
         # New content merged into attic
         assert (attic / ".landed").read_text() == "re-landed"
         assert (attic / ".slot").read_text() == "restored"
@@ -2290,8 +2317,8 @@ class TestMergeSlotIncludesWorkspace:
 
 
 class TestRemoveSlotForceArchiveClaude:
-    def test_force_relocates_claude_projects_to_attic(self, tmp_path, monkeypatch):
-        """--force archives to attic and relocates Claude session dirs."""
+    def test_force_writes_pid_and_keeps_project_dir(self, tmp_path, monkeypatch):
+        """--force archives to attic, writes PID file, leaves project dir for sweep."""
         family = tmp_path / "casehub"
         slot = family / "slots" / "1"
         slot.mkdir(parents=True)
@@ -2317,7 +2344,8 @@ class TestRemoveSlotForceArchiveClaude:
         attic = family / "slots" / "attic" / "1"
         assert attic.exists(), "force must archive to attic, never delete"
         assert (attic / ".slot").exists()
-        assert not proj_dir.exists(), "Claude session dir should be relocated"
+        assert (attic / ".archived-by-pid").exists()
+        assert proj_dir.exists(), "project dir stays until sweep renames it"
 
 
 class TestListSlotsDriftDetection:
@@ -2472,31 +2500,24 @@ class TestAllocateSlotNumberDB:
 class TestRelocateClaudeProjectsRelativePath:
     """Regression: relative slot_dir paths must resolve to absolute before encoding."""
 
-    def test_relocate_matches_when_slot_dir_is_relative(self, tmp_path, monkeypatch):
+    def test_relocate_writes_pid_with_relative_path(self, tmp_path, monkeypatch):
+        """Relative paths still write the PID file correctly."""
         slot_abs = tmp_path / "family" / "slots" / "1"
         slot_abs.mkdir(parents=True)
-        repo = slot_abs / "engine"
-        repo.mkdir()
 
-        fake_home = tmp_path / "home"
-        claude_projects = fake_home / ".claude" / "projects"
-        claude_projects.mkdir(parents=True)
-        proj_dir = claude_projects / str(slot_abs / "engine").replace("/", "-")
-        proj_dir.mkdir()
-        (proj_dir / "memory.md").write_text("data")
-
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        dest_abs = tmp_path / "family" / "slots" / "attic" / "1"
+        dest_abs.mkdir(parents=True)
 
         slot_rel = Path("family") / "slots" / "1"
         dest_rel = Path("family") / "slots" / "attic" / "1"
         monkeypatch.chdir(tmp_path)
 
-        moved = slot_manager.relocate_claude_projects(slot_rel, dest_rel)
+        slot_manager.relocate_claude_projects(slot_rel, dest_rel)
 
-        assert moved == 1, "relative path must still find the Claude project dir"
-        assert not proj_dir.exists()
-        dest_encoded = str((tmp_path / dest_rel / "engine").resolve()).replace("/", "-")
-        assert (claude_projects / dest_encoded).exists()
+        pid_file = dest_abs / ".archived-by-pid"
+        assert pid_file.exists()
+        pid = int(pid_file.read_text().strip())
+        assert pid > 0
 
     def test_remove_matches_when_slot_dir_is_relative(self, tmp_path, monkeypatch):
         slot_abs = tmp_path / "family" / "slots" / "1"

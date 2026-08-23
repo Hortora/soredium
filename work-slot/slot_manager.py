@@ -1302,43 +1302,27 @@ def _claude_project_matches(proj_name: str, slot_path_encoded: str) -> bool:
 
 
 def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
-    """Copy .claude/projects/ directories to match the slot's new attic path.
+    """Record the archiving session's PID so the sweep knows when it's safe to rename.
 
-    Copies (not moves) so the active Claude Code session can keep writing to the
-    old-keyed dir. The orphaned old dir is cleaned up by sweep_orphaned_claude_projects
-    on the next archival.
+    Does NOT touch the .claude/projects/ directory — the active Claude Code
+    session is still writing to it. The sweep (called on every subsequent
+    archival) checks the PID and renames once the session has exited.
     """
-    claude_projects = Path.home() / ".claude" / "projects"
-    if not claude_projects.is_dir():
-        return 0
-
-    slot_path_encoded = str(slot_dir.resolve()).replace("/", "-")
-    dest_path_encoded = str(dest_dir.resolve()).replace("/", "-")
-    copied = 0
-
-    for proj_dir in list(claude_projects.iterdir()):
-        if not proj_dir.is_dir() or proj_dir.is_symlink():
-            continue
-        if _claude_project_matches(proj_dir.name, slot_path_encoded):
-            new_name = proj_dir.name.replace(slot_path_encoded, dest_path_encoded, 1)
-            new_path = claude_projects / new_name
-            if not new_path.exists():
-                shutil.copytree(str(proj_dir), str(new_path))
-                copied += 1
-    return copied
-
-
-_SWEEP_STALENESS_SECONDS = 3600
+    pid_file = dest_dir / ".archived-by-pid"
+    try:
+        pid_file.write_text(str(os.getppid()))
+    except OSError:
+        pass
+    return 0
 
 
 def sweep_orphaned_claude_projects(family_root: Path) -> int:
-    """Delete project dirs orphaned by previous archivals.
+    """Rename project dirs for archived slots whose archiving session has exited.
 
-    For each slot in attic, check if an old-keyed project dir still exists.
-    If so and it hasn't been modified in the last hour (suggesting no active
-    session), merge any unique content into the attic-keyed dir and delete
-    the orphan. Dirs modified recently are skipped — they'll be swept on
-    the next archival once stale. Also removes stale symlinks.
+    For each slot in attic with an .archived-by-pid marker, check if the
+    PID is still alive. If dead, rename the old-keyed project dir to the
+    attic-keyed name — .jsonl files travel with the rename, preserving
+    server-side conversation correlation.
 
     Called during each archival — eventually consistent cleanup.
     """
@@ -1346,8 +1330,6 @@ def sweep_orphaned_claude_projects(family_root: Path) -> int:
     if not claude_projects.is_dir():
         return 0
 
-    import time
-    now = time.time()
     swept = 0
 
     for proj_link in list(claude_projects.iterdir()):
@@ -1362,6 +1344,19 @@ def sweep_orphaned_claude_projects(family_root: Path) -> int:
         for slot_entry in sorted(attic_dir.iterdir()):
             if not slot_entry.is_dir() or not slot_entry.name.isdigit():
                 continue
+
+            pid_file = slot_entry / ".archived-by-pid"
+            if not pid_file.exists():
+                continue
+
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+                print(f"SKIPPED=slot-{slot_entry.name} (pid {pid} still alive)")
+                continue
+            except (ValueError, OSError):
+                pass
+
             old_slot_path = family_root / dir_name / slot_entry.name
             old_encoded = str(old_slot_path.resolve()).replace("/", "-")
             attic_encoded = str(slot_entry.resolve()).replace("/", "-")
@@ -1371,23 +1366,27 @@ def sweep_orphaned_claude_projects(family_root: Path) -> int:
                     continue
                 if not _claude_project_matches(proj_dir.name, old_encoded):
                     continue
-                try:
-                    mtime = proj_dir.stat().st_mtime
-                    if (now - mtime) < _SWEEP_STALENESS_SECONDS:
-                        print(f"SKIPPED={proj_dir.name} (modified {int(now - mtime)}s ago)")
-                        continue
-                except OSError:
-                    continue
                 new_name = proj_dir.name.replace(old_encoded, attic_encoded, 1)
                 new_path = claude_projects / new_name
-                if new_path.is_dir():
-                    for item in sorted(proj_dir.iterdir()):
-                        target = new_path / item.name
-                        if not target.exists():
-                            shutil.move(str(item), str(target))
-                shutil.rmtree(str(proj_dir), ignore_errors=True)
+                if new_path.exists():
+                    shutil.rmtree(str(new_path))
+                shutil.move(str(proj_dir), str(new_path))
                 swept += 1
-                print(f"SWEPT={proj_dir.name}")
+                print(f"RENAMED={proj_dir.name} -> {new_name}")
+
+            if _wl:
+                try:
+                    _conn = _wl.connect()
+                    promoted, published, pub_dest = _read_promotion_stamp(slot_entry)
+                    _wl.record_slot_archived(
+                        _conn, int(slot_entry.name), str(family_root),
+                        promoted=promoted, published=published,
+                        publish_dest=pub_dest,
+                    )
+                    _conn.close()
+                except Exception:
+                    pass
+            pid_file.unlink(missing_ok=True)
     return swept
 
 
@@ -1522,7 +1521,6 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     merge_into_existing = dest.exists()
     if merge_into_existing:
         print(f"WARN=attic_slot_exists slot={slot_num} — merging into existing attic entry")
-    copied = relocate_claude_projects(slot_dir, dest)
     swept = sweep_orphaned_claude_projects(family_root)
     escaped, cwd_offset = _escape_slot_cwd(slot_dir, family_root)
     if escaped:
@@ -1539,6 +1537,7 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
         _cleanup_remnant_dir(slot_dir)
     else:
         shutil.move(str(slot_dir), str(dest))
+    relocate_claude_projects(slot_dir, dest)
     if slot_dir.exists():
         if not _cleanup_remnant_dir(slot_dir):
             print(f"WARN=remnant_dir_persists path={slot_dir}")
@@ -1549,20 +1548,15 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
             print(f"CWD_RELOCATED={relocated}")
         else:
             print(f"CWD_RELOCATED={dest}")
-    if copied:
-        print(f"CLAUDE_PROJECTS_COPIED={copied}")
     if swept:
         print(f"CLAUDE_PROJECTS_SWEPT={swept}")
 
     if _wl:
         try:
             _conn = _wl.connect()
-            promoted, published, pub_dest = _read_promotion_stamp(dest)
-            _wl.record_slot_archive(
+            _wl.record_slot_archiving(
                 _conn, slot_num, str(family_root),
-                promoted=promoted,
-                published=published,
-                publish_dest=pub_dest,
+                pid=os.getppid(),
                 archived_from=str(slot_dir),
                 archived_to=str(dest),
                 resolution=resolution,
@@ -1571,7 +1565,8 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
         except Exception:
             pass
 
-    print(f"ARCHIVED={slot_num}")
+    print(f"ARCHIVING={slot_num}")
+    print(f"PID={os.getppid()}")
 
 
 def restore_slot(family_root: Path, slot_num: int) -> None:
@@ -1792,9 +1787,9 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
         print(f"ERROR=attic_slot_exists slot={slot_num}")
         print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
         sys.exit(1)
-    copied = relocate_claude_projects(slot_dir, dest)
     swept = sweep_orphaned_claude_projects(family_root)
     shutil.move(str(slot_dir), str(dest))
+    relocate_claude_projects(slot_dir, dest)
     if slot_dir.exists():
         if not _cleanup_remnant_dir(slot_dir):
             print(f"WARN=remnant_dir_persists path={slot_dir}")
@@ -1805,25 +1800,23 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
             print(f"CWD_RELOCATED={relocated}")
         else:
             print(f"CWD_RELOCATED={dest}")
-    if copied:
-        print(f"CLAUDE_PROJECTS_COPIED={copied}")
     if swept:
         print(f"CLAUDE_PROJECTS_SWEPT={swept}")
     if _wl:
         try:
             _conn = _wl.connect()
-            promoted, published, pub_dest = _read_promotion_stamp(dest)
-            _wl.record_slot_archive(
+            _wl.record_slot_archiving(
                 _conn, slot_num, str(family_root),
-                promoted=promoted, published=published,
-                publish_dest=pub_dest,
-                archived_from=str(slot_dir), archived_to=str(dest),
+                pid=os.getppid(),
+                archived_from=str(slot_dir),
+                archived_to=str(dest),
                 resolution=resolution,
             )
             _conn.close()
         except Exception:
             pass
-    print(f"ARCHIVED={slot_num}")
+    print(f"ARCHIVING={slot_num}")
+    print(f"PID={os.getppid()}")
 
 
 def check_cross_deps(family_root: Path, slot_num: int) -> int:

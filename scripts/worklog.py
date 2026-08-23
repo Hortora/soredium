@@ -457,6 +457,63 @@ def record_slot_merge(conn: sqlite3.Connection, slot_number: int,
 
 
 @safe
+def record_slot_archiving(conn: sqlite3.Connection, slot_number: int,
+                          family_root: str, pid: int,
+                          archived_from: str | None = None,
+                          archived_to: str | None = None,
+                          resolution: str | None = None) -> None:
+    """Mark slot as archiving — in attic but session still running."""
+    sid = _find_slot(conn, slot_number, family_root)
+    if sid is None:
+        return
+    updates = "state='archiving', archived_at=?"
+    params: list = [_now()]
+    if resolution:
+        updates += ", resolution=?"
+        params.append(resolution)
+    params.append(sid)
+    conn.execute(f"UPDATE slots SET {updates} WHERE id=?", params)
+    if resolution in ("superseded", "obsolete"):
+        conn.execute(
+            "UPDATE work_items SET state='ended', ended_at=? WHERE slot_id=? AND state != 'ended'",
+            (_now(), sid),
+        )
+    meta: dict = {"pid": pid}
+    if archived_from:
+        meta["archived_from"] = archived_from
+    if archived_to:
+        meta["archived_to"] = archived_to
+    if resolution:
+        meta["resolution"] = resolution
+    _log_event(conn, "slot-archiving", slot_id=sid,
+               metadata=meta)
+    conn.commit()
+
+
+@safe
+def record_slot_archived(conn: sqlite3.Connection, slot_number: int,
+                         family_root: str,
+                         promoted: list[str] | None = None,
+                         published: list[str] | None = None,
+                         publish_dest: str | None = None) -> None:
+    """Mark slot as fully archived — session exited, project dir renamed."""
+    sid = _find_slot(conn, slot_number, family_root)
+    if sid is None:
+        return
+    conn.execute("UPDATE slots SET state='archived' WHERE id=?", (sid,))
+    meta: dict = {}
+    if promoted:
+        meta["promoted"] = promoted
+    if published:
+        meta["published"] = published
+    if publish_dest:
+        meta["publish_dest"] = publish_dest
+    _log_event(conn, "slot-archived", slot_id=sid,
+               metadata=meta if meta else None)
+    conn.commit()
+
+
+@safe
 def record_slot_archive(conn: sqlite3.Connection, slot_number: int,
                         family_root: str,
                         promoted: list[str] | None = None,
@@ -465,6 +522,7 @@ def record_slot_archive(conn: sqlite3.Connection, slot_number: int,
                         archived_from: str | None = None,
                         archived_to: str | None = None,
                         resolution: str | None = None) -> None:
+    """Legacy: mark slot as archived in one step (no PID tracking)."""
     sid = _find_slot(conn, slot_number, family_root)
     if sid is None:
         return
