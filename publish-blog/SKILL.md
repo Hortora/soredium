@@ -174,24 +174,14 @@ If `PUSHED=no`, report with resolution command:
    git -C ~/blog push
 ```
 
-### Step 8 — Clean up source entries
+### Step 8 — Source entries are retained
 
-Published entries are now versioned in the destination repo — the workspace copy
-is redundant. Delete it:
+Source entries are **not** deleted after publishing. The project `docs/blog/`
+is the canonical record of what the project produced. The published copies
+in destination repos are for readers — the source stays permanently.
 
-```bash
-python3 ~/.claude/skills/publish-blog/blog_publish.py remove-source \
-  "$BLOG_DIR/.." \
-  "files=$BLOG_DIR/<filename1>,$BLOG_DIR/<filename2>"
-```
-
-Expected output: `REMOVED=<count>`
-
-If all entries in `$BLOG_DIR` have been published and removed, also remove
-`INDEX.md` if present using the same command.
-
-Only remove entries whose destinations all succeeded (✅). If any destination
-failed for an entry, keep the source copy until the failure is resolved.
+Workspace copies (if publishing from a workspace `blog/` dir) are handled
+by work-end artifact promotion, not by this skill.
 
 ### Step 9 — Summary
 
@@ -293,7 +283,7 @@ written before the convention change without requiring bulk frontmatter updates.
 - [ ] All destination directories validated before copying
 - [ ] Entries copied to each resolved destination
 - [ ] Git destinations committed; remote destinations pushed (or failure reported)
-- [ ] Successfully published entries removed from source workspace
+- [ ] Source entries retained in project `docs/blog/` (not deleted)
 - [ ] Summary shows per-destination outcome (✅ / ❌)
 
 ---
