@@ -85,6 +85,28 @@ where section position in the mode map matters.
 
 ---
 
+## Title heading — always visible in the body
+
+After the frontmatter closing `---`, the first line of the body must be an
+H1 heading matching the frontmatter `title:` field:
+
+```markdown
+---
+title: "What the GOAP Planner Can't See"
+---
+
+# What the GOAP Planner Can't See
+
+A case engine that dispatches...
+```
+
+Frontmatter `title:` is metadata for static site generators and publishing
+pipelines. The H1 heading is what readers see in markdown editors (Typora,
+VS Code, GitHub). Without it, the article appears headless — no visible
+title, just body text starting after a YAML block.
+
+---
+
 ## Sentence and paragraph rules
 
 - One idea per sentence where possible
