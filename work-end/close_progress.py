@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Progress tracking for work-end close sequence.
+
+Atomic write-then-rename. Stale detection via lifecycle state comparison.
+"""
+import os
+from pathlib import Path
+
+PROGRESS_FILE = ".close-progress"
+PROGRESS_TMP = ".close-progress.tmp"
+
+LIFECYCLE_PHASE_ORDER = [
+    "active",
+    "closing:review",
+    "closing:verified",
+    "closing:promoted",
+    "closing:pushed",
+    "closing:merged",
+    "closing:stamped",
+    "idle",
+    "drained",
+]
+
+STEP_TO_PHASE = {
+    "review": "closing:review",
+    "sweep_config": "closing:review",
+    "forage": "closing:review",
+    "protocol": "closing:review",
+    "update_claude_md": "closing:review",
+    "impl_doc_sync": "closing:review",
+    "adr": "closing:review",
+    "write_content": "closing:review",
+    "promote": "closing:verified",
+    "trajectory": "closing:promoted",
+    "rebase": "closing:promoted",
+    "squash": "closing:promoted",
+    "land": "closing:promoted",
+    "close_issues": "closing:stamped",
+    "verify": "closing:stamped",
+    "cleanup": "closing:stamped",
+}
+
+
+def read_close_progress(workspace: Path) -> dict[str, str]:
+    path = workspace / PROGRESS_FILE
+    if not path.exists():
+        return {}
+    result: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            result[k.strip()] = v.strip()
+    return result
+
+
+def write_close_progress(workspace: Path, entries: dict[str, str]) -> None:
+    path = workspace / PROGRESS_FILE
+    tmp = workspace / PROGRESS_TMP
+    lines = [f"{k}={v}" for k, v in entries.items()]
+    tmp.write_text("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+
+
+def update_close_progress(workspace: Path, key: str, value: str) -> None:
+    entries = read_close_progress(workspace)
+    entries[key] = value
+    write_close_progress(workspace, entries)
+
+
+def delete_close_progress(workspace: Path) -> None:
+    for name in (PROGRESS_FILE, PROGRESS_TMP):
+        p = workspace / name
+        if p.exists():
+            p.unlink()
+
+
+def is_stale(progress: dict[str, str], meta_state: str) -> bool:
+    if not progress:
+        return False
+    if meta_state not in LIFECYCLE_PHASE_ORDER:
+        return False
+    meta_idx = LIFECYCLE_PHASE_ORDER.index(meta_state)
+    max_progress_idx = 0
+    for step in progress:
+        base_step = step.split("_attempt")[0] if "_attempt" in step else step
+        phase = STEP_TO_PHASE.get(base_step, "closing:review")
+        if phase in LIFECYCLE_PHASE_ORDER:
+            idx = LIFECYCLE_PHASE_ORDER.index(phase)
+            max_progress_idx = max(max_progress_idx, idx)
+    return max_progress_idx > meta_idx
