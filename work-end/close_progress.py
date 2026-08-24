@@ -22,6 +22,7 @@ LIFECYCLE_PHASE_ORDER = [
 ]
 
 STEP_TO_PHASE = {
+    "report_init": "closing:review",
     "review": "closing:review",
     "sweep_config": "closing:review",
     "forage": "closing:review",
@@ -31,13 +32,31 @@ STEP_TO_PHASE = {
     "adr": "closing:review",
     "write_content": "closing:review",
     "promote": "closing:verified",
+    "report_promote": "closing:verified",
     "trajectory": "closing:promoted",
     "rebase": "closing:promoted",
+    "report_rebase": "closing:promoted",
     "squash": "closing:promoted",
+    "report_squash": "closing:promoted",
+    "write_marker": "closing:promoted",
     "land": "closing:promoted",
+    "report_land": "closing:promoted",
     "close_issues": "closing:stamped",
+    "report_close_issues": "closing:stamped",
     "verify": "closing:stamped",
+    "report_verify": "closing:stamped",
+    "archive_slot": "closing:stamped",
+    "report_archive": "closing:stamped",
+    "checkout_main": "closing:stamped",
+    "cleanup_stack": "closing:stamped",
     "cleanup": "closing:stamped",
+    "report_scaffold": "closing:stamped",
+    "arc42_scan": "closing:stamped",
+    "session_rename": "closing:stamped",
+    "garden_feedback": "closing:stamped",
+    "notes": "closing:stamped",
+    "delete_progress": "idle",
+    "report_render": "idle",
 }
 
 

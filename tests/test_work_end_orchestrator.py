@@ -12,6 +12,47 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
 
 
+class TestRunScript:
+    """_run_script calls subprocess and parses KEY=VALUE output."""
+
+    def test_parses_output(self, tmp_path):
+        script = tmp_path / "echo_script.py"
+        script.write_text('print("RESULT=ok")\nprint("COUNT=3")\n')
+        from work_end_orchestrator import _run_script
+        result = _run_script([sys.executable, str(script)], tmp_path)
+        assert result == {"RESULT": "ok", "COUNT": "3"}
+
+    def test_captures_error(self, tmp_path):
+        script = tmp_path / "fail_script.py"
+        script.write_text('import sys; print("ERROR=boom"); sys.exit(1)\n')
+        from work_end_orchestrator import _run_script
+        result = _run_script([sys.executable, str(script)], tmp_path)
+        assert result.get("ERROR") == "boom"
+
+    def test_non_zero_exit_without_error_key(self, tmp_path):
+        script = tmp_path / "silent_fail.py"
+        script.write_text('import sys; sys.exit(1)\n')
+        from work_end_orchestrator import _run_script
+        result = _run_script([sys.executable, str(script)], tmp_path)
+        assert "ERROR" in result
+
+    def test_dry_run_captures_without_executing(self, tmp_path):
+        from work_end_orchestrator import _run_script
+        calls = []
+        result = _run_script(
+            ["python3", "work-end/work_end_execute.py", "promote"],
+            tmp_path, dry_run=True, call_log=calls,
+        )
+        assert len(calls) == 1
+        assert "promote" in str(calls[0])
+        assert result == {}
+
+    def test_script_not_found(self, tmp_path):
+        from work_end_orchestrator import _run_script
+        result = _run_script(["/nonexistent/script.py"], tmp_path)
+        assert "ERROR" in result
+
+
 class TestOrchestratorFirstCall:
     """First call with no progress — should yield ACTION=review."""
 
@@ -114,9 +155,12 @@ class TestSweepConfigAll:
 class TestMainMode:
     """Main mode skips rebase, squash, stamp-related steps."""
 
-    def test_main_mode_skips_to_post_land(self, tmp_path):
+    def test_main_mode_skips_to_post_land(self, tmp_path, monkeypatch):
         from work_end_orchestrator import run_orchestrator
         from close_progress import update_close_progress
+        monkeypatch.setattr("work_end_orchestrator._push_main_mode", lambda ctx: {"PUSHED": "yes", "LANDED_SHA": "abc"})
+        monkeypatch.setattr("work_end_orchestrator._verify_main_mode", lambda ctx: {"VERIFIED": "yes"})
+        monkeypatch.setattr("work_end_orchestrator._cleanup_main_mode", lambda ctx: {"CLEANED": "yes"})
         for step in ["review", "sweep_config", "trajectory"]:
             update_close_progress(tmp_path, step, "done")
         update_close_progress(tmp_path, "sweep_selected", "")
@@ -128,7 +172,7 @@ class TestMainMode:
             "meta_state": "closing:promoted",
             "on_main": "yes",
         })
-        assert result["ACTION"] == "squash" or result["ACTION"] in ("user_input", "complete")
+        assert result["ACTION"] == "user_input" or result["ACTION"] == "complete"
 
 
 class TestAbort:
@@ -245,78 +289,70 @@ class TestIntegrationBranchMode:
         from close_progress import update_close_progress
         update_close_progress(tmp_path, step, "done")
 
-    def test_full_branch_sequence(self, tmp_path):
+    def test_full_branch_sequence(self, tmp_path, monkeypatch):
         """Walk through the complete branch-mode close sequence."""
-        from close_progress import read_close_progress
+        def mock_run(cmd, workspace, **kw):
+            return {"REBASED": "yes", "LANDED": "yes", "LANDED_SHA": "abc123",
+                    "CLOSED": "1", "VERIFIED": "yes", "SWITCHED": "yes",
+                    "CLEANED": "yes"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", mock_run)
 
         actions_seen = []
 
-        # 1. First call — yields review
         result = self._call(tmp_path)
         assert result["ACTION"] == "review"
         actions_seen.append("review")
         self._complete(tmp_path, "review")
 
-        # 2. After review — yields sweep_config
         result = self._call(tmp_path)
         assert result["ACTION"] == "sweep_config"
         actions_seen.append("sweep_config")
         self._complete(tmp_path, "sweep_config")
 
-        # 3. Pass sweep selections — yields first selected item
         result = self._call(tmp_path, sweep_selected="forage,write_content")
         assert result["ACTION"] == "forage"
         actions_seen.append("forage")
         self._complete(tmp_path, "forage")
 
-        # 4. After forage — yields write_content (next selected)
         result = self._call(tmp_path)
         assert result["ACTION"] == "write_content"
         actions_seen.append("write_content")
         self._complete(tmp_path, "write_content")
 
-        # 5. After all sweep — yields trajectory (promoted phase)
         result = self._call(tmp_path, meta_state="closing:promoted")
         assert result["ACTION"] == "trajectory"
         actions_seen.append("trajectory")
         self._complete(tmp_path, "trajectory")
 
-        # 6. After trajectory — yields squash (branch mode)
         result = self._call(tmp_path, meta_state="closing:promoted")
         assert result["ACTION"] == "squash"
         actions_seen.append("squash")
         self._complete(tmp_path, "squash")
 
-        # 7. Orchestrator marks mechanical steps (rebase, land, close_issues, verify)
-        # and yields cleanup user_input steps
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "user_input"
         assert result.get("CONTEXT") == "arc42_scan"
         actions_seen.append("arc42_scan")
         self._complete(tmp_path, "arc42_scan")
 
-        # 8. Next user_input
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "user_input"
         assert result.get("CONTEXT") == "session_rename"
         actions_seen.append("session_rename")
         self._complete(tmp_path, "session_rename")
 
-        # 9. Next user_input
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "user_input"
         assert result.get("CONTEXT") == "garden_feedback"
         actions_seen.append("garden_feedback")
         self._complete(tmp_path, "garden_feedback")
 
-        # 10. Next user_input
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "user_input"
         assert result.get("CONTEXT") == "notes"
         actions_seen.append("notes")
         self._complete(tmp_path, "notes")
 
-        # 11. After all cleanup — complete
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "complete"
         actions_seen.append("complete")
@@ -329,21 +365,28 @@ class TestIntegrationBranchMode:
         ]
         assert actions_seen == expected
 
-    def test_main_mode_skips_squash(self, tmp_path):
+    def test_main_mode_skips_squash(self, tmp_path, monkeypatch):
         """Main mode skips rebase and squash, goes straight to cleanup."""
         from close_progress import update_close_progress
+        monkeypatch.setattr("work_end_orchestrator._push_main_mode", lambda ctx: {"PUSHED": "yes", "LANDED_SHA": "abc"})
+        monkeypatch.setattr("work_end_orchestrator._verify_main_mode", lambda ctx: {"VERIFIED": "yes"})
+        monkeypatch.setattr("work_end_orchestrator._cleanup_main_mode", lambda ctx: {"CLEANED": "yes"})
         for step in ["review", "sweep_config", "trajectory"]:
             update_close_progress(tmp_path, step, "done")
         update_close_progress(tmp_path, "sweep_selected", "")
         result = self._call(tmp_path, meta_state="closing:stamped", on_main="yes")
         assert result["ACTION"] == "user_input"
 
-    def test_no_covers_skips_close_issues(self, tmp_path):
+    def test_no_covers_skips_close_issues(self, tmp_path, monkeypatch):
         """When covers is empty, close_issues step is skipped."""
+        def mock_run(cmd, workspace, **kw):
+            return {"VERIFIED": "yes", "SWITCHED": "yes", "CLEANED": "yes"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", mock_run)
         from close_progress import update_close_progress, read_close_progress
         for step in ["review", "sweep_config", "trajectory", "squash",
                      "rebase", "land", "arc42_scan", "session_rename",
-                     "garden_feedback", "notes", "verify", "cleanup"]:
+                     "garden_feedback", "notes", "verify", "cleanup",
+                     "checkout_main", "cleanup_stack"]:
             update_close_progress(tmp_path, step, "done")
         update_close_progress(tmp_path, "sweep_selected", "")
 
@@ -386,11 +429,15 @@ class TestIntegrationCrashRecovery:
         result = self._call(tmp_path, meta_state="closing:promoted")
         assert result["ACTION"] == "trajectory"
 
-    def test_resume_mid_cleanup(self, tmp_path):
+    def test_resume_mid_cleanup(self, tmp_path, monkeypatch):
         """After crash during cleanup, resumes at next user_input."""
+        def mock_run(cmd, workspace, **kw):
+            return {"CLOSED": "1", "VERIFIED": "yes", "SWITCHED": "yes", "CLEANED": "yes"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", mock_run)
         from close_progress import update_close_progress
         for step in ["review", "sweep_config", "trajectory", "squash",
-                     "rebase", "land", "verify", "arc42_scan"]:
+                     "rebase", "land", "verify", "arc42_scan",
+                     "close_issues"]:
             update_close_progress(tmp_path, step, "done")
         update_close_progress(tmp_path, "sweep_selected", "")
         result = self._call(tmp_path, meta_state="closing:stamped",
@@ -421,6 +468,242 @@ class TestIntegrationCrashRecovery:
         progress = read_close_progress(tmp_path)
         assert "land" not in progress
         assert "cleanup" not in progress
+
+
+class TestStepSequence:
+    """STEPS data structure covers all required steps in correct order."""
+
+    def test_covers_all_mechanical_steps(self):
+        from work_end_orchestrator import STEPS
+        step_names = [s.name for s in STEPS]
+        for name in ["rebase", "land", "close_issues", "verify", "cleanup"]:
+            assert name in step_names, f"Missing mechanical step: {name}"
+
+    def test_covers_all_judgment_steps(self):
+        from work_end_orchestrator import STEPS
+        step_names = [s.name for s in STEPS]
+        for name in ["review", "sweep_config", "forage", "protocol",
+                     "update_claude_md", "impl_doc_sync", "adr",
+                     "write_content", "trajectory", "squash",
+                     "arc42_scan", "session_rename", "garden_feedback", "notes"]:
+            assert name in step_names, f"Missing judgment step: {name}"
+
+    def test_phase_ordering(self):
+        from work_end_orchestrator import STEPS
+        phase_order = [
+            "closing:review", "closing:promoted", "closing:stamped",
+        ]
+        last_phase_idx = 0
+        for step in STEPS:
+            if step.phase in phase_order:
+                idx = phase_order.index(step.phase)
+                assert idx >= last_phase_idx, (
+                    f"Step {step.name} (phase {step.phase}) is out of order"
+                )
+                last_phase_idx = idx
+
+    def test_stamped_phase_internal_ordering(self):
+        from work_end_orchestrator import STEPS
+        stamped = [s.name for s in STEPS if s.phase == "closing:stamped"]
+        if "arc42_scan" in stamped and "close_issues" in stamped:
+            assert stamped.index("close_issues") < stamped.index("arc42_scan"), (
+                "close_issues must come before arc42_scan in closing:stamped"
+            )
+
+
+class TestMechanicalStepWiring:
+    """Mechanical steps call real scripts via _run_script, not stubs."""
+
+    def _setup_to_step(self, tmp_path, target_step, meta_state="closing:review",
+                       on_main="no", in_slot="no", covers="271"):
+        """Mark all steps before target_step as done."""
+        from work_end_orchestrator import STEPS
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "sweep_selected", "")
+        for step in STEPS:
+            if step.name == target_step:
+                break
+            if step.step_type == "judgment":
+                update_close_progress(tmp_path, step.name, "done")
+            elif step.step_type == "mechanical":
+                update_close_progress(tmp_path, step.name, "done")
+
+    def _run(self, tmp_path, meta_state="closing:review", **extra):
+        from work_end_orchestrator import run_orchestrator
+        args = {
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": meta_state,
+            "covers": "271",
+            "issue_repo": "Hortora/soredium",
+        }
+        args.update(extra)
+        return run_orchestrator(args)
+
+    def test_rebase_calls_work_end_execute(self, tmp_path, monkeypatch):
+        """rebase step calls work_end_execute.py rebase with correct args."""
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"REBASED": "yes"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        self._setup_to_step(tmp_path, "rebase", meta_state="closing:promoted")
+        self._run(tmp_path, meta_state="closing:promoted")
+        rebase_calls = [c for c in calls if any("rebase" in str(a) for a in c)]
+        assert len(rebase_calls) >= 1, f"Expected rebase call, got: {calls}"
+
+    def test_land_branch_mode_calls_work_end_execute(self, tmp_path, monkeypatch):
+        """Branch mode land calls work_end_execute.py land."""
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"LANDED": "yes", "LANDED_SHA": "abc123"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        self._setup_to_step(tmp_path, "land", meta_state="closing:promoted")
+        self._run(tmp_path, meta_state="closing:promoted")
+        land_calls = [c for c in calls if any("land" in str(a) for a in c)]
+        assert any("work_end_execute.py" in str(c) for c in land_calls), f"Expected land call, got: {calls}"
+
+    def test_land_slot_mode_calls_merge_slot(self, tmp_path, monkeypatch):
+        """Slot mode land calls slot_manager.py merge-slot."""
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"LANDED_SHAS": "soredium:abc123"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        self._setup_to_step(tmp_path, "land", meta_state="closing:promoted")
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "write_marker", "done")
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        self._run(tmp_path, meta_state="closing:promoted",
+                  in_slot="yes", slot_path=str(slot_path))
+        land_calls = [c for c in calls if any("merge-slot" in str(a) or "slot_manager" in str(a) for a in c)]
+        assert len(land_calls) >= 1, f"Expected merge-slot call, got: {calls}"
+
+    def test_close_issues_calls_work_end_execute(self, tmp_path, monkeypatch):
+        """close_issues step calls work_end_execute.py close-issues."""
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"CLOSED": "1"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        self._setup_to_step(tmp_path, "close_issues", meta_state="closing:stamped")
+        self._run(tmp_path, meta_state="closing:stamped")
+        close_calls = [c for c in calls if any("close-issues" in str(a) for a in c)]
+        assert len(close_calls) >= 1, f"Expected close-issues call, got: {calls}"
+
+    def test_verify_calls_verify_slot_close(self, tmp_path, monkeypatch):
+        """verify step calls verify_slot_close.py."""
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"VERIFIED": "yes"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        self._setup_to_step(tmp_path, "verify", meta_state="closing:stamped")
+        self._run(tmp_path, meta_state="closing:stamped")
+        verify_calls = [c for c in calls if any("verify" in str(a) for a in c)]
+        assert len(verify_calls) >= 1, f"Expected verify call, got: {calls}"
+
+    def test_main_mode_skips_rebase(self, tmp_path, monkeypatch):
+        """Main mode skips rebase — no script call."""
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        self._setup_to_step(tmp_path, "rebase", meta_state="closing:promoted")
+        self._run(tmp_path, meta_state="closing:promoted", on_main="yes")
+        rebase_calls = [c for c in calls if any("rebase" in str(a) for a in c)]
+        assert len(rebase_calls) == 0, "Main mode should NOT call rebase"
+
+
+class TestReconciliation:
+    """Evidence-based recovery corrects false progress on startup."""
+
+    def test_judgment_steps_never_evidence_checked(self, tmp_path):
+        """Judgment steps (review, forage, etc.) are never reset by reconciliation."""
+        from work_end_orchestrator import _reconcile
+        progress, corrections = _reconcile(tmp_path, tmp_path / "project",
+                                            {"review": "done", "forage": "done"}, "closing:verified")
+        assert progress.get("review") == "done"
+        assert progress.get("forage") == "done"
+        assert len(corrections) == 0
+
+    def test_corrects_false_land_done(self, tmp_path):
+        """land=done but no .execute-progress → corrected."""
+        from work_end_orchestrator import _reconcile
+        progress, corrections = _reconcile(tmp_path, tmp_path / "project",
+                                            {"land": "done"}, "closing:stamped")
+        assert "land" not in progress
+        assert "land" in corrections
+
+    def test_preserves_valid_land_done(self, tmp_path):
+        """land=done and .execute-progress exists → preserved."""
+        (tmp_path / ".execute-progress").write_text("project:main=stamped\n")
+        from work_end_orchestrator import _reconcile
+        progress, corrections = _reconcile(tmp_path, tmp_path / "project",
+                                            {"land": "done"}, "closing:stamped")
+        assert progress.get("land") == "done"
+
+    def test_skips_report_steps(self, tmp_path):
+        """report_* steps are never evidence-checked — always preserved."""
+        from work_end_orchestrator import _reconcile
+        progress, corrections = _reconcile(tmp_path, tmp_path / "project",
+                                            {"report_promote": "done"}, "closing:promoted")
+        assert progress.get("report_promote") == "done"
+        assert "report_promote" not in corrections
+
+    def test_skips_attempt_keys(self, tmp_path):
+        """_attempt keys are metadata, not steps — preserved."""
+        from work_end_orchestrator import _reconcile
+        progress, corrections = _reconcile(tmp_path, tmp_path / "project",
+                                            {"review_attempt": "2"}, "closing:review")
+        assert progress.get("review_attempt") == "2"
+
+    def test_reconciliation_runs_on_orchestrator_start(self, tmp_path, monkeypatch):
+        """Orchestrator calls _reconcile on startup — resets false mechanical progress."""
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "land", "done")
+        def mock_run(cmd, workspace, **kw):
+            return {}
+        monkeypatch.setattr("work_end_orchestrator._run_script", mock_run)
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+        })
+        assert result["ACTION"] == "trajectory"
+
+
+class TestAbortExtended:
+    """Abort cleans up .execute-progress."""
+
+    def test_abort_deletes_execute_progress(self, tmp_path):
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        (tmp_path / ".execute-progress").write_text("step1=done\n")
+
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "abort": "yes",
+        })
+        assert result["ACTION"] == "complete"
+        assert not (tmp_path / ".execute-progress").exists()
+        assert not (tmp_path / ".close-progress").exists()
 
 
 class TestCloseReportIntegration:
