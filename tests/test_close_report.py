@@ -42,10 +42,10 @@ class TestRecord:
         rp = tmp_path / "report.json"
         run(["init", str(rp)])
         run(["record", str(rp), "step=rebase", "result=ok"])
-        run(["record", str(rp), "step=merge", "result=ok", "method=fast-forward"])
+        run(["record", str(rp), "step=land", "result=ok", "landed_sha=abc123"])
         data = json.loads(rp.read_text())
         assert "rebase" in data["steps"]
-        assert "merge" in data["steps"]
+        assert "land" in data["steps"]
 
     def test_auto_init_on_missing_file(self, tmp_path):
         rp = tmp_path / "report.json"
@@ -94,75 +94,6 @@ class TestRender:
         result = run(["render", str(rp)])
         assert "✅ Squashed 8 → 3 commits, strategy B" in result.stdout
 
-    def test_merge_rendering(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=merge", "result=ok", "method=fast-forward", "files=5", "insertions=42"])
-        result = run(["render", str(rp)])
-        assert "✅ Merged to main via fast-forward (5 files, 42 insertions)" in result.stdout
-
-    def test_push_fork_rendering(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=push-fork", "result=ok", "remote=origin", "branch=main"])
-        result = run(["render", str(rp)])
-        assert "✅ Pushed to origin (main)" in result.stdout
-
-    def test_push_failed(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=push-fork", "result=failed", "remote=origin"])
-        result = run(["render", str(rp)])
-        assert "❌ Pushed to origin" in result.stdout
-
-    def test_artifacts_rendering(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=artifacts", "result=ok",
-             "workspace_promoted=2", "project_promoted=1",
-             "specs_cleaned=1", "issues_closed=3",
-             "blog_published=1", "blog_dest=/path/blog",
-             "plans_archived=0"])
-        result = run(["render", str(rp)])
-        assert "2 to workspace, 1 to project" in result.stdout
-        assert "3 issues closed" in result.stdout
-        assert "1 blog entries → /path/blog" in result.stdout
-
-    def test_journal_merge_rendering(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=journal-merge", "result=ok", "sections=4", "target=ARC42STORIES.MD"])
-        result = run(["render", str(rp)])
-        assert "✅ Journal merged → ARC42STORIES.MD (4 sections)" in result.stdout
-
-    def test_stamp_rendering(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=stamp-project", "result=ok", "branch=issue-5", "landed_sha=abc1234567890"])
-        result = run(["render", str(rp)])
-        assert "✅ Stamped project branch (issue-5) — landed as abc12345" in result.stdout
-
-    def test_hygiene_clean(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=hygiene", "result=ok", "findings=0"])
-        result = run(["render", str(rp)])
-        assert "✅ Hygiene scan (clean)" in result.stdout
-
-    def test_hygiene_findings(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=hygiene", "result=ok", "findings=3"])
-        result = run(["render", str(rp)])
-        assert "✅ Hygiene scan (3 findings)" in result.stdout
-
-    def test_slot_archive_rendering(self, tmp_path):
-        rp = tmp_path / "report.json"
-        run(["init", str(rp)])
-        run(["record", str(rp), "step=slot-archive", "result=ok", "count=3", "names=devtown,engine,workspace"])
-        result = run(["render", str(rp)])
-        assert "3 clones (devtown,engine,workspace)" in result.stdout
-
     def test_archive_rendering(self, tmp_path):
         rp = tmp_path / "report.json"
         run(["init", str(rp)])
@@ -174,14 +105,14 @@ class TestRender:
         """Steps render in canonical order regardless of record order."""
         rp = tmp_path / "report.json"
         run(["init", str(rp)])
-        run(["record", str(rp), "step=stamp-project", "result=ok", "branch=b"])
+        run(["record", str(rp), "step=verify", "result=ok", "verified=pass"])
+        run(["record", str(rp), "step=promote", "result=ok"])
         run(["record", str(rp), "step=rebase", "result=ok", "branch=b", "base=main"])
-        run(["record", str(rp), "step=merge", "result=ok", "method=ff"])
         result = run(["render", str(rp)])
         lines = [l for l in result.stdout.splitlines() if l.strip()]
-        assert "Rebased" in lines[0]
-        assert "Merged" in lines[1]
-        assert "Stamped" in lines[2]
+        assert "Artifacts promoted" in lines[0]
+        assert "Rebased" in lines[1]
+        assert "Verified" in lines[2]
 
     def test_unknown_step_renders(self, tmp_path):
         """Unknown steps appear at the end with kv summary."""
@@ -196,42 +127,115 @@ class TestRender:
         """Simulates a complete normal (non-slot) work-end close-out."""
         rp = tmp_path / "report.json"
         run(["init", str(rp)])
+        run(["record", str(rp), "step=promote", "result=ok",
+             "promoted_files=2", "target_repos=workspace"])
         run(["record", str(rp), "step=rebase", "result=ok", "branch=issue-42-auth", "base=main"])
         run(["record", str(rp), "step=squash", "result=ok", "before=6", "after=2", "strategy=E"])
-        run(["record", str(rp), "step=merge", "result=ok", "method=fast-forward", "files=4", "insertions=120"])
-        run(["record", str(rp), "step=push-fork", "result=ok", "remote=origin", "branch=main"])
-        run(["record", str(rp), "step=push-blessed", "result=ok", "remote=upstream", "branch=main"])
-        run(["record", str(rp), "step=artifacts", "result=ok",
-             "workspace_promoted=1", "project_promoted=0",
-             "specs_cleaned=1", "issues_closed=1",
-             "blog_published=0", "plans_archived=0"])
-        run(["record", str(rp), "step=journal-merge", "result=ok", "sections=2", "target=ARC42STORIES.MD"])
-        run(["record", str(rp), "step=stamp-project", "result=ok", "branch=issue-42-auth", "landed_sha=deadbeef123"])
-        run(["record", str(rp), "step=stamp-workspace", "result=ok", "branch=issue-42-auth", "landed_sha=cafebabe456"])
-        run(["record", str(rp), "step=hygiene", "result=ok", "findings=0"])
+        run(["record", str(rp), "step=land", "result=ok",
+             "landed_sha=deadbeef123", "pushed_repos=project,workspace"])
+        run(["record", str(rp), "step=close-issues", "result=ok", "closed=1"])
+        run(["record", str(rp), "step=verify", "result=ok", "verified=pass"])
+        run(["record", str(rp), "step=scaffold-cleanup", "result=ok"])
 
         result = run(["render", str(rp)])
         lines = [l for l in result.stdout.splitlines() if l.strip()]
-        assert len(lines) == 10
+        assert len(lines) == 7
         assert all(l.startswith("✅") for l in lines)
 
     def test_full_slot_workflow(self, tmp_path):
         """Simulates a complete slot-mode work-end close-out."""
         rp = tmp_path / "report.json"
         run(["init", str(rp)])
+        run(["record", str(rp), "step=promote", "result=ok"])
         run(["record", str(rp), "step=rebase", "result=ok", "branch=issue-42", "base=main", "conflicts=yes"])
-        run(["record", str(rp), "step=merge", "result=ok", "method=fast-forward", "files=2", "insertions=8"])
-        run(["record", str(rp), "step=push-fork", "result=ok", "remote=origin", "branch=main"])
-        run(["record", str(rp), "step=artifacts", "result=ok",
-             "workspace_promoted=0", "project_promoted=0",
-             "specs_cleaned=0", "issues_closed=1",
-             "blog_published=0", "plans_archived=0"])
-        run(["record", str(rp), "step=stamp-project", "result=ok", "branch=issue-42"])
-        run(["record", str(rp), "step=stamp-workspace", "result=ok", "branch=issue-42"])
-        run(["record", str(rp), "step=slot-archive", "result=ok", "count=3", "names=devtown,engine,workspace"])
+        run(["record", str(rp), "step=land", "result=ok",
+             "landed_sha=abc123", "pushed_repos=project"])
+        run(["record", str(rp), "step=close-issues", "result=ok", "closed=1"])
+        run(["record", str(rp), "step=verify", "result=ok", "verified=pass"])
         run(["record", str(rp), "step=archive", "result=ok", "slot=11", "dest=worktrees/attic/11"])
+        run(["record", str(rp), "step=scaffold-cleanup", "result=ok"])
 
         result = run(["render", str(rp)])
         lines = [l for l in result.stdout.splitlines() if l.strip()]
-        assert any("Slot clones archived" in l for l in lines)
         assert any("Slot archived" in l for l in lines)
+        assert any("Artifacts promoted" in l for l in lines)
+
+
+class TestOrchestratorStepNames:
+    """Tests for orchestrator step names — must be in STEP_ORDER and STEP_LABELS."""
+
+    def _load_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("close_report", str(SCRIPT))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_orchestrator_step_order(self):
+        mod = self._load_module()
+        expected_steps = [
+            "promote", "rebase", "squash", "land",
+            "close-issues", "verify", "archive", "scaffold-cleanup",
+        ]
+        for step in expected_steps:
+            assert step in mod.STEP_ORDER, f"{step} missing from STEP_ORDER"
+
+    def test_orchestrator_step_labels(self):
+        mod = self._load_module()
+        assert mod.STEP_LABELS["promote"] == "Artifacts promoted"
+        assert mod.STEP_LABELS["land"] == "Landed"
+        assert mod.STEP_LABELS["close-issues"] == "Issues closed"
+        assert mod.STEP_LABELS["verify"] == "Verified"
+
+    def test_promote_rendering(self, tmp_path):
+        rp = tmp_path / "report.json"
+        run(["init", str(rp)])
+        run(["record", str(rp), "step=promote", "result=ok",
+             "promoted_files=3", "target_repos=workspace,project"])
+        result = run(["render", str(rp)])
+        assert "Artifacts promoted: 3 files" in result.stdout
+        assert "workspace,project" in result.stdout
+
+    def test_promote_no_artifacts(self, tmp_path):
+        rp = tmp_path / "report.json"
+        run(["init", str(rp)])
+        run(["record", str(rp), "step=promote", "result=ok"])
+        result = run(["render", str(rp)])
+        assert "Artifacts promoted: no artifacts" in result.stdout
+
+    def test_land_rendering(self, tmp_path):
+        rp = tmp_path / "report.json"
+        run(["init", str(rp)])
+        run(["record", str(rp), "step=land", "result=ok",
+             "landed_sha=abc1234567890", "pushed_repos=project,workspace"])
+        result = run(["render", str(rp)])
+        assert "Landed project,workspace (SHA abc1234)" in result.stdout
+
+    def test_land_no_sha(self, tmp_path):
+        rp = tmp_path / "report.json"
+        run(["init", str(rp)])
+        run(["record", str(rp), "step=land", "result=ok"])
+        result = run(["render", str(rp)])
+        assert "Landed" in result.stdout
+
+    def test_close_issues_rendering(self, tmp_path):
+        rp = tmp_path / "report.json"
+        run(["init", str(rp)])
+        run(["record", str(rp), "step=close-issues", "result=ok", "closed=2"])
+        result = run(["render", str(rp)])
+        assert "Issues closed (2)" in result.stdout
+
+    def test_verify_pass(self, tmp_path):
+        rp = tmp_path / "report.json"
+        run(["init", str(rp)])
+        run(["record", str(rp), "step=verify", "result=ok", "verified=pass"])
+        result = run(["render", str(rp)])
+        assert "Verified (pass)" in result.stdout
+
+    def test_verify_failed(self, tmp_path):
+        rp = tmp_path / "report.json"
+        run(["init", str(rp)])
+        run(["record", str(rp), "step=verify", "result=failed", "verified=fail"])
+        result = run(["render", str(rp)])
+        assert "❌" in result.stdout
+        assert "Verified (fail)" in result.stdout

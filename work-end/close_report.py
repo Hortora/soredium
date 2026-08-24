@@ -17,39 +17,25 @@ from pathlib import Path
 
 
 STEP_ORDER = [
+    "promote",
     "rebase",
     "squash",
-    "build-verify",
-    "merge",
-    "push-fork",
-    "push-blessed",
-    "artifacts",
-    "journal-merge",
-    "specs-posted",
-    "stamp-project",
-    "stamp-workspace",
-    "scaffold-cleanup",
-    "hygiene",
-    "slot-archive",
+    "land",
+    "close-issues",
+    "verify",
     "archive",
+    "scaffold-cleanup",
 ]
 
 STEP_LABELS = {
+    "promote": "Artifacts promoted",
     "rebase": "Rebased",
     "squash": "Squashed",
-    "build-verify": "Build verified",
-    "merge": "Merged",
-    "push-fork": "Pushed",
-    "push-blessed": "Pushed to blessed",
-    "artifacts": "Artifacts promoted",
-    "journal-merge": "Journal merged",
-    "specs-posted": "Specs posted",
-    "stamp-project": "Stamped project branch",
-    "stamp-workspace": "Stamped workspace branch",
-    "scaffold-cleanup": "Scaffold cleaned",
-    "hygiene": "Hygiene scan",
-    "slot-archive": "Slot clones archived",
+    "land": "Landed",
+    "close-issues": "Issues closed",
+    "verify": "Verified",
     "archive": "Slot archived",
+    "scaffold-cleanup": "Scaffold cleaned",
 }
 
 
@@ -98,6 +84,11 @@ def render(report_path: Path) -> None:
 def _format_detail(step: str, data: dict) -> str:
     d = {k: v for k, v in data.items() if k != "result"}
 
+    if step == "promote":
+        files = d.get("promoted_files", "")
+        targets = d.get("target_repos", "")
+        return f": {files} files → {targets}" if files else ": no artifacts"
+
     if step == "rebase":
         branch = d.get("branch", "")
         base = d.get("base", "")
@@ -112,70 +103,26 @@ def _format_detail(step: str, data: dict) -> str:
         strat = f", strategy {strategy}" if strategy else ""
         return f" {before} → {after} commits{strat}"
 
-    if step == "build-verify":
-        cmd = d.get("command", "")
-        return f" ({cmd})" if cmd else ""
-
-    if step == "merge":
-        method = d.get("method", "fast-forward")
-        files = d.get("files", "")
-        insertions = d.get("insertions", "")
-        stats = f" ({files} files, {insertions} insertions)" if files else ""
-        return f" to main via {method}{stats}"
-
-    if step in ("push-fork", "push-blessed"):
-        remote = d.get("remote", "")
-        branch = d.get("branch", "")
-        return f" to {remote}" + (f" ({branch})" if branch else "")
-
-    if step == "artifacts":
-        parts = []
-        wp = d.get("workspace_promoted", "0")
-        pp = d.get("project_promoted", "0")
-        ic = d.get("issues_closed", "0")
-        bp = d.get("blog_published", "0")
-        pa = d.get("plans_archived", "0")
-        if int(wp) + int(pp) > 0:
-            parts.append(f"{wp} to workspace, {pp} to project")
-        if int(ic) > 0:
-            parts.append(f"{ic} issues closed")
-        if int(bp) > 0:
-            dest = d.get("blog_dest", "")
-            parts.append(f"{bp} blog entries → {dest}" if dest else f"{bp} blog entries")
-        if int(pa) > 0:
-            parts.append(f"{pa} plans archived")
-        return f": {'; '.join(parts)}" if parts else ""
-
-    if step == "journal-merge":
-        sections = d.get("sections", "0")
-        target = d.get("target", "ARC42STORIES.MD")
-        return f" → {target} ({sections} sections)"
-
-    if step == "specs-posted":
-        issue = d.get("issue", "")
-        return f" to #{issue}" if issue else ""
-
-    if step in ("stamp-project", "stamp-workspace"):
+    if step == "land":
         sha = d.get("landed_sha", "")
-        branch = d.get("branch", "")
-        return f" ({branch})" + (f" — landed as {sha[:8]}" if sha else "")
+        repos = d.get("pushed_repos", "")
+        return f" {repos} (SHA {sha[:7]})" if sha else ""
 
-    if step == "scaffold-cleanup":
-        return ""
+    if step == "close-issues":
+        closed = d.get("closed", "0")
+        return f" ({closed})"
 
-    if step == "hygiene":
-        findings = d.get("findings", "0")
-        return f" ({findings} findings)" if findings != "0" else " (clean)"
-
-    if step == "slot-archive":
-        count = d.get("count", "0")
-        names = d.get("names", "")
-        return f" {count} clones ({names})" if names else f" {count} clones"
+    if step == "verify":
+        verified = d.get("verified", "unknown")
+        return f" ({verified})"
 
     if step == "archive":
         slot = d.get("slot", "")
         dest = d.get("dest", "")
         return f" slot {slot} → {dest}" if slot else ""
+
+    if step == "scaffold-cleanup":
+        return ""
 
     return ""
 
