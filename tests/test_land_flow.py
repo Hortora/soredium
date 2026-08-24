@@ -495,7 +495,6 @@ class TestLandBatchErrors:
         repo = _init_repo(tmp_path / "project")
         branch = "issue-42-test"
         _add_feature(repo, branch)
-        # Create a conflicting commit on main via the remote
         bare = tmp_path / ".project-bare.git"
         conflict_repo = tmp_path / "conflict-maker"
         subprocess.run(["git", "clone", str(bare), str(conflict_repo)], capture_output=True, check=True)
@@ -513,3 +512,38 @@ class TestLandBatchErrors:
         result = land_batch([desc], branch, tmp_path / ".progress")
 
         assert not result.success
+
+
+# --- Crash-safety tests for _write_progress ---
+
+class TestWriteProgressAtomic:
+
+    def test_write_and_read_roundtrip(self, tmp_path):
+        from land_flow import _write_progress, _read_progress
+        progress = tmp_path / ".execute-progress"
+        _write_progress(progress, "repo:branch", "pushed")
+        _write_progress(progress, "repo:branch2", "stamped")
+        result = _read_progress(progress)
+        assert result["repo:branch"] == "pushed"
+        assert result["repo:branch2"] == "stamped"
+
+    def test_no_tmp_file_left(self, tmp_path):
+        from land_flow import _write_progress
+        progress = tmp_path / ".execute-progress"
+        _write_progress(progress, "repo:branch", "pushed")
+        assert not (tmp_path / ".execute-progress.tmp").exists()
+
+    def test_survives_crash(self, tmp_path):
+        from land_flow import _write_progress, _read_progress
+        from unittest.mock import patch
+        progress = tmp_path / ".execute-progress"
+        _write_progress(progress, "repo:branch", "pushed")
+
+        with patch("os.replace", side_effect=OSError("simulated crash")):
+            try:
+                _write_progress(progress, "repo:branch", "stamped")
+            except OSError:
+                pass
+
+        result = _read_progress(progress)
+        assert result["repo:branch"] == "pushed", "Prior progress must survive"

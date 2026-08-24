@@ -19,6 +19,7 @@ Output: KEY=value lines (stdout). Errors on stderr, exit code 1.
 """
 
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -129,7 +130,9 @@ def write_progress(progress_path: Path, key: str, value: str) -> None:
     progress[key] = value
     lines = [f"{k}={v}" for k, v in progress.items()]
     progress_path.parent.mkdir(parents=True, exist_ok=True)
-    progress_path.write_text("\n".join(lines) + "\n")
+    tmp = progress_path.with_suffix('.tmp')
+    tmp.write_text("\n".join(lines) + "\n")
+    os.replace(tmp, progress_path)
 
 
 def append_ledger(workspace: str, entry: dict) -> None:

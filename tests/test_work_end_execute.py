@@ -1,8 +1,10 @@
 """Tests for work-end/work_end_execute.py"""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).parent.parent / "work-end" / "work_end_execute.py"
 
@@ -931,3 +933,46 @@ class TestCloseIssues:
         assert "close-issues" in calls[0]
         assert "owner/repo" in calls[0]
         assert "covers=42,43" in calls[0]
+
+
+# --- Crash-safety tests for write_progress ---
+
+class TestWriteProgressAtomic:
+    """write_progress must use atomic write-then-rename."""
+
+    def _import_module(self):
+        work_end_dir = str(Path(__file__).parent.parent / "work-end")
+        if work_end_dir not in sys.path:
+            sys.path.insert(0, work_end_dir)
+        import work_end_execute
+        return work_end_execute
+
+    def test_write_and_read_roundtrip(self, tmp_path):
+        mod = self._import_module()
+        progress = tmp_path / ".execute-progress"
+        mod.write_progress(progress, "step1", "done")
+        mod.write_progress(progress, "step2", "pending")
+        result = mod.read_progress(progress)
+        assert result["step1"] == "done"
+        assert result["step2"] == "pending"
+
+    def test_no_tmp_file_left(self, tmp_path):
+        mod = self._import_module()
+        progress = tmp_path / ".execute-progress"
+        mod.write_progress(progress, "step1", "done")
+        assert not (tmp_path / ".execute-progress.tmp").exists()
+
+    def test_survives_crash_between_truncate_and_write(self, tmp_path):
+        mod = self._import_module()
+        progress = tmp_path / ".execute-progress"
+        mod.write_progress(progress, "step1", "done")
+
+        with patch("os.replace", side_effect=OSError("simulated crash")):
+            try:
+                mod.write_progress(progress, "step2", "done")
+            except OSError:
+                pass
+
+        result = mod.read_progress(progress)
+        assert result.get("step1") == "done", "Prior progress must survive a crash"
+        assert "step2" not in result, "Crashed write must not appear"

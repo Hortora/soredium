@@ -7,6 +7,7 @@ The flow is topology-agnostic; adapters construct RepoDescriptor batches
 that the flow processes uniformly.
 """
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -71,7 +72,9 @@ def _write_progress(path: Path, key: str, value: str) -> None:
     progress[key] = value
     lines = [f"{k}={v}" for k, v in progress.items()]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n")
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text("\n".join(lines) + "\n")
+    os.replace(tmp, path)
 
 
 def _progress_key(desc: RepoDescriptor, branch: str) -> str:
