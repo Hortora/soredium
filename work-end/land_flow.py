@@ -376,7 +376,7 @@ def _strip_scaffold_from_merge(repo_path: Path) -> None:
         return
     rm = _git(repo_path, "rm", "-f", "--", *to_remove)
     if rm.returncode == 0:
-        _git(repo_path, "commit", "--amend", "--no-edit")
+        _git(repo_path, "commit", "-m", "chore: strip scaffold from workspace main")
 
 
 def _merge_and_push_direct(
