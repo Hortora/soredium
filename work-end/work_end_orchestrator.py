@@ -23,9 +23,11 @@ Usage:
         [abort=yes] [conflict_resolved=yes] [dry_run=yes]
 """
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -36,6 +38,30 @@ from close_progress import (
     delete_close_progress,
     is_stale,
 )
+
+CLOSE_LOG_FILE = ".close-log.jsonl"
+
+
+def _log_call(workspace: Path, meta_state: str, result: dict[str, str],
+              steps_executed: list[str], dry_run: bool = False) -> None:
+    if dry_run:
+        return
+    log_path = workspace / CLOSE_LOG_FILE
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "meta_state": meta_state,
+        "action": result.get("ACTION", ""),
+        "step": result.get("STEP", ""),
+        "context": result.get("CONTEXT", ""),
+        "steps_executed": steps_executed,
+        "error": result.get("ERROR", ""),
+    }
+    try:
+        with open(log_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
+
 
 SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "impl_doc_sync", "adr", "write_content"]
 
@@ -126,6 +152,7 @@ class OrchestratorContext:
     landed_shas: dict[str, str] = field(default_factory=dict)
     expected_state: str = ""
     slot_repos: list[str] = field(default_factory=list)
+    steps_executed: list[str] = field(default_factory=list)
 
     def done(self, step: str) -> bool:
         return self.progress.get(step) in ("done", "skipped")
@@ -338,6 +365,16 @@ def _report_scaffold_script(ctx):
 
 def _report_render_script(ctx):
     return [sys.executable, str(REPORT_SCRIPT), "render", str(_report_path(ctx))]
+
+
+def _archive_close_progress(workspace: Path) -> None:
+    src = workspace / ".close-progress"
+    dst = workspace / ".close-progress.done"
+    if src.exists():
+        os.replace(src, dst)
+    tmp = workspace / ".close-progress.tmp"
+    if tmp.exists():
+        tmp.unlink()
 
 
 # --- Main-mode special cases ---
@@ -705,7 +742,9 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         slot_repos=slot_repos,
     )
 
-    return _next_action(ctx)
+    result = _next_action(ctx)
+    _log_call(workspace, meta_state, result, ctx.steps_executed, dry_run=dry_run)
+    return result
 
 
 def _handle_abort(workspace: Path, meta_state: str) -> dict[str, str]:
@@ -736,11 +775,13 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
         if step.step_type == "mechanical":
             result = _execute_mechanical(step, ctx)
             if result and "ERROR" in result:
+                ctx.steps_executed.append(f"{step.name}:ERROR")
                 return {"ACTION": "error", "STEP": step.name, **result}
             ctx.last_output = result or {}
             if step.name == "land":
                 ctx.landed_shas = _parse_landed_shas(ctx.last_output, ctx)
             update_close_progress(ctx.workspace, step.name, "done")
+            ctx.steps_executed.append(step.name)
             continue
 
         if step.step_type == "judgment":
@@ -763,6 +804,7 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
         if step.step_type == "lifecycle":
             _fire_lifecycle(step, ctx)
             update_close_progress(ctx.workspace, step.name, "done")
+            ctx.steps_executed.append(step.name)
             continue
 
     return {"ACTION": "complete", "SUMMARY": "Close complete."}
@@ -771,7 +813,7 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
 def _execute_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str]:
     if step.name == "delete_progress":
         if not ctx.dry_run:
-            delete_close_progress(ctx.workspace)
+            _archive_close_progress(ctx.workspace)
         elif ctx.call_log is not None:
             ctx.call_log.append(["(internal)", "delete_progress"])
         return {"DELETED": "yes"}
