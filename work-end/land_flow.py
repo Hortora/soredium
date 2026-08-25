@@ -319,6 +319,9 @@ def _merge_and_push_two_hop(
     if ff.returncode != 0:
         _git(desc.repo_path, "merge", f"origin/{desc.base_branch}", "--no-edit")
 
+    if desc.is_workspace:
+        _strip_scaffold_before_merge(desc.repo_path, branch, desc.base_branch)
+
     merge = _git(desc.repo_path, "merge", "--ff-only", branch)
     if merge.returncode != 0:
         merge = _git(desc.repo_path, "merge", branch, "--no-edit")
@@ -327,9 +330,6 @@ def _merge_and_push_two_hop(
             return status
     status.merged = True
     _write_progress(progress_file, key, "merged")
-
-    if desc.is_workspace:
-        _strip_scaffold_from_merge(desc.repo_path)
 
     sha_r = _git(desc.repo_path, "rev-parse", desc.base_branch)
     landed_sha = sha_r.stdout.strip() if sha_r.returncode == 0 else "unknown"
@@ -370,13 +370,13 @@ SCAFFOLD_FILES = [".plan", "JOURNAL.md", ".execute-progress",
                   ".meta", ".epic"]
 
 
-def _strip_scaffold_from_merge(repo_path: Path) -> None:
+def _strip_scaffold_before_merge(repo_path: Path, branch: str, base_branch: str) -> None:
+    _git(repo_path, "checkout", branch)
     to_remove = [f for f in SCAFFOLD_FILES if (repo_path / f).exists()]
-    if not to_remove:
-        return
-    rm = _git(repo_path, "rm", "-f", "--", *to_remove)
-    if rm.returncode == 0:
-        _git(repo_path, "commit", "-m", "chore: strip scaffold from workspace main")
+    if to_remove:
+        _git(repo_path, "rm", "-f", "--", *to_remove)
+        _git(repo_path, "commit", "-m", "chore: remove scaffold before merge")
+    _git(repo_path, "checkout", base_branch)
 
 
 def _merge_and_push_direct(
@@ -393,15 +393,15 @@ def _merge_and_push_direct(
         status.error = "checkout_failed"
         return status
 
+    if desc.is_workspace:
+        _strip_scaffold_before_merge(desc.repo_path, branch, desc.base_branch)
+
     merge = _git(desc.repo_path, "merge", "--ff-only", branch)
     if merge.returncode != 0:
         status.error = "merge_failed"
         return status
     status.merged = True
     _write_progress(progress_file, key, "merged")
-
-    if desc.is_workspace:
-        _strip_scaffold_from_merge(desc.repo_path)
 
     max_retries = 3
     for attempt in range(1, max_retries + 1):
