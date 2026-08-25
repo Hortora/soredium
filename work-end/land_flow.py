@@ -458,7 +458,10 @@ def _stamp_repo(
         _write_progress(progress_file, key, "stamped")
         return
 
-    _git(desc.repo_path, "checkout", branch)
+    co = _git(desc.repo_path, "checkout", branch)
+    if co.returncode != 0:
+        _git(desc.repo_path, "stash", "push", "-u", "-m", "work-end: stash before stamp")
+        _git(desc.repo_path, "checkout", branch)
 
     issue_match = re.match(r"issue-(\d+)", branch)
     issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""

@@ -55,10 +55,18 @@ def _push_or_report(cwd: str, verify_paths: list[str] | None = None) -> None:
     try:
         git("push", cwd=cwd)
         print("PUSHED=yes")
-    except subprocess.CalledProcessError as e:
-        print("PUSHED=failed")
-        print(f"PUSH_ERROR={e.stderr.strip()}")
-        return
+    except subprocess.CalledProcessError:
+        try:
+            branch = subprocess.run(
+                ["git", "-C", cwd, "branch", "--show-current"],
+                capture_output=True, text=True,
+            ).stdout.strip()
+            git("push", "-u", "origin", branch, cwd=cwd)
+            print("PUSHED=yes")
+        except subprocess.CalledProcessError as e2:
+            print("PUSHED=failed")
+            print(f"PUSH_ERROR={e2.stderr.strip()}")
+            return
 
     if verify_paths:
         try:

@@ -40,6 +40,22 @@ from close_progress import (
 )
 
 CLOSE_LOG_FILE = ".close-log.jsonl"
+CLOSE_FILES_TO_EXCLUDE = [".close-progress", ".close-progress.tmp", ".close-progress.done",
+                          ".close-log.jsonl", ".close-report.json"]
+
+
+def _ensure_close_files_excluded(workspace: Path) -> None:
+    exclude = workspace / ".git" / "info" / "exclude"
+    if not exclude.exists():
+        return
+    content = exclude.read_text()
+    added = False
+    for f in CLOSE_FILES_TO_EXCLUDE:
+        if f not in content:
+            content += f"\n{f}"
+            added = True
+    if added:
+        exclude.write_text(content)
 
 
 def _log_call(workspace: Path, meta_state: str, result: dict[str, str],
@@ -704,6 +720,7 @@ def parse_args(argv: list[str]) -> dict[str, str]:
 
 def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     workspace = Path(args["workspace"])
+    _ensure_close_files_excluded(workspace)
     project = Path(args.get("project", ""))
     branch = args.get("branch", "")
     base_branch = args.get("base_branch", "main")
@@ -729,8 +746,9 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         if attempt_key in progress:
             update_close_progress(workspace, attempt_key, "0")
 
-    if args.get("sweep_selected") is not None and "sweep_config" in read_close_progress(workspace):
+    if args.get("sweep_selected") is not None:
         selected = args["sweep_selected"]
+        update_close_progress(workspace, "sweep_config", "done")
         update_close_progress(workspace, "sweep_selected", selected)
 
     progress = read_close_progress(workspace)

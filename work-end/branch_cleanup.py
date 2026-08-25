@@ -69,7 +69,7 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
         return 0
 
     try:
-        git("rm", "-f", *files_to_remove, cwd=workspace)
+        git("rm", "-f", "--ignore-unmatch", *files_to_remove, cwd=workspace)
     except subprocess.CalledProcessError as e:
         print("ERROR=rm_failed")
         print(f"ERROR_DETAIL=Failed to remove scaffold files: {e.stderr.strip()}")
