@@ -978,8 +978,8 @@ class TestWriteProgressAtomic:
         assert "step2" not in result, "Crashed write must not appear"
 
 
-class TestLandWorkspaceMerge:
-    """Workspace branch must be merged, pushed, and stamped during land."""
+class TestLandWorkspaceStampOnly:
+    """Workspace branch is stamp-only — no merge. Artifacts promoted separately."""
 
     def _setup_repos(self, tmp_path: Path, branch: str = "issue-345-test"):
         proj_remote = _init_bare(tmp_path / "proj-remote.git")
@@ -1001,30 +1001,8 @@ class TestLandWorkspaceMerge:
         (workspace / "spec.md").write_text("# spec\n")
         _git(workspace, "add", "spec.md")
         _git(workspace, "commit", "-m", "docs: workspace spec")
-        (workspace / "blog.md").write_text("# blog\n")
-        _git(workspace, "add", "blog.md")
-        _git(workspace, "commit", "-m", "docs: workspace blog")
 
         return project, workspace, branch
-
-    def test_workspace_branch_merged_to_main(self, tmp_path: Path):
-        """After land, workspace branch content must be on workspace main."""
-        project, workspace, branch = self._setup_repos(tmp_path)
-
-        result = _run_execute(
-            "land",
-            f"project={project}",
-            f"branch={branch}",
-            "base_branch=main",
-            f"workspace={workspace}",
-        )
-        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
-        assert "LANDED=yes" in result.stdout
-
-        _git(workspace, "checkout", "main")
-        ws_files = os.listdir(workspace)
-        assert "spec.md" in ws_files, "Workspace spec not merged to main"
-        assert "blog.md" in ws_files, "Workspace blog not merged to main"
 
     def test_workspace_branch_stamped(self, tmp_path: Path):
         """After land, workspace branch must have a stamp commit."""
@@ -1042,9 +1020,11 @@ class TestLandWorkspaceMerge:
         stamp = _git(workspace, "log", "-1", "--format=%s", branch)
         assert "branch closed" in stamp, f"Workspace branch not stamped, tip: {stamp}"
 
-    def test_workspace_pushed_to_remote(self, tmp_path: Path):
-        """After land, workspace main must be pushed to origin."""
+    def test_workspace_main_not_modified(self, tmp_path: Path):
+        """After land, workspace main must NOT have branch content — no merge."""
         project, workspace, branch = self._setup_repos(tmp_path)
+
+        main_sha_before = _git(workspace, "rev-parse", "main")
 
         result = _run_execute(
             "land",
@@ -1053,13 +1033,13 @@ class TestLandWorkspaceMerge:
             "base_branch=main",
             f"workspace={workspace}",
         )
-        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
+        assert result.returncode == 0
 
-        unpushed = _git(workspace, "log", "origin/main..main", "--oneline")
-        assert unpushed == "", f"Workspace has unpushed commits: {unpushed}"
+        main_sha_after = _git(workspace, "rev-parse", "main")
+        assert main_sha_before == main_sha_after, "Workspace main should not change — no merge"
 
     def test_reports_workspace_status(self, tmp_path: Path):
-        """Land output must report workspace merge status."""
+        """Land output must report WORKSPACE_LANDED."""
         project, workspace, branch = self._setup_repos(tmp_path)
 
         result = _run_execute(
@@ -1070,120 +1050,4 @@ class TestLandWorkspaceMerge:
             f"workspace={workspace}",
         )
         assert result.returncode == 0
-        assert "WORKSPACE_LANDED=yes" in result.stdout, (
-            f"Missing WORKSPACE_LANDED in output: {result.stdout}"
-        )
-
-
-class TestLandWorkspaceNoRemote:
-    """Workspace with no remote — fallback path must still merge, stamp, and push."""
-
-    def _setup_repos_no_ws_remote(self, tmp_path: Path, branch: str = "issue-345-test"):
-        proj_remote = _init_bare(tmp_path / "proj-remote.git")
-        project = _init_repo(tmp_path / "project")
-        workspace = _init_repo(tmp_path / "workspace")
-
-        _git(project, "remote", "add", "origin", str(proj_remote))
-        _git(project, "push", "origin", "main")
-
-        _git(project, "checkout", "-b", branch)
-        (project / "feature.py").write_text("# feature\n")
-        _git(project, "add", "feature.py")
-        _git(project, "commit", "-m", "feat: project feature")
-
-        _git(workspace, "checkout", "-b", branch)
-        (workspace / "spec.md").write_text("# spec\n")
-        _git(workspace, "add", "spec.md")
-        _git(workspace, "commit", "-m", "docs: workspace spec")
-
-        return project, workspace, branch
-
-    def test_no_remote_workspace_still_merged(self, tmp_path: Path):
-        """Workspace with no remote: branch content must still merge to main."""
-        project, workspace, branch = self._setup_repos_no_ws_remote(tmp_path)
-
-        result = _run_execute(
-            "land",
-            f"project={project}",
-            f"branch={branch}",
-            "base_branch=main",
-            f"workspace={workspace}",
-        )
-        assert result.returncode == 0, f"land failed: {result.stdout}\n{result.stderr}"
-
-        _git(workspace, "checkout", "main")
-        ws_files = os.listdir(workspace)
-        assert "spec.md" in ws_files, (
-            f"Workspace spec not merged to main (fallback path). Files: {ws_files}"
-        )
-
-    def test_no_remote_workspace_stamped(self, tmp_path: Path):
-        """Workspace with no remote: branch must still be stamped."""
-        project, workspace, branch = self._setup_repos_no_ws_remote(tmp_path)
-
-        result = _run_execute(
-            "land",
-            f"project={project}",
-            f"branch={branch}",
-            "base_branch=main",
-            f"workspace={workspace}",
-        )
-        assert result.returncode == 0
-
-        stamp = _git(workspace, "log", "-1", "--format=%s", branch)
-        assert "branch closed" in stamp, f"Workspace not stamped (fallback), tip: {stamp}"
-
-    def test_no_remote_reports_workspace_landed(self, tmp_path: Path):
-        """Even without remote, must report WORKSPACE_LANDED."""
-        project, workspace, branch = self._setup_repos_no_ws_remote(tmp_path)
-
-        result = _run_execute(
-            "land",
-            f"project={project}",
-            f"branch={branch}",
-            "base_branch=main",
-            f"workspace={workspace}",
-        )
-        assert result.returncode == 0
-        assert "WORKSPACE_LANDED=yes" in result.stdout, (
-            f"Missing WORKSPACE_LANDED: {result.stdout}"
-        )
-
-    def test_no_remote_failure_blocks_landed(self, tmp_path: Path):
-        """If workspace merge fails, must NOT report LANDED=yes."""
-        proj_remote = _init_bare(tmp_path / "proj-remote.git")
-        project = _init_repo(tmp_path / "project")
-        workspace = _init_repo(tmp_path / "workspace")
-        branch = "issue-345-conflict"
-
-        _git(project, "remote", "add", "origin", str(proj_remote))
-        _git(project, "push", "origin", "main")
-
-        _git(project, "checkout", "-b", branch)
-        (project / "feature.py").write_text("# feature\n")
-        _git(project, "add", "feature.py")
-        _git(project, "commit", "-m", "feat: feature")
-
-        _git(workspace, "checkout", "-b", branch)
-        (workspace / "README.md").write_text("branch version\n")
-        _git(workspace, "add", "README.md")
-        _git(workspace, "commit", "-m", "docs: branch change")
-
-        _git(workspace, "checkout", "main")
-        (workspace / "README.md").write_text("main version\n")
-        _git(workspace, "add", "README.md")
-        _git(workspace, "commit", "-m", "docs: main change")
-        _git(workspace, "checkout", branch)
-
-        result = _run_execute(
-            "land",
-            f"project={project}",
-            f"branch={branch}",
-            "base_branch=main",
-            f"workspace={workspace}",
-        )
-        has_ws_error = "WORKSPACE_LANDED=no" in result.stdout or "WORKSPACE_ERROR" in result.stdout
-        landed_yes = "LANDED=yes" in result.stdout
-        assert has_ws_error or not landed_yes, (
-            f"Should report workspace failure or not claim LANDED=yes: {result.stdout}"
-        )
+        assert "WORKSPACE_LANDED=yes" in result.stdout

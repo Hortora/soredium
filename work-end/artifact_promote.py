@@ -106,29 +106,32 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
         print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
         return 1
 
-    # Checkout main and pull
+    wt = ws / ".promote-tmp"
     try:
-        git("checkout", "main", cwd=workspace)
+        git("worktree", "add", str(wt), "main", cwd=workspace)
     except subprocess.CalledProcessError as e:
-        print("ERROR=checkout_failed")
-        print(f"ERROR_DETAIL=Failed to checkout main: {e.stderr.strip()}")
+        print("ERROR=worktree_failed")
+        print(f"ERROR_DETAIL=Failed to create worktree for main: {e.stderr.strip()}")
         return 1
 
     try:
-        git("pull", "--rebase", "origin", "main", cwd=workspace)
-    except subprocess.CalledProcessError:
-        pass
+        try:
+            git("pull", "--rebase", "origin", "main", cwd=str(wt))
+        except subprocess.CalledProcessError:
+            pass
 
-    promoted = 0
-    skipped: list[str] = []
-    for artifact in artifacts:
-        if source_dir:
-            src = Path(source_dir) / artifact
+        promoted = 0
+        skipped: list[str] = []
+        for artifact in artifacts:
+            if source_dir:
+                src = Path(source_dir) / artifact
+            else:
+                src = ws / artifact
             if not src.exists():
                 skipped.append(artifact)
-                print(f"SKIP_DETAIL={artifact}: not found in source-dir", file=sys.stderr)
+                print(f"SKIP_DETAIL={artifact}: not found", file=sys.stderr)
                 continue
-            dst = ws / artifact
+            dst = wt / artifact
             dst.parent.mkdir(parents=True, exist_ok=True)
             if src.is_dir():
                 if dst.exists():
@@ -136,30 +139,31 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
                 shutil.copytree(str(src), str(dst))
             else:
                 shutil.copy2(str(src), str(dst))
-            git("add", artifact, cwd=workspace)
+            git("add", artifact, cwd=str(wt))
             promoted += 1
-        else:
+
+        promoted_paths = [a for a in artifacts if a not in skipped]
+
+        if promoted > 0:
             try:
-                git("checkout", branch, "--", artifact, cwd=workspace)
-                git("add", artifact, cwd=workspace)
-                promoted += 1
+                git("commit", "-m", f"docs(work-end): promote artifacts from {branch}", cwd=str(wt))
             except subprocess.CalledProcessError as e:
-                skipped.append(artifact)
-                print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
+                if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
+                    print("ERROR=commit_failed")
+                    print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
+                    return 1
 
-    promoted_paths = [a for a in artifacts if a not in skipped]
-
-    if promoted > 0:
+            _push_or_report(str(wt), verify_paths=promoted_paths)
+    finally:
         try:
-            git("commit", "-m", f"docs(work-end): workspace-promote artifacts from {branch} to workspace main", cwd=workspace)
-        except subprocess.CalledProcessError as e:
-            # Nothing to commit (already up to date)
-            if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
-                print("ERROR=commit_failed")
-                print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
-                return 1
-
-        _push_or_report(workspace, verify_paths=promoted_paths)
+            git("worktree", "remove", str(wt), "--force", cwd=workspace)
+        except subprocess.CalledProcessError:
+            if wt.exists():
+                shutil.rmtree(wt, ignore_errors=True)
+                try:
+                    git("worktree", "prune", cwd=workspace)
+                except subprocess.CalledProcessError:
+                    pass
 
     # Switch back to branch
     try:
@@ -312,69 +316,65 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
         print("ARCHIVED=0")
         return 0
 
+    wt = ws / ".promote-tmp"
     try:
-        git("checkout", "main", cwd=workspace)
+        git("worktree", "add", str(wt), "main", cwd=workspace)
     except subprocess.CalledProcessError as e:
-        print("ERROR=checkout_failed")
-        print(f"ERROR_DETAIL=Failed to checkout main: {e.stderr.strip()}")
+        print("ERROR=worktree_failed")
+        print(f"ERROR_DETAIL=Failed to create worktree for main: {e.stderr.strip()}")
         return 1
 
     try:
-        git("pull", "--rebase", "origin", "main", cwd=workspace)
-    except subprocess.CalledProcessError:
-        pass
+        try:
+            git("pull", "--rebase", "origin", "main", cwd=str(wt))
+        except subprocess.CalledProcessError:
+            pass
 
-    ws_plans = ws / "plans"
-    ws_plans.mkdir(parents=True, exist_ok=True)
+        wt_plans = wt / "plans"
+        wt_plans.mkdir(parents=True, exist_ok=True)
 
-    skipped: list[str] = []
-    for pf in plan_files:
-        if source_dir:
-            dst = ws_plans / pf.name
+        skipped: list[str] = []
+        for pf in plan_files:
+            src = pf if source_dir else (ws / pf.relative_to(scan_root))
+            dst = wt_plans / pf.name
             try:
-                shutil.copy2(str(pf), str(dst))
+                shutil.copy2(str(src), str(dst))
             except Exception as e:
                 skipped.append(pf.name)
                 print(f"SKIP_DETAIL={pf.name}: {e}", file=sys.stderr)
-        else:
-            rel = str(pf.relative_to(ws))
+
+        attic_dir = wt_plans / "attic" / branch
+        attic_dir.mkdir(parents=True, exist_ok=True)
+        archived = 0
+        for pf in plan_files:
+            if pf.name in skipped:
+                continue
+            src = wt_plans / pf.name
+            if src.exists():
+                shutil.move(str(src), str(attic_dir / pf.name))
+                archived += 1
+
+        if archived > 0:
             try:
-                git("checkout", branch, "--", rel, cwd=workspace)
+                git("add", "-A", "plans/", cwd=str(wt))
+                git("commit", "-m", f"docs(work-end): archive plans from {branch}", cwd=str(wt))
             except subprocess.CalledProcessError as e:
-                skipped.append(pf.name)
-                print(f"SKIP_DETAIL={pf.name}: {e.stderr.strip()}", file=sys.stderr)
+                if "nothing to commit" not in (e.stdout + e.stderr):
+                    print("ERROR=commit_failed")
+                    print(f"ERROR_DETAIL={e.stderr.strip()}")
+                    return 1
 
-    attic_dir = ws_plans / "attic" / branch
-    attic_dir.mkdir(parents=True, exist_ok=True)
-    archived = 0
-    for pf in plan_files:
-        if pf.name in skipped:
-            continue
-        src = ws_plans / pf.name
-        if src.exists():
-            shutil.move(str(src), str(attic_dir / pf.name))
-            archived += 1
-
-    if archived > 0:
+            _push_or_report(str(wt))
+    finally:
         try:
-            git("add", "-A", "plans/", cwd=workspace)
-            git("commit", "-m", f"docs(work-end): archive plans from {branch}", cwd=workspace)
-        except subprocess.CalledProcessError as e:
-            if "nothing to commit" not in (e.stdout + e.stderr):
-                print("ERROR=commit_failed")
-                print(f"ERROR_DETAIL={e.stderr.strip()}")
+            git("worktree", "remove", str(wt), "--force", cwd=workspace)
+        except subprocess.CalledProcessError:
+            if wt.exists():
+                shutil.rmtree(wt, ignore_errors=True)
                 try:
-                    git("checkout", branch, cwd=workspace)
+                    git("worktree", "prune", cwd=workspace)
                 except subprocess.CalledProcessError:
                     pass
-                return 1
-
-        _push_or_report(workspace)
-
-    try:
-        git("checkout", branch, cwd=workspace)
-    except subprocess.CalledProcessError:
-        pass
 
     print(f"ARCHIVED={archived}")
     if skipped:

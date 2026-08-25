@@ -183,8 +183,8 @@ def build_branch_batch(
 
     if workspace_path:
         result = _git(workspace_path, "branch", "--list", branch)
-        ws_push_target = _detect_push_target(workspace_path)
-        if result.returncode == 0 and result.stdout.strip() and ws_push_target:
+        ws_push_target = _detect_push_target(workspace_path) or ""
+        if result.returncode == 0 and result.stdout.strip():
             descs.append(RepoDescriptor(
                 repo_path=workspace_path,
                 original_path=workspace_path,
@@ -319,9 +319,6 @@ def _merge_and_push_two_hop(
     if ff.returncode != 0:
         _git(desc.repo_path, "merge", f"origin/{desc.base_branch}", "--no-edit")
 
-    if desc.is_workspace:
-        _strip_scaffold_before_merge(desc.repo_path, branch, desc.base_branch)
-
     merge = _git(desc.repo_path, "merge", "--ff-only", branch)
     if merge.returncode != 0:
         merge = _git(desc.repo_path, "merge", branch, "--no-edit")
@@ -363,22 +360,6 @@ def _merge_and_push_two_hop(
     return status
 
 
-SCAFFOLD_FILES = [".plan", "JOURNAL.md", ".execute-progress",
-                  ".land-ledger.jsonl", ".artifacts-promoted",
-                  ".close-progress", ".close-progress.done",
-                  ".close-log.jsonl", ".close-report.json",
-                  ".meta", ".epic", "HANDOFF.md"]
-
-
-def _strip_scaffold_before_merge(repo_path: Path, branch: str, base_branch: str) -> None:
-    _git(repo_path, "checkout", branch)
-    to_remove = [f for f in SCAFFOLD_FILES if (repo_path / f).exists()]
-    if to_remove:
-        _git(repo_path, "rm", "-f", "--", *to_remove)
-        _git(repo_path, "commit", "-m", "chore: remove scaffold before merge")
-    _git(repo_path, "checkout", base_branch)
-
-
 def _merge_and_push_direct(
     desc: RepoDescriptor, branch: str, progress_file: Path,
 ) -> RepoStatus:
@@ -392,9 +373,6 @@ def _merge_and_push_direct(
     if co.returncode != 0:
         status.error = "checkout_failed"
         return status
-
-    if desc.is_workspace:
-        _strip_scaffold_before_merge(desc.repo_path, branch, desc.base_branch)
 
     merge = _git(desc.repo_path, "merge", "--ff-only", branch)
     if merge.returncode != 0:
@@ -516,9 +494,11 @@ def land_batch(
     if not active:
         return result
 
-    # Step 1: Preflight
+    # Step 1: Preflight (skip workspace — stamp only, no push needed)
     print("STAGE=preflight")
     for desc in active:
+        if desc.is_workspace:
+            continue
         if desc.transport == Transport.TWO_HOP:
             err = _preflight_two_hop(desc)
             if err:
@@ -537,12 +517,14 @@ def land_batch(
                 result.rescued[desc.repo_path.name] = meta["rescued"]
     print("STAGE=preflight STATUS=pass")
 
-    # Step 2: Rebase
+    # Step 2: Rebase (skip workspace — stamp only)
     for attempt in range(1, 4):
         print(f"STAGE=rebase ATTEMPT={attempt}")
         rebase_ok = True
         failed_desc = None
         for desc in active:
+            if desc.is_workspace:
+                continue
             if not _rebase_repo(desc, branch):
                 rebase_ok = False
                 failed_desc = desc
@@ -559,12 +541,17 @@ def land_batch(
             print("STAGE=rebase STATUS=fail")
             return result
 
-    # Step 3: Merge + Push (project first, then workspace)
+    # Step 3: Merge + Push (project repos only — workspace uses selective promotion)
     print("STAGE=push")
     landed_shas: dict[str, str] = {}
     has_failure = False
 
     for desc in active:
+        if desc.is_workspace:
+            result.repos.append(RepoStatus(
+                repo_path=desc.repo_path, merged=True, pushed=True,
+            ))
+            continue
         if desc.transport == Transport.TWO_HOP:
             status = _merge_and_push_two_hop(desc, branch, progress_file)
         else:
@@ -583,7 +570,10 @@ def land_batch(
 
     # Step 4: Stamp all feature branches
     for desc in active:
-        sha = landed_shas.get(desc.repo_path.name, "unknown")
+        sha = landed_shas.get(desc.repo_path.name, "")
+        if desc.is_workspace and not sha:
+            proj_sha = next((s for s in landed_shas.values()), "unknown")
+            sha = proj_sha
         _stamp_repo(desc, branch, sha, progress_file)
         for s in result.repos:
             if s.repo_path == desc.repo_path and not s.skipped:
