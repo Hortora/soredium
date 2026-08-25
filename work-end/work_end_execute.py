@@ -287,27 +287,50 @@ def cmd_land(opts: dict[str, str]) -> int:
         for name, rescue_branch in result.rescued.items():
             print(f"RESCUED_TO={rescue_branch}")
 
-    # Stamp workspace branch if not in batch (no remote)
+    # Workspace landing — either via batch or fallback
+    ws_landed = False
+    ws_error = ""
     if workspace:
         ws_in_batch = any(s.repo_path == Path(workspace) for s in result.repos)
-        if not ws_in_batch:
+        if ws_in_batch:
+            ws_status = next((s for s in result.repos if s.repo_path == Path(workspace)), None)
+            ws_landed = ws_status and not ws_status.error
+        else:
             ws_branch_exists = git(workspace, "branch", "--list", branch)
             if ws_branch_exists.returncode == 0 and ws_branch_exists.stdout.strip():
                 tip_msg = git(workspace, "log", "-1", "--format=%s", branch)
-                if not (tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")):
+                if tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed"):
+                    ws_landed = True
+                else:
                     co = git(workspace, "checkout", base_branch)
-                    if co.returncode == 0:
+                    if co.returncode != 0:
+                        ws_error = f"checkout_{base_branch}_failed"
+                    else:
                         ws_merge = git(workspace, "merge", "--ff-only", branch)
                         if ws_merge.returncode != 0:
-                            git(workspace, "merge", branch, "--no-edit")
-                        ws_sha = git(workspace, "rev-parse", "HEAD").stdout.strip()
-                        git(workspace, "checkout", branch)
-                        git(workspace, "commit", "--allow-empty", "-m",
-                            f"chore: branch closed — landed as {ws_sha} on {base_branch}")
-                        git(workspace, "checkout", base_branch)
+                            ws_merge = git(workspace, "merge", branch, "--no-edit")
+                        if ws_merge.returncode != 0:
+                            ws_error = "merge_failed"
+                            git(workspace, "merge", "--abort")
+                        else:
+                            ws_sha = git(workspace, "rev-parse", "HEAD").stdout.strip()
+                            ws_push = git(workspace, "push")
+                            if ws_push.returncode != 0:
+                                ws_push = git(workspace, "push", "origin", base_branch)
+                            git(workspace, "checkout", branch)
+                            git(workspace, "commit", "--allow-empty", "-m",
+                                f"chore: branch closed — landed as {ws_sha} on {base_branch}")
+                            git(workspace, "checkout", base_branch)
+                            ws_landed = True
+            else:
+                ws_landed = True
 
     print("LANDED=yes")
     print(f"LANDED_SHA={landed_sha}")
+    if workspace:
+        print(f"WORKSPACE_LANDED={'yes' if ws_landed else 'no'}")
+        if ws_error:
+            print(f"WORKSPACE_ERROR={ws_error}")
     return 0
 
 
