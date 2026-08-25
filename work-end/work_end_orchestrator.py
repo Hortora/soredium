@@ -74,6 +74,36 @@ def _run_script(cmd: list[str], workspace: Path,
         return {"ERROR": f"script_not_found: {cmd[0]}"}
 
 
+def _parse_slot_repos(slot_path: Path) -> list[str]:
+    slot_file = slot_path / ".slot" if slot_path else None
+    if not slot_file or not slot_file.exists():
+        return []
+    primary = None
+    secondaries = []
+    in_repos = False
+    for line in slot_file.read_text().splitlines():
+        if line.strip() == "## Repos":
+            in_repos = True
+            continue
+        if in_repos:
+            if line.startswith("##"):
+                break
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                is_primary = "(primary)" in stripped
+                name = stripped[2:].split("(")[0].strip()
+                if is_primary:
+                    primary = name
+                else:
+                    secondaries.append(name)
+    if primary:
+        return [primary] + secondaries
+    return secondaries
+
+
+PER_REPO_SWEEP_STEPS = {"protocol", "update_claude_md", "impl_doc_sync"}
+
+
 @dataclass
 class OrchestratorContext:
     workspace: Path
@@ -95,9 +125,23 @@ class OrchestratorContext:
     last_output: dict[str, str] = field(default_factory=dict)
     landed_shas: dict[str, str] = field(default_factory=dict)
     expected_state: str = ""
+    slot_repos: list[str] = field(default_factory=list)
 
     def done(self, step: str) -> bool:
         return self.progress.get(step) in ("done", "skipped")
+
+    def per_repo_done(self, step: str) -> bool:
+        if not self.in_slot or not self.slot_repos:
+            return self.done(step)
+        return all(self.progress.get(f"{step}:{repo}") in ("done", "skipped") for repo in self.slot_repos)
+
+    def next_repo_for(self, step: str) -> str | None:
+        if not self.in_slot or not self.slot_repos:
+            return None
+        for repo in self.slot_repos:
+            if self.progress.get(f"{step}:{repo}") not in ("done", "skipped"):
+                return repo
+        return None
 
 
 @dataclass
@@ -201,6 +245,8 @@ def _report_squash_script(ctx):
 
 
 def _write_marker_script(ctx):
+    if not ctx.slot_path:
+        return None
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
             "write-marker", f"slot_path={ctx.slot_path}", f"branch={ctx.branch}"]
 
@@ -256,6 +302,8 @@ def _report_verify_script(ctx):
 
 
 def _archive_slot_script(ctx):
+    if not ctx.slot_path or not ctx.family_root:
+        return None
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
             "archive-slot", f"slot_path={ctx.slot_path}",
             f"family_root={ctx.family_root}", f"slot_num={ctx.slot_num}"]
@@ -263,7 +311,7 @@ def _archive_slot_script(ctx):
 
 def _report_archive_script(ctx):
     return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
-            "step=archive", f"slot={ctx.slot_num}", f"dest=attic/{ctx.slot_num}"]
+            "step=archive", f"slot={ctx.slot_num or ''}", f"dest=attic/{ctx.slot_num or ''}"]
 
 
 def _checkout_main_script(ctx):
@@ -408,14 +456,42 @@ def _fire_lifecycle(step, ctx):
 
 # --- Reconciliation ---
 
+def _check_rebase(ws, proj):
+    proc = subprocess.run(
+        ["git", "-C", str(proj), "merge-base", "--is-ancestor", "main", "HEAD"],
+        capture_output=True, text=True,
+    )
+    return proc.returncode == 0
+
+
+def _check_checkout_main(ws, proj):
+    for repo in [proj, ws]:
+        proc = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True,
+        )
+        if proc.stdout.strip() != "main":
+            return False
+    return True
+
+
+def _check_cleanup_stack(ws, proj):
+    stack_file = ws / ".pause-stack"
+    if not stack_file.exists():
+        return True
+    return True
+
+
 EVIDENCE_CHECKS: dict[str, Callable] = {
     "land": lambda ws, proj: (ws / ".execute-progress").exists(),
-    "rebase": lambda ws, proj: True,
+    "rebase": _check_rebase,
     "close_issues": lambda ws, proj: True,
     "verify": lambda ws, proj: True,
-    "cleanup": lambda ws, proj: True,
-    "checkout_main": lambda ws, proj: True,
-    "cleanup_stack": lambda ws, proj: True,
+    "cleanup": lambda ws, proj: not (ws / "JOURNAL.md").exists() or (ws / ".plan").exists(),
+    "checkout_main": _check_checkout_main,
+    "cleanup_stack": _check_cleanup_stack,
+    "promote": lambda ws, proj: True,
+    "archive_slot": lambda ws, proj: True,
 }
 JUDGMENT_STEPS_SET = {"review", "sweep_config", "forage", "protocol",
                       "update_claude_md", "impl_doc_sync", "adr",
@@ -615,6 +691,8 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         if corrections:
             write_close_progress(workspace, progress)
 
+    slot_repos = _parse_slot_repos(slot_path) if in_slot and slot_path else []
+
     ctx = OrchestratorContext(
         workspace=workspace, project=project, branch=branch,
         base_branch=base_branch, meta_state=meta_state,
@@ -624,6 +702,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         plan_path=plan_path, slot_path=slot_path,
         family_root=family_root, slot_num=slot_num,
         expected_state=meta_state,
+        slot_repos=slot_repos,
     )
 
     return _next_action(ctx)
@@ -667,6 +746,17 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
         if step.step_type == "judgment":
             if step.name in ("arc42_scan", "session_rename", "garden_feedback", "notes"):
                 return _yield_user_input(step, ctx)
+            if step.name in PER_REPO_SWEEP_STEPS and ctx.in_slot and ctx.slot_repos:
+                if ctx.per_repo_done(step.name):
+                    continue
+                repo = ctx.next_repo_for(step.name)
+                if repo:
+                    repo_path = str(ctx.slot_path / repo)
+                    context = {"REPO": repo_path}
+                    if step.action_context_fn:
+                        context.update(step.action_context_fn(ctx))
+                    return _yield_judgment(f"{step.name}:{repo}", ctx.workspace, ctx.progress, context)
+                continue
             return _yield_judgment(step.name, ctx.workspace, ctx.progress,
                                    step.action_context_fn(ctx) if step.action_context_fn else {})
 

@@ -160,8 +160,6 @@ def run_audit(workspace, mode="branch"):
         prev_progress = set(read_close_progress(workspace).keys())
 
     expected = set(_expected_steps(mode))
-    mechanical_reached = {s for s in steps_reached if s not in JUDGMENT_STEPS}
-    judgment_reached = steps_reached & JUDGMENT_STEPS
 
     progress = read_close_progress(workspace)
     fallback_triggers = [k for k in progress if k.startswith("fallback_")]

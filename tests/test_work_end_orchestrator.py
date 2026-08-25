@@ -699,6 +699,33 @@ class TestReconciliation:
         assert result["ACTION"] == "trajectory"
 
 
+class TestEvidenceChecks:
+    """Evidence checks verify real state, not just trust progress."""
+
+    def test_rebase_check_uses_git(self, tmp_path):
+        from work_end_orchestrator import _check_rebase
+        result = _check_rebase(tmp_path, tmp_path / "project")
+        assert isinstance(result, bool)
+
+    def test_checkout_main_check_uses_git(self, tmp_path):
+        from work_end_orchestrator import _check_checkout_main
+        result = _check_checkout_main(tmp_path, tmp_path / "project")
+        assert isinstance(result, bool)
+
+    def test_cleanup_check_verifies_journal_removed(self, tmp_path):
+        from work_end_orchestrator import EVIDENCE_CHECKS
+        (tmp_path / "JOURNAL.md").write_text("# Journal\n")
+        check = EVIDENCE_CHECKS["cleanup"]
+        assert check(tmp_path, tmp_path / "project") is False
+
+    def test_cleanup_check_passes_when_plan_exists(self, tmp_path):
+        from work_end_orchestrator import EVIDENCE_CHECKS
+        (tmp_path / "JOURNAL.md").write_text("# Journal\n")
+        (tmp_path / ".plan").write_text("state: drained\n")
+        check = EVIDENCE_CHECKS["cleanup"]
+        assert check(tmp_path, tmp_path / "project") is True
+
+
 class TestAbortExtended:
     """Abort cleans up .execute-progress."""
 

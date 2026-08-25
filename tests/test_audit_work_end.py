@@ -57,6 +57,122 @@ class TestAuditSlotMode:
         assert "checkout_main" in result["steps_reached"]
 
 
+class TestParseSlotRepos:
+
+    def test_primary_first_regardless_of_file_order(self, tmp_path):
+        from work_end_orchestrator import _parse_slot_repos
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("## Repos\n- beta\n- alpha (primary)\n- gamma\n")
+        repos = _parse_slot_repos(slot)
+        assert repos[0] == "alpha"
+        assert set(repos[1:]) == {"beta", "gamma"}
+
+    def test_no_primary_marker(self, tmp_path):
+        from work_end_orchestrator import _parse_slot_repos
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("## Repos\n- beta\n- alpha\n")
+        repos = _parse_slot_repos(slot)
+        assert repos == ["beta", "alpha"]
+
+    def test_missing_slot_file(self, tmp_path):
+        from work_end_orchestrator import _parse_slot_repos
+        assert _parse_slot_repos(tmp_path) == []
+
+
+class TestSlotPerRepoSweep:
+    """Per-repo sweep yields compound progress keys in slot mode."""
+
+    def test_per_repo_sweep_yields_repo_context(self, tmp_path):
+        """In slot mode with repos, per-repo steps yield REPO= and compound keys."""
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress, read_close_progress
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        (slot_path / ".slot").write_text("## Repos\n- alpha (primary)\n- beta\n")
+        (tmp_path / ".plan").write_text("## State\nstate: closing:review\n")
+
+        def mock_run(cmd, ws, **kw):
+            return {}
+        import work_end_orchestrator
+        original = work_end_orchestrator._run_script
+        work_end_orchestrator._run_script = mock_run
+
+        try:
+            update_close_progress(tmp_path, "report_init", "done")
+            update_close_progress(tmp_path, "review", "done")
+            update_close_progress(tmp_path, "sweep_config", "done")
+            update_close_progress(tmp_path, "sweep_selected", "protocol,update_claude_md")
+            update_close_progress(tmp_path, "forage", "skipped")
+
+            result = run_orchestrator({
+                "workspace": str(tmp_path),
+                "project": str(tmp_path / "project"),
+                "branch": "issue-test",
+                "base_branch": "main",
+                "meta_state": "closing:review",
+                "in_slot": "yes",
+                "slot_path": str(slot_path),
+                "plan_path": str(tmp_path / ".plan"),
+            })
+            assert result["ACTION"] == "protocol:alpha"
+            assert "REPO" in result
+            assert "alpha" in result["REPO"]
+
+            update_close_progress(tmp_path, "protocol:alpha", "done")
+            result = run_orchestrator({
+                "workspace": str(tmp_path),
+                "project": str(tmp_path / "project"),
+                "branch": "issue-test",
+                "base_branch": "main",
+                "meta_state": "closing:review",
+                "in_slot": "yes",
+                "slot_path": str(slot_path),
+                "plan_path": str(tmp_path / ".plan"),
+            })
+            assert result["ACTION"] == "protocol:beta"
+            assert "beta" in result["REPO"]
+
+            update_close_progress(tmp_path, "protocol:beta", "done")
+            result = run_orchestrator({
+                "workspace": str(tmp_path),
+                "project": str(tmp_path / "project"),
+                "branch": "issue-test",
+                "base_branch": "main",
+                "meta_state": "closing:review",
+                "in_slot": "yes",
+                "slot_path": str(slot_path),
+                "plan_path": str(tmp_path / ".plan"),
+            })
+            assert result["ACTION"] == "update_claude_md:alpha"
+        finally:
+            work_end_orchestrator._run_script = original
+
+    def test_non_slot_mode_uses_simple_keys(self, tmp_path, monkeypatch):
+        """Without slot mode, per-repo steps use simple progress keys."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "protocol")
+        update_close_progress(tmp_path, "forage", "skipped")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+        assert result["ACTION"] == "protocol"
+        assert "REPO" not in result
+
+
 class TestAuditMainMode:
 
     def test_main_mode_completes(self, tmp_path):
