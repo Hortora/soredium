@@ -179,27 +179,52 @@ def build_slot_batch(
     return sorted(descriptors, key=lambda d: d.is_workspace)
 
 
+def _is_slot_clone(repo_path: Path) -> bool:
+    r = _git(repo_path, "remote", "get-url", "local")
+    return r.returncode == 0
+
+
+def _resolve_original_from_local(repo_path: Path) -> Path:
+    r = _git(repo_path, "remote", "get-url", "local")
+    if r.returncode == 0:
+        return Path(r.stdout.strip())
+    return repo_path
+
+
 def build_branch_batch(
     project_path: Path,
     workspace_path: Path | None,
     branch: str,
     base_branch: str = "main",
 ) -> list[RepoDescriptor]:
-    """Build RepoDescriptor batch for branch mode."""
-    push_target = _detect_push_target(project_path)
-    mirror_target = _detect_mirror_target(project_path)
-
-    descs = [
-        RepoDescriptor(
-            repo_path=project_path,
-            original_path=project_path,
-            push_target=push_target,
-            base_branch=base_branch,
-            is_workspace=False,
-            transport=Transport.DIRECT,
-            mirror_target=mirror_target,
-        ),
-    ]
+    """Build RepoDescriptor batch for branch mode. Auto-detects slot clones."""
+    if _is_slot_clone(project_path):
+        original = _resolve_original_from_local(project_path)
+        push_target = _resolve_local_push_remote(project_path)
+        descs = [
+            RepoDescriptor(
+                repo_path=project_path,
+                original_path=original,
+                push_target=push_target,
+                base_branch=base_branch,
+                is_workspace=False,
+                transport=Transport.TWO_HOP,
+            ),
+        ]
+    else:
+        push_target = _detect_push_target(project_path)
+        mirror_target = _detect_mirror_target(project_path)
+        descs = [
+            RepoDescriptor(
+                repo_path=project_path,
+                original_path=project_path,
+                push_target=push_target,
+                base_branch=base_branch,
+                is_workspace=False,
+                transport=Transport.DIRECT,
+                mirror_target=mirror_target,
+            ),
+        ]
 
     if workspace_path:
         result = _git(workspace_path, "branch", "--list", branch)
