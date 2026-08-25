@@ -117,30 +117,48 @@ def _run_script(cmd: list[str], workspace: Path,
 
 
 def _parse_slot_repos(slot_path: Path) -> list[str]:
-    slot_file = slot_path / ".slot" if slot_path else None
-    if not slot_file or not slot_file.exists():
+    if not slot_path or not slot_path.is_dir():
         return []
+
     primary = None
-    secondaries = []
-    in_repos = False
-    for line in slot_file.read_text().splitlines():
-        if line.strip() == "## Repos":
-            in_repos = True
-            continue
-        if in_repos:
-            if line.startswith("##"):
-                break
-            stripped = line.strip()
-            if stripped.startswith("- "):
-                is_primary = "(primary)" in stripped
-                name = stripped[2:].split("(")[0].strip()
-                if is_primary:
-                    primary = name
-                else:
-                    secondaries.append(name)
+    secondaries_from_file = []
+    slot_file = slot_path / ".slot"
+    if slot_file.exists():
+        in_repos = False
+        for line in slot_file.read_text().splitlines():
+            if line.strip() == "## Repos":
+                in_repos = True
+                continue
+            if in_repos:
+                if line.startswith("##"):
+                    break
+                stripped = line.strip()
+                if stripped.startswith("- "):
+                    is_primary = "(primary)" in stripped
+                    name = stripped[2:].split("(")[0].strip()
+                    if is_primary:
+                        primary = name
+                    else:
+                        secondaries_from_file.append(name)
+
+    file_repos = set()
     if primary:
-        return [primary] + secondaries
-    return secondaries
+        file_repos.add(primary)
+    file_repos.update(secondaries_from_file)
+
+    dir_repos = set()
+    skip_prefixes = ("wsp-", ".m2", "attic")
+    for entry in sorted(slot_path.iterdir()):
+        if not entry.is_dir() or not (entry / ".git").exists():
+            continue
+        if any(entry.name.startswith(p) for p in skip_prefixes):
+            continue
+        dir_repos.add(entry.name)
+
+    extra = sorted(dir_repos - file_repos)
+    if primary:
+        return [primary] + [s for s in secondaries_from_file if s in dir_repos] + extra
+    return sorted(dir_repos)
 
 
 PER_REPO_SWEEP_STEPS = {"protocol", "update_claude_md", "impl_doc_sync"}
@@ -328,6 +346,20 @@ def _report_land_script(ctx):
     repos = ",".join(ctx.landed_shas.keys()) if ctx.landed_shas else ctx.project.name
     return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
             f"step=land", f"landed_sha={sha}", f"pushed_repos={repos}"]
+
+
+def _write_landed_script(ctx):
+    if not ctx.slot_path:
+        return None
+    landed_path = ctx.slot_path / ".landed"
+    shas = ",".join(f"{k}:{v}" for k, v in ctx.landed_shas.items() if v)
+    issues = ctx.covers
+    content = f"landed_shas={shas}\nissues={issues}\nbranch={ctx.branch}\n"
+    if not ctx.dry_run:
+        landed_path.write_text(content)
+    elif ctx.call_log is not None:
+        ctx.call_log.append(["(internal)", "write_landed", str(landed_path)])
+    return None
 
 
 def _close_issues_script(ctx):
@@ -659,6 +691,9 @@ STEPS: list[StepDef] = [
             from_state="closing:merged", to_state="closing:stamped", event="stamp_pass"),
 
     # --- closing:stamped ---
+    StepDef("write_landed", "closing:stamped", "mechanical",
+            skip_fn=_skip_not_slot,
+            script_fn=_write_landed_script),
     StepDef("close_issues", "closing:stamped", "mechanical",
             skip_fn=_skip_no_covers,
             script_fn=_close_issues_script),

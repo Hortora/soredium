@@ -59,11 +59,17 @@ class TestAuditSlotMode:
 
 class TestParseSlotRepos:
 
+    def _make_git_dir(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        (path / ".git").mkdir(exist_ok=True)
+
     def test_primary_first_regardless_of_file_order(self, tmp_path):
         from work_end_orchestrator import _parse_slot_repos
         slot = tmp_path / "slot"
         slot.mkdir()
         (slot / ".slot").write_text("## Repos\n- beta\n- alpha (primary)\n- gamma\n")
+        for name in ("alpha", "beta", "gamma"):
+            self._make_git_dir(slot / name)
         repos = _parse_slot_repos(slot)
         assert repos[0] == "alpha"
         assert set(repos[1:]) == {"beta", "gamma"}
@@ -73,12 +79,26 @@ class TestParseSlotRepos:
         slot = tmp_path / "slot"
         slot.mkdir()
         (slot / ".slot").write_text("## Repos\n- beta\n- alpha\n")
+        for name in ("alpha", "beta"):
+            self._make_git_dir(slot / name)
         repos = _parse_slot_repos(slot)
-        assert repos == ["beta", "alpha"]
+        assert repos == ["alpha", "beta"]
 
     def test_missing_slot_file(self, tmp_path):
         from work_end_orchestrator import _parse_slot_repos
         assert _parse_slot_repos(tmp_path) == []
+
+    def test_discovers_repos_not_in_slot_file(self, tmp_path):
+        from work_end_orchestrator import _parse_slot_repos
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("## Repos\n- engine (primary)\n")
+        for name in ("engine", "worker", "blocks"):
+            self._make_git_dir(slot / name)
+        repos = _parse_slot_repos(slot)
+        assert repos[0] == "engine"
+        assert "worker" in repos
+        assert "blocks" in repos
 
 
 class TestSlotPerRepoSweep:
@@ -92,6 +112,10 @@ class TestSlotPerRepoSweep:
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
         (slot_path / ".slot").write_text("## Repos\n- alpha (primary)\n- beta\n")
+        for name in ("alpha", "beta"):
+            d = slot_path / name
+            d.mkdir()
+            (d / ".git").mkdir()
         (tmp_path / ".plan").write_text("## State\nstate: closing:review\n")
 
         def mock_run(cmd, ws, **kw):
