@@ -47,7 +47,7 @@ class TestAuditSlotMode:
     def test_slot_mode_exercises_slot_routing(self, tmp_path):
         from audit_work_end import run_audit
         result = run_audit(tmp_path, mode="slot")
-        for step in ["write_marker", "archive_slot", "report_archive"]:
+        for step in ["archive_slot", "report_archive"]:
             assert step in result["steps_reached"], f"Missing slot step: {step}"
 
     def test_slot_mode_skips_branch_only_steps(self, tmp_path):

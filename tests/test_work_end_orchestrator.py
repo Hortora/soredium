@@ -581,22 +581,23 @@ class TestMechanicalStepWiring:
         land_calls = [c for c in calls if any("land" in str(a) for a in c)]
         assert any("work_end_execute.py" in str(c) for c in land_calls), f"Expected land call, got: {calls}"
 
-    def test_land_slot_mode_calls_merge_slot(self, tmp_path, monkeypatch):
-        """Slot mode land calls slot_manager.py merge-slot."""
+    def test_land_slot_mode_calls_per_repo(self, tmp_path, monkeypatch):
+        """Slot mode land calls work_end_execute.py land per repo."""
         calls = []
         def capture(cmd, workspace, **kw):
             calls.append(cmd)
-            return {"LANDED_SHAS": "soredium:abc123"}
+            return {"LANDED": "yes", "LANDED_SHA": "abc123"}
         monkeypatch.setattr("work_end_orchestrator._run_script", capture)
         self._setup_to_step(tmp_path, "land", meta_state="closing:promoted")
-        from close_progress import update_close_progress
-        update_close_progress(tmp_path, "write_marker", "done")
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
+        (slot_path / ".slot").write_text("## Repos\n- alpha (primary)\n- beta\n")
+        (slot_path / "alpha").mkdir()
+        (slot_path / "beta").mkdir()
         self._run(tmp_path, meta_state="closing:promoted",
                   in_slot="yes", slot_path=str(slot_path))
-        land_calls = [c for c in calls if any("merge-slot" in str(a) or "slot_manager" in str(a) for a in c)]
-        assert len(land_calls) >= 1, f"Expected merge-slot call, got: {calls}"
+        land_calls = [c for c in calls if any("land" in str(a) for a in c) and any("work_end_execute" in str(a) for a in c)]
+        assert len(land_calls) >= 1, f"Expected per-repo land call, got: {calls}"
 
     def test_close_issues_calls_work_end_execute(self, tmp_path, monkeypatch):
         """close_issues step calls work_end_execute.py close-issues."""

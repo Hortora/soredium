@@ -128,6 +128,20 @@ def _parse_slot_repos(slot_path: Path) -> list[str]:
 
 
 PER_REPO_SWEEP_STEPS = {"protocol", "update_claude_md", "impl_doc_sync"}
+PER_REPO_EXECUTE_STEPS = {"promote", "rebase", "land"}
+
+
+def _resolve_repo_workspace(ctx, repo_name: str) -> Path | None:
+    if not ctx.slot_path:
+        return None
+    candidates = [
+        ctx.slot_path / f"wsp-{ctx.slot_path.parent.name}-{repo_name}",
+        ctx.slot_path / f"wsp-{repo_name}",
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c
+    return ctx.workspace
 
 
 @dataclass
@@ -153,6 +167,8 @@ class OrchestratorContext:
     expected_state: str = ""
     slot_repos: list[str] = field(default_factory=list)
     steps_executed: list[str] = field(default_factory=list)
+    current_repo_project: Path | None = None
+    current_repo_workspace: Path | None = None
 
     def done(self, step: str) -> bool:
         return self.progress.get(step) in ("done", "skipped")
@@ -231,9 +247,11 @@ def _report_init_script(ctx):
 
 
 def _promote_script(ctx):
+    ws = ctx.current_repo_workspace or ctx.workspace
+    proj = ctx.current_repo_project or ctx.project
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
-            "promote", f"workspace={ctx.workspace}",
-            f"project={ctx.project}", f"branch={ctx.branch}"]
+            "promote", f"workspace={ws}",
+            f"project={proj}", f"branch={ctx.branch}"]
 
 
 def _report_promote_script(ctx):
@@ -244,8 +262,9 @@ def _report_promote_script(ctx):
 
 
 def _rebase_script(ctx):
+    proj = ctx.current_repo_project or ctx.project
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
-            "rebase", f"project={ctx.project}", f"branch={ctx.branch}",
+            "rebase", f"project={proj}", f"branch={ctx.branch}",
             f"base_branch={ctx.base_branch}"]
 
 
@@ -279,14 +298,13 @@ def _write_marker_script(ctx):
 
 
 def _land_script(ctx):
-    if ctx.in_slot:
-        return [sys.executable, str(SLOT_MANAGER),
-                "merge-slot", str(ctx.slot_path)]
     if ctx.on_main:
         return None
+    proj = ctx.current_repo_project or ctx.project
+    ws = ctx.current_repo_workspace or ctx.workspace
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
-            "land", f"project={ctx.project}", f"branch={ctx.branch}",
-            f"base_branch={ctx.base_branch}", f"workspace={ctx.workspace}"]
+            "land", f"project={proj}", f"branch={ctx.branch}",
+            f"base_branch={ctx.base_branch}", f"workspace={ws}"]
 
 
 def _report_land_script(ctx):
@@ -613,9 +631,6 @@ STEPS: list[StepDef] = [
     StepDef("report_squash", "closing:promoted", "mechanical",
             skip_fn=_skip_on_main,
             script_fn=_report_squash_script),
-    StepDef("write_marker", "closing:promoted", "mechanical",
-            skip_fn=_skip_not_slot,
-            script_fn=_write_marker_script),
     StepDef("land", "closing:promoted", "mechanical",
             script_fn=_land_script),
     StepDef("report_land", "closing:promoted", "mechanical",
@@ -773,6 +788,41 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
             continue
 
         if step.step_type == "mechanical":
+            if step.name in PER_REPO_EXECUTE_STEPS and ctx.in_slot and ctx.slot_repos:
+                if ctx.per_repo_done(step.name):
+                    continue
+                repo = ctx.next_repo_for(step.name)
+                if repo:
+                    ctx.current_repo_project = ctx.slot_path / repo if ctx.slot_path else None
+                    ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo)
+                    step_key = f"{step.name}:{repo}"
+                    attempt_key = f"{step_key}_mechanical_attempt"
+                    attempt = int(ctx.progress.get(attempt_key, "0"))
+                    result = _execute_mechanical(step, ctx)
+                    ctx.current_repo_project = None
+                    ctx.current_repo_workspace = None
+                    if result and "ERROR" in result:
+                        attempt += 1
+                        update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                        ctx.steps_executed.append(f"{step_key}:ERROR:{attempt}")
+                        if attempt >= 3:
+                            return {
+                                "ACTION": "user_input",
+                                "CONTEXT": "step_failed",
+                                "STEP": step_key,
+                                "ATTEMPTS": str(attempt),
+                                "REASON": result.get("ERROR", "unknown"),
+                                "ERROR_DETAIL": result.get("ERROR_DETAIL", ""),
+                            }
+                        return {"ACTION": "error", "STEP": step_key,
+                                "RETRY": str(attempt), **result}
+                    ctx.last_output = result or {}
+                    if step.name == "land":
+                        ctx.landed_shas[repo] = (result or {}).get("LANDED_SHA", "")
+                    update_close_progress(ctx.workspace, step_key, "done")
+                    ctx.steps_executed.append(step_key)
+                continue
+
             attempt_key = f"{step.name}_mechanical_attempt"
             attempt = int(ctx.progress.get(attempt_key, "0"))
             result = _execute_mechanical(step, ctx)
