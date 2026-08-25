@@ -10,9 +10,29 @@ that the flow processes uniformly.
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
+
+
+def _record_worklog_end(branch: str, repo_path: str, landed_sha: str) -> None:
+    if not _wl:
+        return
+    try:
+        conn = _wl.connect()
+        _wl.record_work_end(conn, branch, repo_path, landed_sha=landed_sha)
+        conn.close()
+    except Exception:
+        pass
 
 
 class Transport(Enum):
@@ -459,6 +479,8 @@ def _stamp_repo(
             _git(desc.repo_path, "push", push_remote, branch, "--force-with-lease")
 
     _write_progress(progress_file, key, "stamped")
+
+    _record_worklog_end(branch, str(desc.repo_path), landed_sha)
 
 
 # ---------------------------------------------------------------------------
