@@ -113,8 +113,14 @@ class StepDef:
     event: str | None = None
 
 
+# --- Skip predicates ---
+
 def _skip_on_main(ctx: OrchestratorContext) -> bool:
     return ctx.on_main
+
+
+def _skip_not_main(ctx: OrchestratorContext) -> bool:
+    return not ctx.on_main
 
 
 def _skip_not_slot(ctx: OrchestratorContext) -> bool:
@@ -132,16 +138,59 @@ def _is_sweep_deselected(step_name: str):
     return check
 
 
+# --- Script paths ---
+
 SLOT_MANAGER = Path(__file__).parent.parent / "work-slot" / "slot_manager.py"
 LIFECYCLE_SCRIPT = Path(__file__).parent.parent / "project" / "lifecycle.py"
 VERIFY_SCRIPT = WORK_END_DIR / "verify_slot_close.py"
 CLEANUP_SCRIPT = WORK_END_DIR / "branch_cleanup.py"
+REPORT_SCRIPT = WORK_END_DIR / "close_report.py"
+
+
+# --- Report helper ---
+
+def _report_path(ctx):
+    return ctx.workspace / ".close-report.json"
+
+
+# --- Script builders ---
+
+def _report_init_script(ctx):
+    return [sys.executable, str(REPORT_SCRIPT), "init", str(_report_path(ctx))]
+
+
+def _promote_script(ctx):
+    return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
+            "promote", f"workspace={ctx.workspace}",
+            f"project={ctx.project}", f"branch={ctx.branch}"]
+
+
+def _report_promote_script(ctx):
+    promoted = int(ctx.last_output.get("WORKSPACE_PROMOTED", 0)) + int(ctx.last_output.get("PROJECT_PROMOTED", 0))
+    repos = f"{ctx.project.name},{ctx.workspace.name}"
+    return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
+            f"step=promote", f"promoted_files={promoted}", f"target_repos={repos}"]
 
 
 def _rebase_script(ctx):
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
             "rebase", f"project={ctx.project}", f"branch={ctx.branch}",
             f"base_branch={ctx.base_branch}"]
+
+
+def _report_rebase_script(ctx):
+    return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
+            f"step=rebase", f"branch={ctx.branch}", f"base={ctx.base_branch}"]
+
+
+def _report_squash_script(ctx):
+    return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
+            "step=squash"]
+
+
+def _write_marker_script(ctx):
+    return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
+            "write-marker", f"slot_path={ctx.slot_path}", f"branch={ctx.branch}"]
 
 
 def _land_script(ctx):
@@ -155,9 +204,22 @@ def _land_script(ctx):
             f"base_branch={ctx.base_branch}", f"workspace={ctx.workspace}"]
 
 
+def _report_land_script(ctx):
+    sha = ctx.landed_shas.get(ctx.project.name, "")
+    repos = ",".join(ctx.landed_shas.keys()) if ctx.landed_shas else ctx.project.name
+    return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
+            f"step=land", f"landed_sha={sha}", f"pushed_repos={repos}"]
+
+
 def _close_issues_script(ctx):
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
             "close-issues", f"repo={ctx.issue_repo}", f"covers={ctx.covers}"]
+
+
+def _report_close_issues_script(ctx):
+    closed = ctx.last_output.get("CLOSED", "0")
+    return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
+            f"step=close-issues", f"closed={closed}"]
 
 
 def _verify_script(ctx):
@@ -173,6 +235,23 @@ def _verify_script(ctx):
     if ctx.in_slot and ctx.slot_path:
         cmd.append(f"slot_dir={ctx.slot_path}")
     return cmd
+
+
+def _report_verify_script(ctx):
+    verified = ctx.last_output.get("VERIFIED", "unknown")
+    return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
+            f"step=verify", f"verified={verified}"]
+
+
+def _archive_slot_script(ctx):
+    return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
+            "archive-slot", f"slot_path={ctx.slot_path}",
+            f"family_root={ctx.family_root}", f"slot_num={ctx.slot_num}"]
+
+
+def _report_archive_script(ctx):
+    return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
+            "step=archive"]
 
 
 def _checkout_main_script(ctx):
@@ -192,7 +271,22 @@ def _cleanup_scaffold_script(ctx):
             "cleanup-scaffold", str(ctx.workspace)]
 
 
+def _report_scaffold_script(ctx):
+    return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
+            "step=scaffold-cleanup"]
+
+
+def _report_render_script(ctx):
+    return [sys.executable, str(REPORT_SCRIPT), "render", str(_report_path(ctx))]
+
+
+# --- Main-mode special cases ---
+
 def _push_main_mode(ctx):
+    if ctx.dry_run:
+        if ctx.call_log is not None:
+            ctx.call_log.append(["(internal)", "push_main_mode", f"project={ctx.project}", f"workspace={ctx.workspace}"])
+        return {"PUSHED": "yes", "LANDED_SHA": "dry_run"}
     for repo_path in [ctx.project, ctx.workspace]:
         proc = subprocess.run(
             ["git", "-C", str(repo_path), "push", "origin", "main"],
@@ -208,6 +302,10 @@ def _push_main_mode(ctx):
 
 
 def _verify_main_mode(ctx):
+    if ctx.dry_run:
+        if ctx.call_log is not None:
+            ctx.call_log.append(["(internal)", "verify_main_mode", f"project={ctx.project}", f"workspace={ctx.workspace}"])
+        return {"VERIFIED": "yes"}
     results = {}
     for repo_path in [ctx.project, ctx.workspace]:
         proc = subprocess.run(
@@ -225,6 +323,10 @@ def _verify_main_mode(ctx):
 
 
 def _cleanup_main_mode(ctx):
+    if ctx.dry_run:
+        if ctx.call_log is not None:
+            ctx.call_log.append(["(internal)", "cleanup_main_mode", f"workspace={ctx.workspace}"])
+        return {"CLEANED": "yes"}
     scaffold_files = ["JOURNAL.md", ".execute-progress", ".land-ledger.jsonl", ".artifacts-promoted"]
     for f in scaffold_files:
         p = ctx.workspace / f
@@ -238,6 +340,61 @@ def _cleanup_main_mode(ctx):
                     capture_output=True, text=True)
     return {"CLEANED": "yes"}
 
+
+# --- Lifecycle ---
+
+def _build_evidence(event, ctx):
+    if event == "review_pass":
+        return {"review_result": "pass"}
+    if event == "promote_pass":
+        return {
+            "promoted_files": int(ctx.last_output.get("WORKSPACE_PROMOTED", 0)) + int(ctx.last_output.get("PROJECT_PROMOTED", 0)),
+            "target_repos": [ctx.project.name, ctx.workspace.name],
+        }
+    if event == "push_pass":
+        return {
+            "pushed_repos": [ctx.project.name, ctx.workspace.name],
+            "pushed_shas": ctx.landed_shas,
+        }
+    if event == "merge_pass":
+        if ctx.on_main:
+            return {"landed_shas": {}, "verified_on_main": {}}
+        return {
+            "landed_shas": ctx.landed_shas,
+            "verified_on_main": {r: True for r in ctx.landed_shas},
+        }
+    if event == "stamp_pass":
+        if ctx.on_main:
+            return {"stamp_shas": {}}
+        return {"stamp_shas": ctx.landed_shas}
+    if event == "cleanup_pass":
+        return {
+            "repos_on_main": {ctx.project.name: True, ctx.workspace.name: True},
+            "work_items_ended": True,
+        }
+    if event == "cleanup_main":
+        return {"work_items_ended": True}
+    return {}
+
+
+def _fire_lifecycle(step, ctx):
+    if not ctx.plan_path:
+        return
+    evidence = _build_evidence(step.event, ctx)
+    cmd = [
+        sys.executable, str(LIFECYCLE_SCRIPT),
+        "commit-transition", str(ctx.plan_path),
+        f"from_state={step.from_state}",
+        f"new_state={step.to_state}",
+        f"event={step.event}",
+    ]
+    if evidence:
+        cmd.append(f"evidence={json.dumps(evidence)}")
+    _run_script(cmd, ctx.workspace, dry_run=ctx.dry_run, call_log=ctx.call_log)
+    ctx.expected_state = step.to_state
+
+
+# --- Reconciliation ---
 
 EVIDENCE_CHECKS: dict[str, Callable] = {
     "land": lambda ws, proj: (ws / ".execute-progress").exists(),
@@ -281,8 +438,12 @@ def _reconcile(workspace: Path, project: Path,
     return corrected, corrections
 
 
+# --- Step sequence ---
+
 STEPS: list[StepDef] = [
     # --- closing:review ---
+    StepDef("report_init", "closing:review", "mechanical",
+            script_fn=_report_init_script),
     StepDef("review", "closing:review", "judgment",
             action_context_fn=lambda ctx: {"DIFF_RANGE": f"{ctx.base_branch}..{ctx.branch}"}),
     StepDef("sweep_config", "closing:review", "judgment",
@@ -300,24 +461,74 @@ STEPS: list[StepDef] = [
     StepDef("write_content", "closing:review", "judgment",
             skip_fn=_is_sweep_deselected("write_content")),
 
+    # --- lifecycle: review -> verified ---
+    StepDef("review_pass", "closing:review", "lifecycle",
+            from_state="closing:review", to_state="closing:verified", event="review_pass"),
+
+    # --- closing:verified ---
+    StepDef("promote", "closing:verified", "mechanical",
+            script_fn=_promote_script),
+    StepDef("report_promote", "closing:verified", "mechanical",
+            script_fn=_report_promote_script),
+    StepDef("promote_pass", "closing:verified", "lifecycle",
+            from_state="closing:verified", to_state="closing:promoted", event="promote_pass"),
+
     # --- closing:promoted ---
     StepDef("trajectory", "closing:promoted", "judgment",
             action_context_fn=lambda ctx: {"COVERS": ctx.covers, "OWNER_REPO": ctx.issue_repo}),
     StepDef("rebase", "closing:promoted", "mechanical",
             skip_fn=_skip_on_main,
             script_fn=_rebase_script),
+    StepDef("report_rebase", "closing:promoted", "mechanical",
+            skip_fn=_skip_on_main,
+            script_fn=_report_rebase_script),
     StepDef("squash", "closing:promoted", "judgment",
             skip_fn=_skip_on_main,
             action_context_fn=lambda ctx: {"REPOS": ctx.project.name}),
+    StepDef("report_squash", "closing:promoted", "mechanical",
+            skip_fn=_skip_on_main,
+            script_fn=_report_squash_script),
+    StepDef("write_marker", "closing:promoted", "mechanical",
+            skip_fn=_skip_not_slot,
+            script_fn=_write_marker_script),
     StepDef("land", "closing:promoted", "mechanical",
             script_fn=_land_script),
+    StepDef("report_land", "closing:promoted", "mechanical",
+            script_fn=_report_land_script),
+    StepDef("push_pass", "closing:promoted", "lifecycle",
+            from_state="closing:promoted", to_state="closing:pushed", event="push_pass"),
+    StepDef("merge_pass", "closing:pushed", "lifecycle",
+            from_state="closing:pushed", to_state="closing:merged", event="merge_pass"),
+    StepDef("stamp_pass", "closing:merged", "lifecycle",
+            from_state="closing:merged", to_state="closing:stamped", event="stamp_pass"),
 
     # --- closing:stamped ---
     StepDef("close_issues", "closing:stamped", "mechanical",
             skip_fn=_skip_no_covers,
             script_fn=_close_issues_script),
+    StepDef("report_close_issues", "closing:stamped", "mechanical",
+            skip_fn=_skip_no_covers,
+            script_fn=_report_close_issues_script),
     StepDef("verify", "closing:stamped", "mechanical",
             script_fn=_verify_script),
+    StepDef("report_verify", "closing:stamped", "mechanical",
+            script_fn=_report_verify_script),
+    StepDef("archive_slot", "closing:stamped", "mechanical",
+            skip_fn=_skip_not_slot,
+            script_fn=_archive_slot_script),
+    StepDef("report_archive", "closing:stamped", "mechanical",
+            skip_fn=_skip_not_slot,
+            script_fn=_report_archive_script),
+    StepDef("checkout_main", "closing:stamped", "mechanical",
+            skip_fn=_skip_on_main,
+            script_fn=_checkout_main_script),
+    StepDef("cleanup_stack", "closing:stamped", "mechanical",
+            skip_fn=_skip_on_main,
+            script_fn=_cleanup_stack_script),
+    StepDef("cleanup", "closing:stamped", "mechanical",
+            script_fn=_cleanup_scaffold_script),
+    StepDef("report_scaffold", "closing:stamped", "mechanical",
+            script_fn=_report_scaffold_script),
     StepDef("arc42_scan", "closing:stamped", "judgment",
             action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"}),
     StepDef("session_rename", "closing:stamped", "judgment",
@@ -326,14 +537,19 @@ STEPS: list[StepDef] = [
             action_context_fn=lambda ctx: {"CONTEXT": "garden_feedback"}),
     StepDef("notes", "closing:stamped", "judgment",
             action_context_fn=lambda ctx: {"CONTEXT": "notes"}),
-    StepDef("cleanup", "closing:stamped", "mechanical",
-            script_fn=_cleanup_scaffold_script),
-    StepDef("checkout_main", "closing:stamped", "mechanical",
+
+    # --- lifecycle: stamped -> idle/drained ---
+    StepDef("cleanup_pass", "closing:stamped", "lifecycle",
             skip_fn=_skip_on_main,
-            script_fn=_checkout_main_script),
-    StepDef("cleanup_stack", "closing:stamped", "mechanical",
-            skip_fn=_skip_on_main,
-            script_fn=_cleanup_stack_script),
+            from_state="closing:stamped", to_state="idle", event="cleanup_pass"),
+    StepDef("cleanup_main", "closing:stamped", "lifecycle",
+            skip_fn=_skip_not_main,
+            from_state="closing:stamped", to_state="drained", event="cleanup_main"),
+
+    # --- post-close ---
+    StepDef("delete_progress", "idle", "mechanical"),
+    StepDef("report_render", "idle", "mechanical",
+            script_fn=_report_render_script),
 ]
 
 
@@ -442,12 +658,25 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
             return _yield_judgment(step.name, ctx.workspace, ctx.progress,
                                    step.action_context_fn(ctx) if step.action_context_fn else {})
 
+        if step.step_type == "lifecycle":
+            _fire_lifecycle(step, ctx)
+            update_close_progress(ctx.workspace, step.name, "done")
+            continue
+
     return {"ACTION": "complete", "SUMMARY": "Close complete."}
 
 
 def _execute_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str]:
+    if step.name == "delete_progress":
+        if not ctx.dry_run:
+            delete_close_progress(ctx.workspace)
+        elif ctx.call_log is not None:
+            ctx.call_log.append(["(internal)", "delete_progress"])
+        return {"DELETED": "yes"}
+
     if not step.script_fn:
         return {}
+
     cmd = step.script_fn(ctx)
     if cmd is None:
         if step.name == "land" and ctx.on_main:

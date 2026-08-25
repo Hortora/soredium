@@ -56,7 +56,8 @@ class TestRunScript:
 class TestOrchestratorFirstCall:
     """First call with no progress — should yield ACTION=review."""
 
-    def test_yields_review_on_first_call(self, tmp_path):
+    def test_yields_review_on_first_call(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from work_end_orchestrator import run_orchestrator
         result = run_orchestrator({
             "workspace": str(tmp_path),
@@ -67,7 +68,8 @@ class TestOrchestratorFirstCall:
         })
         assert result["ACTION"] == "review"
 
-    def test_includes_diff_range(self, tmp_path):
+    def test_includes_diff_range(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from work_end_orchestrator import run_orchestrator
         result = run_orchestrator({
             "workspace": str(tmp_path),
@@ -121,10 +123,12 @@ class TestOrchestratorSequence:
         result = self._run(tmp_path)
         assert result["ACTION"] == "write_content"
 
-    def test_all_sweep_done_yields_no_more_sweep(self, tmp_path):
+    def test_all_sweep_done_yields_no_more_sweep(self, tmp_path, monkeypatch):
         """After all sweep sub-steps done, next call should trigger
         mechanical steps (lifecycle transition) and yield trajectory."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
         update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
         update_close_progress(tmp_path, "sweep_selected", "forage")
@@ -136,9 +140,11 @@ class TestOrchestratorSequence:
 class TestSweepConfigAll:
     """When all sweep items are deselected, no sweep actions yield."""
 
-    def test_empty_selection_skips_to_post_sweep(self, tmp_path):
+    def test_empty_selection_skips_to_post_sweep(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from work_end_orchestrator import run_orchestrator
         from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
         update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
         update_close_progress(tmp_path, "sweep_selected", "")
@@ -158,10 +164,13 @@ class TestMainMode:
     def test_main_mode_skips_to_post_land(self, tmp_path, monkeypatch):
         from work_end_orchestrator import run_orchestrator
         from close_progress import update_close_progress
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         monkeypatch.setattr("work_end_orchestrator._push_main_mode", lambda ctx: {"PUSHED": "yes", "LANDED_SHA": "abc"})
         monkeypatch.setattr("work_end_orchestrator._verify_main_mode", lambda ctx: {"VERIFIED": "yes"})
         monkeypatch.setattr("work_end_orchestrator._cleanup_main_mode", lambda ctx: {"CLEANED": "yes"})
-        for step in ["review", "sweep_config", "trajectory"]:
+        for step in ["report_init", "review", "sweep_config",
+                     "review_pass", "promote", "report_promote", "promote_pass",
+                     "trajectory"]:
             update_close_progress(tmp_path, step, "done")
         update_close_progress(tmp_path, "sweep_selected", "")
         result = run_orchestrator({
@@ -368,10 +377,13 @@ class TestIntegrationBranchMode:
     def test_main_mode_skips_squash(self, tmp_path, monkeypatch):
         """Main mode skips rebase and squash, goes straight to cleanup."""
         from close_progress import update_close_progress
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         monkeypatch.setattr("work_end_orchestrator._push_main_mode", lambda ctx: {"PUSHED": "yes", "LANDED_SHA": "abc"})
         monkeypatch.setattr("work_end_orchestrator._verify_main_mode", lambda ctx: {"VERIFIED": "yes"})
         monkeypatch.setattr("work_end_orchestrator._cleanup_main_mode", lambda ctx: {"CLEANED": "yes"})
-        for step in ["review", "sweep_config", "trajectory"]:
+        for step in ["report_init", "review", "sweep_config",
+                     "review_pass", "promote", "report_promote", "promote_pass",
+                     "trajectory"]:
             update_close_progress(tmp_path, step, "done")
         update_close_progress(tmp_path, "sweep_selected", "")
         result = self._call(tmp_path, meta_state="closing:stamped", on_main="yes")
@@ -419,10 +431,11 @@ class TestIntegrationCrashRecovery:
         result = self._call(tmp_path)
         assert result["ACTION"] == "sweep_config"
 
-    def test_resume_after_sweep(self, tmp_path):
+    def test_resume_after_sweep(self, tmp_path, monkeypatch):
         """After crash, review+sweep done — resumes at trajectory."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from close_progress import update_close_progress
-        for step in ["review", "sweep_config"]:
+        for step in ["report_init", "review", "sweep_config"]:
             update_close_progress(tmp_path, step, "done")
         update_close_progress(tmp_path, "sweep_selected", "forage")
         update_close_progress(tmp_path, "forage", "done")
@@ -491,14 +504,16 @@ class TestStepSequence:
     def test_phase_ordering(self):
         from work_end_orchestrator import STEPS
         phase_order = [
-            "closing:review", "closing:promoted", "closing:stamped",
+            "closing:review", "closing:verified", "closing:promoted",
+            "closing:pushed", "closing:merged", "closing:stamped", "idle",
         ]
         last_phase_idx = 0
         for step in STEPS:
             if step.phase in phase_order:
                 idx = phase_order.index(step.phase)
                 assert idx >= last_phase_idx, (
-                    f"Step {step.name} (phase {step.phase}) is out of order"
+                    f"Step {step.name} (phase {step.phase}) is out of order "
+                    f"(after phase {phase_order[last_phase_idx]})"
                 )
                 last_phase_idx = idx
 
