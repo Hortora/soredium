@@ -328,6 +328,9 @@ def _merge_and_push_two_hop(
     status.merged = True
     _write_progress(progress_file, key, "merged")
 
+    if desc.is_workspace:
+        _strip_scaffold_from_merge(desc.repo_path)
+
     sha_r = _git(desc.repo_path, "rev-parse", desc.base_branch)
     landed_sha = sha_r.stdout.strip() if sha_r.returncode == 0 else "unknown"
     status.landed_sha = landed_sha
@@ -359,6 +362,22 @@ def _merge_and_push_two_hop(
     return status
 
 
+SCAFFOLD_FILES = [".plan", "JOURNAL.md", ".execute-progress",
+                  ".land-ledger.jsonl", ".artifacts-promoted",
+                  ".close-progress", ".close-progress.done",
+                  ".close-log.jsonl", ".close-report.json",
+                  ".meta", ".epic"]
+
+
+def _strip_scaffold_from_merge(repo_path: Path) -> None:
+    to_remove = [f for f in SCAFFOLD_FILES if (repo_path / f).exists()]
+    if not to_remove:
+        return
+    rm = _git(repo_path, "rm", "-f", "--", *to_remove)
+    if rm.returncode == 0:
+        _git(repo_path, "commit", "--amend", "--no-edit")
+
+
 def _merge_and_push_direct(
     desc: RepoDescriptor, branch: str, progress_file: Path,
 ) -> RepoStatus:
@@ -379,6 +398,9 @@ def _merge_and_push_direct(
         return status
     status.merged = True
     _write_progress(progress_file, key, "merged")
+
+    if desc.is_workspace:
+        _strip_scaffold_from_merge(desc.repo_path)
 
     max_retries = 3
     for attempt in range(1, max_retries + 1):

@@ -88,13 +88,20 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
             print(f"ERROR_DETAIL=Failed to commit scaffold cleanup: {e.stderr.strip()}")
             return 1
 
+    push_ok = False
     try:
         git("push", cwd=workspace)
+        push_ok = True
     except subprocess.CalledProcessError:
-        # Push failure is non-fatal
-        pass
+        try:
+            git("push", "origin", "main", cwd=workspace)
+            push_ok = True
+        except subprocess.CalledProcessError:
+            pass
 
     print("CLEANED=yes")
+    if not push_ok:
+        print("PUSH_WARNING=scaffold cleanup committed locally but not pushed — stale .plan may persist on remote")
     return 0
 
 
