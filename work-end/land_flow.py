@@ -349,13 +349,14 @@ def _merge_and_push_two_hop(
     if has_origin.returncode == 0:
         remote_push = _git(desc.original_path, "push", "origin", desc.base_branch, "--no-verify")
         if remote_push.returncode != 0:
-            print(f"WARN=github_push_failed repo={desc.repo_path.name}")
-        else:
-            ls = _git(desc.original_path, "ls-remote", "origin", desc.base_branch)
-            if ls.returncode == 0 and ls.stdout.strip():
-                remote_sha = ls.stdout.split()[0]
-                if remote_sha != landed_sha:
-                    print(f"WARN=github_verify_failed repo={desc.repo_path.name}")
+            status.error = "github_push_failed"
+            return status
+        ls = _git(desc.original_path, "ls-remote", "origin", desc.base_branch)
+        if ls.returncode == 0 and ls.stdout.strip():
+            remote_sha = ls.stdout.split()[0]
+            if remote_sha != landed_sha:
+                status.error = "github_verify_failed"
+                return status
 
     status.pushed = True
     _write_progress(progress_file, key, "pushed")

@@ -773,10 +773,24 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
             continue
 
         if step.step_type == "mechanical":
+            attempt_key = f"{step.name}_mechanical_attempt"
+            attempt = int(ctx.progress.get(attempt_key, "0"))
             result = _execute_mechanical(step, ctx)
             if result and "ERROR" in result:
-                ctx.steps_executed.append(f"{step.name}:ERROR")
-                return {"ACTION": "error", "STEP": step.name, **result}
+                attempt += 1
+                update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                ctx.steps_executed.append(f"{step.name}:ERROR:{attempt}")
+                if attempt >= 3:
+                    return {
+                        "ACTION": "user_input",
+                        "CONTEXT": "step_failed",
+                        "STEP": step.name,
+                        "ATTEMPTS": str(attempt),
+                        "REASON": result.get("ERROR", "unknown"),
+                        "ERROR_DETAIL": result.get("ERROR_DETAIL", ""),
+                    }
+                return {"ACTION": "error", "STEP": step.name,
+                        "RETRY": str(attempt), **result}
             ctx.last_output = result or {}
             if step.name == "land":
                 ctx.landed_shas = _parse_landed_shas(ctx.last_output, ctx)

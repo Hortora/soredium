@@ -699,6 +699,52 @@ class TestReconciliation:
         assert result["ACTION"] == "trajectory"
 
 
+class TestMechanicalRetry:
+    """Mechanical steps retry up to 3 times before escalating to user."""
+
+    def test_first_error_returns_retry_hint(self, tmp_path, monkeypatch):
+        def fail_once(cmd, ws, **kw):
+            return {"ERROR": "push_failed", "ERROR_DETAIL": "remote rejected"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", fail_once)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "review_pass", "done")
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "test", "base_branch": "main",
+            "meta_state": "closing:verified",
+        })
+        assert result["ACTION"] == "error"
+        assert result.get("RETRY") == "1"
+
+    def test_third_error_escalates_to_user_input(self, tmp_path, monkeypatch):
+        def fail_always(cmd, ws, **kw):
+            return {"ERROR": "push_failed"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", fail_always)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "review_pass", "done")
+        update_close_progress(tmp_path, "promote_mechanical_attempt", "2")
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "test", "base_branch": "main",
+            "meta_state": "closing:verified",
+        })
+        assert result["ACTION"] == "user_input"
+        assert result["CONTEXT"] == "step_failed"
+        assert result["STEP"] == "promote"
+
+
 class TestEvidenceChecks:
     """Evidence checks verify real state, not just trust progress."""
 

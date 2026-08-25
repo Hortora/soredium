@@ -195,6 +195,10 @@ def verify(
                     f"original_sync_{repo_name}",
                     check_original_sync(slot_dir, repo_name, orig_path),
                 ))
+                checks.append((
+                    f"original_pushed_{repo_name}",
+                    check_main_pushed(str(orig_path), base),
+                ))
         slot_num = Path(slot_dir).name
         attic = str(Path(slot_dir).parent / "attic" / slot_num)
         checks.append(("archive_status", check_slot_archive_status(slot_dir, attic)))
