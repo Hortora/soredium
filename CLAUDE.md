@@ -418,6 +418,11 @@ python3 scripts/validate_all.py --tier commit
 # Run lifecycle state machine tests
 python3 -m pytest tests/test_lifecycle.py tests/test_pre_push_hook.py -v
 
+# Run work-end orchestrator audit (dry-run across branch/slot/main modes)
+python3 work-end/audit_work_end.py mode=branch
+python3 work-end/audit_work_end.py mode=slot
+python3 work-end/audit_work_end.py mode=main
+
 # Reconcile slot DB/disk state (three-phase: audit → strategy → execute)
 python3 scripts/reconcile_slots.py <family-root>              # audit — report divergences
 python3 scripts/reconcile_slots.py <family-root> --strategy   # + propose actions

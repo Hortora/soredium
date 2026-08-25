@@ -184,8 +184,20 @@ def _report_rebase_script(ctx):
 
 
 def _report_squash_script(ctx):
+    before = "?"
+    after = "?"
+    strategy = "unknown"
+    plan_file = ctx.workspace / f".squash-plan-{ctx.project.name}.json"
+    if plan_file.exists():
+        try:
+            data = json.loads(plan_file.read_text())
+            before = str(len(data.get("commits", [])))
+            after = str(len(data.get("groups", [])))
+            strategy = data.get("strategy", "unknown")
+        except (json.JSONDecodeError, OSError):
+            pass
     return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
-            "step=squash"]
+            "step=squash", f"before={before}", f"after={after}", f"strategy={strategy}"]
 
 
 def _write_marker_script(ctx):
@@ -251,7 +263,7 @@ def _archive_slot_script(ctx):
 
 def _report_archive_script(ctx):
     return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
-            "step=archive"]
+            "step=archive", f"slot={ctx.slot_num}", f"dest=attic/{ctx.slot_num}"]
 
 
 def _checkout_main_script(ctx):
