@@ -367,7 +367,7 @@ SCAFFOLD_FILES = [".plan", "JOURNAL.md", ".execute-progress",
                   ".land-ledger.jsonl", ".artifacts-promoted",
                   ".close-progress", ".close-progress.done",
                   ".close-log.jsonl", ".close-report.json",
-                  ".meta", ".epic"]
+                  ".meta", ".epic", "HANDOFF.md"]
 
 
 def _strip_scaffold_before_merge(repo_path: Path, branch: str, base_branch: str) -> None:
