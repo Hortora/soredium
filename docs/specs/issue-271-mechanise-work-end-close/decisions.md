@@ -165,3 +165,95 @@ Note: `closing:verified` covers the promotion phase after review+sweep complete.
 **Sources:** lifecycle.py `commit_transition()` (ConcurrentModification exception), DIRTY-TREE-PROTOCOL in SKILL.md ("dirty files may belong to another session")
 **Exploration:** quick (implicit decision surfaced by reviewer, now explicit)
 **Status:** captured
+
+## D13: Mechanical wiring specification format
+
+**Choice:** Step definition tables — structured block per step with exact CLI invocation, output keys, success/failure criteria, evidence construction, mode routing, and progress key
+**Alternatives:**
+- Pseudocode per step — more precise but risks becoming a second implementation that diverges from the actual code
+- Executable spec (Python dataclass definitions) — clever but couples spec to runtime, premature
+**Rationale:** Tables are precise enough to prevent stubs (the exact failure mode from #275), auditable enough to verify completeness (greppable, every step must have all fields), and decoupled enough from code to remain a stable reference. The prior spec's prose descriptions ("orchestrator calls promote") left room for stub implementations.
+**Trade-offs:** Tables are verbose — one block per step across ~25 steps is substantial. Acceptable because the alternative (prose ambiguity) caused the revert.
+**Sources:** Issue #275 (stubbed steps evidence), prior spec design.md (prose descriptions that didn't prevent stubs)
+**Exploration:** quick
+**Status:** captured
+
+## D14: Capability audit approach
+
+**Choice:** Exhaustive capability matrix in the spec — walk every section of the current SKILL.md, extract every discrete capability, map each to orchestrator step / SKILL.md action handler / dropped (with justification). Matrix serves as implementation checklist and post-deployment audit artifact.
+**Alternatives:**
+- Diff-based audit at the end — text diffs can't catch behavioral capabilities (ordering constraints, mode-specific behavior) spread across multiple sections
+- Test-based verification — most rigorous at runtime but requires implementation to exist first; doesn't prevent gaps during spec writing
+**Rationale:** The matrix is the spec's primary defense against capability loss. Written before implementation, it catches gaps early. Capabilities aren't lines of text — they're behaviors. Only an explicit enumeration can guarantee coverage.
+**Trade-offs:** Extracting capabilities from a 662-line SKILL.md is labor-intensive. Acceptable because the user's hard requirement is "no loss of capabilities."
+**Sources:** Current work-end/SKILL.md (662 lines), user requirement ("no loss of capabilities, post-audit")
+**Exploration:** quick
+**Status:** captured
+
+## D15: Cross-session state recovery
+
+**Choice:** Evidence-based reconstruction on every start — every orchestrator invocation begins with a reconciliation pass. For each step marked "done" in .close-progress, check mechanical evidence (file exists, git state, remote state, issue state). If evidence contradicts progress, correct the file and report corrections. ~10 evidence checks, each a fast local operation (<2s total).
+**Alternatives:**
+- Trust progress file, verify only on explicit recover=yes — faster but resumes from false position silently (the exact failure mode #275 identified)
+- Delete progress file every start, re-derive from evidence — most robust but expensive (network calls for late-stage checks) and loses retry attempt counts
+**Rationale:** Balances correctness (evidence-checked) with efficiency (fast local checks) and preserves retry state. The reconciliation report gives visibility into corrections before continuing.
+**Trade-offs:** Adds ~2s startup overhead per orchestrator invocation. Acceptable — the orchestrator is called ~15-20 times per close sequence, adding ~30-40s total across a multi-minute process.
+**Sources:** Issue #275 (recovery scenarios table, evidence checks table), lifecycle.py commit-transition CAS pattern
+**Exploration:** quick
+**Status:** captured
+
+## D16: SKILL.md action handler detail level
+
+**Choice:** Verbatim extraction with mapping — the spec extracts every judgment instruction from the current SKILL.md and maps it to its target action handler. The spec says "the review action handler contains THESE exact instructions." The implementer copies, doesn't summarize.
+**Alternatives:**
+- Topic-level specification — says "handler covers: security-audit suppression, budget limits..." but implementer writes content. Risk: missed nuances or rephrased behavior.
+- Reference-only — says "extract from current SKILL.md lines 170-280." Lightest but requires implementer to parse 662 lines and decide relevance.
+**Rationale:** The prior implementation proved that leaving content decisions to the implementer results in incomplete work. Verbatim extraction removes judgment from the step that went wrong last time. This is D14 (capability matrix) applied to LLM-facing content.
+**Trade-offs:** The spec will be longer — including verbatim SKILL.md content adds ~200 lines. Acceptable because completeness is the explicit goal.
+**Sources:** Current work-end/SKILL.md (judgment instructions in Steps 2-6), revert commit ("stubs all mechanical steps"), D14 (capability audit approach)
+**Depends on:** D14 (capability audit)
+**Exploration:** quick
+**Status:** captured
+
+## D17: Rollout strategy
+
+**Choice:** Shadow mode with fallback — the new SKILL.md keeps old step-by-step instructions as a hidden fallback section. Dispatch loop is primary path. If orchestrator returns error or unexpected output, LLM falls back to old instructions for that step. Once all steps verified, a follow-up commit removes the fallback. SKILL.md is always deployable.
+**Alternatives:**
+- Big bang cutover — wire everything, swap in one commit. Requires complete orchestrator before any of it is used. High risk — the implementer may think "everything" is done when it isn't (exactly what happened with #275).
+- Incremental promotion per step — wire one step at a time, update SKILL.md per commit. Safest but creates long series of SKILL.md edits with complex merge potential.
+**Rationale:** Shadow mode means no capability loss even with an incomplete orchestrator. The fallback is explicitly temporary — the spec includes "remove fallback" as the final task. This directly addresses the revert scenario: if the orchestrator stubs a step, the LLM executes it via the fallback path instead of skipping it.
+**Trade-offs:** The SKILL.md is temporarily larger (dispatch loop + fallback instructions). The fallback may mask orchestrator bugs during testing — mitigated by the post-deployment audit which verifies the orchestrator path was taken, not the fallback.
+**Sources:** Revert commit 151b7a8 ("stubs all mechanical steps"), issue #275 (scope of missing wiring)
+**Exploration:** quick
+**Status:** captured
+
+## D18: Post-deployment audit design
+
+**Choice:** Scripted dry-run audit — a Python script (audit_work_end.py) runs the orchestrator in dry_run=yes mode against synthetic workspaces for each mode (branch, slot, main). Checks: every step reached, every script call has correct arguments, every lifecycle transition fires with valid evidence, every capability from D14 matrix exercised. Output is PASS/FAIL per capability. Runnable after every implementation commit.
+**Alternatives:**
+- Manual audit checklist — markdown checklist worked through by hand. Thorough but manual, error-prone, not repeatable.
+- Real work-end runs across test repos — most realistic but expensive to set up and maintain.
+**Rationale:** A scripted dry-run is repeatable, fast, and integrates into the development loop. D14 capability matrix provides the checklist — the script mechanically verifies each row. Real runs are valuable as a final smoke test but not the primary audit mechanism.
+**Trade-offs:** Dry-run mode must be implemented in the orchestrator (extra code path). Mitigated by making dry_run a thin wrapper that captures calls without executing them — same pattern as test mocking.
+**Depends on:** D14 (capability audit matrix provides the checklist)
+**Sources:** User requirement ("post audit for this, to be sure"), D14 (capability matrix)
+**Exploration:** quick
+**Status:** captured
+
+## D17: Rollout strategy (REVISED — R1-02, R1-17)
+
+**Choice:** Shadow mode with fallback AND explicit fallback telemetry. When the orchestrator returns an error and the LLM falls back to old instructions, it emits `FALLBACK_TRIGGERED=<step>` as a structured marker before executing the fallback path. The post-deployment audit greps for FALLBACK_TRIGGERED across real closes. Zero triggers after N closes = evidence-based fallback removal. Non-zero triggers = identifies exactly which steps need fixing.
+**Revision:** Original D17 had silent fallback — no way to distinguish "orchestrator ran" from "LLM fell back." The fallback would mask orchestrator bugs (the exact pattern from the first implementation where stubs passed tests). Adding the marker makes the fallback observable and the removal decision evidence-based.
+**Status:** revised (R1-02: fallback telemetry added to close the observability gap)
+
+## D15: Cross-session state recovery (REVISED — R1-04)
+
+**Choice:** Two-tier evidence reconciliation. Local-only checks (file existence, git state, progress file consistency) run on every orchestrator invocation (<1s). Network-dependent checks (gh issue view, git ls-remote for remote SHA verification) run ONCE on the first invocation of a close sequence only, then cache results in .close-progress.
+**Revision:** Original D15 claimed "<2s all-local" but the evidence check table includes gh issue view (1-3s per issue, network-dependent) and remote state verification (git ls-remote). Running these on every invocation across 15-20 calls would add minutes. Two-tier split: local checks are cheap and run always; network checks run once and cache.
+**Status:** revised (R1-04: local/network split with caching)
+
+## D14: Capability audit approach (REVISED — R1-12)
+
+**Choice:** Exhaustive capability matrix pinned to a specific SKILL.md git SHA. The spec records the SHA. Before implementation begins, the implementer diffs the current SKILL.md against the pinned SHA. Any new capabilities since the pin are added to the matrix before proceeding. The "no loss of capabilities" guarantee covers the SKILL.md at implementation time, not just at spec time.
+**Revision:** Original D14 assumed the SKILL.md is stable between spec writing and implementation. The SKILL.md is continuously refined — new capabilities (notes 6.8, garden feedback 6.6, trajectory 4.1b) could appear between spec and implementation. Pinning to SHA + diff eliminates the temporal drift window.
+**Status:** revised (R1-12: SHA pinning + diff-before-implementation gate)
