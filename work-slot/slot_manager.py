@@ -1231,30 +1231,43 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     # Build batch and land via shared flow
     from land_flow import build_slot_batch, land_batch
 
-    descriptors = build_slot_batch(slot_dir)
+    descriptors = build_slot_batch(slot_dir, branch=branch)
     if not descriptors:
         print("ERROR=no_repos_in_slot")
+        print("HINT=no repos have the feature branch — check slot setup")
         return 1
 
     progress_file = slot_dir / ".execute-progress"
     result = land_batch(descriptors, branch, progress_file)
 
-    if not result.success:
+    # Collect landed repos (may be partial if some repos failed)
+    project_repos = [d.repo_path.name for d in descriptors if not d.is_workspace]
+    landed_shas = {s.repo_path.name: s.landed_sha for s in result.repos if s.landed_sha}
+    failed_repos = [s.repo_path.name for s in result.repos if s.error]
+    stamped_repos = [s.repo_path.name for s in result.repos if s.stamped]
+    shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
+
+    # Write .landed marker when at least one repo landed successfully.
+    # The marker records which repos succeeded and which failed — the
+    # verify step uses this to report partial success accurately.
+    if landed_shas:
+        marker_lines = [
+            f"branch={branch}",
+            f"repos={','.join(project_repos)}",
+            f"landed_shas={shas_str}",
+            f"stamped={','.join(stamped_repos)}",
+            f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}",
+        ]
+        if failed_repos:
+            marker_lines.append(f"failed={','.join(failed_repos)}")
+        (slot_dir / ".landed").write_text("\n".join(marker_lines) + "\n")
+    else:
+        # Nothing landed at all — hard failure
         for s in result.repos:
             if s.error:
                 print(f"ERROR={s.error} repo={s.repo_path.name}")
+        print("ERROR=no_repos_landed")
         return 1
-
-    # Write .landed marker
-    project_repos = [d.repo_path.name for d in descriptors if not d.is_workspace]
-    landed_shas = {s.repo_path.name: s.landed_sha for s in result.repos if s.landed_sha}
-    shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
-    (slot_dir / ".landed").write_text(
-        f"branch={branch}\n"
-        f"repos={','.join(project_repos)}\n"
-        f"landed_shas={shas_str}\n"
-        f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
-    )
 
     if _wl:
         try:
@@ -1284,10 +1297,15 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     # Report
     for s in result.repos:
         icon = "OK" if not s.error else "FAIL"
-        print(f"RESULT={s.repo_path.name} STATUS={'ok' if not s.error else s.error} SHA={s.landed_sha} ICON={icon}")
+        stamped_flag = " STAMPED" if s.stamped else ""
+        print(f"RESULT={s.repo_path.name} STATUS={'ok' if not s.error else s.error} SHA={s.landed_sha}{stamped_flag} ICON={icon}")
     ok_count = sum(1 for s in result.repos if not s.error)
-    print(f"SUMMARY=ok:{ok_count} warn:0 fail:0")
+    fail_count = len(failed_repos)
+    print(f"SUMMARY=ok:{ok_count} fail:{fail_count}")
     print(f"LANDED_SHAS={shas_str}")
+    if failed_repos:
+        print(f"WARN=partial_land failed_repos={','.join(failed_repos)}")
+        return 1
     return 0
 
 

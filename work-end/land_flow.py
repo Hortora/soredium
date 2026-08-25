@@ -153,15 +153,25 @@ def _detect_mirror_target(repo_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def build_slot_batch(
-    slot_dir: Path, base_branch: str = "main",
+    slot_dir: Path, branch: str = "", base_branch: str = "main",
 ) -> list[RepoDescriptor]:
-    """Build RepoDescriptor batch for a slot. Project repos first."""
+    """Build RepoDescriptor batch for a slot. Project repos first.
+
+    When branch is specified, only includes repos that have that branch.
+    Repos without the branch are reported as skipped.
+    """
     descriptors: list[RepoDescriptor] = []
     for entry in sorted(slot_dir.iterdir()):
         if not entry.is_dir() or not (entry / ".git").exists():
             continue
         if entry.name in (".m2", "attic"):
             continue
+
+        if branch:
+            has_branch = _git(entry, "branch", "--list", branch)
+            if has_branch.returncode != 0 or not has_branch.stdout.strip():
+                print(f"SKIP_REPO={entry.name} reason=no_branch branch={branch}")
+                continue
 
         is_ws = (entry / ".workspace").exists()
         original = _resolve_original(entry)
@@ -475,40 +485,56 @@ def _merge_and_push_direct(
 
 def _stamp_repo(
     desc: RepoDescriptor, branch: str, landed_sha: str, progress_file: Path,
-) -> None:
+) -> bool:
+    """Stamp a branch as closed. Returns True on success, False on failure."""
     key = _progress_key(desc, branch)
+    repo_name = desc.repo_path.name
 
     tip = _git(desc.repo_path, "log", "-1", "--format=%s", branch)
     if tip.returncode == 0 and tip.stdout.strip().startswith("chore: branch closed"):
         _write_progress(progress_file, key, "stamped")
-        return
+        return True
+
+    if tip.returncode != 0:
+        print(f"STAMP_WARN={repo_name} reason=branch_tip_unreadable branch={branch}")
+        return False
 
     co = _git(desc.repo_path, "checkout", branch)
     if co.returncode != 0:
         _git(desc.repo_path, "stash", "push", "-u", "-m", "work-end: stash before stamp")
-        _git(desc.repo_path, "checkout", branch)
+        co2 = _git(desc.repo_path, "checkout", branch)
+        if co2.returncode != 0:
+            print(f"STAMP_FAIL={repo_name} reason=checkout_failed branch={branch}")
+            return False
 
     issue_match = re.match(r"issue-(\d+)", branch)
     issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""
 
-    _git(
+    commit = _git(
         desc.repo_path, "commit", "--allow-empty",
         "-m", f"chore: branch closed — landed as {landed_sha} on {desc.base_branch}{issue_ref}",
     )
+    if commit.returncode != 0:
+        print(f"STAMP_FAIL={repo_name} reason=commit_failed detail={commit.stderr.strip()}")
+        return False
 
     if desc.transport == Transport.TWO_HOP:
-        _git(desc.repo_path, "push", "origin", branch, "--force-with-lease")
+        push = _git(desc.repo_path, "push", "origin", branch, "--force-with-lease")
     else:
         push_remote = desc.push_target
         has_upstream = _git(desc.repo_path, "remote", "get-url", "upstream")
         if has_upstream.returncode == 0:
             push_remote = "origin"
+        push = None
         if push_remote:
-            _git(desc.repo_path, "push", push_remote, branch, "--force-with-lease")
+            push = _git(desc.repo_path, "push", push_remote, branch, "--force-with-lease")
+
+    if push and push.returncode != 0:
+        print(f"STAMP_WARN={repo_name} reason=stamp_push_failed detail={push.stderr.strip()}")
 
     _write_progress(progress_file, key, "stamped")
-
     _record_worklog_end(branch, str(desc.repo_path), landed_sha)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +620,7 @@ def land_batch(
     # Step 3: Merge + Push (project repos only — workspace uses selective promotion)
     print("STAGE=push")
     landed_shas: dict[str, str] = {}
-    has_failure = False
+    failed_repos: list[str] = []
 
     for desc in active:
         if desc.is_workspace:
@@ -608,25 +634,41 @@ def land_batch(
             status = _merge_and_push_direct(desc, branch, progress_file)
         result.repos.append(status)
         if status.error:
-            has_failure = True
+            failed_repos.append(desc.repo_path.name)
+            print(f"PUSH_FAIL={desc.repo_path.name} error={status.error}")
         else:
             landed_shas[desc.repo_path.name] = status.landed_sha
 
-    if has_failure:
+    if failed_repos:
         result.success = False
-        print("STAGE=push STATUS=fail")
-        return result
-    print("STAGE=push STATUS=pass")
+        print(f"STAGE=push STATUS=partial failed={','.join(failed_repos)}")
+    else:
+        print("STAGE=push STATUS=pass")
 
-    # Step 4: Stamp all feature branches
+    # Step 4: Stamp all feature branches (even if some repos failed push —
+    # repos that pushed successfully still need stamping)
+    print("STAGE=stamp")
+    stamp_failures: list[str] = []
     for desc in active:
-        sha = landed_shas.get(desc.repo_path.name, "")
+        repo_name = desc.repo_path.name
+        if repo_name in failed_repos:
+            print(f"STAMP_SKIP={repo_name} reason=push_failed")
+            continue
+        sha = landed_shas.get(repo_name, "")
         if desc.is_workspace and not sha:
             proj_sha = next((s for s in landed_shas.values()), "unknown")
             sha = proj_sha
-        _stamp_repo(desc, branch, sha, progress_file)
+        ok = _stamp_repo(desc, branch, sha, progress_file)
         for s in result.repos:
             if s.repo_path == desc.repo_path and not s.skipped:
-                s.stamped = True
+                s.stamped = ok
+        if not ok:
+            stamp_failures.append(repo_name)
+
+    if stamp_failures:
+        result.success = False
+        print(f"STAGE=stamp STATUS=partial failed={','.join(stamp_failures)}")
+    else:
+        print("STAGE=stamp STATUS=pass")
 
     return result

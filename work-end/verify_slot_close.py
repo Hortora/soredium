@@ -94,6 +94,11 @@ def check_landed_marker(slot_dir: str) -> dict:
     content = landed.read_text()
     if "landed_shas=" not in content:
         return {"status": "fail", "detail": "no landed_shas in .landed marker"}
+    for line in content.splitlines():
+        if line.startswith("failed="):
+            failed = line.split("=", 1)[1]
+            if failed:
+                return {"status": "warn", "detail": f"partial land — failed repos: {failed}"}
     return {"status": "pass"}
 
 
