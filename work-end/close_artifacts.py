@@ -318,13 +318,13 @@ def main() -> int:
     for key, value in results.items():
         print(f"{key.upper()}={value}")
 
-    # Write stamp (only on full success)
+    stamp_path = write_stamp(workspace, branch, results)
+    print(f"STAMP={stamp_path}")
+
     if failures:
         print(f"FAILURES={';'.join(failures)}")
         return 2
 
-    stamp_path = write_stamp(workspace, branch, results)
-    print(f"STAMP={stamp_path}")
     return 0
 
 
