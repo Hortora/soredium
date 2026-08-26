@@ -9,79 +9,34 @@ description: >
 
 # work-end
 
-The orchestrator drives the close sequence. Call it in a loop. Follow
-its output. That is the job.
+Call the orchestrator. Follow its output. That is the job.
 
 <HARD-GATE>
-**Orchestrator errors are hard stops.** Do NOT edit `.close-progress`.
-Do NOT manually execute steps. Do NOT work around errors. Fix the root
-cause or escalate.
-
-**Postconditions are enforced.** Review sub-steps require `produced=N`.
-The forcing function verifies no open findings remain. The orchestrator
-rejects `step_done` without evidence.
-
-**Never defer work-end.** Session-bound items are lost if the session
-ends. All other steps are Python scripts. Session length is not a factor.
+**Do NOT edit `.close-progress`.** The orchestrator owns its state.
+**Do NOT manually execute steps.** Fix the root cause or STOP.
+**Do NOT defer.** Session-bound items are lost if the session ends.
 </HARD-GATE>
 
-### Red Flags — thoughts that mean STOP
-
-| Thought | Reality |
-|---------|---------|
-| "I'll do the review steps myself" | The orchestrator yields them. Call it. |
-| "The orchestrator crashed, I'll do it manually" | Manual steps miss side effects. STOP. |
-| "I'll edit .close-progress to unstick it" | State machine violation. |
-| "Code review was clean so I'll skip branch audit" | Each sub-step is independent. |
-| "I'd recommend skipping the sweep" | Present defaults ON. User decides. |
-| "Session is getting long" | Not a reason to skip anything. |
-
----
-
-## Pre-close
-
-### Path Resolution
+## Step 1 — Context
 
 ```bash
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-Use: `WORKSPACE`, `PROJECT`, `CURRENT_BRANCH`, `PROJECT_SHA`, `ISSUE_N`,
-`COVERS`, `OWNER_REPO`, `BASE_BRANCH`, `META_STATE`, `HAS_PLAN`,
-`PLAN_PATH`, `ON_MAIN`, `IN_SLOT`, `SLOT_PATH`.
-
-### Lifecycle Entry
-
-Auto-resolve transient states:
-
-| `META_STATE` | Action |
-|-------------|--------|
-| `scaffolded` | Transition `auto_setup` → `active` |
-| `transitioning` | Transition `auto_refresh` → `active` |
-| `active` | Ready |
-| `closing:*` | Offer to continue from that gate |
-
-Then fire: `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_end`
-
-### Context
-
 ```bash
-python3 work-end/work_end_context.py workspace=<WORKSPACE> project=<PROJECT>
+python3 work-end/work_end_context.py workspace=$WORKSPACE project=$PROJECT
 ```
 
-Handle preconditions from JSON output:
-- `branch_alignment` fail → hard stop
-- `clean_tree` fail → `git stash push -u` or WIP commit (NEVER `git reset --hard`)
-- `meta_exists` `no-meta` → infer issue from branch name
-- `meta_exists` `stale-plan` → remove stale .plan, proceed without lifecycle
+Handle preconditions from the JSON output. Read `handlers/pre_close.md`
+if any precondition is not `pass`.
 
-**Queue gate:** If mid-queue, redirect to `work next`.
+## Step 2 — Enter closing state
 
----
+```bash
+python3 ~/.claude/skills/project/lifecycle.py transition $PLAN_PATH work_end
+```
 
-## Close Sequence — The Loop
-
-Call the orchestrator in a loop until `ACTION=complete`:
+## Step 3 — The Loop
 
 ```bash
 python3 work-end/work_end_orchestrator.py \
@@ -96,10 +51,10 @@ python3 work-end/work_end_orchestrator.py \
     [abort=yes] [conflict_resolved=yes]
 ```
 
-### Action Dispatch
+Call in a loop until `ACTION=complete`. Read the ACTION, dispatch:
 
-| ACTION | What to do |
-|--------|-----------|
+| ACTION | Do |
+|--------|----|
 | `code_review` | Read `handlers/review.md` § code_review |
 | `branch_audit_*` | Read `handlers/review.md` § branch_audit_dimension |
 | `loose_ends` | Read `handlers/review.md` § loose_ends |
@@ -111,25 +66,22 @@ python3 work-end/work_end_orchestrator.py \
 | `update_claude_md` | Invoke update-claude-md |
 | `impl_doc_sync` | Invoke implementation-doc-sync |
 | `adr` | Invoke adr |
-| `write_content` | Invoke write-content (diary type) |
+| `write_content` | Invoke write-content (diary) |
 | `trajectory` | Read `handlers/execute.md` § trajectory |
 | `squash` | Read `handlers/execute.md` § squash |
 | `verify_recover` | Read `handlers/execute.md` § verify_recover |
 | `user_input` | Read `handlers/user_input.md`, dispatch by CONTEXT |
-| `error` | Report to user. Do NOT work around it. |
-| `complete` | Run completion (below) |
+| `error` | Report to user. STOP. |
+| `complete` | Step 4 |
 
-For `sweep_selected`: pass user selections back after sweep_config.
-For `skip_step`: only when user explicitly asks or step_failed.
-
-### Completion
-
-When `ACTION=complete`, run both and print verbatim:
+## Step 4 — Summary and Audit
 
 ```bash
 python3 work-end/progress_summary.py $WORKSPACE mode=close
 python3 work-end/verify_slot_close.py $PROJECT branch=$BRANCH workspace=$WORKSPACE covers=$COVERS issue_repo=$OWNER_REPO [on_main=yes] [slot_dir=$SLOT_PATH]
 ```
+
+Print both outputs verbatim. Do not compose your own summary.
 
 ---
 
@@ -139,6 +91,4 @@ python3 work-end/verify_slot_close.py $PROJECT branch=$BRANCH workspace=$WORKSPA
 
 **Invokes:** `code-review`, `branch-audit`, `forage`, `protocol`,
 `update-claude-md`, `implementation-doc-sync`, `adr`, `write-content`,
-`publish-blog`, `git-squash` — all via orchestrator dispatch
-
-**Reads from:** `ctx.py`, `.plan`, `.close-progress`, `findings.jsonl`
+`git-squash` — all via orchestrator dispatch
