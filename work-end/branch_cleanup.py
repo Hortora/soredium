@@ -53,7 +53,9 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
 
     files_to_remove = []
     scaffold_names = [".plan", "JOURNAL.md", ".execute-progress",
-                      ".land-ledger.jsonl", ".artifacts-promoted"]
+                      ".land-ledger.jsonl", ".artifacts-promoted",
+                      ".close-progress", ".close-report.json",
+                      ".close-log.jsonl", ".wrap-log.jsonl"]
     for name in scaffold_names:
         if (ws / name).exists():
             files_to_remove.append(name)

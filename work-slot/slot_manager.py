@@ -361,19 +361,31 @@ def allocate_slot_number(family_root: Path) -> int:
         reusable = _wl.find_reusable_slot(conn, str(family_root))
         if reusable is not None:
             slot_num, others = reusable
+            # Guard: never reuse a number that exists in the attic — that
+            # creates a split-brain where both slots/N/ and slots/attic/N/ exist.
             for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
-                debris = family_root / dir_name / str(slot_num)
-                if debris.exists():
-                    shutil.rmtree(str(debris), ignore_errors=True)
-            for other_num in others:
+                attic_entry = family_root / dir_name / "attic" / str(slot_num)
+                if attic_entry.exists():
+                    print(f"WARN=attic_collision slot={slot_num} — skipping reuse, attic entry exists")
+                    reusable = None
+                    break
+            if reusable is None:
+                slot_num = _wl.reserve_slot_number(conn, str(family_root))
+            else:
                 for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
-                    debris = family_root / dir_name / str(other_num)
+                    debris = family_root / dir_name / str(slot_num)
                     if debris.exists():
                         shutil.rmtree(str(debris), ignore_errors=True)
-                _wl.fail_slot(conn, other_num, str(family_root))
-            print(f"REUSED_PENDING={slot_num}")
-            return slot_num
-        slot_num = _wl.reserve_slot_number(conn, str(family_root))
+                for other_num in others:
+                    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+                        debris = family_root / dir_name / str(other_num)
+                        if debris.exists():
+                            shutil.rmtree(str(debris), ignore_errors=True)
+                    _wl.fail_slot(conn, other_num, str(family_root))
+                print(f"REUSED_PENDING={slot_num}")
+                return slot_num
+        else:
+            slot_num = _wl.reserve_slot_number(conn, str(family_root))
     finally:
         conn.close()
     return slot_num
@@ -391,6 +403,13 @@ def resolve_workspace_source(repo_path: Path) -> tuple[Path, str] | None:
         return None
     target = wksp.resolve()
     if not target.is_dir():
+        return None
+
+    # Guard: if the symlink resolves into a slots directory, it was repointed
+    # by a previous slot creation. Skip it — the original workspace is gone
+    # from this symlink's perspective. discover_workspace() will find it.
+    target_str = str(target)
+    if "/slots/" in target_str or "/worktrees/" in target_str:
         return None
 
     rc, stdout, _ = run_cmd(["git", "-C", str(target), "rev-parse", "--show-toplevel"])
@@ -570,6 +589,14 @@ def install_post_commit_hook(clone_path: Path) -> None:
 
 
 def repoint_wksp(repo_worktree: Path, ws_subdir: Path) -> None:
+    # Safety: never repoint a wksp symlink in an original repo — only in slot clones.
+    # An original repo's wksp points to the canonical workspace and must not be modified.
+    repo_str = str(repo_worktree)
+    if "/slots/" not in repo_str and "/worktrees/" not in repo_str:
+        raise SlotCreationError(
+            f"repoint_wksp_on_original repo={repo_worktree}: "
+            f"Refusing to modify wksp symlink in a non-slot directory. "
+            f"This would corrupt the original repo's workspace link.")
     wksp = repo_worktree / "wksp"
     if wksp.is_symlink() or wksp.exists():
         wksp.unlink()
