@@ -646,6 +646,88 @@ class TestCreateSlot:
                 )
 
 
+class TestCreateSlotPrimaryWorkspace:
+    @patch("slot_manager.run_cmd")
+    def test_warns_when_primary_repo_has_no_workspace(self, mock_cmd, tmp_path, capsys):
+        """When the primary repo has no wksp symlink, create_slot should warn."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+        # No wksp symlink — this is the bug scenario
+
+        mock_cmd.return_value = (0, "", "")
+
+        result = slot_manager.create_slot(
+            family_root=family,
+            repos=["engine"],
+            branch="issue-42-spi",
+            issue="42",
+            issue_repo="casehubio/engine",
+            covers="42",
+            context="Add SPI layer",
+        )
+
+        captured = capsys.readouterr()
+        assert "WARN=primary_no_workspace" in captured.out
+
+    @patch("slot_manager.run_cmd")
+    def test_no_warning_when_primary_has_workspace(self, mock_cmd, tmp_path, capsys):
+        """No warning when primary repo has a wksp symlink."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+
+        mock_cmd.return_value = (0, "", "")
+
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            slot_manager.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-42-spi",
+                issue="42",
+                issue_repo="casehubio/engine",
+                covers="42",
+                context="Add SPI layer",
+            )
+
+        captured = capsys.readouterr()
+        assert "WARN=primary_no_workspace" not in captured.out
+
+    @patch("slot_manager.run_cmd")
+    def test_no_warning_when_only_secondary_has_no_workspace(self, mock_cmd, tmp_path, capsys):
+        """When only a secondary repo lacks wksp, no primary warning is emitted."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+        init_repo(family / "iot")
+        # iot has no wksp — but it's secondary, not primary
+
+        mock_cmd.return_value = (0, "", "")
+
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.side_effect = [
+                (ws_engine, "wsp-casehub-engine"),
+                None,  # iot has no workspace
+            ]
+            slot_manager.create_slot(
+                family_root=family,
+                repos=["engine", "iot"],
+                branch="issue-42-spi",
+                issue="42",
+                issue_repo="casehubio/engine",
+                covers="42",
+                context="Cross-repo work",
+            )
+
+        captured = capsys.readouterr()
+        assert "WARN=primary_no_workspace" not in captured.out
+
+
 class TestCreateSlotIsx:
     @patch("slot_manager.run_cmd")
     def test_create_isx_slot_preflight_fails(self, mock_cmd, tmp_path):

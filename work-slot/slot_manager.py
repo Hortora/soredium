@@ -720,6 +720,9 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
 
         primary_repo = repos[0]
         primary_wksp = slot_dir / primary_repo / "wksp"
+        if not primary_wksp.is_symlink():
+            print(f"WARN=primary_no_workspace repo={primary_repo}")
+            print("WARN_DETAIL=primary repo has no wksp symlink — .plan scaffold will be skipped")
         if primary_wksp.is_symlink():
             ws_path = primary_wksp.resolve()
             scaffold_script = Path.home() / ".claude" / "skills" / "work-start" / "scaffold.py"
