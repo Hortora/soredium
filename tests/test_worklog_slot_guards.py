@@ -64,6 +64,29 @@ class TestFailSlot:
         assert event is not None
 
 
+class TestRecordSessionBoundary:
+    def test_records_wrap_event(self, db, norm_family):
+        wl.record_session_boundary(
+            db, mode="wrap", branch="issue-42-test",
+            issue_repo="org/repo", issue_number=42,
+            steps={"forage": {"ran": True, "produced": 2}},
+        )
+        row = db.execute("SELECT * FROM session_boundaries").fetchone()
+        assert row is not None
+        assert row["mode"] == "wrap"
+        assert row["branch"] == "issue-42-test"
+        assert '"forage"' in row["steps_json"]
+
+    def test_records_close_event(self, db, norm_family):
+        wl.record_session_boundary(
+            db, mode="close", branch="issue-99-fix",
+            steps={"review": {"ran": True, "produced": 0}},
+        )
+        row = db.execute("SELECT * FROM session_boundaries WHERE mode='close'").fetchone()
+        assert row is not None
+        assert row["mode"] == "close"
+
+
 class TestFindReusableSlot:
     def test_returns_highest_pending(self, db, norm_family):
         for n in (1, 3, 5):

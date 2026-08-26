@@ -23,6 +23,14 @@ sys.path.insert(0, str(_work_end))
 
 from close_progress import read_close_progress, update_close_progress
 from orchestrator_engine import run_loop, log_call
+
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
 from shared_steps import (
     StepDef,
     OrchestratorContextBase,
@@ -139,6 +147,12 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         if attempt_key in progress:
             update_close_progress(workspace, attempt_key, "0")
 
+    if args.get("step_done"):
+        step = args["step_done"]
+        update_close_progress(workspace, step, "done")
+        if args.get("produced"):
+            update_close_progress(workspace, f"{step}_produced", args["produced"])
+
     if args.get("sweep_selected") is not None:
         selected = args["sweep_selected"]
         update_close_progress(workspace, "wrap_sweep_config", "done")
@@ -161,7 +175,38 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         complete_summary="Wrap complete.",
     )
     log_call(workspace, "wrap", result, ctx.steps_executed, dry_run=dry_run)
+
+    if result.get("ACTION") == "complete" and _wl and not dry_run:
+        try:
+            conn = _wl.connect()
+            steps_data = _build_step_outcomes(ctx.progress)
+            _wl.record_session_boundary(
+                conn, mode="wrap", branch=branch,
+                issue_repo=issue_repo,
+                issue_number=int(covers.split(",")[0]) if covers else 0,
+                steps=steps_data,
+            )
+            conn.close()
+        except Exception:
+            pass
+
     return result
+
+
+def _build_step_outcomes(progress: dict[str, str]) -> dict:
+    """Build step outcomes from progress for the session boundary event."""
+    outcomes = {}
+    for step_name in ["loose_ends", "forage", "protocol", "update_claude_md",
+                      "write_content", "garden_feedback", "notes",
+                      "epic_hygiene", "journal_entry", "arc42_scan_wrap",
+                      "handoff_write", "wip_commit"]:
+        status = progress.get(step_name)
+        if status == "done":
+            produced = int(progress.get(f"{step_name}_produced", "0"))
+            outcomes[step_name] = {"ran": True, "produced": produced}
+        elif status == "skipped":
+            outcomes[step_name] = {"ran": False, "skipped": True}
+    return outcomes
 
 
 def main():

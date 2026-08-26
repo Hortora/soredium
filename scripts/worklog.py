@@ -12,7 +12,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DEFAULT_DB = os.path.expanduser("~/.hortora/worklog.db")
 
@@ -120,6 +120,18 @@ SCHEMA_V3 = """
 ALTER TABLE slots ADD COLUMN resolution TEXT;
 """
 
+SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS session_boundaries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    mode         TEXT NOT NULL,
+    branch       TEXT,
+    issue_repo   TEXT,
+    issue_number INTEGER,
+    steps_json   TEXT,
+    timestamp    TEXT NOT NULL
+);
+"""
+
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -137,6 +149,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.executescript(SCHEMA_V2)
     if current < 3:
         conn.executescript(SCHEMA_V3)
+    if current < 4:
+        conn.executescript(SCHEMA_V4)
     if current < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
@@ -275,6 +289,21 @@ def fail_slot(conn: sqlite3.Connection, slot_number: int,
     conn.execute(
         "UPDATE slots SET state='failed' WHERE slot_number=? AND family_root=?",
         (slot_number, family_root),
+    )
+    conn.commit()
+
+
+def record_session_boundary(conn: sqlite3.Connection,
+                            mode: str, branch: str,
+                            issue_repo: str = "",
+                            issue_number: int = 0,
+                            steps: dict | None = None) -> None:
+    """Record a session boundary event (close or wrap). No @safe."""
+    conn.execute(
+        "INSERT INTO session_boundaries (mode, branch, issue_repo, issue_number, steps_json, timestamp) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (mode, branch, issue_repo, issue_number,
+         json.dumps(steps) if steps else "{}", _now()),
     )
     conn.commit()
 

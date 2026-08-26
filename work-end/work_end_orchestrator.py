@@ -76,6 +76,14 @@ ABORTABLE_STATES = {"closing:review", "closing:verified"}
 
 from orchestrator_engine import run_script as _run_script, run_loop, log_call as _engine_log_call
 
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
+
 
 def _parse_slot_repos(slot_path: Path) -> list[str]:
     if not slot_path or not slot_path.is_dir():
@@ -742,6 +750,12 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         if attempt_key in progress:
             update_close_progress(workspace, attempt_key, "0")
 
+    if args.get("step_done"):
+        step = args["step_done"]
+        update_close_progress(workspace, step, "done")
+        if args.get("produced"):
+            update_close_progress(workspace, f"{step}_produced", args["produced"])
+
     if args.get("sweep_selected") is not None:
         selected = args["sweep_selected"]
         update_close_progress(workspace, "sweep_config", "done")
@@ -773,6 +787,21 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     result = _next_action(ctx)
     _log_call(workspace, meta_state, result, ctx.steps_executed, dry_run=dry_run)
+
+    if result.get("ACTION") == "complete" and _wl and not dry_run:
+        try:
+            conn = _wl.connect()
+            steps_data = _build_close_step_outcomes(progress)
+            _wl.record_session_boundary(
+                conn, mode="close", branch=branch,
+                issue_repo=issue_repo,
+                issue_number=int(covers.split(",")[0]) if covers else 0,
+                steps=steps_data,
+            )
+            conn.close()
+        except Exception:
+            pass
+
     return result
 
 
@@ -907,6 +936,23 @@ def _get_sweep_selected(progress: dict[str, str]) -> set[str]:
     if not raw:
         return set()
     return {s.strip() for s in raw.split(",") if s.strip()}
+
+
+def _build_close_step_outcomes(progress: dict[str, str]) -> dict:
+    """Build step outcomes from progress for the session boundary event."""
+    outcomes = {}
+    for step_name in ["review", "forage", "protocol", "update_claude_md",
+                      "impl_doc_sync", "adr", "write_content",
+                      "garden_feedback", "notes", "promote", "rebase",
+                      "squash", "land", "close_issues", "verify",
+                      "arc42_scan", "trajectory", "session_rename"]:
+        status = progress.get(step_name)
+        if status == "done":
+            produced = int(progress.get(f"{step_name}_produced", "0"))
+            outcomes[step_name] = {"ran": True, "produced": produced}
+        elif status == "skipped":
+            outcomes[step_name] = {"ran": False, "skipped": True}
+    return outcomes
 
 
 def main():

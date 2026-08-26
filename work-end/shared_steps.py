@@ -139,9 +139,31 @@ def make_update_claude_md_step(phase: str, sweep_key: str = "sweep_selected") ->
                    skip_fn=_is_sweep_deselected("update_claude_md", sweep_key))
 
 
+def _find_existing_diary(ctx) -> dict[str, str]:
+    """Check for an existing diary entry on this branch to revise."""
+    context: dict[str, str] = {}
+    blog_dir = ctx.workspace / "blog"
+    if not blog_dir.is_dir():
+        return context
+    branch = getattr(ctx, "branch", "")
+    candidates = sorted(blog_dir.glob("*.md"), reverse=True)
+    for entry in candidates[:5]:
+        try:
+            head = entry.read_text()[:500]
+            if f"series: {branch}" in head or branch in entry.name:
+                context["EXISTING_DIARY"] = str(entry)
+                context["DIARY_MODE"] = "revise"
+                return context
+        except OSError:
+            continue
+    context["DIARY_MODE"] = "new"
+    return context
+
+
 def make_write_content_step(phase: str, sweep_key: str = "sweep_selected") -> StepDef:
     return StepDef("write_content", phase, "judgment",
-                   skip_fn=_is_sweep_deselected("write_content", sweep_key))
+                   skip_fn=_is_sweep_deselected("write_content", sweep_key),
+                   action_context_fn=_find_existing_diary)
 
 
 def make_arc42_scan_step(phase: str) -> StepDef:

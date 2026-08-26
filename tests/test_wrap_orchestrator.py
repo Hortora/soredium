@@ -161,6 +161,34 @@ class TestWrapComplete:
         assert result.get("ACTION") == "complete"
 
 
+class TestWrapStepProduced:
+    def test_step_done_with_produced_persists(self, tmp_path):
+        write_close_progress(tmp_path, {"loose_ends": "done"})
+        wo.run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path),
+            "branch": "issue-42-test",
+            "step_done": "forage",
+            "produced": "3",
+            "dry_run": "yes",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("forage") == "done"
+        assert progress.get("forage_produced") == "3"
+
+    def test_step_done_without_produced(self, tmp_path):
+        wo.run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path),
+            "branch": "issue-42-test",
+            "step_done": "notes",
+            "dry_run": "yes",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("notes") == "done"
+        assert "notes_produced" not in progress
+
+
 class TestWrapGardenFeedback:
     def test_garden_feedback_yields_user_input(self, tmp_path):
         write_close_progress(tmp_path, {

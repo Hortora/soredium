@@ -81,3 +81,47 @@ class TestMakeSteps:
         step = make_garden_feedback_step("wrapping")
         assert step.name == "garden_feedback"
         assert step.action_context_fn is not None
+
+
+class TestWriteContentDiaryDetection:
+    def test_finds_existing_diary_by_branch(self, tmp_path):
+        from shared_steps import _find_existing_diary, OrchestratorContextBase
+        blog = tmp_path / "blog"
+        blog.mkdir()
+        entry = blog / "2026-08-26-test-entry.md"
+        entry.write_text("---\ntitle: test\nseries: issue-42-feature\n---\n# Test\n")
+        ctx = OrchestratorContextBase(
+            workspace=tmp_path, project=tmp_path,
+            branch="issue-42-feature", base_branch="main",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress={},
+        )
+        result = _find_existing_diary(ctx)
+        assert result["DIARY_MODE"] == "revise"
+        assert str(entry) in result["EXISTING_DIARY"]
+
+    def test_returns_new_when_no_match(self, tmp_path):
+        from shared_steps import _find_existing_diary, OrchestratorContextBase
+        blog = tmp_path / "blog"
+        blog.mkdir()
+        entry = blog / "2026-08-26-other.md"
+        entry.write_text("---\ntitle: other\nseries: different-branch\n---\n")
+        ctx = OrchestratorContextBase(
+            workspace=tmp_path, project=tmp_path,
+            branch="issue-42-feature", base_branch="main",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress={},
+        )
+        result = _find_existing_diary(ctx)
+        assert result["DIARY_MODE"] == "new"
+
+    def test_returns_new_when_no_blog_dir(self, tmp_path):
+        from shared_steps import _find_existing_diary, OrchestratorContextBase
+        ctx = OrchestratorContextBase(
+            workspace=tmp_path, project=tmp_path,
+            branch="issue-42-feature", base_branch="main",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress={},
+        )
+        result = _find_existing_diary(ctx)
+        assert result.get("DIARY_MODE", "new") == "new"
