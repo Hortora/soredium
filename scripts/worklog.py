@@ -267,6 +267,36 @@ def confirm_slot_create(conn: sqlite3.Connection, slot_number: int,
     return sid
 
 
+def fail_slot(conn: sqlite3.Connection, slot_number: int,
+              family_root: str) -> None:
+    """Transition a slot to failed state. Works for both pending and active.
+    Preserves audit trail — no deletion. No @safe."""
+    family_root = _norm(family_root)
+    conn.execute(
+        "UPDATE slots SET state='failed' WHERE slot_number=? AND family_root=?",
+        (slot_number, family_root),
+    )
+    conn.commit()
+
+
+def find_reusable_slot(conn: sqlite3.Connection,
+                       family_root: str) -> tuple[int, list[int]] | None:
+    """Find reusable pending/failed slots for a family_root.
+    Returns (highest_number, [other_numbers]) or None."""
+    family_root = _norm(family_root)
+    rows = conn.execute(
+        "SELECT slot_number FROM slots "
+        "WHERE family_root=? AND state IN ('pending', 'failed') "
+        "ORDER BY slot_number DESC",
+        (family_root,),
+    ).fetchall()
+    if not rows:
+        return None
+    highest = rows[0][0]
+    others = [r[0] for r in rows[1:]]
+    return highest, others
+
+
 # --- Repos ---
 
 @safe
