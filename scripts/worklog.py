@@ -692,18 +692,26 @@ def record_step_failure(conn: sqlite3.Connection, mode: str,
                         repo_path: str | None = None,
                         issue_repo: str | None = None) -> None:
     """Record a step failure event after final retry exhaustion."""
+    record_close_event(conn, "step-failed", mode, branch,
+                       repo_path=repo_path,
+                       step=step, attempts=attempts, reason=reason,
+                       issue_repo=issue_repo)
+
+
+@safe
+def record_close_event(conn: sqlite3.Connection, event_type: str,
+                       mode: str, branch: str,
+                       repo_path: str | None = None,
+                       issue_repo: str | None = None,
+                       **kwargs) -> None:
+    """Record any close/wrap orchestrator event."""
     wid = None
     if branch and repo_path:
         wid = find_work_item(conn, branch, repo_path)
-    _log_event(conn, "step-failed", work_item_id=wid,
-               repo_path=repo_path,
-               metadata={
-                   "mode": mode,
-                   "step": step,
-                   "attempts": attempts,
-                   "reason": reason,
-                   "issue_repo": issue_repo or "",
-               })
+    meta = {"mode": mode, "issue_repo": issue_repo or ""}
+    meta.update(kwargs)
+    _log_event(conn, event_type, work_item_id=wid,
+               repo_path=repo_path, metadata=meta)
     conn.commit()
 
 

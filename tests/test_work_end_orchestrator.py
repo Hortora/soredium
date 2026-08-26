@@ -263,7 +263,7 @@ class TestRetry:
         import worklog
         mock_wl = type(sys)("mock_wl")
         mock_wl.connect = lambda: worklog.connect(db_path)
-        mock_wl.record_step_failure = worklog.record_step_failure
+        mock_wl.record_close_event = worklog.record_close_event
         monkeypatch.setattr("work_end_orchestrator._wl", mock_wl)
         from close_progress import update_close_progress
         update_close_progress(tmp_path, "review", "done")
@@ -289,6 +289,34 @@ class TestRetry:
         assert meta["mode"] == "close"
         assert meta["attempts"] == 3
         conn.close()
+
+
+class TestStepDoneValidation:
+    """step_done= rejects mechanical steps."""
+
+    def test_rejects_mechanical_step_done(self, tmp_path):
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "step_done": "promote",
+        })
+        assert result.get("ERROR") == "invalid_step_done"
+
+    def test_accepts_judgment_step_done(self, tmp_path):
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "step_done": "review",
+        })
+        assert result.get("ERROR") != "invalid_step_done"
 
 
 class TestSkipStep:

@@ -115,6 +115,23 @@ WRAP_STEPS: list[StepDef] = [
             script_fn=_wip_commit_script),
 ]
 
+WRAP_MECHANICAL_STEPS = {s.name for s in WRAP_STEPS if s.step_type == "mechanical"}
+
+
+def _record(event_type, branch, project, issue_repo, dry_run, **kwargs):
+    if not _wl or dry_run:
+        return
+    try:
+        conn = _wl.connect()
+        _wl.record_close_event(
+            conn, event_type, "wrap", branch,
+            repo_path=str(project), issue_repo=issue_repo,
+            **kwargs,
+        )
+        conn.close()
+    except Exception:
+        pass
+
 
 # --- Orchestrator entry point ---
 
@@ -139,13 +156,20 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     has_arc42 = args.get("has_arc42", "no") == "yes"
     has_plan = args.get("has_plan", "no") == "yes"
 
+    rec = lambda evt, **kw: _record(evt, branch, project, issue_repo, dry_run, **kw)
+
     if args.get("skip_step"):
         err = validate_skip(workspace, args["skip_step"])
         if err:
+            rec("invalid-skip", step=args["skip_step"], reason=err.get("REASON", ""))
             return err
 
     if args.get("step_done"):
-        apply_step_done(workspace, args["step_done"], args.get("produced"))
+        err = apply_step_done(workspace, args["step_done"], args.get("produced"),
+                              mechanical_steps=WRAP_MECHANICAL_STEPS)
+        if err:
+            rec("invalid-step-done", step=args["step_done"], reason=err.get("REASON", ""))
+            return err
 
     if args.get("sweep_selected") is not None:
         selected = args["sweep_selected"]
@@ -170,20 +194,14 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     )
     log_call(workspace, "wrap", result, ctx.steps_executed, dry_run=dry_run)
 
-    if result.get("CONTEXT") == "step_failed" and _wl and not dry_run:
-        try:
-            conn = _wl.connect()
-            _wl.record_step_failure(
-                conn, mode="wrap", branch=branch,
-                step=result.get("STEP", ""),
-                attempts=int(result.get("ATTEMPTS", "0")),
-                reason=result.get("REASON", ""),
-                repo_path=str(project),
-                issue_repo=issue_repo,
-            )
-            conn.close()
-        except Exception:
-            pass
+    if result.get("ERROR") and not dry_run:
+        rec("step-error", step=result.get("STEP", ""),
+            error=result.get("ERROR", ""), retry=result.get("RETRY", ""))
+
+    if result.get("CONTEXT") == "step_failed":
+        rec("step-failed", step=result.get("STEP", ""),
+            attempts=int(result.get("ATTEMPTS", "0")),
+            reason=result.get("REASON", ""))
 
     if result.get("ACTION") == "complete" and _wl and not dry_run:
         try:

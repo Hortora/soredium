@@ -76,6 +76,8 @@ ABORTABLE_STATES = {"closing:review", "closing:verified"}
 
 from orchestrator_engine import run_script as _run_script, run_loop, log_call as _engine_log_call, validate_skip, apply_step_done
 
+MECHANICAL_STEPS = None  # populated after STEPS is defined
+
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
     sys.path.insert(0, str(_lib))
@@ -712,6 +714,23 @@ STEPS: list[StepDef] = [
             script_fn=_report_render_script),
 ]
 
+MECHANICAL_STEPS = {s.name for s in STEPS if s.step_type == "mechanical"}
+
+
+def _record(event_type, branch, project, issue_repo, dry_run, **kwargs):
+    if not _wl or dry_run:
+        return
+    try:
+        conn = _wl.connect()
+        _wl.record_close_event(
+            conn, event_type, "close", branch,
+            repo_path=str(project), issue_repo=issue_repo,
+            **kwargs,
+        )
+        conn.close()
+    except Exception:
+        pass
+
 
 def parse_args(argv: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
@@ -742,13 +761,20 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     if args.get("abort") == "yes":
         return _handle_abort(workspace, meta_state)
 
+    rec = lambda evt, **kw: _record(evt, branch, project, issue_repo, dry_run, **kw)
+
     if args.get("skip_step"):
         err = validate_skip(workspace, args["skip_step"])
         if err:
+            rec("invalid-skip", step=args["skip_step"], reason=err.get("REASON", ""))
             return err
 
     if args.get("step_done"):
-        apply_step_done(workspace, args["step_done"], args.get("produced"))
+        err = apply_step_done(workspace, args["step_done"], args.get("produced"),
+                              mechanical_steps=MECHANICAL_STEPS)
+        if err:
+            rec("invalid-step-done", step=args["step_done"], reason=err.get("REASON", ""))
+            return err
 
     if args.get("sweep_selected") is not None:
         selected = args["sweep_selected"]
@@ -758,11 +784,15 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     progress = read_close_progress(workspace)
 
     if is_stale(progress, meta_state):
+        rec("stale-progress-reset", meta_state=meta_state,
+            progress_keys=",".join(progress.keys()))
         delete_close_progress(workspace)
         progress = {}
     elif progress:
         progress, corrections = _reconcile(workspace, project, progress, meta_state)
         if corrections:
+            rec("reconciliation-correction", meta_state=meta_state,
+                corrected_steps=",".join(corrections))
             write_close_progress(workspace, progress)
 
     slot_repos = _parse_slot_repos(slot_path) if in_slot and slot_path else []
@@ -782,20 +812,14 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     result = _next_action(ctx)
     _log_call(workspace, meta_state, result, ctx.steps_executed, dry_run=dry_run)
 
-    if result.get("CONTEXT") == "step_failed" and _wl and not dry_run:
-        try:
-            conn = _wl.connect()
-            _wl.record_step_failure(
-                conn, mode="close", branch=branch,
-                step=result.get("STEP", ""),
-                attempts=int(result.get("ATTEMPTS", "0")),
-                reason=result.get("REASON", ""),
-                repo_path=str(project),
-                issue_repo=issue_repo,
-            )
-            conn.close()
-        except Exception:
-            pass
+    if result.get("ERROR") and not dry_run:
+        rec(f"step-error", step=result.get("STEP", ""),
+            error=result.get("ERROR", ""), retry=result.get("RETRY", ""))
+
+    if result.get("CONTEXT") == "step_failed":
+        rec("step-failed", step=result.get("STEP", ""),
+            attempts=int(result.get("ATTEMPTS", "0")),
+            reason=result.get("REASON", ""))
 
     if result.get("ACTION") == "complete" and _wl and not dry_run:
         try:

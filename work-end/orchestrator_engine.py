@@ -138,8 +138,16 @@ def validate_skip(workspace: Path, step: str) -> dict[str, str] | None:
     return None
 
 
-def apply_step_done(workspace: Path, step: str, produced: str | None = None) -> None:
-    """Mark a step done. last_yielded is NOT cleared — the next yield overwrites it."""
+def apply_step_done(workspace: Path, step: str, produced: str | None = None,
+                    mechanical_steps: set[str] | None = None) -> dict[str, str] | None:
+    """Mark a step done. Returns error dict if step is mechanical (not LLM-completable)."""
+    if mechanical_steps and step in mechanical_steps:
+        return {
+            "ACTION": "error",
+            "ERROR": "invalid_step_done",
+            "STEP": step,
+            "REASON": f"Cannot mark mechanical step '{step}' as done — only the orchestrator completes mechanical steps",
+        }
     update_close_progress(workspace, step, "done")
     if produced:
         update_close_progress(workspace, f"{step}_produced", produced)
