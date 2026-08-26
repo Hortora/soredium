@@ -60,23 +60,9 @@ def _ensure_close_files_excluded(workspace: Path) -> None:
 
 def _log_call(workspace: Path, meta_state: str, result: dict[str, str],
               steps_executed: list[str], dry_run: bool = False) -> None:
-    if dry_run:
-        return
-    log_path = workspace / CLOSE_LOG_FILE
-    entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "meta_state": meta_state,
-        "action": result.get("ACTION", ""),
-        "step": result.get("STEP", ""),
-        "context": result.get("CONTEXT", ""),
-        "steps_executed": steps_executed,
-        "error": result.get("ERROR", ""),
-    }
-    try:
-        with open(log_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-    except OSError:
-        pass
+    _engine_log_call(workspace, "close", result, steps_executed,
+                     dry_run=dry_run,
+                     extra={"meta_state": meta_state, "context": result.get("CONTEXT", "")})
 
 
 SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "impl_doc_sync", "adr", "write_content"]
@@ -88,32 +74,7 @@ MAX_JUDGMENT_RETRIES = 3
 ABORTABLE_STATES = {"closing:review", "closing:verified"}
 
 
-def _run_script(cmd: list[str], workspace: Path,
-                dry_run: bool = False,
-                call_log: list | None = None) -> dict[str, str]:
-    if dry_run:
-        if call_log is not None:
-            call_log.append(cmd)
-        return {}
-    try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=300,
-            cwd=str(workspace),
-        )
-        result: dict[str, str] = {}
-        for line in proc.stdout.splitlines():
-            if "=" in line:
-                k, _, v = line.partition("=")
-                result[k.strip()] = v.strip()
-        if proc.returncode != 0 and "ERROR" not in result:
-            result["ERROR"] = f"exit_{proc.returncode}"
-            if proc.stderr:
-                result["STDERR"] = proc.stderr[:500]
-        return result
-    except subprocess.TimeoutExpired:
-        return {"ERROR": "timeout"}
-    except FileNotFoundError:
-        return {"ERROR": f"script_not_found: {cmd[0]}"}
+from orchestrator_engine import run_script as _run_script, run_loop, log_call as _engine_log_call
 
 
 def _parse_slot_repos(slot_path: Path) -> list[str]:
@@ -833,101 +794,8 @@ def _handle_abort(workspace: Path, meta_state: str) -> dict[str, str]:
     }
 
 
-def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
-    for step in STEPS:
-        if step.skip_fn and step.skip_fn(ctx):
-            continue
-        if ctx.done(step.name):
-            continue
-
-        if step.step_type == "mechanical":
-            if step.name in PER_REPO_EXECUTE_STEPS and ctx.in_slot and ctx.slot_repos:
-                if ctx.per_repo_done(step.name):
-                    continue
-                repo = ctx.next_repo_for(step.name)
-                if repo:
-                    ctx.current_repo_project = ctx.slot_path / repo if ctx.slot_path else None
-                    ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo)
-                    step_key = f"{step.name}:{repo}"
-                    attempt_key = f"{step_key}_mechanical_attempt"
-                    attempt = int(ctx.progress.get(attempt_key, "0"))
-                    result = _execute_mechanical(step, ctx)
-                    ctx.current_repo_project = None
-                    ctx.current_repo_workspace = None
-                    if result and "ERROR" in result:
-                        attempt += 1
-                        update_close_progress(ctx.workspace, attempt_key, str(attempt))
-                        ctx.steps_executed.append(f"{step_key}:ERROR:{attempt}")
-                        if attempt >= 3:
-                            return {
-                                "ACTION": "user_input",
-                                "CONTEXT": "step_failed",
-                                "STEP": step_key,
-                                "ATTEMPTS": str(attempt),
-                                "REASON": result.get("ERROR", "unknown"),
-                                "ERROR_DETAIL": result.get("ERROR_DETAIL", ""),
-                            }
-                        return {"ACTION": "error", "STEP": step_key,
-                                "RETRY": str(attempt), **result}
-                    ctx.last_output = result or {}
-                    if step.name == "land":
-                        ctx.landed_shas[repo] = (result or {}).get("LANDED_SHA", "")
-                    update_close_progress(ctx.workspace, step_key, "done")
-                    ctx.steps_executed.append(step_key)
-                continue
-
-            attempt_key = f"{step.name}_mechanical_attempt"
-            attempt = int(ctx.progress.get(attempt_key, "0"))
-            result = _execute_mechanical(step, ctx)
-            if result and "ERROR" in result:
-                attempt += 1
-                update_close_progress(ctx.workspace, attempt_key, str(attempt))
-                ctx.steps_executed.append(f"{step.name}:ERROR:{attempt}")
-                if attempt >= 3:
-                    return {
-                        "ACTION": "user_input",
-                        "CONTEXT": "step_failed",
-                        "STEP": step.name,
-                        "ATTEMPTS": str(attempt),
-                        "REASON": result.get("ERROR", "unknown"),
-                        "ERROR_DETAIL": result.get("ERROR_DETAIL", ""),
-                    }
-                return {"ACTION": "error", "STEP": step.name,
-                        "RETRY": str(attempt), **result}
-            ctx.last_output = result or {}
-            if step.name == "land":
-                ctx.landed_shas = _parse_landed_shas(ctx.last_output, ctx)
-            update_close_progress(ctx.workspace, step.name, "done")
-            ctx.steps_executed.append(step.name)
-            continue
-
-        if step.step_type == "judgment":
-            if step.name in ("arc42_scan", "session_rename", "garden_feedback", "notes"):
-                return _yield_user_input(step, ctx)
-            if step.name in PER_REPO_SWEEP_STEPS and ctx.in_slot and ctx.slot_repos:
-                if ctx.per_repo_done(step.name):
-                    continue
-                repo = ctx.next_repo_for(step.name)
-                if repo:
-                    repo_path = str(ctx.slot_path / repo)
-                    context = {"REPO": repo_path}
-                    if step.action_context_fn:
-                        context.update(step.action_context_fn(ctx))
-                    return _yield_judgment(f"{step.name}:{repo}", ctx.workspace, ctx.progress, context)
-                continue
-            return _yield_judgment(step.name, ctx.workspace, ctx.progress,
-                                   step.action_context_fn(ctx) if step.action_context_fn else {})
-
-        if step.step_type == "lifecycle":
-            _fire_lifecycle(step, ctx)
-            update_close_progress(ctx.workspace, step.name, "done")
-            ctx.steps_executed.append(step.name)
-            continue
-
-    return {"ACTION": "complete", "SUMMARY": "Close complete."}
-
-
-def _execute_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str]:
+def _close_execute_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str]:
+    """Work-end-specific mechanical execution with main-mode overrides."""
     if step.name == "delete_progress":
         if not ctx.dry_run:
             _archive_close_progress(ctx.workspace)
@@ -950,6 +818,60 @@ def _execute_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, st
     return _run_script(cmd, ctx.workspace, dry_run=ctx.dry_run, call_log=ctx.call_log)
 
 
+def _close_on_step_done(step: StepDef, ctx: OrchestratorContext, result: dict[str, str]) -> None:
+    """Track landed SHAs after land step completes."""
+    if step.name == "land":
+        ctx.landed_shas = _parse_landed_shas(result, ctx)
+
+
+def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str] | None:
+    """Per-repo fan-out for slot-mode mechanical steps."""
+    if step.name not in PER_REPO_EXECUTE_STEPS or not ctx.in_slot or not ctx.slot_repos:
+        return None
+    if ctx.per_repo_done(step.name):
+        return {}
+    repo = ctx.next_repo_for(step.name)
+    if not repo:
+        return {}
+    ctx.current_repo_project = ctx.slot_path / repo if ctx.slot_path else None
+    ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo)
+    step_key = f"{step.name}:{repo}"
+    attempt_key = f"{step_key}_mechanical_attempt"
+    attempt = int(ctx.progress.get(attempt_key, "0"))
+    result = _close_execute_mechanical(step, ctx)
+    ctx.current_repo_project = None
+    ctx.current_repo_workspace = None
+    if result and "ERROR" in result:
+        attempt += 1
+        update_close_progress(ctx.workspace, attempt_key, str(attempt))
+        ctx.steps_executed.append(f"{step_key}:ERROR:{attempt}")
+        from orchestrator_engine import _make_error_result
+        return _make_error_result(step_key, attempt, result)
+    ctx.last_output = result or {}
+    if step.name == "land":
+        ctx.landed_shas[repo] = (result or {}).get("LANDED_SHA", "")
+    update_close_progress(ctx.workspace, step_key, "done")
+    ctx.steps_executed.append(step_key)
+    return {}
+
+
+def _close_per_repo_judgment(step: StepDef, ctx: OrchestratorContext) -> dict[str, str] | None:
+    """Per-repo fan-out for slot-mode judgment steps."""
+    if step.name not in PER_REPO_SWEEP_STEPS or not ctx.in_slot or not ctx.slot_repos:
+        return None
+    if ctx.per_repo_done(step.name):
+        return {}
+    repo = ctx.next_repo_for(step.name)
+    if not repo:
+        return {}
+    repo_path = str(ctx.slot_path / repo)
+    context = {"REPO": repo_path}
+    if step.action_context_fn:
+        context.update(step.action_context_fn(ctx))
+    from orchestrator_engine import _yield_judgment
+    return _yield_judgment(f"{step.name}:{repo}", ctx.workspace, ctx.progress, context)
+
+
 def _parse_landed_shas(result: dict[str, str], ctx: OrchestratorContext) -> dict[str, str]:
     if ctx.in_slot:
         raw = result.get("LANDED_SHAS", "")
@@ -960,41 +882,20 @@ def _parse_landed_shas(result: dict[str, str], ctx: OrchestratorContext) -> dict
     return {}
 
 
-def _yield_judgment(step: str, workspace: Path,
-                    progress: dict[str, str],
-                    context: dict[str, str]) -> dict[str, str]:
-    attempt_key = f"{step}_attempt"
-    attempt = int(progress.get(attempt_key, "0")) + 1
-
-    if attempt > MAX_JUDGMENT_RETRIES:
-        return {
-            "ACTION": "user_input",
-            "CONTEXT": "step_failed",
-            "STEP": step,
-            "ATTEMPTS": str(MAX_JUDGMENT_RETRIES),
-            "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
-        }
-
-    update_close_progress(workspace, attempt_key, str(attempt))
-    result = {"ACTION": step}
-    result.update(context)
-    return result
+CLOSE_USER_INPUT_STEPS = {"arc42_scan", "session_rename", "garden_feedback", "notes"}
 
 
-def _yield_user_input(step: StepDef, ctx: OrchestratorContext) -> dict[str, str]:
-    context = step.action_context_fn(ctx) if step.action_context_fn else {}
-    attempt_key = f"{step.name}_attempt"
-    attempt = int(ctx.progress.get(attempt_key, "0")) + 1
-    if attempt > MAX_JUDGMENT_RETRIES:
-        return {
-            "ACTION": "user_input",
-            "CONTEXT": "step_failed",
-            "STEP": step.name,
-            "ATTEMPTS": str(MAX_JUDGMENT_RETRIES),
-            "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
-        }
-    update_close_progress(ctx.workspace, attempt_key, str(attempt))
-    return {"ACTION": "user_input", **context}
+def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
+    return run_loop(
+        STEPS, ctx,
+        execute_mechanical_fn=_close_execute_mechanical,
+        on_step_done=_close_on_step_done,
+        handle_lifecycle=_fire_lifecycle,
+        per_repo_mechanical=_close_per_repo_mechanical,
+        per_repo_judgment=_close_per_repo_judgment,
+        user_input_steps=CLOSE_USER_INPUT_STEPS,
+        complete_summary="Close complete.",
+    )
 
 
 def _sweep_defaults() -> str:

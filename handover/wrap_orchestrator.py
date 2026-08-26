@@ -2,11 +2,8 @@
 """
 wrap_orchestrator.py — Session wrap (handover) sequence orchestrator.
 
-Same yield-based pattern as work_end_orchestrator.py. Python drives,
-LLM assists. Each invocation runs mechanical steps up to the next
-judgment point, prints one ACTION= line, and exits.
-
-Shared step definitions imported from work-end/shared_steps.py.
+Uses the shared orchestrator engine from work-end/orchestrator_engine.py.
+Only defines wrap-specific steps and context — no duplicated loop logic.
 
 Usage:
     python3 handover/wrap_orchestrator.py \
@@ -17,46 +14,27 @@ Usage:
         [dry_run=yes]
 """
 
-import json
-import os
-import subprocess
 import sys
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from pathlib import Path
 
 _work_end = Path(__file__).resolve().parent.parent / "work-end"
 sys.path.insert(0, str(_work_end))
 
-from close_progress import (
-    read_close_progress,
-    update_close_progress,
-    write_close_progress,
-    delete_close_progress,
-)
+from close_progress import read_close_progress, update_close_progress
+from orchestrator_engine import run_loop, log_call
 from shared_steps import (
     StepDef,
     OrchestratorContextBase,
     WRAP_SWEEP_STEPS,
-    MAX_JUDGMENT_RETRIES,
-    JUDGMENT_STEPS_SET,
-    _is_sweep_deselected,
     sweep_defaults,
-    get_sweep_selected,
-    yield_judgment,
-    yield_user_input,
     make_forage_step,
     make_protocol_step,
     make_update_claude_md_step,
     make_write_content_step,
-    make_arc42_scan_step,
-    make_session_rename_step,
     make_garden_feedback_step,
     make_notes_step,
 )
-
-WRAP_LOG_FILE = ".wrap-log.jsonl"
-WRAP_PROGRESS_FILE = ".close-progress"
 
 
 @dataclass
@@ -64,6 +42,8 @@ class WrapContext(OrchestratorContextBase):
     has_arc42: bool = False
     has_plan: bool = False
 
+
+# --- Skip predicates (wrap-specific) ---
 
 def _skip_no_arc42(ctx: WrapContext) -> bool:
     return not ctx.has_arc42
@@ -73,70 +53,15 @@ def _skip_no_plan(ctx: WrapContext) -> bool:
     return not ctx.has_plan
 
 
-def _run_script(cmd: list[str], workspace: Path,
-                dry_run: bool = False,
-                call_log: list | None = None) -> dict[str, str]:
-    if dry_run:
-        if call_log is not None:
-            call_log.append(cmd)
-        return {}
-    try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=300,
-            cwd=str(workspace),
-        )
-        result: dict[str, str] = {}
-        for line in proc.stdout.splitlines():
-            if "=" in line:
-                k, _, v = line.partition("=")
-                result[k.strip()] = v.strip()
-        if proc.returncode != 0 and "ERROR" not in result:
-            result["ERROR"] = f"exit_{proc.returncode}"
-            if proc.stderr:
-                result["STDERR"] = proc.stderr[:500]
-        return result
-    except subprocess.TimeoutExpired:
-        return {"ERROR": "timeout"}
-    except FileNotFoundError:
-        return {"ERROR": f"script_not_found: {cmd[0]}"}
-
-
-def _log_call(workspace: Path, result: dict[str, str],
-              steps_executed: list[str], dry_run: bool = False) -> None:
-    if dry_run:
-        return
-    log_path = workspace / WRAP_LOG_FILE
-    entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "mode": "wrap",
-        "action": result.get("ACTION", ""),
-        "step": result.get("STEP", ""),
-        "steps_executed": steps_executed,
-        "error": result.get("ERROR", ""),
-    }
-    try:
-        with open(log_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-    except OSError:
-        pass
-
+# --- Script builders (wrap-specific) ---
 
 LOOSE_ENDS_SCRIPT = _work_end / "loose_ends_sweep.py"
-HYGIENE_SCRIPT = _work_end / "hygiene_scan.py"
 
 
 def _loose_ends_script(ctx):
     return [sys.executable, str(LOOSE_ENDS_SCRIPT),
             f"workspace={ctx.workspace}", f"project={ctx.project}",
             f"branch={ctx.branch}"]
-
-
-def _hygiene_script(ctx):
-    cmd = [sys.executable, str(HYGIENE_SCRIPT),
-           f"workspace={ctx.workspace}", f"project={ctx.project}"]
-    if ctx.plan_path:
-        cmd.append(f"plan_path={ctx.plan_path}")
-    return cmd
 
 
 def _wip_commit_script(ctx):
@@ -148,7 +73,14 @@ def _wrap_sweep_defaults() -> str:
     return sweep_defaults(WRAP_SWEEP_STEPS)
 
 
+# --- Step sequence ---
+
 WRAP_PHASE = "wrapping"
+
+WRAP_USER_INPUT_STEPS = {
+    "arc42_scan_wrap", "garden_feedback", "notes",
+    "handoff_write", "epic_hygiene", "journal_entry",
+}
 
 WRAP_STEPS: list[StepDef] = [
     StepDef("loose_ends", WRAP_PHASE, "mechanical",
@@ -175,6 +107,8 @@ WRAP_STEPS: list[StepDef] = [
             script_fn=_wip_commit_script),
 ]
 
+
+# --- Orchestrator entry point ---
 
 def parse_args(argv: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
@@ -221,59 +155,13 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         has_arc42=has_arc42, has_plan=has_plan,
     )
 
-    result = _next_action(ctx)
-    _log_call(workspace, result, ctx.steps_executed, dry_run=dry_run)
+    result = run_loop(
+        WRAP_STEPS, ctx,
+        user_input_steps=WRAP_USER_INPUT_STEPS,
+        complete_summary="Wrap complete.",
+    )
+    log_call(workspace, "wrap", result, ctx.steps_executed, dry_run=dry_run)
     return result
-
-
-def _next_action(ctx: WrapContext) -> dict[str, str]:
-    for step in WRAP_STEPS:
-        if step.skip_fn and step.skip_fn(ctx):
-            continue
-        if ctx.done(step.name):
-            continue
-
-        if step.step_type == "mechanical":
-            result = _execute_mechanical(step, ctx)
-            if result and "ERROR" in result:
-                attempt_key = f"{step.name}_mechanical_attempt"
-                attempt = int(ctx.progress.get(attempt_key, "0")) + 1
-                update_close_progress(ctx.workspace, attempt_key, str(attempt))
-                ctx.steps_executed.append(f"{step.name}:ERROR:{attempt}")
-                if attempt >= 3:
-                    return {
-                        "ACTION": "user_input",
-                        "CONTEXT": "step_failed",
-                        "STEP": step.name,
-                        "ATTEMPTS": str(attempt),
-                        "REASON": result.get("ERROR", "unknown"),
-                    }
-                return {"ACTION": "error", "STEP": step.name,
-                        "RETRY": str(attempt), **result}
-            ctx.last_output = result or {}
-            update_close_progress(ctx.workspace, step.name, "done")
-            ctx.steps_executed.append(step.name)
-            continue
-
-        if step.step_type == "judgment":
-            if step.name in ("arc42_scan_wrap", "session_rename",
-                             "garden_feedback", "notes", "handoff_write",
-                             "epic_hygiene", "journal_entry"):
-                return yield_user_input(step.name, ctx,
-                                        step.action_context_fn(ctx) if step.action_context_fn else {})
-            return yield_judgment(step.name, ctx.workspace, ctx.progress,
-                                 step.action_context_fn(ctx) if step.action_context_fn else {})
-
-    return {"ACTION": "complete", "SUMMARY": "Wrap complete."}
-
-
-def _execute_mechanical(step: StepDef, ctx: WrapContext) -> dict[str, str]:
-    if not step.script_fn:
-        return {}
-    cmd = step.script_fn(ctx)
-    if cmd is None:
-        return {}
-    return _run_script(cmd, ctx.workspace, dry_run=ctx.dry_run, call_log=ctx.call_log)
 
 
 def main():
