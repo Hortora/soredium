@@ -569,7 +569,10 @@ EVIDENCE_CHECKS: dict[str, Callable] = {
     "promote": lambda ws, proj: True,
     "archive_slot": lambda ws, proj: True,
 }
-JUDGMENT_STEPS_SET = {"review", "sweep_config", "forage", "protocol",
+JUDGMENT_STEPS_SET = {"code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends", "forcing_function",
+                      "sweep_config", "forage", "protocol",
                       "update_claude_md", "impl_doc_sync", "adr",
                       "write_content", "trajectory", "squash",
                       "arc42_scan", "session_rename", "garden_feedback", "notes"}
@@ -604,12 +607,64 @@ def _reconcile(workspace: Path, project: Path,
 
 # --- Step sequence ---
 
+REVIEW_SUB_STEPS = [
+    "code_review", "branch_audit_conformance", "branch_audit_coherence",
+    "branch_audit_structure", "branch_audit_robustness",
+    "loose_ends", "forcing_function",
+]
+
+
+def _diff_range_context(ctx):
+    return {"DIFF_RANGE": f"{ctx.base_branch}..{ctx.branch}"}
+
+
+def _dimension_context(dimension: str):
+    def context(ctx):
+        return {"DIFF_RANGE": f"{ctx.base_branch}..{ctx.branch}", "DIMENSION": dimension}
+    return context
+
+
+def _loose_ends_context(ctx):
+    return {
+        "WORKSPACE": str(ctx.workspace),
+        "PROJECT": str(ctx.project),
+        "BRANCH": ctx.branch,
+    }
+
+
+def _forcing_function_context(ctx):
+    findings_path = ctx.workspace / ".audit" / "findings.jsonl"
+    count = 0
+    if findings_path.exists():
+        for line in findings_path.read_text().splitlines():
+            try:
+                import json as _json
+                entry = _json.loads(line)
+                if entry.get("status", "open") == "open":
+                    count += 1
+            except (json.JSONDecodeError, ValueError):
+                pass
+    return {"CONTEXT": "forcing_function", "OPEN_FINDINGS": str(count)}
+
+
 STEPS: list[StepDef] = [
-    # --- closing:review ---
+    # --- closing:review (sub-steps) ---
     StepDef("report_init", "closing:review", "mechanical",
             script_fn=_report_init_script),
-    StepDef("review", "closing:review", "judgment",
-            action_context_fn=lambda ctx: {"DIFF_RANGE": f"{ctx.base_branch}..{ctx.branch}"}),
+    StepDef("code_review", "closing:review", "judgment",
+            action_context_fn=_diff_range_context),
+    StepDef("branch_audit_conformance", "closing:review", "judgment",
+            action_context_fn=_dimension_context("conformance")),
+    StepDef("branch_audit_coherence", "closing:review", "judgment",
+            action_context_fn=_dimension_context("coherence")),
+    StepDef("branch_audit_structure", "closing:review", "judgment",
+            action_context_fn=_dimension_context("structure")),
+    StepDef("branch_audit_robustness", "closing:review", "judgment",
+            action_context_fn=_dimension_context("robustness")),
+    StepDef("loose_ends", "closing:review", "judgment",
+            action_context_fn=_loose_ends_context),
+    StepDef("forcing_function", "closing:review", "judgment",
+            action_context_fn=_forcing_function_context),
     StepDef("sweep_config", "closing:review", "judgment",
             action_context_fn=lambda ctx: {"ITEMS": _sweep_defaults()}),
     StepDef("forage", "closing:review", "judgment",
@@ -791,6 +846,11 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         update_close_progress(workspace, "sweep_selected", selected)
 
     progress = read_close_progress(workspace)
+
+    if progress.get("review") == "done" and "code_review" not in progress:
+        for sub in REVIEW_SUB_STEPS:
+            progress[sub] = "done"
+        write_close_progress(workspace, progress)
 
     if is_stale(progress, meta_state):
         rec("stale-progress-reset", meta_state=meta_state,

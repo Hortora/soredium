@@ -56,7 +56,7 @@ class TestRunScript:
 class TestOrchestratorFirstCall:
     """First call with no progress — should yield ACTION=review."""
 
-    def test_yields_review_on_first_call(self, tmp_path, monkeypatch):
+    def test_yields_code_review_on_first_call(self, tmp_path, monkeypatch):
         monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from work_end_orchestrator import run_orchestrator
         result = run_orchestrator({
@@ -66,7 +66,7 @@ class TestOrchestratorFirstCall:
             "base_branch": "main",
             "meta_state": "closing:review",
         })
-        assert result["ACTION"] == "review"
+        assert result["ACTION"] == "code_review"
 
     def test_includes_diff_range(self, tmp_path, monkeypatch):
         monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
@@ -96,23 +96,43 @@ class TestOrchestratorSequence:
         args.update(extra)
         return run_orchestrator(args)
 
-    def test_review_then_sweep_config(self, tmp_path):
+    def _mark_review_done(self, tmp_path):
         from close_progress import update_close_progress
-        update_close_progress(tmp_path, "review", "done")
+        from work_end_orchestrator import REVIEW_SUB_STEPS
+        for sub in REVIEW_SUB_STEPS:
+            update_close_progress(tmp_path, sub, "done")
+
+    def test_code_review_then_dimensions(self, tmp_path):
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "code_review", "done")
+        result = self._run(tmp_path)
+        assert result["ACTION"] == "branch_audit_conformance"
+
+    def test_dimensions_yield_in_order(self, tmp_path):
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "code_review", "done")
+        update_close_progress(tmp_path, "branch_audit_conformance", "done")
+        result = self._run(tmp_path)
+        assert result["ACTION"] == "branch_audit_coherence"
+
+    def test_all_review_done_then_sweep_config(self, tmp_path):
+        self._mark_review_done(tmp_path)
         result = self._run(tmp_path)
         assert result["ACTION"] == "sweep_config"
 
     def test_sweep_config_then_first_selected_step(self, tmp_path):
+        self._mark_review_done(tmp_path)
         from close_progress import update_close_progress
-        update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
         update_close_progress(tmp_path, "sweep_selected", "forage,write_content")
         result = self._run(tmp_path)
         assert result["ACTION"] == "forage"
 
     def test_skips_deselected_sweep_steps(self, tmp_path):
+        self._mark_review_done(tmp_path)
         from close_progress import update_close_progress
-        update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
         update_close_progress(tmp_path, "sweep_selected", "write_content")
         update_close_progress(tmp_path, "forage", "skipped")
@@ -128,8 +148,8 @@ class TestOrchestratorSequence:
         mechanical steps (lifecycle transition) and yield trajectory."""
         monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from close_progress import update_close_progress
+        self._mark_review_done(tmp_path)
         update_close_progress(tmp_path, "report_init", "done")
-        update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
         update_close_progress(tmp_path, "sweep_selected", "forage")
         update_close_progress(tmp_path, "forage", "done")
@@ -253,7 +273,7 @@ class TestStaleProgress:
     def test_stale_progress_deleted(self, tmp_path):
         from close_progress import write_close_progress, read_close_progress
         write_close_progress(tmp_path, {
-            "review": "done", "promote": "done", "land": "done",
+            "code_review": "done", "promote": "done", "land": "done",
         })
         from work_end_orchestrator import run_orchestrator
         result = run_orchestrator({
@@ -263,7 +283,7 @@ class TestStaleProgress:
             "base_branch": "main",
             "meta_state": "closing:review",
         })
-        assert result["ACTION"] == "review"
+        assert result["ACTION"] == "code_review"
         progress = read_close_progress(tmp_path)
         assert "land" not in progress
 
@@ -348,7 +368,7 @@ class TestStepDoneValidation:
             "branch": "issue-271-test",
             "base_branch": "main",
             "meta_state": "closing:review",
-            "step_done": "review",
+            "step_done": "code_review",
         })
         assert result.get("ERROR") != "invalid_step_done"
 
@@ -470,9 +490,26 @@ class TestIntegrationBranchMode:
         actions_seen = []
 
         result = self._call(tmp_path)
-        assert result["ACTION"] == "review"
-        actions_seen.append("review")
-        self._complete(tmp_path, "review")
+        assert result["ACTION"] == "code_review"
+        actions_seen.append("code_review")
+        self._complete(tmp_path, "code_review")
+
+        for dim in ["conformance", "coherence", "structure", "robustness"]:
+            step = f"branch_audit_{dim}"
+            result = self._call(tmp_path)
+            assert result["ACTION"] == step
+            actions_seen.append(step)
+            self._complete(tmp_path, step)
+
+        result = self._call(tmp_path)
+        assert result["ACTION"] == "loose_ends"
+        actions_seen.append("loose_ends")
+        self._complete(tmp_path, "loose_ends")
+
+        result = self._call(tmp_path)
+        assert result["ACTION"] == "forcing_function"
+        actions_seen.append("forcing_function")
+        self._complete(tmp_path, "forcing_function")
 
         result = self._call(tmp_path)
         assert result["ACTION"] == "sweep_config"
@@ -528,7 +565,10 @@ class TestIntegrationBranchMode:
         actions_seen.append("complete")
 
         expected = [
-            "review", "sweep_config", "forage", "write_content",
+            "code_review", "branch_audit_conformance", "branch_audit_coherence",
+            "branch_audit_structure", "branch_audit_robustness",
+            "loose_ends", "forcing_function",
+            "sweep_config", "forage", "write_content",
             "trajectory", "squash",
             "arc42_scan", "session_rename", "garden_feedback", "notes",
             "complete",
@@ -634,11 +674,11 @@ class TestIntegrationCrashRecovery:
         """Progress from a completed prior close is detected and removed."""
         from close_progress import write_close_progress, read_close_progress
         write_close_progress(tmp_path, {
-            "review": "done", "promote": "done",
+            "code_review": "done", "promote": "done",
             "land": "done", "cleanup": "done",
         })
         result = self._call(tmp_path, meta_state="closing:review")
-        assert result["ACTION"] == "review"
+        assert result["ACTION"] == "code_review"
         progress = read_close_progress(tmp_path)
         assert "land" not in progress
         assert "cleanup" not in progress
@@ -656,7 +696,10 @@ class TestStepSequence:
     def test_covers_all_judgment_steps(self):
         from work_end_orchestrator import STEPS
         step_names = [s.name for s in STEPS]
-        for name in ["review", "sweep_config", "forage", "protocol",
+        for name in ["code_review", "branch_audit_conformance",
+                     "branch_audit_coherence", "branch_audit_structure",
+                     "branch_audit_robustness", "loose_ends", "forcing_function",
+                     "sweep_config", "forage", "protocol",
                      "update_claude_md", "impl_doc_sync", "adr",
                      "write_content", "trajectory", "squash",
                      "arc42_scan", "session_rename", "garden_feedback", "notes"]:

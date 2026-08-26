@@ -24,6 +24,13 @@ LIFECYCLE_PHASE_ORDER = [
 STEP_TO_PHASE = {
     "report_init": "closing:review",
     "review": "closing:review",
+    "code_review": "closing:review",
+    "branch_audit_conformance": "closing:review",
+    "branch_audit_coherence": "closing:review",
+    "branch_audit_structure": "closing:review",
+    "branch_audit_robustness": "closing:review",
+    "loose_ends": "closing:review",
+    "forcing_function": "closing:review",
     "sweep_config": "closing:review",
     "forage": "closing:review",
     "protocol": "closing:review",

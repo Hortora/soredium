@@ -56,7 +56,11 @@ WRAP_SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "write_content"]
 
 MAX_JUDGMENT_RETRIES = 3
 
-JUDGMENT_STEPS_SET = {"review", "sweep_config", "forage", "protocol",
+JUDGMENT_STEPS_SET = {"review", "code_review",
+                      "branch_audit_conformance", "branch_audit_coherence",
+                      "branch_audit_structure", "branch_audit_robustness",
+                      "forcing_function",
+                      "sweep_config", "forage", "protocol",
                       "update_claude_md", "impl_doc_sync", "adr",
                       "write_content", "trajectory", "squash",
                       "arc42_scan", "session_rename", "garden_feedback",

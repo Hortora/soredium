@@ -177,20 +177,26 @@ loop:
     use fallback instructions for this step (see Fallback section)
     go to loop
 
-  if ACTION=complete        -> run progress summary (see below), done
-  if ACTION=user_input      -> dispatch by CONTEXT (see Handler: user_input)
-  if ACTION=review          -> Handler: review
-  if ACTION=review_rebase   -> Handler: review_rebase
-  if ACTION=sweep_config    -> Handler: sweep_config
-  if ACTION=squash          -> Handler: squash
-  if ACTION=trajectory      -> Handler: trajectory
-  if ACTION=verify_recover  -> Handler: verify_recover
-  if ACTION=forage          -> invoke forage SWEEP
-  if ACTION=protocol        -> invoke protocol SWEEP
-  if ACTION=update_claude_md -> invoke update-claude-md
-  if ACTION=impl_doc_sync   -> invoke implementation-doc-sync
-  if ACTION=adr             -> invoke adr
-  if ACTION=write_content   -> Handler: write_content
+  if ACTION=complete                  -> run progress summary (see below), done
+  if ACTION=user_input                -> dispatch by CONTEXT (see Handler: user_input)
+  if ACTION=code_review               -> Handler: code_review
+  if ACTION=branch_audit_conformance  -> Handler: branch_audit_dimension
+  if ACTION=branch_audit_coherence    -> Handler: branch_audit_dimension
+  if ACTION=branch_audit_structure    -> Handler: branch_audit_dimension
+  if ACTION=branch_audit_robustness   -> Handler: branch_audit_dimension
+  if ACTION=loose_ends                -> Handler: loose_ends
+  if ACTION=forcing_function          -> Handler: forcing_function
+  if ACTION=review_rebase             -> Handler: review_rebase
+  if ACTION=sweep_config              -> Handler: sweep_config
+  if ACTION=squash                    -> Handler: squash
+  if ACTION=trajectory                -> Handler: trajectory
+  if ACTION=verify_recover            -> Handler: verify_recover
+  if ACTION=forage                    -> invoke forage SWEEP
+  if ACTION=protocol                  -> invoke protocol SWEEP
+  if ACTION=update_claude_md          -> invoke update-claude-md
+  if ACTION=impl_doc_sync             -> invoke implementation-doc-sync
+  if ACTION=adr                       -> invoke adr
+  if ACTION=write_content             -> Handler: write_content
   go to loop
 ```
 
@@ -224,19 +230,7 @@ pass `conflict_resolved=yes` to re-run rebase verification.
 
 ## Action Handlers
 
-### Handler: review
-
-Code review, branch audit, loose ends sweep, and forcing function.
-All four sub-steps are hard gates — review does not complete until
-the forcing function has resolved all findings.
-
-**Budget limits are not gates.** If code-review or branch-audit reports
-a budget warning ("coverage may be incomplete"), proceed to the next
-sub-step. The forcing function processes whatever findings were
-collected. Do not restart the review, do not block, do not retry.
-Surface the warning in the close summary.
-
-#### Code review
+### Handler: code_review
 
 Invoke `code-review` on the diff specified by DIFF_RANGE.
 
@@ -247,30 +241,58 @@ After code-review completes, persist any unresolved findings to
 `$WORKSPACE/.audit/findings.jsonl` via `append_finding` from
 `project/findings.py` with `category: "review"` and `source: "code-review"`.
 
-#### Branch audit
+Mark done with `step_done=code_review produced=N` (N = finding count).
 
-Invoke `branch-audit` on the full branch diff. Four dimensions:
-Conformance, Coherence, Structure, Robustness.
+**Budget limits are not gates.** If code-review reports a budget warning
+("coverage may be incomplete"), proceed. The forcing function processes
+whatever findings were collected. Surface the warning text.
 
-Findings are appended to `findings.jsonl` after each dimension completes
-(not batched). This ensures partial progress survives session interruption.
+### Handler: branch_audit_dimension
 
-#### Loose ends sweep
+The orchestrator yields each dimension separately:
+`branch_audit_conformance`, `branch_audit_coherence`,
+`branch_audit_structure`, `branch_audit_robustness`.
+
+Run the specific dimension from `branch-audit` on the full branch diff.
+The DIMENSION field tells you which one. Each dimension reviews against
+specific concerns:
+
+| Dimension | Key question |
+|-----------|-------------|
+| Conformance | Did we build what we said we'd build? |
+| Coherence | Does the branch hold together as a whole? |
+| Structure | Are the boundaries right? |
+| Robustness | What could go wrong? |
+
+Append findings to `$WORKSPACE/.audit/findings.jsonl` with
+`source: "branch-audit"` and `dimension: "<DIMENSION>"`.
+
+Mark done with `step_done=<ACTION> produced=N`.
+
+**Budget limits are not gates.** Complete what you can, report what
+you skipped.
+
+### Handler: loose_ends
+
+Run the loose ends sweep script:
 
 ```bash
-python3 work-end/loose_ends_sweep.py workspace=$WS project=$PROJ branch=$BRANCH cycle_start=<ISO>
+python3 work-end/loose_ends_sweep.py workspace=$WORKSPACE project=$PROJECT branch=$BRANCH cycle_start=<ISO>
 ```
 
-Pass `cycle_start` as the timestamp when the review action started — this
-filters out findings just written by code-review and branch-audit.
+Pass `cycle_start` as the timestamp when code_review started — this
+filters out findings just written by prior review steps.
 
 Supplement script output with conversation-context items
 ("I'll come back to this") and append those to `findings.jsonl`.
 
-#### Forcing function (HARD GATE)
+Mark done with `step_done=loose_ends produced=N`.
+
+### Handler: forcing_function (HARD GATE)
 
 Read all open findings from `$WORKSPACE/.audit/findings.jsonl` via
-`read_findings` from `project/findings.py`. Present grouped by category:
+`read_findings` from `project/findings.py`. OPEN_FINDINGS tells you
+how many are open. Present grouped by category:
 
 ```
 Open findings — N items require resolution before branch close
@@ -303,7 +325,7 @@ LOOSE-END:
 
 **Re-review after fixes:** When "Fix" creates new commits, re-run
 code-review on those commits only. New findings join the queue.
-Branch-audit does not re-run.
+Branch-audit dimensions do not re-run.
 
 **Batch operations:**
 - "File all remaining as single issue" — one issue with checklist
@@ -312,6 +334,8 @@ Branch-audit does not re-run.
 
 Each resolution is persisted to `findings.jsonl` immediately.
 No finding survives branch close with status `open`.
+
+Mark done with `step_done=forcing_function`.
 
 ### Handler: review_rebase
 
