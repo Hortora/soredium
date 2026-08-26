@@ -65,21 +65,33 @@ Analyze the spec for complexity signals and present a recommendation:
 
 ### Degree-only prompt
 
+Present exactly 4 options. The recommended tier goes first with "(Recommended)"
+appended to its label and the reasoning in its description. The remaining 3
+slots show the other tiers. "Skip" is always available via the built-in
+"Other" option — do not waste a slot on it.
+
 ```python
 AskUserQuestion(questions=[{
     "question": "Review depth? (coherence + structure + robustness + cross-cutting)",
     "header": "Review",
     "options": [
-        {"label": "<Recommended> (Recommended)", "description": "<reasoning>"},
-        {"label": "Skip", "description": "No review needed"},
+        # Slot 1: recommended tier (dynamic — set by recommendation engine above)
+        {"label": "<Tier> (Recommended)", "description": "<reasoning from signal analysis>"},
+        # Slots 2-4: remaining tiers (pick the 3 not used in slot 1)
         {"label": "Light", "description": "~2 min — single pass per dimension"},
         {"label": "Standard", "description": "~5 min — 2-3 rounds per dimension"},
         {"label": "Adversarial", "description": "~12 min — 4-6 rounds per dimension"},
-        {"label": "Deep", "description": "~25 min — 8-10 rounds + ultrathink"},
+        # If Deep is recommended, the 3 remaining are Light/Standard/Adversarial.
+        # If Standard is recommended, the 3 remaining are Light/Adversarial/Deep.
+        # User can type "Skip" or "Deep" via the built-in Other option.
     ],
     "multiSelect": false,
 }])
 ```
+
+Only 4 options may appear (AskUserQuestion hard limit). Always include
+the recommended tier plus exactly 3 others from {Light, Standard,
+Adversarial, Deep}.
 
 **If invoked with explicit `--type` flag** (`/design-review --type robustness`):
 run only that single dimension (backward compat, old behavior). No cross-cutting.
