@@ -177,7 +177,7 @@ loop:
     use fallback instructions for this step (see Fallback section)
     go to loop
 
-  if ACTION=complete        -> print SUMMARY, done
+  if ACTION=complete        -> run progress summary (see below), done
   if ACTION=user_input      -> dispatch by CONTEXT (see Handler: user_input)
   if ACTION=review          -> Handler: review
   if ACTION=review_rebase   -> Handler: review_rebase
@@ -198,6 +198,18 @@ After executing an action, call the orchestrator again with the same
 arguments. The orchestrator reads `.close-progress` to determine the
 next action. When the LLM marks a judgment step done (by calling the
 orchestrator again after executing it), the orchestrator advances.
+
+### Completion — Progress Summary
+
+When `ACTION=complete`, run the mechanical summary and print it verbatim:
+
+```bash
+python3 work-end/progress_summary.py $WORKSPACE mode=close
+```
+
+**Do not compose your own summary.** The script reads `.close-progress`
+and outputs a deterministic report showing every step's status. Print
+the script's output as-is — the user sees exactly what Python reported.
 
 For `sweep_selected`: after the user responds to `sweep_config`,
 pass their selections back: `sweep_selected=forage,protocol,...`

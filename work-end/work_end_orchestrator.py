@@ -225,6 +225,8 @@ def _skip_no_covers(ctx: OrchestratorContext) -> bool:
 
 def _is_sweep_deselected(step_name: str):
     def check(ctx: OrchestratorContext) -> bool:
+        if "sweep_selected" not in ctx.progress:
+            return False
         selected = _get_sweep_selected(ctx.progress)
         return step_name not in selected
     return check
@@ -770,6 +772,13 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             return err
 
     if args.get("step_done"):
+        if args["step_done"] == "sweep_config":
+            return {
+                "ACTION": "error",
+                "ERROR": "invalid_step_done",
+                "STEP": "sweep_config",
+                "REASON": "Use sweep_selected= to complete sweep_config",
+            }
         err = apply_step_done(workspace, args["step_done"], args.get("produced"),
                               mechanical_steps=MECHANICAL_STEPS)
         if err:

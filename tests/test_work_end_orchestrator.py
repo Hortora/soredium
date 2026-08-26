@@ -158,6 +158,40 @@ class TestSweepConfigAll:
         assert result["ACTION"] == "trajectory"
 
 
+class TestSweepConfigGuard:
+    """sweep_config cannot be completed via step_done; missing sweep_selected defaults to yield."""
+
+    def test_step_done_sweep_config_rejected(self, tmp_path):
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "step_done": "sweep_config",
+        })
+        assert result["ERROR"] == "invalid_step_done"
+        assert result["STEP"] == "sweep_config"
+
+    def test_missing_sweep_selected_yields_sweep_steps(self, tmp_path):
+        """If sweep_config is done but sweep_selected key was never written,
+        sweep steps must still yield (not silently skip)."""
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+        assert result["ACTION"] == "forage"
+
+
 class TestMainMode:
     """Main mode skips rebase, squash, stamp-related steps."""
 

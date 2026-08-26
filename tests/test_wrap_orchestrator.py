@@ -121,6 +121,32 @@ class TestWrapSweepConfig:
         assert progress.get("wrap_sweep_config") == "done"
 
 
+class TestWrapSweepConfigGuard:
+    def test_step_done_wrap_sweep_config_rejected(self, tmp_path):
+        result = wo.run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path),
+            "branch": "issue-42-test",
+            "step_done": "wrap_sweep_config",
+        })
+        assert result["ERROR"] == "invalid_step_done"
+        assert result["STEP"] == "wrap_sweep_config"
+
+    def test_missing_wrap_sweep_selected_yields_sweep_steps(self, tmp_path):
+        write_close_progress(tmp_path, {
+            "loose_ends": "done",
+            "epic_hygiene": "done",
+            "wrap_sweep_config": "done",
+        })
+        result = wo.run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path),
+            "branch": "issue-42-test",
+            "dry_run": "yes",
+        })
+        assert result["ACTION"] == "forage"
+
+
 class TestWrapSkipStep:
     def _run(self, tmp_path, **extra):
         args = {

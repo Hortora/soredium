@@ -66,9 +66,11 @@ JUDGMENT_STEPS_SET = {"review", "sweep_config", "forage", "protocol",
 
 def _is_sweep_deselected(step_name: str, key: str = "sweep_selected"):
     def check(ctx) -> bool:
-        raw = ctx.progress.get(key, "")
-        if not raw:
+        if key not in ctx.progress:
             return False
+        raw = ctx.progress[key]
+        if not raw:
+            return True
         selected = {s.strip() for s in raw.split(",") if s.strip()}
         return step_name not in selected
     return check

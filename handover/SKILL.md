@@ -549,30 +549,15 @@ Committing is mandatory. It's what makes git history the archive.
 
 ### Step 7 — Session close summary
 
-After the commit, output a single tick-list summary showing what was done and what was skipped. This gives the user a clean signal that the wrap is complete and nothing was missed.
+Run the mechanical summary and print it verbatim:
 
-```
-Session wrap complete.
-
-✅ Loose ends sweep      N new findings, M prior open  (or: nothing found)
-✅ Epic hygiene          (or ⏭ skipped — [reason])
-✅ Forage sweep          N entries submitted  (or: nothing garden-worthy found)
-✅ Protocol sweep        N protocols captured (or: nothing new)
-✅ update-claude-md      (or ⏭ skipped)
-✅ journal-entry         (or ⏭ skipped — not mid-epic)
-✅ arc42 stale scan      N items fixed  (or: nothing stale found)  (or ⏭ skipped — no ARC42STORIES.MD)
-✅ write-content (diary)  <entry filename>
-✅ HANDOFF.md committed  <workspace>/HANDOFF.md
+```bash
+python3 work-end/progress_summary.py $WORKSPACE mode=wrap
 ```
 
-Rules:
-- Show every checklist item — both ticked and skipped
-- For skipped items, include a brief reason in parentheses
-- For forage sweep, show the count of entries submitted (or "nothing garden-worthy found" if the sweep was clean)
-- For arc42 stale scan, show how many items were fixed (or "nothing stale found")
-- For write-content (diary), show the actual filename written
-- For HANDOFF.md, show the resolved workspace path
-- Keep each line to one line — no multi-line elaboration
+**Do not compose your own summary.** The script reads `.close-progress`
+and outputs a deterministic report showing every step's status. Print
+the script's output as-is.
 
 ---
 

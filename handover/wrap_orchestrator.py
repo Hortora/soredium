@@ -165,6 +165,13 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             return err
 
     if args.get("step_done"):
+        if args["step_done"] == "wrap_sweep_config":
+            return {
+                "ACTION": "error",
+                "ERROR": "invalid_step_done",
+                "STEP": "wrap_sweep_config",
+                "REASON": "Use sweep_selected= to complete wrap_sweep_config",
+            }
         err = apply_step_done(workspace, args["step_done"], args.get("produced"),
                               mechanical_steps=WRAP_MECHANICAL_STEPS)
         if err:
