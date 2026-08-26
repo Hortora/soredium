@@ -164,7 +164,7 @@ class TestWorkspaceNameCollision:
 
         with patch("slot_manager.resolve_workspace_source") as mock_resolve:
             mock_resolve.return_value = (ws_repo, "work")
-            with pytest.raises(SystemExit):
+            with pytest.raises(slot_manager.SlotCreationError):
                 slot_manager.create_slot(
                     family_root=family,
                     repos=["work"],
@@ -634,7 +634,7 @@ class TestCreateSlot:
 
         with patch("slot_manager.resolve_workspace_source") as mock_resolve:
             mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
-            with pytest.raises(SystemExit):
+            with pytest.raises(slot_manager.SlotCreationError, match="clone_failed"):
                 slot_manager.create_slot(
                     family_root=family,
                     repos=["engine"],
@@ -644,27 +644,23 @@ class TestCreateSlot:
                     covers="42",
                     context="test",
                 )
-        captured = capsys.readouterr()
-        assert "ERROR=clone_failed" in captured.out
 
 
 class TestCreateSlotIsx:
     @patch("slot_manager.run_cmd")
-    def test_create_isx_slot_preflight_fails(self, mock_cmd, tmp_path, capsys):
+    def test_create_isx_slot_preflight_fails(self, mock_cmd, tmp_path):
         family = tmp_path / "casehub"
         family.mkdir()
         init_repo(family / "engine")
         mock_cmd.return_value = (0, "", "")
         with patch("shutil.which", return_value=None):
-            with pytest.raises(SystemExit):
+            with pytest.raises(slot_manager.SlotCreationError, match="isx is not on PATH"):
                 slot_manager.create_slot(
                     family_root=family, repos=["engine"],
                     branch="issue-42-fix", issue="42",
                     issue_repo="Hortora/soredium", covers="42",
                     context="test", isx=True, isx_template="tpl-java",
                 )
-        captured = capsys.readouterr()
-        assert "ERROR=isx_not_found" in captured.out
 
     @patch("slot_manager.run_cmd")
     def test_create_isx_slot_writes_isolation(self, mock_cmd, tmp_path):
@@ -714,15 +710,13 @@ class TestCreateSlotIsx:
             return (0, "", "")
         mock_cmd.side_effect = side_effect
         with patch("shutil.which", return_value="/opt/homebrew/bin/isx"):
-            with pytest.raises(SystemExit):
+            with pytest.raises(slot_manager.SlotCreationError, match="isx_branch_failed"):
                 slot_manager.create_slot(
                     family_root=family, repos=["engine"],
                     branch="issue-42-fix", issue="42",
                     issue_repo="Hortora/soredium", covers="42",
                     context="test", isx=True, isx_template="tpl-java",
                 )
-        captured = capsys.readouterr()
-        assert "ERROR=isx_branch_failed" in captured.out
 
 
 class TestListSlots:
@@ -3590,7 +3584,7 @@ class TestCreateSlotWkspValidation:
         mock_cmd.return_value = (0, "", "")
         mock_validate.return_value = ["engine: wksp/ symlink dangling -> /nonexistent"]
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(slot_manager.SlotCreationError, match="wksp_validation_failed"):
             slot_manager.create_slot(
                 family_root=family,
                 repos=["engine"],
@@ -3600,8 +3594,6 @@ class TestCreateSlotWkspValidation:
                 covers="99",
                 context="test",
             )
-        captured = capsys.readouterr()
-        assert "ERROR=wksp_validation_failed" in captured.out
 
     @patch("slot_manager.validate_slot_wksp")
     @patch("slot_manager.run_cmd")
@@ -3805,6 +3797,169 @@ class TestFindSlotByBranch:
         slots_dir = tmp_path / "slots" / "1"
         slots_dir.mkdir(parents=True)
         assert slot_manager.find_slot_by_branch(tmp_path, "anything") is None
+
+
+class TestCreateSlotDuplicateGuard:
+    def _setup_db(self, tmp_path, monkeypatch):
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        import worklog as _wl_mod
+        db_path = tmp_path / "guard_test.db"
+        monkeypatch.setattr(slot_manager, "_wl", _wl_mod)
+        monkeypatch.setattr(_wl_mod, "DEFAULT_DB", str(db_path))
+        return _wl_mod
+
+    def test_duplicate_branch_raises(self, tmp_path, monkeypatch):
+        self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        family.mkdir()
+        init_repo(family / "myrepo")
+        existing = family / "slots" / "1"
+        existing.mkdir(parents=True)
+        (existing / ".slot").write_text("# Slot 1 — my-branch\n\n## Repos\n- myrepo\n")
+        with pytest.raises(slot_manager.SlotCreationError, match="already has branch"):
+            slot_manager.create_slot(family, ["myrepo"], "my-branch",
+                                     issue="1", issue_repo="org/repo",
+                                     covers="1", context="test")
+
+    def test_duplicate_landed_branch_message(self, tmp_path, monkeypatch):
+        self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        family.mkdir()
+        init_repo(family / "myrepo")
+        existing = family / "slots" / "1"
+        existing.mkdir(parents=True)
+        (existing / ".slot").write_text("# Slot 1 — my-branch\n\n## Repos\n- myrepo\n")
+        (existing / ".landed").write_text("landed_shas=myrepo:abc\n")
+        with pytest.raises(slot_manager.SlotCreationError, match="landed.*Archive it"):
+            slot_manager.create_slot(family, ["myrepo"], "my-branch",
+                                     issue="1", issue_repo="org/repo",
+                                     covers="1", context="test")
+
+
+class TestCreateSlotRollback:
+    def _setup_db(self, tmp_path, monkeypatch):
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        import worklog as _wl_mod
+        db_path = tmp_path / "rollback_test.db"
+        monkeypatch.setattr(slot_manager, "_wl", _wl_mod)
+        monkeypatch.setattr(_wl_mod, "DEFAULT_DB", str(db_path))
+        return _wl_mod
+
+    def test_clone_failure_cleans_up_dir(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        family.mkdir()
+        with pytest.raises(slot_manager.SlotCreationError):
+            slot_manager.create_slot(family, ["nonexistent"], "test-branch",
+                                     issue="1", issue_repo="org/repo",
+                                     covers="1", context="test")
+        slots_dir = family / "slots"
+        remaining = [d for d in slots_dir.iterdir() if d.is_dir() and d.name.isdigit()] if slots_dir.exists() else []
+        assert len(remaining) == 0
+
+    def test_clone_failure_transitions_db_to_failed(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        family = tmp_path / "family"
+        family.mkdir()
+        with pytest.raises(slot_manager.SlotCreationError):
+            slot_manager.create_slot(family, ["nonexistent"], "test-branch",
+                                     issue="1", issue_repo="org/repo",
+                                     covers="1", context="test")
+        conn = _wl_mod.connect()
+        row = conn.execute(
+            "SELECT state FROM slots WHERE family_root=?",
+            (_wl_mod._norm(str(family)),)
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row["state"] == "failed"
+
+
+class TestAllocateSlotReuse:
+    def _setup_db(self, tmp_path, monkeypatch):
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        import worklog as _wl_mod
+        db_path = tmp_path / "reuse_test.db"
+        monkeypatch.setattr(slot_manager, "_wl", _wl_mod)
+        monkeypatch.setattr(_wl_mod, "DEFAULT_DB", str(db_path))
+        return _wl_mod
+
+    def test_reuses_pending(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (5, ?, 'pending', '2026-01-01')",
+            (_wl_mod._norm(str(tmp_path)),))
+        conn.commit()
+        conn.close()
+        result = slot_manager.allocate_slot_number(tmp_path)
+        assert result == 5
+        captured = capsys.readouterr()
+        assert "REUSED_PENDING=5" in captured.out
+
+    def test_reuses_failed(self, tmp_path, monkeypatch, capsys):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (7, ?, 'failed', '2026-01-01')",
+            (_wl_mod._norm(str(tmp_path)),))
+        conn.commit()
+        conn.close()
+        result = slot_manager.allocate_slot_number(tmp_path)
+        assert result == 7
+
+    def test_cleans_debris_on_reuse(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (3, ?, 'pending', '2026-01-01')",
+            (_wl_mod._norm(str(tmp_path)),))
+        conn.commit()
+        conn.close()
+        debris = tmp_path / "slots" / "3"
+        debris.mkdir(parents=True)
+        (debris / ".m2").mkdir()
+        slot_manager.allocate_slot_number(tmp_path)
+        assert not debris.exists()
+
+    def test_cleans_older_pending_slots(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        conn = _wl_mod.connect()
+        for n in (1, 3, 5):
+            conn.execute(
+                "INSERT INTO slots (slot_number, family_root, state, created_at) "
+                "VALUES (?, ?, 'pending', '2026-01-01')",
+                (n, _wl_mod._norm(str(tmp_path))))
+        conn.commit()
+        conn.close()
+        result = slot_manager.allocate_slot_number(tmp_path)
+        assert result == 5
+        conn = _wl_mod.connect()
+        states = {r["slot_number"]: r["state"] for r in conn.execute(
+            "SELECT slot_number, state FROM slots WHERE family_root=?",
+            (_wl_mod._norm(str(tmp_path)),)).fetchall()}
+        conn.close()
+        assert states[5] == "pending"
+        assert states[1] == "failed"
+        assert states[3] == "failed"
+
+    def test_fresh_when_no_pending(self, tmp_path, monkeypatch):
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        conn = _wl_mod.connect()
+        conn.execute(
+            "INSERT INTO slots (slot_number, family_root, state, created_at) "
+            "VALUES (10, ?, 'active', '2026-01-01')",
+            (_wl_mod._norm(str(tmp_path)),))
+        conn.commit()
+        conn.close()
+        result = slot_manager.allocate_slot_number(tmp_path)
+        assert result == 11
 
 
 class TestListSlotsGhostFilter:

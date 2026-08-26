@@ -350,7 +350,7 @@ def sync_isx(slot_dir: Path) -> int:
 
 
 def allocate_slot_number(family_root: Path) -> int:
-    """Reserve next slot number via DB. Hard fail if DB unavailable."""
+    """Reserve next slot number via DB. Reuses pending/failed slots if available."""
     if _wl is None:
         print("ERROR=worklog_unavailable")
         print("ERROR_DETAIL=worklog module required for slot numbering — "
@@ -358,6 +358,21 @@ def allocate_slot_number(family_root: Path) -> int:
         sys.exit(1)
     conn = _wl.connect()
     try:
+        reusable = _wl.find_reusable_slot(conn, str(family_root))
+        if reusable is not None:
+            slot_num, others = reusable
+            for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+                debris = family_root / dir_name / str(slot_num)
+                if debris.exists():
+                    shutil.rmtree(str(debris), ignore_errors=True)
+            for other_num in others:
+                for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+                    debris = family_root / dir_name / str(other_num)
+                    if debris.exists():
+                        shutil.rmtree(str(debris), ignore_errors=True)
+                _wl.fail_slot(conn, other_num, str(family_root))
+            print(f"REUSED_PENDING={slot_num}")
+            return slot_num
         slot_num = _wl.reserve_slot_number(conn, str(family_root))
     finally:
         conn.close()
@@ -623,142 +638,156 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 isx: bool = False, isx_template: str = "",
                 isx_instance: str = "") -> dict:
     if isx and not _check_isx_available():
-        print("ERROR=isx_not_found")
-        print("ERROR_DETAIL=isx is not on PATH. Install with: brew install sanne/tap/incus-spawn")
-        sys.exit(1)
+        raise SlotCreationError("isx is not on PATH. Install with: brew install sanne/tap/incus-spawn")
+
+    result = find_slot_by_branch(family_root, branch)
+    if result is not None:
+        existing_num, landed = result
+        if landed:
+            raise SlotCreationError(
+                f"Slot {existing_num} has branch `{branch}` (landed, not yet archived). "
+                f"Archive it first.")
+        raise SlotCreationError(
+            f"Slot {existing_num} already has branch `{branch}`. "
+            f"Use that slot or archive it first.")
 
     slots_dir = family_root / SLOT_DIR_NAME
     slots_dir.mkdir(exist_ok=True)
     slot_num = allocate_slot_number(family_root)
     slot_dir = slots_dir / str(slot_num)
-    slot_dir.mkdir()
-    m2_dir = slot_dir / ".m2"
-    m2_dir.mkdir()
 
-    for repo_name in repos:
-        repo_path = family_root / repo_name
-        if not repo_path.is_dir():
-            print(f"ERROR=repo_not_found repo={repo_name}")
-            sys.exit(1)
+    try:
+        slot_dir.mkdir()
+        m2_dir = slot_dir / ".m2"
+        m2_dir.mkdir()
 
-        sync_main(str(repo_path))
+        for repo_name in repos:
+            repo_path = family_root / repo_name
+            if not repo_path.is_dir():
+                raise SlotCreationError(f"repo_not_found repo={repo_name}")
 
-        clone_dest = slot_dir / repo_name
-        rc, _, stderr = run_cmd([
-            "git", "clone", "--shared", "--branch", "main",
-            str(repo_path), str(clone_dest),
-        ])
-        if rc != 0:
-            print(f"ERROR=clone_failed repo={repo_name} stderr={stderr.strip()}")
-            sys.exit(1)
-        rc, _, _ = run_cmd(["git", "-C", str(clone_dest), "checkout", "-b", branch])
-        if rc != 0:
-            print(f"ERROR=branch_create_failed repo={repo_name}")
-            sys.exit(1)
-        _exclude_symlinks(clone_dest)
-        _symlink_gitignored_assets(repo_path, clone_dest)
-        configure_slot_remotes(clone_dest, repo_path)
-        configure_update_instead(repo_path)
+            sync_main(str(repo_path))
 
-        gi_changed = setup_slot_repo(clone_dest, m2_dir)
-        if gi_changed:
-            run_cmd(["git", "-C", str(clone_dest), "add", ".gitignore"])
-            run_cmd(["git", "-C", str(clone_dest), "commit", "-m",
-                     "chore: add slot infrastructure to .gitignore"])
-
-        ws_info = resolve_workspace_source(repo_path)
-        if ws_info:
-            ws_source, ws_name = ws_info
-            ws_slot_dir = slot_dir / ws_name
-
-            if ws_slot_dir.exists():
-                print(f"ERROR=workspace_name_collision ws={ws_name} repo={repo_name}")
-                print(f"ERROR_DETAIL=Workspace clone name '{ws_name}' already exists in slot. "
-                      f"Two project repos may share a workspace, or a naming collision occurred.")
-                sys.exit(1)
-
-            sync_main(str(ws_source))
+            clone_dest = slot_dir / repo_name
             rc, _, stderr = run_cmd([
                 "git", "clone", "--shared", "--branch", "main",
-                str(ws_source), str(ws_slot_dir),
+                str(repo_path), str(clone_dest),
             ])
             if rc != 0:
-                print(f"ERROR=workspace_clone_failed ws={ws_name} stderr={stderr.strip()}")
-                sys.exit(1)
-            rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
+                raise SlotCreationError(f"clone_failed repo={repo_name} stderr={stderr.strip()}")
+            rc, _, _ = run_cmd(["git", "-C", str(clone_dest), "checkout", "-b", branch])
             if rc != 0:
-                print(f"ERROR=workspace_branch_failed ws={ws_name}")
-                sys.exit(1)
-            _exclude_symlinks(ws_slot_dir)
-            configure_slot_remotes(ws_slot_dir, ws_source)
-            configure_update_instead(ws_source)
-            (ws_slot_dir / ".workspace").touch()
+                raise SlotCreationError(f"branch_create_failed repo={repo_name}")
+            _exclude_symlinks(clone_dest)
+            _symlink_gitignored_assets(repo_path, clone_dest)
+            configure_slot_remotes(clone_dest, repo_path)
+            configure_update_instead(repo_path)
 
-            repoint_wksp(clone_dest, ws_slot_dir)
-            create_proj_symlink(ws_slot_dir, clone_dest)
-            replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
+            gi_changed = setup_slot_repo(clone_dest, m2_dir)
+            if gi_changed:
+                run_cmd(["git", "-C", str(clone_dest), "add", ".gitignore"])
+                run_cmd(["git", "-C", str(clone_dest), "commit", "-m",
+                         "chore: add slot infrastructure to .gitignore"])
 
-    primary_repo = repos[0]
-    primary_wksp = slot_dir / primary_repo / "wksp"
-    if primary_wksp.is_symlink():
-        ws_path = primary_wksp.resolve()
-        scaffold_script = Path.home() / ".claude" / "skills" / "work-start" / "scaffold.py"
-        if scaffold_script.exists():
-            scaffold_args = [
-                sys.executable, str(scaffold_script), str(ws_path),
-                f"branch={branch}",
-                f"project-sha=slot-creation",
-                f"date={datetime.date.today().isoformat()}",
-                f"issue={issue}",
-                f"issue-repo={issue_repo}",
-                f"covers={covers}",
-                "force=yes",
-            ]
-            cover_list = [c.strip() for c in covers.split(",") if c.strip()]
-            if len(cover_list) > 1:
-                plan_content = _build_epic_plan(
-                    branch, issue_repo, cover_list,
-                    datetime.date.today().isoformat(),
-                )
-                if plan_content:
-                    scaffold_args.append("plan=yes")
-                    scaffold_args.append(f"plan-content={plan_content}")
-            run_cmd(scaffold_args)
+            ws_info = resolve_workspace_source(repo_path)
+            if ws_info:
+                ws_source, ws_name = ws_info
+                ws_slot_dir = slot_dir / ws_name
 
-    instance_name = ""
-    if isx:
-        instance_name = isx_instance or _truncate_instance_name(branch)
-        rc, _, stderr = run_cmd(["isx", "branch", instance_name, "--from", isx_template])
-        if rc != 0:
-            print(f"ERROR=isx_branch_failed instance={instance_name} err={stderr.strip()}")
-            sys.exit(1)
+                if ws_slot_dir.exists():
+                    raise SlotCreationError(
+                        f"workspace_name_collision ws={ws_name} repo={repo_name}: "
+                        f"Workspace clone name '{ws_name}' already exists in slot.")
 
-    write_slot_md(slot_dir, slot_num, repos, branch, issue,
-                  issue_repo, covers, context,
-                  isolation_type="isx" if isx else "",
-                  isx_instance=instance_name if isx else "",
-                  isx_template=isx_template if isx else "")
+                sync_main(str(ws_source))
+                rc, _, stderr = run_cmd([
+                    "git", "clone", "--shared", "--branch", "main",
+                    str(ws_source), str(ws_slot_dir),
+                ])
+                if rc != 0:
+                    raise SlotCreationError(f"workspace_clone_failed ws={ws_name} stderr={stderr.strip()}")
+                rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
+                if rc != 0:
+                    raise SlotCreationError(f"workspace_branch_failed ws={ws_name}")
+                _exclude_symlinks(ws_slot_dir)
+                configure_slot_remotes(ws_slot_dir, ws_source)
+                configure_update_instead(ws_source)
+                (ws_slot_dir / ".workspace").touch()
 
-    if isx:
-        _wire_isx_remotes(slot_dir, repos, instance_name)
+                repoint_wksp(clone_dest, ws_slot_dir)
+                create_proj_symlink(ws_slot_dir, clone_dest)
+                replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
 
-    conn = _wl.connect()
-    try:
-        repo_paths = [str(family_root / r) for r in repos]
-        _wl.confirm_slot_create(
-            conn, slot_num, str(family_root),
-            repos=repo_paths, branch=branch,
-            issue_number=int(issue) if issue else 0,
-            issue_repo=issue_repo, covers=covers,
-        )
-    finally:
-        conn.close()
+        primary_repo = repos[0]
+        primary_wksp = slot_dir / primary_repo / "wksp"
+        if primary_wksp.is_symlink():
+            ws_path = primary_wksp.resolve()
+            scaffold_script = Path.home() / ".claude" / "skills" / "work-start" / "scaffold.py"
+            if scaffold_script.exists():
+                scaffold_args = [
+                    sys.executable, str(scaffold_script), str(ws_path),
+                    f"branch={branch}",
+                    f"project-sha=slot-creation",
+                    f"date={datetime.date.today().isoformat()}",
+                    f"issue={issue}",
+                    f"issue-repo={issue_repo}",
+                    f"covers={covers}",
+                    "force=yes",
+                ]
+                cover_list = [c.strip() for c in covers.split(",") if c.strip()]
+                if len(cover_list) > 1:
+                    plan_content = _build_epic_plan(
+                        branch, issue_repo, cover_list,
+                        datetime.date.today().isoformat(),
+                    )
+                    if plan_content:
+                        scaffold_args.append("plan=yes")
+                        scaffold_args.append(f"plan-content={plan_content}")
+                run_cmd(scaffold_args)
 
-    wksp_failures = validate_slot_wksp(slot_dir)
-    if wksp_failures:
-        for f in wksp_failures:
-            print(f"ERROR=wksp_validation_failed detail={f}")
-        sys.exit(1)
+        instance_name = ""
+        if isx:
+            instance_name = isx_instance or _truncate_instance_name(branch)
+            rc, _, stderr = run_cmd(["isx", "branch", instance_name, "--from", isx_template])
+            if rc != 0:
+                raise SlotCreationError(f"isx_branch_failed instance={instance_name} err={stderr.strip()}")
+
+        write_slot_md(slot_dir, slot_num, repos, branch, issue,
+                      issue_repo, covers, context,
+                      isolation_type="isx" if isx else "",
+                      isx_instance=instance_name if isx else "",
+                      isx_template=isx_template if isx else "")
+
+        if isx:
+            _wire_isx_remotes(slot_dir, repos, instance_name)
+
+        conn = _wl.connect()
+        try:
+            repo_paths = [str(family_root / r) for r in repos]
+            _wl.confirm_slot_create(
+                conn, slot_num, str(family_root),
+                repos=repo_paths, branch=branch,
+                issue_number=int(issue) if issue else 0,
+                issue_repo=issue_repo, covers=covers,
+            )
+        finally:
+            conn.close()
+
+        wksp_failures = validate_slot_wksp(slot_dir)
+        if wksp_failures:
+            raise SlotCreationError(
+                "wksp_validation_failed: " + "; ".join(wksp_failures))
+    except Exception:
+        if slot_dir.exists():
+            shutil.rmtree(str(slot_dir), ignore_errors=True)
+        if _wl:
+            try:
+                conn = _wl.connect()
+                _wl.fail_slot(conn, slot_num, str(family_root))
+                conn.close()
+            except Exception:
+                pass
+        raise
 
     return {
         "slot_number": slot_num,
@@ -1991,18 +2020,22 @@ def main() -> None:
         if not branch:
             print("ERROR=missing_branch")
             sys.exit(1)
-        result = create_slot(
-            family_root=family_root,
-            repos=repos,
-            branch=branch,
-            issue=args.get("issue", ""),
-            issue_repo=args.get("issue-repo", ""),
-            covers=args.get("covers", args.get("issue", "")),
-            context=args.get("context", ""),
-            isx=args.get("isx", "").lower() in ("yes", "true", "1"),
-            isx_template=args.get("template", ""),
-            isx_instance=args.get("instance", ""),
-        )
+        try:
+            result = create_slot(
+                family_root=family_root,
+                repos=repos,
+                branch=branch,
+                issue=args.get("issue", ""),
+                issue_repo=args.get("issue-repo", ""),
+                covers=args.get("covers", args.get("issue", "")),
+                context=args.get("context", ""),
+                isx=args.get("isx", "").lower() in ("yes", "true", "1"),
+                isx_template=args.get("template", ""),
+                isx_instance=args.get("instance", ""),
+            )
+        except SlotCreationError as e:
+            print(f"ERROR={e}")
+            sys.exit(1)
         print(f"SLOT_NUMBER={result['slot_number']}")
         print(f"SLOT_DIR={result['slot_dir']}")
         print(f"BRANCH={result['branch']}")
