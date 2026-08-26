@@ -19,10 +19,12 @@ Handle preconditions from `work_end_context.py` JSON output.
 1. `git stash push -u -m "work-end: stashing uncommitted changes"`
 2. `git add -A && git commit -m "wip: uncommitted changes before work-end"`
 
-**NEVER use:** `git reset --hard`, `git checkout -- .`, `git clean -fd`
+**NEVER use:** `git reset --hard`, `git checkout -- .`, `git clean -fd`,
+`git reset HEAD` followed by ignoring the changes.
 
 The dirty files may belong to another session. A `git reset --hard`
-destroyed hours of work in a real incident.
+destroyed hours of work in a real incident. The rebase and land scripts
+include `safety_stash()` as defense-in-depth.
 
 ## Lifecycle Entry
 
@@ -40,8 +42,14 @@ Auto-resolve transient states before entering closing:review:
 If `HAS_PLAN=yes`, run `plan_manager.py detect`. If mid-queue, redirect
 to `work next` instead of closing.
 
+## Queue Gate
+
+If `HAS_PLAN=yes`, run `plan_manager.py detect`. If mid-queue, redirect:
+"Queue has N remaining issues. Run `work next` to advance, or pass
+`confirm-partial` to close the branch with remaining work."
+
 ## Main Mode
 
 If `ON_MAIN=yes`, work-end runs in main mode — same ceremony minus
 rebase, squash, stamp. Diff against `drained-sha` from `.plan`'s
-`## State`.
+`## State`. If no `drained-sha` (first close), diff against `project-sha`.

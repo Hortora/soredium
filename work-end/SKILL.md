@@ -23,6 +23,10 @@ Call the orchestrator. Follow its output. That is the job.
 python3 ~/.claude/skills/project/ctx.py
 ```
 
+Use: `WORKSPACE`, `PROJECT`, `CURRENT_BRANCH`, `PROJECT_SHA`, `ISSUE_N`,
+`COVERS`, `OWNER_REPO`, `BASE_BRANCH`, `META_STATE`, `HAS_PLAN`,
+`PLAN_PATH`, `ON_MAIN`, `IN_SLOT`, `SLOT_PATH`.
+
 ```bash
 python3 work-end/work_end_context.py workspace=$WORKSPACE project=$PROJECT
 ```
@@ -30,11 +34,16 @@ python3 work-end/work_end_context.py workspace=$WORKSPACE project=$PROJECT
 Handle preconditions from the JSON output. Read `handlers/pre_close.md`
 if any precondition is not `pass`.
 
+If `HAS_PLAN=yes`, run `complete_active_issue` after confirming close.
+
 ## Step 2 — Enter closing state
 
 ```bash
 python3 ~/.claude/skills/project/lifecycle.py transition $PLAN_PATH work_end
 ```
+
+**Abort:** from `closing:review` or `closing:verified` only. Pass
+`abort=yes`. Post-promotion states are forward-only.
 
 ## Step 3 — The Loop
 

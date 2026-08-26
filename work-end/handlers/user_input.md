@@ -33,6 +33,10 @@ the source of truth for what was retrieved — not conversation context.
    Downgrade any? (e.g. "3 OUTDATED 4 NOT_RELEVANT", or "go" to send all as RELEVANT)
    ```
 
+   **Your job is to be skeptical about unflagged entries.** Mechanically
+   flagged entries (version mismatch, stale) are already surfaced. You add
+   judgment: were the unflagged entries genuinely used this session?
+
 4. After user responds, group by outcome and call gardenFeedback:
    ```
    gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT",
@@ -58,6 +62,15 @@ Options: skip / retry / abort.
 <SKIP-ISOLATION>
 **Skipping is scoped to the failed step ONLY.** Each step is independent.
 The orchestrator validates `skip_step=` against the last yielded step.
+
+**When you may pass skip_step:**
+- The orchestrator returned `CONTEXT=step_failed` for that specific STEP
+- The user explicitly asked to skip that specific step
+
+**When you may NOT pass skip_step:**
+- A different step failed and you want to "skip the rest of the sweep"
+- You think the step is unnecessary based on session context
+- You want to save time or tokens
 </SKIP-ISOLATION>
 
 ## CONTEXT=rebase_conflict
