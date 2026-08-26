@@ -232,158 +232,112 @@ session continuity.
 
 ## Workflow
 
-### Step 0 — Session wrap checklist
+### Step 0 — Session wrap (orchestrator-driven)
 
-Before writing the handover, offer to create the supporting artifacts.
-Present this exactly:
+The wrap orchestrator drives the session-end sequence. Same pattern as
+work-end: Python decides what's next, the LLM executes one action at a
+time. Shared steps (forage, protocol, update_claude_md, write_content,
+garden_feedback, notes) use the same step definitions as work-end —
+no duplication.
+
+```bash
+python3 handover/wrap_orchestrator.py \
+    workspace=$WORKSPACE project=$PROJECT branch=$BRANCH \
+    [covers=$COVERS] [issue_repo=$OWNER_REPO] \
+    [plan_path=$PLAN_PATH] [has_arc42=$HAS_ARC42STORIES] \
+    [has_plan=$HAS_PLAN] \
+    [sweep_selected=<csv>] [skip_step=<name>] \
+    [dry_run=yes]
+```
+
+Call in a loop until `ACTION=complete`:
+
+| ACTION | Handler |
+|--------|---------|
+| `loose_ends` | Mechanical — `loose_ends_sweep.py` runs automatically |
+| `user_input` (CONTEXT=epic_hygiene) | Run `hygiene_scan.py`, present findings |
+| `wrap_sweep_config` | Present sweep checklist (see below), pass selections via `sweep_selected=` |
+| `forage` | Invoke forage SWEEP |
+| `protocol` | Invoke protocol SWEEP |
+| `update_claude_md` | Invoke update-claude-md |
+| `user_input` (CONTEXT=journal_entry) | Write JOURNAL.md entries (skipped if no `.plan`) |
+| `user_input` (CONTEXT=arc42_scan) | ARC42STORIES.MD stale scan (skipped if no ARC42STORIES.MD) |
+| `write_content` | Invoke write-content (diary) |
+| `user_input` (CONTEXT=garden_feedback) | Garden feedback — same handler as work-end |
+| `user_input` (CONTEXT=notes) | Notes prompt |
+| `user_input` (CONTEXT=handoff_write) | Write HANDOFF.md (Step 1 below) |
+| `wip_commit` | Mechanical — commits all WIP |
+| `complete` | Done |
+| `error` | Handle error, retry or skip |
+
+**Sweep checklist** (when `ACTION=wrap_sweep_config`):
+
+Present all items ON by default. The wrap sweep is a subset of work-end's
+sweep — no `impl_doc_sync` or `adr` (those are close-time concerns):
 
 ```
 Session wrap — create before writing the handover?
 
-[x] 1  Loose ends sweep  capture deferred/skipped/missing items
-[x] 2  write-content     capture this session's work as a diary entry
+[x] 1  forage sweep      check for gotchas, techniques, undocumented
+[x] 2  protocol sweep    check for project rules worth formalising
 [x] 3  update-claude-md  sync any new workflow conventions
-[x] 4  forage sweep      check for gotchas, techniques, undocumented
-[x] 5  protocol sweep    check for project rules worth formalising
-[?] 6  journal-entry     document any design changes this session not yet in JOURNAL.md  ← ON if mid-epic (.plan exists), OFF otherwise
-[?] 7  epic hygiene      check epic branch state, alignment, and staleness  ← ON if workspace configured, OFF otherwise
-[?] 8  arc42 stale scan  check ARC42STORIES.MD for stale statuses, resolved blockers, closed-issue forward refs  ← ON if ARC42STORIES.MD exists
-[x] 9  garden feedback    record retrieval feedback + propagate GE-IDs for work-end
-[x] 10 notes             anything to note for later? (appends to $WORKSPACE/.notes/NOTES.md)
+[x] 4  write-content     capture this session's work as a diary entry
 
-Type numbers to toggle (e.g. "2 7"), "all" to toggle all on/off, or "go" to proceed:
+Type numbers to toggle, or "go" to proceed:
 ```
 
-- **Default:** loose ends sweep, write-content (diary), update-claude-md, forage sweep, protocol sweep ticked; journal-entry depends on epic state (see below).
+Pass selections back: `sweep_selected=forage,protocol,update_claude_md,write_content`
 
 <SESSION-BOUND-ITEMS>
-**Items 1, 2, 4, 5, 9 (loose ends sweep, write-content, forage sweep, protocol sweep, garden feedback) are session-bound.**
+**Session-bound steps:** loose ends, forage, protocol, write-content, garden feedback.
 They depend on conversation context that does not survive to the next session.
-They cannot be deferred — "defer to next session" means "lose forever." The user
-may skip them explicitly, but the skill must never offer "defer" as an option.
-Write-content can write a partial diary draft (the next session can append to it).
-Loose ends sweep captures deferred findings from conversation context (LLM checks).
-
-Items 3, 6, 7, 8 (update-claude-md, journal-entry, epic hygiene, arc42 stale scan)
-work from file state and git history — they can be deferred if needed.
-
-Item 9 (notes) captures persistent scratch items to `$WORKSPACE/.notes/NOTES.md` —
-things to come back to later, observations that span sessions and branches, notes
-not actionable enough to be issues. Append-only with date headers and optional
-`[repo]` tags. Committed to the orphan `notes` branch at wrap time. Not session-bound
-— can be deferred, but defaulting ON ensures notes are captured while context is fresh.
+They cannot be deferred — "defer to next session" means "lose forever."
+The user may skip them explicitly via `skip_step=`, but the orchestrator
+never offers "defer" as an option.
 </SESSION-BOUND-ITEMS>
 
-- **protocol sweep is on by default** — scans the session for project-specific rules worth formalising. Skip it for sessions that worked purely in universal tools with no project-specific rules established or re-enforced. The protocol skill creates `docs/protocols/` if it does not exist — never skip the sweep because the directory is absent.
-- **journal-entry is ON by default when on an epic branch** — check `ls .plan 2>/dev/null` before showing the checklist. If `.meta` exists the session is mid-epic and design reasoning is about to be lost; default journal-entry to ON. If not on an epic branch, default to OFF.
-- **epic hygiene** — split into always-run and optional tiers:
+**Garden feedback handler** — same as work-end: runs `garden_feedback_table.py`,
+presents inverted-default table with skeptical framing. See work-end
+`CONTEXT=garden_feedback` for the full handler specification.
 
-  **Always-run (not toggleable — these run even if epic hygiene is toggled off):**
-  5. **Project main working tree dirty** — run `git status --short` on the project base branch; any staged or unstaged changes mean an operation was left incomplete
-  6. **Project main diverged from remote** — run `git log origin/main..main --oneline` and `git log main..origin/main --oneline`; local commits not on remote = work invisible to next session; remote ahead of local = next session will conflict
-  7. **Unrecovered artifacts on closed branches** — for every workspace branch where `is_closed()` returns CLOSED or MERGED_UNSTAMPED, check whether blogs and specs reached workspace main. A closed branch with a blog still on it means work-end's artifact promotion failed or was skipped. For each finding: `⚠️ Blog/Spec <filename> on closed branch <branch> never reached workspace main.` Offer to cherry-pick immediately.
-  8. **Unstamped closed branches** — for every workspace branch, check `is_closed()`. Flag MERGED_UNSTAMPED: `⚠️ Branch <branch> is merged but not stamped.` Offer to stamp immediately. Flag STAMPED_UNMERGED: `⚠️ Branch <branch> is stamped but content not merged — investigate.`
+**Epic hygiene handler** — `hygiene_scan.py` checks branch alignment,
+dirty trees, unrecovered artifacts, unstamped branches. Findings persist
+to `$WORKSPACE/.audit/findings.json`.
 
-  **Optional (ON by default, toggleable via the checklist):**
-  1. Orphaned `.plan` on main (epic closed without cleanup)
-  2. Workspace/project branch misalignment
-  3. Open epic branches with no commits in the last 7 days (stale)
-  4. Mid-epic: journal exists but has no `§Section` anchors (entries will not merge at close)
-
-  Report findings — do not auto-fix, just surface them so they can be addressed or noted in the handover.
-
-  **Persistence:** `hygiene_scan.py` writes findings to `$WORKSPACE/.audit/findings.json`. Open findings carry forward — `work_health.py` reads them at session entry and surfaces unresolved items. Findings accumulate until addressed (fixed, filed as an issue, or dismissed).
-- **arc42 stale scan is ON by default when ARC42STORIES.MD exists** — read `HAS_ARC42STORIES` from ctx.py output (already run in Path Resolution). Catches stale status drift that accumulates from cross-session and cross-repo work — the three failure modes it targets are: (a) layer/chapter status not updated when the issue closed in a different session, (b) external blocker references (cross-repo issues, foundation PRs) that shipped but were never cleared, (c) forward-tense issue references ("will migrate", "#N will...") where the referenced issue is now CLOSED. Run after epic hygiene so any just-surfaced issues are also reflected. See **Step 2c — ARC42STORIES.MD stale scan** below.
-- **"all":** if all are on → turn all off; if any are off → turn all on
-- **Numbers:** toggle individual items
-- **"go" (or "ok", "yes", blank Enter if the UI allows it):** proceed with current selections
-
-Run checked items **in this order** before continuing:
-1. Loose ends sweep — run first while session context is full; captures deferred/skipped items to `findings.jsonl`
-   ```bash
-   python3 work-end/loose_ends_sweep.py workspace=<WS> project=<PROJ> branch=<BRANCH>
-   ```
-   The LLM supplements script output with conversation-context items ("I'll come back to this")
-   and appends those to `findings.jsonl` via `append_finding` from `project/findings.py`.
-   Capture only — no forcing function at handover.
-2. Epic hygiene — run early so any issues surface and can be mentioned in blog/handover
-3. Forage sweep — done while context is full (findings may feed the blog)
-4. Protocol sweep — done while context is full; catches project-specific rules before context is lost
-5. update-claude-md — sync new conventions first
-6. journal-entry — write any missing JOURNAL.md entries before the handover
-7. arc42 stale scan — run after journal-entry so any layer completions just written are already reflected
-8. write-content (diary) — written last so it can mention forage and protocol submissions and synthesise the complete session narrative including any new conventions
-9. garden feedback — record retrieval feedback while context is fresh, propagate GE-IDs for work-end (see **Step 0g** below)
-10. notes — prompt "anything to note for later?" If yes, append entries to
-   `$WORKSPACE/.notes/NOTES.md` under today's date header. Optional `[repo]`
-   prefix for repo-specific notes (no prefix = primary). Commit to orphan branch:
-   `git -C $WORKSPACE/.notes add NOTES.md && git -C $WORKSPACE/.notes commit -m "notes: wrap"`.
-   If `.notes/` worktree doesn't exist, skip with: "No notes worktree — run workspace-init to set up."
-
-After all checked items complete, continue to Step 1.
-
-#### Step 0g — Garden retrieval feedback
-
-Skeptical review of garden entries retrieved this session. The script reads
-from the retrieval tracking DB — no reliance on conversation context.
-
-Non-blocking — if the MCP server is unavailable, skip silently and continue.
-
-1. Run the feedback table script:
-   ```bash
-   python3 scripts/garden_feedback_table.py <PROJECT_PATH> hours=4
-   ```
-   Read the output — it lists every GE-ID retrieved from the tracking DB
-   with mechanical flags (version mismatches, missing verified_on, stale
-   last_reviewed).
-
-2. If `NO_ENTRIES=true`: skip to step 6 (propagate prior GE-IDs only).
-
-3. Present the table with inverted default — all entries default to RELEVANT:
-   ```
-   Garden feedback — N entries retrieved this session
-
-     1.   GE-20260824-c09677  "Stateless re-entrant script pattern"     → RELEVANT
-     2. ⚠️ GE-20260809-96d41c  "gitignore trailing-slash skips symlinks" → RELEVANT
-          verified_on: git 2.43 — project uses git 2.47
-
-   Be skeptical — which should NOT go back as RELEVANT?
-   Downgrade any? (e.g. "2 OUTDATED", or "go" to send all as RELEVANT)
-   ```
-
-4. The LLM's job is to be skeptical about the unflagged entries — find
-   the ones that weren't actually useful. Mechanically flagged entries
-   are already surfaced; the LLM adds judgment about unflagged ones.
-
-5. After user responds, group by outcome and call gardenFeedback:
-   - Entries not downgraded → RELEVANT
-   - User-downgraded entries → the specified outcome
-   - For OUTDATED: include stack parameter from the script's PROJECT_STACK
-   ```
-   gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT",
-       issueRepo: "<OWNER_REPO>", issueNumber: <ISSUE_N>)
-   gardenFeedback(geIds: "GE-...", outcome: "OUTDATED",
-       stack: "<from PROJECT_STACK>",
-       issueRepo: "<OWNER_REPO>", issueNumber: <ISSUE_N>)
-   ```
-   MCP unavailable → warn once, continue.
-
-6. Read any existing `## Garden Entries Consulted` section from the current
-   HANDOFF.md (prior sessions may have propagated GE-IDs).
-7. Merge this session's GE-IDs with any propagated ones. Write the
-   combined list to HANDOFF.md's `## Garden Entries Consulted` section
-   (Step 5 will include it when writing HANDOFF.md):
-   ```markdown
-   ## Garden Entries Consulted
-
-   GE-IDs retrieved across sessions, pending final feedback at work-end.
-
-   - GE-20260620-a1b2c3 — "Hibernate lazy loading gotcha" (session 1, brainstorming)
-   - GE-20260621-d4e5f6 — "CDI producer pattern" (session 2, implementation)
-   ```
-   Include a brief title and which session/phase retrieved it for context.
+After `ACTION=complete`, the session wrap is done.
 
 ---
+
+## Action Handlers
+
+When the orchestrator yields an ACTION, the LLM executes it following
+these handler instructions. Shared handlers (garden_feedback, forage,
+protocol, etc.) follow the same spec as work-end — see work-end SKILL.md
+for the full handler definitions. Only wrap-specific handlers are
+documented here.
+
+### Handler: garden_feedback
+
+Same as work-end `CONTEXT=garden_feedback` — runs `garden_feedback_table.py`,
+presents inverted-default table with skeptical framing. Additionally,
+after recording feedback, propagate GE-IDs to HANDOFF.md:
+
+Read any existing `## Garden Entries Consulted` section from the current
+HANDOFF.md (prior sessions may have propagated GE-IDs). Merge this
+session's GE-IDs with any propagated ones. Write the combined list to
+HANDOFF.md's `## Garden Entries Consulted` section:
+```markdown
+## Garden Entries Consulted
+
+GE-IDs retrieved across sessions, pending final feedback at work-end.
+
+- GE-20260620-a1b2c3 — "Hibernate lazy loading gotcha" (session 1, brainstorming)
+- GE-20260621-d4e5f6 — "CDI producer pattern" (session 2, implementation)
+```
+
+### Handler: handoff_write
+
+Write the HANDOFF.md file. Follow Steps 1-5 below.
 
 ### Step 1 — Check previous handover (cheap)
 
@@ -422,53 +376,11 @@ should be filed as issues before this session ends — see spec §Component 3.
 - Do NOT include queue progress in HANDOFF.md — the resume path displays
   it via `format_resume_display()` from live `.plan` state
 
-### Step 2b — Forage sweep (while context is still full)
+### Step 2b — ARC42STORIES.MD stale scan
 
-**The sweep is done by the handover itself from conversation memory** —
-not by invoking forage and asking it to find things. Forage
-is only called once specific entries have been identified.
-
-Review the session across all four categories. For each one, think
-through what actually happened in the conversation:
-
-**Gotchas** — did anything go wrong in a non-obvious way?
-> Scan for: bugs whose symptom misled about root cause; silent failures
-> with no error; things that required multiple failed approaches; workarounds
-> for things that "should" work but don't.
-
-**Techniques** — did any non-obvious approach work well?
-> Scan for: solutions a skilled developer wouldn't naturally reach for;
-> tool or API combinations used in undocumented ways; patterns that solved
-> a problem more elegantly than expected.
-
-**Undocumented** — was anything discovered that isn't in the official docs?
-> Scan for: flags, options, or behaviours only findable via source code;
-> features that work but have no documentation; things discovered through
-> trial and error or commit history.
-
-**Conventions** — was a deliberate style choice made where alternatives exist?
-> Scan for: naming schemes, module structures, config strategies, or other
-> choices where another project could legitimately choose differently.
-
-Collect all candidates silently, then present as a **single batch prompt**
-using `AskUserQuestion` with `multiSelect: true`. All items pre-selected.
-User deselects any they don't want, or accepts all with one click.
-
-Do NOT prompt per-item — one prompt for the entire sweep.
-
-If confirmed → invoke `forage` CAPTURE for each selected item with the
-specific content already known from context.
-
-If nothing surfaces in any category → proceed to Step 3.
-
-> **Why here:** The context window is full. After the handover is written
-> and the session ends, this knowledge is lost. The sweep costs near-zero
-> from context; the cost of missing an entry is rediscovery time later.
-
-The sweep is **always done** (even if it finds nothing). Completeness
-matters — checking all four categories explicitly prevents the common
-failure of only catching the most obvious kind (usually gotchas) and
-missing techniques, undocumented items, and conventions.
+**Handled by the orchestrator** — the `arc42_scan_wrap` step yields
+`CONTEXT=arc42_scan` when ARC42STORIES.MD exists. The LLM runs the
+scan below when that action fires.
 
 ### Step 2c — ARC42STORIES.MD stale scan (if checked)
 

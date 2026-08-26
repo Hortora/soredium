@@ -9,6 +9,7 @@ Subcommands:
     cleanup-scaffold    <workspace> [single-repo=<yes/no>]
     cleanup-stack       <workspace> branch=<name>
     checkout-main       <project> <workspace>
+    wip-commit          <project> <workspace>
 
 Output (KEY=value lines):
     CLEANED=yes         (for cleanup-scaffold)
@@ -201,10 +202,34 @@ def checkout_main(project: str, workspace: str) -> int:
     return 0
 
 
+def wip_commit(project: str, workspace: str) -> int:
+    """Commit all uncommitted changes as WIP in both repos."""
+    for repo_path, label in [(project, "project"), (workspace, "workspace")]:
+        p = Path(repo_path)
+        if not p.is_dir():
+            continue
+        result = subprocess.run(
+            ["git", "-C", repo_path, "status", "--porcelain"],
+            capture_output=True, text=True,
+        )
+        if not result.stdout.strip():
+            continue
+        try:
+            git("add", "-A", cwd=repo_path)
+            git("commit", "-m", "WIP: session wrap — uncommitted changes", cwd=repo_path)
+            print(f"COMMITTED_{label.upper()}=yes")
+        except subprocess.CalledProcessError as e:
+            if "nothing to commit" not in (e.stdout or "") and "nothing to commit" not in (e.stderr or ""):
+                print(f"WARN=commit_failed_{label}")
+    print("WIP_COMMITTED=yes")
+    return 0
+
+
 SUBCOMMANDS = {
     "cleanup-scaffold": lambda args: cleanup_scaffold(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "cleanup-stack": lambda args: cleanup_stack(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "checkout-main": lambda args: checkout_main(args[0], args[1]) if len(args) >= 2 else _usage(),
+    "wip-commit": lambda args: wip_commit(args[0], args[1]) if len(args) >= 2 else _usage(),
 }
 
 
