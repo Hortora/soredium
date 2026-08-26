@@ -360,7 +360,7 @@ Read `COMMITTED=yes, SHA=<sha>` from output. If `ERROR=nothing_to_commit` → wa
 | Subject ends with period | Not conventional commits standard | Remove trailing period |
 | Using past tense ("Added X") | Not imperative mood (wrong mental model for git revert/cherry-pick) | Use "Add X" (command form) |
 | Type `chore` for production code | Wrong semantics | Use `feat`, `fix`, or `refactor` |
-| Offering to push after committing in a slot clone | Slot commits stay local until work-end squashes and pushes | **Slot mode:** when `is_slot_path()` detects a slot path (`/slots/` or legacy `/worktrees/`), do not offer or execute `git push` after committing. Commits accumulate locally until work-end. |
+| NOT pushing after committing in a slot clone | Unpushed commits in `git clone --shared` live only in the clone's `.git/objects/` — destroying the clone destroys all commits (slot 158 incident: 9 commits lost) | **Slot mode:** when `is_slot_path()` detects a slot path, ALWAYS run `git push -u origin HEAD` after committing. A post-commit hook also handles this, but the skill must not suppress pushes. work-end squashes branch history regardless of push state. |
 | Wrong type (`refactor` for bug fix) | Misleading git history | `fix` if it was wrong, `refactor` if working |
 | Vague scope (`(skills)`, `(stuff)`) | Unclear what changed, hard to search history | Use specific component name or omit scope entirely |
 | Wrong scope level (too broad/narrow) | Misleading - doesn't match actual change scope | Choose primary affected component, omit if 5+ components |
