@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """
-verify_slot_close.py — Unified verification gate for work-end.
+verify_slot_close.py — Post-close audit for work-end.
 
-Checks that all repos are merged, stamped, pushed, and artifacts promoted.
-Defense-in-depth audit — the primary fix is Execute's mechanical per-repo
-loop; this catches bugs in Execute itself.
+Defense-in-depth verification that runs after every close sequence
+(branch, main, slot). Checks all expected postconditions against
+ground truth. Reports findings — doesn't block.
 
 Usage:
-    python3 verify_slot_close.py <project> branch=<name> workspace=<path> [covers=N,M]
+    python3 verify_slot_close.py <project> branch=<name> workspace=<path>
+        [covers=N,M] [issue_repo=<repo>] [slot_dir=<path>]
+        [on_main=yes] [base_branch=main]
 
 Output: VERIFIED=yes|no with per-check results.
 Exit 0 always (verification outcome is data, not an error).
 Exit 1 on missing args or operational errors.
 """
 
+import json
 import re
 import subprocess
 import sys
@@ -50,8 +53,8 @@ def check_branch_stamped(project: str, branch: str) -> dict:
         return {"status": "fail", "detail": f"branch {branch} not found"}
     msg = result.stdout.strip()
     if msg.startswith("chore: branch closed"):
-        return {"status": "pass"}
-    return {"status": "fail", "detail": "UNSTAMPED"}
+        return {"status": "pass", "detail": msg}
+    return {"status": "fail", "detail": f"tip is: {msg[:60]}"}
 
 
 def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
@@ -61,7 +64,7 @@ def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
     msg = result.stdout.strip()
     sha_match = re.search(r"landed as ([0-9a-f]+)", msg)
     if not sha_match:
-        return {"status": "warn", "detail": "no landing SHA in stamp (old format — may indicate skipped squash-merge)"}
+        return {"status": "warn", "detail": "no landing SHA in stamp (old format)"}
     sha = sha_match.group(1)
     verify = git(project, "merge-base", "--is-ancestor", sha, base)
     if verify.returncode == 0:
@@ -72,7 +75,7 @@ def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
 def check_main_pushed(project: str, base: str = "main") -> dict:
     result = git(project, "log", f"origin/{base}..{base}", "--oneline")
     if result.returncode != 0:
-        return {"status": "pass", "detail": "no remote tracking (single remote check skipped)"}
+        return {"status": "pass", "detail": "no remote tracking"}
     unpushed = result.stdout.strip()
     if unpushed:
         count = len(unpushed.splitlines())
@@ -83,14 +86,56 @@ def check_main_pushed(project: str, base: str = "main") -> dict:
 def check_workspace_stamped(workspace: str, branch: str) -> dict:
     result = git(workspace, "branch", "--list", branch)
     if result.returncode != 0 or not result.stdout.strip():
-        return {"status": "warn", "detail": "workspace branch not found — verify single-repo mode or branch deletion"}
+        return {"status": "warn", "detail": "workspace branch not found"}
     return check_branch_stamped(workspace, branch)
+
+
+def check_on_main(repo: str, label: str) -> dict:
+    result = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    if result.returncode != 0:
+        return {"status": "fail", "detail": f"cannot read HEAD for {label}"}
+    branch = result.stdout.strip()
+    if branch == "main":
+        return {"status": "pass"}
+    return {"status": "fail", "detail": f"{label} on {branch}, not main"}
+
+
+def check_no_open_findings(workspace: str) -> dict:
+    findings_path = Path(workspace) / ".audit" / "findings.jsonl"
+    if not findings_path.exists():
+        return {"status": "pass", "detail": "no findings file"}
+    open_count = 0
+    for line in findings_path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            if entry.get("status", "open") == "open":
+                open_count += 1
+        except (json.JSONDecodeError, ValueError):
+            pass
+    if open_count > 0:
+        return {"status": "fail", "detail": f"{open_count} open finding(s)"}
+    return {"status": "pass"}
+
+
+def check_no_stale_scaffold(workspace: str) -> dict:
+    stale = []
+    for name in [".execute-progress", ".land-ledger.jsonl", ".artifacts-promoted"]:
+        if (Path(workspace) / name).exists():
+            stale.append(name)
+    if stale:
+        return {"status": "warn", "detail": f"stale: {', '.join(stale)}"}
+    return {"status": "pass"}
 
 
 def check_landed_marker(slot_dir: str) -> dict:
     landed = Path(slot_dir) / ".landed"
     if not landed.exists():
         return {"status": "fail", "detail": "no .landed marker"}
+    if landed.is_dir():
+        return {"status": "fail", "detail": ".landed is a directory, should be a file"}
     content = landed.read_text()
     if "landed_shas=" not in content:
         return {"status": "fail", "detail": "no landed_shas in .landed marker"}
@@ -124,7 +169,7 @@ def check_original_sync(slot_dir: str, repo_name: str, original_path: str) -> di
     result = git(original_path, "merge-base", "--is-ancestor", landed_sha, "main")
     if result.returncode == 0:
         return {"status": "pass", "detail": f"{repo_name} SHA {landed_sha[:8]} on main"}
-    return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not reachable from main — original behind"}
+    return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not reachable from main"}
 
 
 def check_slot_archive_status(slot_dir: str, attic_dir: str) -> dict:
@@ -159,6 +204,15 @@ def check_issues_closed(issue_repo: str, covers: list[int] | None) -> dict:
     return {"status": "pass", "detail": f"{len(covers)}/{len(covers)} closed"}
 
 
+def check_slot_marker(slot_dir: str, marker: str) -> dict:
+    path = Path(slot_dir) / marker
+    if path.exists() and path.is_file():
+        return {"status": "pass"}
+    if path.exists() and path.is_dir():
+        return {"status": "fail", "detail": f"{marker} is a directory, should be a file"}
+    return {"status": "fail", "detail": f"{marker} missing"}
+
+
 def _resolve_original_repos(slot_dir: str) -> dict[str, str]:
     result = {}
     slot_path = Path(slot_dir)
@@ -180,20 +234,34 @@ def verify(
     base: str = "main", covers: list[int] | None = None,
     issue_repo: str = "",
     slot_dir: str = "", original_repos: dict[str, str] | None = None,
+    on_main: bool = False,
 ) -> bool:
     checks: list[tuple[str, dict]] = []
 
-    checks.append(("project_merged", check_branch_merged(project, branch, base)))
-    checks.append(("project_stamped", check_branch_stamped(project, branch)))
-    checks.append(("landing_sha", check_landing_sha(project, branch, base)))
-    checks.append(("main_pushed", check_main_pushed(project, base)))
-    checks.append(("workspace_stamped", check_workspace_stamped(workspace, branch)))
+    if on_main:
+        checks.append(("project_pushed", check_main_pushed(project, base)))
+        checks.append(("workspace_pushed", check_main_pushed(workspace, base)))
+        checks.append(("no_open_findings", check_no_open_findings(workspace)))
+        checks.append(("no_stale_scaffold", check_no_stale_scaffold(workspace)))
+    else:
+        checks.append(("project_merged", check_branch_merged(project, branch, base)))
+        checks.append(("project_stamped", check_branch_stamped(project, branch)))
+        checks.append(("project_landing_sha", check_landing_sha(project, branch, base)))
+        checks.append(("project_pushed", check_main_pushed(project, base)))
+        checks.append(("workspace_merged", check_branch_merged(workspace, branch, base)))
+        checks.append(("workspace_stamped", check_workspace_stamped(workspace, branch)))
+        checks.append(("workspace_pushed", check_main_pushed(workspace, base)))
+        checks.append(("project_on_main", check_on_main(project, "project")))
+        checks.append(("workspace_on_main", check_on_main(workspace, "workspace")))
+        checks.append(("no_open_findings", check_no_open_findings(workspace)))
+        checks.append(("no_stale_scaffold", check_no_stale_scaffold(workspace)))
 
     if covers and issue_repo:
         checks.append(("issues_closed", check_issues_closed(issue_repo, covers)))
 
     if slot_dir:
         checks.append(("landed_marker", check_landed_marker(slot_dir)))
+        checks.append(("phase_a_marker", check_slot_marker(slot_dir, ".phase-a-complete")))
         if original_repos:
             for repo_name, orig_path in original_repos.items():
                 checks.append((
@@ -214,7 +282,7 @@ def verify(
         detail = result.get("detail", "")
         icon = "✅" if status == "pass" else "❌" if status == "fail" else "⚠️"
         suffix = f" — {detail}" if detail else ""
-        print(f"{icon} {name}: {status}{suffix}")
+        print(f"  {icon} {name}: {status}{suffix}")
         if status == "fail":
             all_pass = False
 
@@ -227,7 +295,8 @@ def verify(
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("Usage: verify_slot_close.py <project> branch=<name> workspace=<path> [covers=N,M] [slot_dir=<path>]",
+        print("Usage: verify_slot_close.py <project> branch=<name> workspace=<path> "
+              "[covers=N,M] [issue_repo=<repo>] [slot_dir=<path>] [on_main=yes]",
               file=sys.stderr)
         return 1
 
@@ -237,6 +306,7 @@ def main() -> int:
     branch = opts.get("branch", "")
     workspace = opts.get("workspace", "")
     base = opts.get("base_branch", "main")
+    on_main = opts.get("on_main", "no") == "yes"
 
     if not branch:
         print("ERROR=MISSING_ARGS")
@@ -259,7 +329,8 @@ def main() -> int:
 
     verify(project, branch, workspace, base, covers,
            issue_repo=issue_repo,
-           slot_dir=slot_dir, original_repos=original_repos)
+           slot_dir=slot_dir, original_repos=original_repos,
+           on_main=on_main)
     return 0
 
 

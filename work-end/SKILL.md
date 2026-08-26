@@ -220,17 +220,24 @@ arguments. The orchestrator reads `.close-progress` to determine the
 next action. When the LLM marks a judgment step done (by calling the
 orchestrator again after executing it), the orchestrator advances.
 
-### Completion — Progress Summary
+### Completion — Progress Summary and Post-Close Audit
 
-When `ACTION=complete`, run the mechanical summary and print it verbatim:
+When `ACTION=complete`, run both the progress summary and the post-close
+audit, and print their output verbatim:
 
 ```bash
 python3 work-end/progress_summary.py $WORKSPACE mode=close
 ```
 
-**Do not compose your own summary.** The script reads `.close-progress`
-and outputs a deterministic report showing every step's status. Print
-the script's output as-is — the user sees exactly what Python reported.
+```bash
+python3 work-end/verify_slot_close.py $PROJECT branch=$BRANCH workspace=$WORKSPACE covers=$COVERS issue_repo=$OWNER_REPO [on_main=yes] [slot_dir=$SLOT_PATH]
+```
+
+**Do not compose your own summary.** Print both scripts' output as-is.
+The progress summary shows step status. The audit checks ground truth —
+branches stamped, issues closed, artifacts promoted, no stale scaffold.
+If the audit reports failures, surface them clearly. The audit doesn't
+block — the work is done — but the user must see what needs fixing.
 
 For `sweep_selected`: after the user responds to `sweep_config`,
 pass their selections back: `sweep_selected=forage,protocol,...`

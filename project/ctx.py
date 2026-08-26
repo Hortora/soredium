@@ -259,7 +259,7 @@ def resolve(cwd=None) -> dict[str, str]:
         "IN_WORKTREE": "yes" if topo.in_worktree else "no",
         "MAIN_WORKTREE_ROOT": str(topo.main_worktree_root) if topo.main_worktree_root else "",
         "IN_SLOT": "yes" if topo.layout == "slot" else "no",
-        "SLOT_PATH": str(topo.slot_dir / ".slot") if topo.slot_dir else "",
+        "SLOT_PATH": str(topo.slot_dir) if topo.slot_dir else "",
         "IN_ATTIC": "yes" if topo.slot_dir and "/attic/" in str(topo.slot_dir) else "no",
         # WorkState fields (F1/F3 — work/SKILL.md reads these)
         "ROUTE": state.route,
