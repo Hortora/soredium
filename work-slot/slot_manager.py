@@ -912,13 +912,16 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             _wire_isx_remotes(slot_dir, [repo_name], instance)
 
     ws_info = resolve_workspace_source(repo_path)
+    if not ws_info:
+        ws_info = discover_workspace(repo_path)
+        if ws_info:
+            print(f"DISCOVERED_WORKSPACE={ws_info[1]} repo={repo_name}")
     if ws_info:
         ws_source, ws_name = ws_info
         family_repo_names = _get_family_repo_names(family_root)
         if ws_name in family_repo_names:
             ws_name = f"work-{ws_source.name}"
         ws_slot_dir = slot_dir / ws_name
-        # Disambiguate when directory exists but belongs to a different workspace
         if ws_slot_dir.exists():
             existing_origin = _get_clone_origin(ws_slot_dir)
             if existing_origin and str(ws_source) not in existing_origin:
@@ -935,6 +938,8 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
                 _exclude_symlinks(ws_slot_dir)
                 configure_slot_remotes(ws_slot_dir, ws_source)
                 configure_update_instead(ws_source)
+                install_post_commit_hook(ws_slot_dir)
+                (ws_slot_dir / ".workspace").touch()
 
         wksp_target = repo_path / "wksp"
         if wksp_target.is_symlink():
@@ -950,6 +955,9 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             repoint_wksp(clone_dest, ws_subdir)
             create_proj_symlink(ws_subdir, clone_dest)
             replicate_claude_md(repo_path, ws_subdir, clone_dest)
+
+    configure_slot_remotes(clone_dest, repo_path)
+    configure_update_instead(repo_path)
 
     _update_slot_repos(slot_dir, repo_name, add=True)
 
