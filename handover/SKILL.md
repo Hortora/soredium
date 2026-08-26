@@ -12,46 +12,26 @@ description: >
 
 # Session Handover
 
-> **Terminology:** *handover* is the act (what you do at session end); *handoff* is the artifact (the `HANDOFF.md` file passed to the next session).
-
-## When to Use This vs work-end
-
 | Situation | Skill |
 |-----------|-------|
-| Branch is **done** — closing, merging, pushing | `work-end` (includes full wrap + HANDOFF.md) |
-| Branch is **not done** — pausing mid-work, ending session | `handover` (this skill) |
-| **Continuing** work on a branch | `work continue` (auto-reads HANDOFF.md) |
-| **Interrogating** the handover document directly | `resume handover` (this skill, resume path) |
-
-**work-end already writes HANDOFF.md** as its final step (Step 12). If you just ran
-work-end, do NOT invoke this skill — everything is already done.
+| Branch **done** — closing, merging | `work-end` (includes full wrap) |
+| Branch **not done** — ending session | `handover` (this skill) |
+| **Continuing** work | `work continue` (auto-reads HANDOFF.md) |
 
 ---
 
 ## Resuming a Handover
 
-**Note:** `work continue` now auto-reads HANDOFF.md as part of its
-context loading. The explicit `resume handover` invocation below is
-for when you want to interrogate the handover document directly —
-ask questions about it, review past sessions, etc. — rather than
-simply continuing work.
+When the user says "resume handover", locate and read HANDOFF.md.
 
-When the user says "resume handover" (or similar), the job is to **locate and read** HANDOFF.md, not create one.
+### Step R1 — Find HANDOFF.md
 
-**HANDOFF.md lives in the workspace, not the project repo.** Many projects separate methodology artifacts (handovers, blog, specs, ADRs) into a dedicated workspace repository. Always resolve the correct location before reading.
-
-### Step R1 — Determine where HANDOFF.md lives
-
-Use the same convention as `work-start` — derive workspace from CWD via git, not from CLAUDE.md:
-
-Run the bundled context script — no shell variable assignments:
 ```bash
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-Use `WORKSPACE` and `PROJECT` from the output as concrete strings. HANDOFF.md is at `<WORKSPACE>/HANDOFF.md`.
-
-**Do not scan CLAUDE.md for a workspace path.** Multiple CLAUDE.mds are loaded per session (global, parent, project). The parent's `**Workspace:**` declaration will be found first and will point to the wrong repo. `python3 ~/.claude/skills/project/ctx.py` resolves from CWD via git — always correct.
+Use `WORKSPACE` from output. HANDOFF.md is at `<WORKSPACE>/HANDOFF.md`.
+Do not scan CLAUDE.md for workspace path — use ctx.py.
 
 ### Step R2 — Check freshness, then read
 
@@ -59,186 +39,47 @@ Use `WORKSPACE` and `PROJECT` from the output as concrete strings. HANDOFF.md is
 git -C "$WORKSPACE" log -1 --format="%ar" -- HANDOFF.md
 ```
 
-If more than a week old, flag it before using the context:
-> "HANDOFF.md is N days old — some context may be stale. Verify key assumptions before building on it."
+If older than a week, flag: "HANDOFF.md is N days old — verify key assumptions."
 
-Read the file, then immediately proceed to Step R2b.
-
-### Step R2b — Detect open branch and run entry-scope validation
-
-Run `work_health.py` entry-scope validation:
+Read the file, then run entry-scope validation:
 ```bash
 python3 ~/.claude/skills/project/work_health.py --scope entry --project "$PROJECT" --workspace "$WORKSPACE"
 ```
 
-Read the output. If any CHECK has STATUS=warn or STATUS=changed, include the
-findings in the resume output.
+Check for open branch via `.plan` and `is_closed()`. If branch is open:
+> "Branch `<name>` is still open for #`<issue>`. Run `/work` to continue."
 
-Then check for an open branch. Read the branch name from `$WORKSPACE/.plan`
-(if it exists). Use `is_closed()` to determine branch state:
+### Step R3 — Display .plan queue
 
-```python
-from lifecycle import is_closed, ClosureState
-state = is_closed(PROJECT, branch, workspace=WORKSPACE)
-```
+If `.plan` exists, display via `format_resume_display()`.
 
-- If `.plan` exists and `is_closed()` returns `OPEN` or `MERGED_UNSTAMPED` →
-  branch is still open. Present resume output with this Immediate Next Step:
-  > "Branch `<branch-name>` is still open for #`<issue>`. Run `/work` to continue."
-- If `is_closed()` returns `CLOSED` or `DELETED` → previous session closed cleanly.
-  Proceed normally — the Immediate Next Step comes from HANDOFF.md content.
-- If no `.plan` exists → no active branch. Proceed normally.
-
-### Step R3 — Display .plan queue (replaces issue cross-check)
-
-If `$WORKSPACE/.plan` exists, display the human-readable queue
-using `format_resume_display()` from `work_health.py`. The `plan_state`
-check in Step R2b already validated issue state against GitHub — any
-closed issues were marked `[x]` automatically.
-
-Present the queue after the HANDOFF.md session context sections.
-
-If `.plan` doesn't exist, skip — show HANDOFF.md session context only.
-
-Then read the file and present the resume output using this structure:
+Present resume output: **Last Session** (2-3 lines), **Immediate Next Step**
+(specific action), **Cross-Module** (only active blockers with tracked issues),
+**Queue** (if .plan), **work_health findings** (if any).
 
 ---
 
-**## Last Session**
-2–3 lines: what was done, what was tried, key reasoning.
+## Creating a Handover — Orchestrator Loop
 
-**## Immediate Next Step**
-Single specific action right now — procedural or unblocking (e.g. "run /work", "delete branches", "fix X in Y").
+<HARD-GATE>
+**The orchestrator controls the wrap sequence.** Call it in a loop until
+`ACTION=complete`. Do not skip the orchestrator. Do not jump ahead to
+writing HANDOFF.md. The orchestrator ensures sweep steps (forage,
+protocol, write-content) run while session context is live.
 
-**## Cross-Module**
-Only include if there are **active** cross-module relationships — blocking, enabled, or blocked-by. Each item must reference a tracked issue. Omit the section entirely if none apply.
+A hook blocks HANDOFF.md commits without orchestrator completion.
+</HARD-GATE>
 
-Do NOT include static architectural dependencies (e.g., "module X uses SPI Y from repo Z"). Those belong in CLAUDE.md's module documentation, not in a handover. The test: "Is there an action that needs to happen — by us, by them, or in a downstream repo — before something can proceed?" If no — omit. If the answer is "yes, but there's no issue tracking it" — file the issue first, then list it here with the reference.
-
-**Blocking** (we owe something another repo needs — we are the bottleneck, treat as high priority):
-- `<module>` — what we owe (gates repo#N) · Scale · Complexity
-
-**Enabled** (we delivered our part, downstream work is now unblocked but not yet done — track so we pick it up or chase it):
-- `<module>` — what's now ready (repo#N) · Scale · Complexity
-
-**Blocked by** (work in this repo can't proceed because another repo hasn't shipped something — wait or escalate):
-- `<module>` — what we need from them (gates #N) · Scale · Complexity
-
-**## Queue**
-If `.plan` exists, display via `format_resume_display()`. Otherwise omit.
-
-**## work_health findings**
-If `work_health.py --scope entry` reported any warnings or changes, summarise here. Otherwise omit.
-
----
-
-**No What's Left, What's Next, or Cleaned up sections.** Work tracking
-moved to `.plan` (curated queue) and GitHub issues (source of truth).
-See handover-reference.md for the full routing table.
-
-### Common Mistake
-
-Do **not** scan CLAUDE.md for a workspace path. Multiple CLAUDE.mds are loaded (global, parent, project-level), and a parent repo's `**Workspace:**` declaration will be picked up instead of the current session's workspace. Always use `git rev-parse --show-toplevel` from CWD — that is the workspace.
-
----
-
-Generates a concise `HANDOFF.md` — a pointer document that gives the next
-Claude session enough context to resume immediately. References are read on
-demand; the handover itself stays small. Git history is the archive.
-
-**Token budget:** HANDOFF.md should be readable in under 200 tokens. No work
-tracking, no backlog — session context only.
-
----
-
-## What This Is Not
-
-- **Not a project blog entry** — the blog captures narrative for posterity.
-  The handover captures operational context for the next 24–48 hours.
-- **Not a knowledge-garden entry** — cross-project technical gotchas go in
-  the garden. Session-specific context goes in the handover.
-- **Not a replacement for CLAUDE.md** — CLAUDE.md is already auto-loaded
-  and covers permanent conventions. Don't duplicate it here.
-
----
-
-## Core Principles
-
-### 1. Write only deltas — reference the rest
-
-If something hasn't changed since the previous handover, **don't restate it**.
-Write `*Unchanged — retrieve with: `git show HEAD~1:HANDOFF.md`*` for that
-section and move on. Only sections that actually changed get written in full.
-
-This keeps the current handover minimal. The git history holds everything else.
-
-### 2. Git history is the archive
-
-HANDOFF.md is a single file, overwritten each session and **always committed**.
-Previous versions are free — they live in git. No separate archive directory
-needed.
+### Path Resolution
 
 ```bash
-# How many handovers exist?
-git log --oneline -- HANDOFF.md
-
-# When was the last one written?
-git log -1 --format="%ar" -- HANDOFF.md
-
-# Read the previous handover (whole file)
-git show HEAD~1:HANDOFF.md
-
-# What changed between the last two handovers?
-git diff HEAD~1 HEAD -- HANDOFF.md
-
-# Read just one section of a previous handover (surgical)
-git show HEAD~1:HANDOFF.md | grep -A 10 "## Open Questions"
-
-# Find a handover from a specific date
-git log --before="2026-04-03" -1 --format="%H" -- HANDOFF.md | xargs -I{} git show {}:HANDOFF.md
+python3 ~/.claude/skills/project/ctx.py
 ```
 
-These commands are cheap — use them rather than loading full files when only
-part of the historical context is needed.
+Use `WORKSPACE`, `PROJECT`, `CURRENT_BRANCH`, `COVERS`, `OWNER_REPO`,
+`HAS_PLAN`, `PLAN_PATH`, `HAS_ARC42STORIES`.
 
-### 3. Commit is required, not optional
-
-An uncommitted HANDOFF.md is invisible to git history — the archive doesn't
-exist. Always commit. No exceptions.
-
-### 4. Freshness check before reading
-
-When starting a session, check how old the handover is before loading it:
-
-```bash
-git log -1 --format="%ar" -- HANDOFF.md   # → "3 days ago"
-```
-
-If it's more than a week old, flag it before using the context:
-> "HANDOFF.md is 9 days old — some context may be stale. Verify key
-> assumptions before building on it."
-
-The next session can then choose to load a more recent intermediate handover
-from git history if one exists.
-
-### 5. Read nothing just to reference it
-
-If a file is already in context from this session, summarise from memory.
-If it isn't, write the path — the next session reads it only if the task
-requires it. This is the knowledge-garden GARDEN.md approach applied to
-session continuity.
-
----
-
-## Workflow
-
-### Step 0 — Session wrap (orchestrator-driven)
-
-The wrap orchestrator drives the session-end sequence. Same pattern as
-work-end: Python decides what's next, the LLM executes one action at a
-time. Shared steps (forage, protocol, update_claude_md, write_content,
-garden_feedback, notes) use the same step definitions as work-end —
-no duplication.
+### The Loop
 
 ```bash
 python3 handover/wrap_orchestrator.py \
@@ -246,458 +87,92 @@ python3 handover/wrap_orchestrator.py \
     [covers=$COVERS] [issue_repo=$OWNER_REPO] \
     [plan_path=$PLAN_PATH] [has_arc42=$HAS_ARC42STORIES] \
     [has_plan=$HAS_PLAN] \
-    [sweep_selected=<csv>] [skip_step=<name>] \
-    [dry_run=yes]
+    [sweep_selected=<csv>] [skip_step=<name>]
 ```
 
 Call in a loop until `ACTION=complete`:
 
-| ACTION | Handler |
-|--------|---------|
-| `loose_ends` | Mechanical — `loose_ends_sweep.py` runs automatically |
+| ACTION | What to do |
+|--------|-----------|
+| `loose_ends` | Mechanical — runs automatically |
 | `user_input` (CONTEXT=epic_hygiene) | Run `hygiene_scan.py`, present findings |
-| `wrap_sweep_config` | Present sweep checklist (see below), pass selections via `sweep_selected=` |
+| `wrap_sweep_config` | Present sweep checklist, pass selections via `sweep_selected=` |
 | `forage` | Invoke forage SWEEP |
 | `protocol` | Invoke protocol SWEEP |
 | `update_claude_md` | Invoke update-claude-md |
-| `user_input` (CONTEXT=journal_entry) | Write JOURNAL.md entries (skipped if no `.plan`) |
-| `user_input` (CONTEXT=arc42_scan) | ARC42STORIES.MD stale scan (skipped if no ARC42STORIES.MD) |
+| `user_input` (CONTEXT=journal_entry) | Write JOURNAL.md entries |
+| `user_input` (CONTEXT=arc42_scan) | Read `handlers/arc42_stale_scan.md`, follow it |
 | `write_content` | Invoke write-content (diary) |
-| `user_input` (CONTEXT=garden_feedback) | Garden feedback — same handler as work-end |
+| `user_input` (CONTEXT=garden_feedback) | Same handler as work-end (run `garden_feedback_table.py`) |
 | `user_input` (CONTEXT=notes) | Notes prompt |
-| `user_input` (CONTEXT=handoff_write) | Write HANDOFF.md (Step 1 below) |
+| `user_input` (CONTEXT=handoff_write) | **Read `handlers/handoff_write.md` and follow it** |
 | `wip_commit` | Mechanical — commits all WIP |
-| `complete` | Done |
-| `error` | Handle error, retry or skip |
+| `complete` | Run progress summary (see below) |
 
-**Sweep checklist** (when `ACTION=wrap_sweep_config`):
-
-Present all items ON by default. The wrap sweep is a subset of work-end's
-sweep — no `impl_doc_sync` or `adr` (those are close-time concerns):
-
-```
-Session wrap — create before writing the handover?
-
-[x] 1  forage sweep      check for gotchas, techniques, undocumented
-[x] 2  protocol sweep    check for project rules worth formalising
-[x] 3  update-claude-md  sync any new workflow conventions
-[x] 4  write-content     capture this session's work as a diary entry
-
-Type numbers to toggle, or "go" to proceed:
-```
-
-Pass selections back: `sweep_selected=forage,protocol,update_claude_md,write_content`
+**Sweep checklist** (ACTION=wrap_sweep_config): present all items ON.
+Pass back: `sweep_selected=forage,protocol,update_claude_md,write_content`
 
 <SESSION-BOUND-ITEMS>
-**Session-bound steps:** loose ends, forage, protocol, write-content, garden feedback.
-They depend on conversation context that does not survive to the next session.
-They cannot be deferred — "defer to next session" means "lose forever."
-The user may skip them explicitly via `skip_step=`, but the orchestrator
-never offers "defer" as an option.
+Forage, protocol, write-content, garden feedback depend on conversation
+context. They cannot be deferred — "defer to next session" = "lose forever."
 </SESSION-BOUND-ITEMS>
 
 <SKIP-ISOLATION>
-**Skipping is scoped to the failed step ONLY.** A failure in one sweep step
-(e.g. forage) does not justify skipping other sweep steps (e.g. write_content).
-Each step is independent — skip only the step named in STEP=.
-
-The orchestrator enforces this: `skip_step=` is validated against the last
-yielded step. Skipping a step that was not yielded returns ERROR=invalid_skip.
-
-**When you may pass skip_step:**
-- The orchestrator returned `CONTEXT=step_failed` for that specific STEP
-- The user explicitly asked to skip that specific step
-
-**When you may NOT pass skip_step:**
-- A different step failed and you want to "skip the rest of the sweep"
-- You think the step is unnecessary based on session context
-- You want to save time or tokens
+Skipping is scoped to the failed step ONLY. The orchestrator validates
+`skip_step=` against the last yielded step.
 </SKIP-ISOLATION>
 
-**Garden feedback handler** — same as work-end: runs `garden_feedback_table.py`,
-presents inverted-default table with skeptical framing. See work-end
-`CONTEXT=garden_feedback` for the full handler specification.
-
-**Epic hygiene handler** — `hygiene_scan.py` checks branch alignment,
-dirty trees, unrecovered artifacts, unstamped branches. Findings persist
-to `$WORKSPACE/.audit/findings.json`.
-
-After `ACTION=complete`, the session wrap is done.
-
----
-
-## Action Handlers
-
-When the orchestrator yields an ACTION, the LLM executes it following
-these handler instructions. Shared handlers (garden_feedback, forage,
-protocol, etc.) follow the same spec as work-end — see work-end SKILL.md
-for the full handler definitions. Only wrap-specific handlers are
-documented here.
-
-### Handler: garden_feedback
-
-Same as work-end `CONTEXT=garden_feedback` — runs `garden_feedback_table.py`,
-presents inverted-default table with skeptical framing. Additionally,
-after recording feedback, propagate GE-IDs to HANDOFF.md:
-
-Read any existing `## Garden Entries Consulted` section from the current
-HANDOFF.md (prior sessions may have propagated GE-IDs). Merge this
-session's GE-IDs with any propagated ones. Write the combined list to
-HANDOFF.md's `## Garden Entries Consulted` section:
-```markdown
-## Garden Entries Consulted
-
-GE-IDs retrieved across sessions, pending final feedback at work-end.
-
-- GE-20260620-a1b2c3 — "Hibernate lazy loading gotcha" (session 1, brainstorming)
-- GE-20260621-d4e5f6 — "CDI producer pattern" (session 2, implementation)
-```
-
-### Handler: handoff_write
-
-Write the HANDOFF.md file. Follow Steps 1-5 below.
-
-### Step 1 — Check previous handover (cheap)
-
-```bash
-git log --oneline -3 -- HANDOFF.md
-```
-
-If a previous handover exists, get the diff to know what changed:
-
-```bash
-git diff HEAD -- HANDOFF.md 2>/dev/null || git show HEAD:HANDOFF.md 2>/dev/null
-```
-
-This tells you what sections are unchanged — don't rewrite those. Work from
-the diff, not from loading the full previous file.
-
-### Step 2 — Recall from context (free)
-
-From the current session, recall:
-- What happened this session? (Last Session — 2-3 lines)
-- What decisions were made? What was tried and didn't work?
-- Are there active cross-module blockers? (Not static dependencies — only
-  work gated on another repo shipping something, or vice versa. Each must
-  have a tracked issue.)
-- What's the single most important next action? (Immediate Next Step)
-
-Do NOT read any project files to answer these. Work from conversation memory.
-
-**No What's Left or What's Next.** Work tracking moved to `.plan` (curated
-queue) and GitHub issues. Trailing obligations that aren't GitHub issues
-should be filed as issues before this session ends — see spec §Component 3.
-
-**Queue context:** If `HAS_PLAN=yes` from ctx.py output:
-- Update `.plan`'s `## Session State` with current position and today's
-  date as the last wrap timestamp
-- Do NOT include queue progress in HANDOFF.md — the resume path displays
-  it via `format_resume_display()` from live `.plan` state
-
-### Step 2b — ARC42STORIES.MD stale scan
-
-**Handled by the orchestrator** — the `arc42_scan_wrap` step yields
-`CONTEXT=arc42_scan` when ARC42STORIES.MD exists. The LLM runs the
-scan below when that action fires.
-
-### Step 2c — ARC42STORIES.MD stale scan (if checked)
-
-Only run if `ARC42STORIES.MD` exists in the project repo and was ticked in the checklist. The goal is to catch drift that accumulates across sessions, particularly from cross-repo work — when a foundation module ships or an issue closes in a different session, the references in ARC42STORIES.MD are not automatically updated.
-
-**Three things to scan for:**
-
-**1. Layer/chapter statuses not reflecting closed issues**
-
-Read the layer taxonomy table (§4) and chapter index (§9.2). For each row that shows `🔲 pending (#NNN)`, check the referenced issue:
-```bash
-gh issue view <NNN> --repo <OWNER_REPO> --json state --jq '.state'
-```
-If the issue is CLOSED but the row still says pending, the status is stale.
-
-**2. External blocker references that have resolved**
-
-Scan ARC42STORIES.MD for phrases like `blocked on`, `pending casehubio/`, `waiting on`, `requires`, followed by an external issue reference (e.g. `casehubio/ledger#114`). For each cross-repo reference found:
-```bash
-gh issue view NNN --repo "casehubio/REPO" --json state --jq '.state'
-```
-If the blocker issue is CLOSED, the "blocked on" language is stale.
-
-**3. Forward-tense issue references where the issue is now closed**
-
-Scan for phrases like `#NNN will`, `will migrate`, `will add`, `will replace` followed by or preceded by a `#NNN` issue reference. For each one, check if that issue is now CLOSED. If so, the sentence should be updated to past tense.
-
-**Report and offer to fix:**
-
-Present each finding with the exact line and proposed fix. Apply only on confirmation. After applying fixes, commit to the project repo:
-```bash
-python3 ~/.claude/skills/git-commit/commit_exec.py commit "$PROJECT" message="docs: sync ARC42STORIES.MD — stale scan at session wrap" files=ARC42STORIES.MD
-```
-Read `COMMITTED=yes, SHA=<sha>` from output.
-
-**If nothing stale is found**, proceed silently.
-
-**Why this belongs in wrap, not work-end:** Work-end covers only what changed *this session*. ARC42STORIES.MD staleness accumulates from cross-session and cross-repo work — foundation modules shipping, issues closing in different sessions — so it requires a periodic point-in-time scan, not a per-commit update.
-
-### Step 3 — Gather cheap orientation
-
-```bash
-git log --oneline -6        # recent commits
-git status --short          # any uncommitted state
-```
-
-### Step 4 — Build the references table (locate, don't read)
-
-```bash
-ls snapshots/ | sort | tail -1   # latest snapshot path
-ls blog/ | sort | tail -1        # latest blog entry path
-ls adr/ | sort | tail -3         # recent ADRs
-```
-
-Run `ls` only — do not open the files. CLAUDE.md is auto-loaded; omit it.
-
-### Step 5 — Write HANDOFF.md (delta-first)
-
-Use the template and routing table in [handover-reference.md](handover-reference.md).
-
-For each section: has it changed since last handover?
-- **Changed** → write it in full
-- **Unchanged** → write `*Unchanged — `git show HEAD~1:HANDOFF.md`*`
-- **Doesn't exist yet** (first handover) → write all sections in full
-
-Overwrite the previous HANDOFF.md completely.
-
-### Step 5a — Content boundary check
-
-Before proceeding, scan the draft for content that doesn't belong in a
-technical record by default — personal characterisations, social context,
-meeting dynamics, or anything a third party would be surprised to read.
-
-**Note:** if the author explicitly asked for any of this to be included, it
-belongs and does not need flagging. This check catches accidental inclusion,
-not deliberate author choices.
-
-Ask yourself: *Does this handover contain anything a colleague, stakeholder,
-or future reader would find surprising, uncomfortable, or out of place in a
-technical document?*
-
-Flags to look for:
-
-- What a specific person said, thought, or decided in a meeting
-- Characterisation of anyone's personality, competence, or approach
-- Frustration or complaints directed at a person or team
-- Social or organisational dynamics around a decision
-- Anything that reads as gossip, venting, or interpersonal commentary
-
-**If anything is flagged**, present it to the author:
-
-```
-⚠️  Content boundary check — author decision required:
-
-Sentence: "<exact sentence>"
-Concern: <one-line reason>
-
-Options:
-  [K] Keep as written
-  [R] Rephrase — describe what to change
-  [D] Delete this sentence
-```
-
-Wait for a decision on each. Apply all decisions before continuing.
-
-**If nothing is flagged** → proceed silently to Step 5c.
-
-**Step 5b removed.** Issue repo cross-check is no longer needed — HANDOFF.md
-no longer contains What's Left or What's Next sections with `#N` references.
-Work tracking moved to `.plan` where `plan_state` validation handles it.
-
-### Step 5c — Suggest and offer to rename the session
-
-**Only prompt if the session has an auto-generated name.** Auto-generated names
-follow a random three-word pattern (e.g. `gleaming-stargazing-newell`,
-`mellow-hopping-simon`). If the session already has a meaningful custom name
-(set by the user earlier in the session) → skip this step silently.
-
-If the session name appears auto-generated, generate a concise descriptive name
-from the session's content — 2–4 words, e.g. "Hortora Design and Naming" or
-"Garden v2 Retrieval Redesign." — and suggest it **after the handover is written
-and committed**:
-
-> **Rename this session?**
->
-> Suggested name: **`<Suggested Name>`**
->
-> Type `/rename <Suggested Name>` to apply it.
-
-**Note:** Do not block writing or committing the handover on the rename.
-The rename is cosmetic — the handover must be committed regardless.
-`/rename` is a Claude Code built-in; the user must type it.
-
-### Step 6 — Commit (required)
-
-Resolve the workspace path via the context script (already run in Path Resolution above), then commit HANDOFF.md to the **current workspace branch**. HANDOFF.md is ephemeral to the work — it lives on the branch because work lives on the branch. Pause/resume preserves it; branch closure discards it. For persistent cross-session notes, use `.notes/NOTES.md`.
-
-Use `WORKSPACE` from the ctx.py output as a concrete string.
-
-```bash
-git -C <Workspace> add HANDOFF.md
-git -C <Workspace> commit -m "docs: session handover"
-```
-
-If on main (quick-fix work or no active branch), this commits to main — which is correct because main IS the branch in that case.
-
-Committing is mandatory. It's what makes git history the archive.
-
-### Step 7 — Session close summary
-
-Run the mechanical summary and print it verbatim:
+### Completion — Progress Summary
 
 ```bash
 python3 work-end/progress_summary.py $WORKSPACE mode=wrap
 ```
 
-**Do not compose your own summary.** The script reads `.close-progress`
-and outputs a deterministic report showing every step's status. Print
-the script's output as-is.
+Print the output verbatim. Do not compose your own summary.
 
 ---
 
----
+## Red Flags — thoughts that mean STOP
 
-## Decision Flow
-
-```mermaid
-flowchart TD
-    Trigger((Session ending))
-    WrapChecklist[Show wrap checklist:\nwrite-content / update-claude-md /\nforage sweep / protocol sweep /\njournal-entry\nmost on by default]
-    UserToggles[User toggles items\nor types 'all' / Enter]
-    GardenSweep[Forage sweep if checked:\ncheck gotchas / techniques /\nundocumented / conventions — all 4 categories]
-    GardenFound{Anything\nworth submitting?}
-    SubmitGarden[Invoke forage CAPTURE\nto write submission]
-    WriteBlog[Invoke write-content\nsingle-entry for this session]
-    UpdateClaude[Invoke update-claude-md\nsync new conventions]
-    CheckHistory[git log --oneline -3\n-- HANDOFF.md]
-    HasPrevious{Previous\nhandover exists?}
-    GetDiff[git diff HEAD -- HANDOFF.md\nidentify unchanged sections]
-    Recall[Recall from context:\nwhat changed, decisions,\nnext step — zero cost]
-    GitStatus[git log --oneline -6\ngit status --short]
-    BuildRefs[ls to locate file paths\ndo not open files]
-    Draft[Write HANDOFF.md:\nchanged sections in full,\nunchanged sections as references]
-    TokenCheck{Over 500 tokens?}
-    Trim[Mark more sections\nas unchanged references]
-    Confirm[Show to user]
-    UserApproves{Approved?}
-    Refine[Adjust]
-    Write[Write HANDOFF.md]
-    Commit[git add HANDOFF.md\ngit commit — required]
-    Done((Done))
-
-    Trigger --> WrapChecklist
-    WrapChecklist --> UserToggles
-    UserToggles --> GardenSweep
-    GardenSweep --> GardenFound
-    GardenFound -->|yes| SubmitGarden
-    GardenFound -->|no| UpdateClaude
-    SubmitGarden --> UpdateClaude
-    UpdateClaude --> WriteBlog
-    WriteBlog --> CheckHistory
-    CheckHistory --> HasPrevious
-    HasPrevious -->|yes| GetDiff
-    HasPrevious -->|no| Recall
-    GetDiff --> Recall
-    Recall --> GitStatus
-    GitStatus --> BuildRefs
-    BuildRefs --> Draft
-    Draft --> TokenCheck
-    TokenCheck -->|yes| Trim
-    Trim --> Draft
-    TokenCheck -->|no| Confirm
-    Confirm --> UserApproves
-    UserApproves -->|yes| Write
-    UserApproves -->|adjust| Refine
-    Refine --> Draft
-    Write --> Commit
-    Commit --> Done
-```
+| Thought | Reality |
+|---------|---------|
+| "I'll just write HANDOFF.md directly" | The orchestrator ensures sweeps run first. Call it. |
+| "The user said wrap, so write the handover" | Wrap = orchestrator loop, not just HANDOFF.md. |
+| "Sweeps aren't needed for a short session" | Session-bound items are lost if skipped. |
+| "I'll skip the orchestrator to save time" | A hook blocks HANDOFF.md commits without it. |
 
 ---
 
 ## Common Pitfalls
 
-| Mistake | Why It's Wrong | Fix |
-|---------|----------------|-----|
-| Restating unchanged context verbatim | Wastes tokens; the previous handover already has it | Write `*Unchanged — git show HEAD~1:HANDOFF.md*` |
-| Skipping the commit | Makes git history useless as an archive | Commit is mandatory, not optional |
-| Loading previous handover to check what's unchanged | Wastes tokens; use `git diff` instead | `git diff HEAD -- HANDOFF.md` shows only what changed |
-| Loading GARDEN.md detail files | Index is enough; details load on demand | Always reference GARDEN.md (index), never sub-files |
-| Copying CLAUDE.md content | Auto-loaded; pure duplication | Omit entirely |
-| Skipping the freshness check | Old handover misleads the next session | `git log -1 --format="%ar" -- HANDOFF.md` before using |
-| Writing "continue work" as next step | Too vague to act on | Be specific — name the file, command, or section |
-| Scanning CLAUDE.md for workspace path when resuming | Multiple CLAUDE.mds are loaded; parent's `**Workspace:**` is found first and points to the wrong repo | Use `git rev-parse --show-toplevel` from CWD — that is always the workspace |
-| Adding work items to HANDOFF.md | Work tracking moved to `.plan` and GitHub issues | HANDOFF.md is session context only — no What's Left, What's Next, or issue references |
+| Mistake | Fix |
+|---------|-----|
+| Skip orchestrator, write HANDOFF.md directly | Call the orchestrator loop — hook blocks commits without it |
+| Restate unchanged context | Write `*Unchanged — git show HEAD~1:HANDOFF.md*` |
+| Skip the commit | Commit is mandatory — the archive mechanism |
+| Load files to reference them | Write the path; next session reads on demand |
+| Copy CLAUDE.md content | Auto-loaded; omit entirely |
+| Write "continue work" as next step | Be specific — name the file, command, or section |
 
 ---
 
 ## Success Criteria
 
-Handover is complete when:
-
-- ✅ Wrap checklist shown and user selections confirmed
-- ✅ Loose ends sweep performed (if checked) — deferred/skipped/missing items captured to `findings.jsonl`
-- ✅ Forage sweep performed — all four categories checked (gotchas, techniques, undocumented, conventions)
-- ✅ Any garden-worthy entries submitted via forage CAPTURE before writing the handover
-- ✅ Protocol sweep performed (if checked) — session scanned for project-specific rules worth formalising; confirmed entries captured and committed
-- ✅ write-content (diary) invoked (if checked) — session diary entry written
-- ✅ update-claude-md invoked (if checked) — CLAUDE.md synced
-- ✅ journal-entry written (if checked) — JOURNAL.md updated; off by default; only applicable on epic branches
-- ✅ Session name offered — user was prompted to `/rename` or acknowledged the session already has a meaningful name
-- ✅ HANDOFF.md exists on the workspace branch
-- ✅ Readable in under 500 tokens
-- ✅ Unchanged sections reference git history, not repeated content
-- ✅ Immediate next step is specific enough to act on without asking
-- ✅ Cross-Module section present only for active blockers with tracked issues; omitted if none or if items are just static dependencies
-- ✅ HANDOFF.md under 200 tokens — no work tracking sections
-- ✅ `.plan` queue displayed on resume (if exists)
-- ✅ References table uses paths only — no file content inline
-- ✅ Nothing from CLAUDE.md is duplicated
-- ✅ arc42 stale scan performed (if ARC42STORIES.MD exists) — stale statuses, resolved blockers, and closed-issue forward refs checked and fixed
-- ✅ User confirmed before writing
-- ✅ Committed to git (required — this is the archive mechanism)
-
-**The test:** Could a fresh Claude reading only CLAUDE.md and HANDOFF.md
-pick up the work in the next message, with git history available for any
-context marked as "unchanged"? If yes — done.
+- Orchestrator loop ran to `ACTION=complete`
+- Sweep steps executed (forage, protocol, write-content, update-claude-md)
+- HANDOFF.md exists, committed, under 200 tokens
+- Unchanged sections reference git history
+- Immediate next step is specific enough to act on
+- Progress summary printed (mechanical, not LLM-composed)
 
 ---
 
 ## Skill Chaining
 
-**Invoked by:** User directly for mid-work session wrap ("create a handover",
-"end of session", "write a handover", "wrap"). NOT invoked after work-end —
-work-end Step 12 handles the full wrap including HANDOFF.md.
+**Invoked by:** User ("wrap", "end of session", "create a handover")
 
-**Invokes:** [`forage`] — forage sweep (Step 2b); [`protocol`] — protocol sweep
-(if checked); [`write-content`] — diary (if checked); [`update-claude-md`] —
-convention sync (if checked); `git commit` directly for HANDOFF.md
+**Invokes:** forage, protocol, write-content, update-claude-md (via orchestrator),
+handlers/handoff_write.md (for HANDOFF.md writing)
 
-**Resume path invokes:** [`work-start`] — when an open branch is detected,
-the resume output directs the user to `/work` which handles branch resumption
-
-**Reads from (surgical, not upfront):**
-- `git diff HEAD -- HANDOFF.md` — what changed from last handover
-- `git log --oneline -6` — recent commits for orientation
-- `ls` on workspace directories — locate paths without reading files
-- `.plan` — open branch detection on resume
-
-**Complements:**
-- `work-end` — branch closure includes full wrap; this skill is for mid-work only
-- `write-content` — narrative context the handover points to
-- `forage` — technical gotcha index the handover references
-- `implementation-doc-sync` — doc-sync handles session-scoped doc updates;
-  handover captures operational context for the next session
-- `work-pause` — different intent: work-pause switches branches mid-session;
-  handover ends the session preserving context for resumption
-- `work-slot` — for epic slots, handover auto-includes an Epic Progress
-  section from .slot
-
-**Does NOT replace:** CLAUDE.md (auto-loaded), `--resume`/`--continue` flags
-(restore conversation history for same-machine continuation)
+**Complements:** work-end (branch closure includes full wrap), work-pause
+(switches branches mid-session, different intent)
