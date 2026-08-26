@@ -125,6 +125,56 @@ class TestContextNoMeta:
         assert data["preconditions"]["meta_exists"]["status"] == "needs_input"
 
 
+class TestStalePlan:
+    """Stale .plan from a different branch is detected."""
+
+    def test_stale_plan_detected(self, tmp_path: Path) -> None:
+        workspace = _init_repo(tmp_path / "workspace")
+        project = _init_repo(tmp_path / "project")
+        _git(workspace, "checkout", "-b", "issue-988-bugfix")
+        _git(project, "checkout", "-b", "issue-988-bugfix")
+        plan = workspace / ".plan"
+        plan.write_text(
+            "# Work Plan\n\n## State\n"
+            "branch: issue-364-old-branch\n"
+            "state: active\n"
+            "covers: 364\n"
+        )
+        _git(workspace, "add", ".plan")
+        _git(workspace, "commit", "-m", "stale plan")
+
+        result = _run_context(workspace, project)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["preconditions"]["meta_exists"]["status"] == "needs_input"
+        assert data["preconditions"]["meta_exists"]["detail"] == "stale-plan"
+
+    def test_stale_plan_infers_issue_from_branch(self, tmp_path: Path) -> None:
+        workspace = _init_repo(tmp_path / "workspace")
+        project = _init_repo(tmp_path / "project")
+        _git(workspace, "checkout", "-b", "issue-988-bugfix")
+        _git(project, "checkout", "-b", "issue-988-bugfix")
+        plan = workspace / ".plan"
+        plan.write_text(
+            "# Work Plan\n\n## State\n"
+            "branch: issue-364-old-branch\n"
+            "state: active\n"
+            "covers: 364\n"
+        )
+        _git(workspace, "add", ".plan")
+        _git(workspace, "commit", "-m", "stale plan")
+
+        result = _run_context(workspace, project)
+        data = json.loads(result.stdout)
+        assert data["context"]["issue"] == "988"
+
+    def test_matching_plan_passes(self, tmp_path: Path) -> None:
+        workspace, project = _create_project_with_branch(tmp_path, "issue-99-test")
+        result = _run_context(workspace, project)
+        data = json.loads(result.stdout)
+        assert data["preconditions"]["meta_exists"]["status"] == "pass"
+
+
 class TestSubdirectoryDirtyTree:
     """git status must be scoped to the workspace subdir, not the whole repo."""
 

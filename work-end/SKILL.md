@@ -118,7 +118,8 @@ Parse the JSON output. Handle preconditions:
 |-------------|--------|--------|
 | `branch_alignment` | `fail` | Hard stop — both repos must be on the same branch |
 | `clean_tree` | `fail` | Hard stop — see DIRTY TREE PROTOCOL below |
-| `meta_exists` | `needs_input` | Graceful degradation: infer issue from branch name, confirm with user |
+| `meta_exists` | `needs_input` (detail: `no-meta`) | Graceful degradation: infer issue from branch name, confirm with user |
+| `meta_exists` | `needs_input` (detail: `stale-plan`) | Stale .plan from a different branch. Remove it, infer issue from current branch name, proceed without lifecycle metadata |
 | `meta_exists` | `pass` | Proceed — read context values from output |
 
 <DIRTY-TREE-PROTOCOL>

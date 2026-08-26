@@ -49,7 +49,7 @@ def check_clean_tree(workspace: str, project: str) -> dict:
     return {"status": "pass"}
 
 
-def check_meta_exists(workspace: str) -> dict:
+def check_meta_exists(workspace: str, current_branch: str = "") -> dict:
     ws = Path(workspace)
     plan_path = ws / ".plan"
     target = plan_path
@@ -72,6 +72,15 @@ def check_meta_exists(workspace: str) -> dict:
         if ":" in line:
             k, _, v = line.partition(":")
             meta_data[k.strip()] = v.strip()
+
+    plan_branch = meta_data.get("branch", "")
+    if current_branch and plan_branch and plan_branch != current_branch:
+        return {
+            "status": "needs_input",
+            "detail": "stale-plan",
+            "stale_branch": plan_branch,
+            "meta": meta_data,
+        }
 
     return {
         "status": "pass",
@@ -148,13 +157,17 @@ def gather_context(workspace: str, project: str) -> dict:
     preconditions["branch_alignment"] = check_branch_alignment(workspace, project)
     preconditions["clean_tree"] = check_clean_tree(workspace, project)
     preconditions["isx_staleness"] = check_isx_staleness(workspace, project)
-    meta_result = check_meta_exists(workspace)
+    current_branch = get_branch(workspace)
+    meta_result = check_meta_exists(workspace, current_branch=current_branch)
     preconditions["meta_exists"] = {
         k: v for k, v in meta_result.items() if k != "meta"
     }
 
-    branch = get_branch(workspace)
+    branch = current_branch
     meta = meta_result.get("meta", {})
+
+    if meta_result.get("detail") == "stale-plan":
+        meta = {}
 
     context = {
         "workspace": workspace,
@@ -167,6 +180,12 @@ def gather_context(workspace: str, project: str) -> dict:
         "design_repo": meta.get("design-repo", ""),
         "state": meta.get("state", ""),
     }
+
+    if not context["issue"] and branch:
+        import re
+        m = re.search(r'issue-(\d+)', branch)
+        if m:
+            context["issue"] = m.group(1)
 
     return {
         "preconditions": preconditions,
