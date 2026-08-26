@@ -404,12 +404,51 @@ If ARC42STORIES.MD exists, scan for stale statuses and offer fixes.
 Suggest a descriptive session name if auto-generated.
 
 **CONTEXT=garden_feedback:**
-Record which garden entries were useful.
-1. Collect all GE-IDs from session context and HANDOFF.md
-2. Assess relevance: HIGHLY_RELEVANT, RELEVANT, PARTIALLY_RELEVANT,
-   NOT_RELEVANT, OUTDATED (requires stack parameter)
-3. Group by outcome, call gardenFeedback once per group
-4. MCP unavailable -> warn once, continue (never block)
+Skeptical review of garden entries retrieved this session. The script is
+the source of truth for what was retrieved — not conversation context.
+
+1. Run the feedback table script:
+   ```bash
+   python3 scripts/garden_feedback_table.py <PROJECT_PATH> hours=4
+   ```
+   Read the output — it lists every GE-ID retrieved from the tracking DB
+   with mechanical flags (version mismatches, missing verified_on, stale
+   last_reviewed).
+
+2. If `NO_ENTRIES=true`: skip silently — no garden entries were retrieved.
+
+3. Present the table with inverted default — all entries default to RELEVANT:
+   ```
+   Garden feedback — N entries retrieved this session
+
+     1.   GE-20260824-c09677  "Stateless re-entrant script pattern"     → RELEVANT
+     2.   GE-20260821-ebba3b  "work-end can stamp without merging"      → RELEVANT
+     3. ⚠️ GE-20260809-96d41c  "gitignore trailing-slash skips symlinks" → RELEVANT
+          verified_on: git 2.43 — project uses git 2.47
+     4.   GE-20260813-f7d73e  "merge-slot needs .phase-a-complete"      → RELEVANT
+
+   Be skeptical — which should NOT go back as RELEVANT?
+   Downgrade any? (e.g. "3 OUTDATED 4 NOT_RELEVANT", or "go" to send all as RELEVANT)
+   ```
+
+4. The LLM's job is to be skeptical about the unflagged entries — find
+   the ones that weren't actually useful. Mechanically flagged entries
+   (version mismatch, stale) are already surfaced; the LLM adds judgment
+   about whether unflagged entries were genuinely used.
+
+5. After user responds, group by outcome and call gardenFeedback:
+   - Entries not downgraded → RELEVANT
+   - User-downgraded entries → the specified outcome (NOT_RELEVANT,
+     PARTIALLY_RELEVANT, OUTDATED)
+   - For OUTDATED: include stack parameter from the script's PROJECT_STACK
+   ```
+   gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT",
+       issueRepo: "<OWNER_REPO>", issueNumber: <ISSUE_N>)
+   gardenFeedback(geIds: "GE-...", outcome: "OUTDATED",
+       stack: "<from PROJECT_STACK>",
+       issueRepo: "<OWNER_REPO>", issueNumber: <ISSUE_N>)
+   ```
+6. MCP unavailable → warn once, continue (never block)
 
 **CONTEXT=notes:**
 Surface most recent date section from $WORKSPACE/.notes/NOTES.md.

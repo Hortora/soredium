@@ -324,38 +324,53 @@ After all checked items complete, continue to Step 1.
 
 #### Step 0g — Garden retrieval feedback
 
-Record retrieval feedback for garden entries used this session, and propagate
-GE-IDs to HANDOFF.md so work-end can make the final judgment on entries from
-earlier sessions.
+Skeptical review of garden entries retrieved this session. The script reads
+from the retrieval tracking DB — no reliance on conversation context.
 
 Non-blocking — if the MCP server is unavailable, skip silently and continue.
 
-1. Review `gardenSearch` results from this session's conversation context.
-   Collect all GE-IDs that appeared in search results.
-2. If no garden entries were retrieved this session, skip to step 5.
-3. For each retrieved GE-ID, assess its relevance to the work so far:
-   - **HIGHLY_RELEVANT** — directly solved a problem or was the key context
-   - **RELEVANT** — useful and informed the work
-   - **PARTIALLY_RELEVANT** — tangentially related but not central
-   - **NOT_RELEVANT** — appeared in results but wasn't useful
-   - **OUTDATED** — entry found the right topic but its advice no longer applies
-     for the project's current stack versions (requires `stack` parameter)
-   - **DEFERRED** — can't judge yet; usefulness depends on how the work concludes
-4. Group GE-IDs by outcome and call `gardenFeedback` once per group
-   (skip DEFERRED — those go to HANDOFF.md):
+1. Run the feedback table script:
+   ```bash
+   python3 scripts/garden_feedback_table.py <PROJECT_PATH> hours=4
+   ```
+   Read the output — it lists every GE-ID retrieved from the tracking DB
+   with mechanical flags (version mismatches, missing verified_on, stale
+   last_reviewed).
+
+2. If `NO_ENTRIES=true`: skip to step 6 (propagate prior GE-IDs only).
+
+3. Present the table with inverted default — all entries default to RELEVANT:
+   ```
+   Garden feedback — N entries retrieved this session
+
+     1.   GE-20260824-c09677  "Stateless re-entrant script pattern"     → RELEVANT
+     2. ⚠️ GE-20260809-96d41c  "gitignore trailing-slash skips symlinks" → RELEVANT
+          verified_on: git 2.43 — project uses git 2.47
+
+   Be skeptical — which should NOT go back as RELEVANT?
+   Downgrade any? (e.g. "2 OUTDATED", or "go" to send all as RELEVANT)
+   ```
+
+4. The LLM's job is to be skeptical about the unflagged entries — find
+   the ones that weren't actually useful. Mechanically flagged entries
+   are already surfaced; the LLM adds judgment about unflagged ones.
+
+5. After user responds, group by outcome and call gardenFeedback:
+   - Entries not downgraded → RELEVANT
+   - User-downgraded entries → the specified outcome
+   - For OUTDATED: include stack parameter from the script's PROJECT_STACK
    ```
    gardenFeedback(geIds: "GE-...|GE-...", outcome: "RELEVANT",
        issueRepo: "<OWNER_REPO>", issueNumber: <ISSUE_N>)
    gardenFeedback(geIds: "GE-...", outcome: "OUTDATED",
-       stack: "quarkus:3.36.1|jdk:26",
+       stack: "<from PROJECT_STACK>",
        issueRepo: "<OWNER_REPO>", issueNumber: <ISSUE_N>)
    ```
-   Always pass `issueRepo` and `issueNumber` from context.
-   Get stack versions from pom.xml, package.json, or CLAUDE.md.
-   If the call fails (MCP unavailable), log a single warning and continue.
-5. Read any existing `## Garden Entries Consulted` section from the current
+   MCP unavailable → warn once, continue.
+
+6. Read any existing `## Garden Entries Consulted` section from the current
    HANDOFF.md (prior sessions may have propagated GE-IDs).
-6. Merge this session's DEFERRED GE-IDs with any propagated ones. Write the
+7. Merge this session's GE-IDs with any propagated ones. Write the
    combined list to HANDOFF.md's `## Garden Entries Consulted` section
    (Step 5 will include it when writing HANDOFF.md):
    ```markdown
