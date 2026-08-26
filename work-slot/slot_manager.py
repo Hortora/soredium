@@ -516,6 +516,19 @@ def _unignore_subdir(ws_clone: Path, subdir_name: str) -> None:
         gitignore.write_text("\n".join(filtered) + "\n" if filtered else "")
 
 
+def install_post_commit_hook(clone_path: Path) -> None:
+    """Install a post-commit hook that pushes to origin after every commit.
+    Prevents data loss when slot clones are destroyed — unpushed commits
+    in git clone --shared live only in the clone's .git/objects/."""
+    hooks_dir = clone_path / ".git" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_file = hooks_dir / "post-commit"
+    if hook_file.exists():
+        return
+    hook_file.write_text("#!/bin/sh\ngit push -u origin HEAD 2>/dev/null || true\n")
+    hook_file.chmod(0o755)
+
+
 def repoint_wksp(repo_worktree: Path, ws_subdir: Path) -> None:
     wksp = repo_worktree / "wksp"
     if wksp.is_symlink() or wksp.exists():
@@ -682,6 +695,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             _symlink_gitignored_assets(repo_path, clone_dest)
             configure_slot_remotes(clone_dest, repo_path)
             configure_update_instead(repo_path)
+            install_post_commit_hook(clone_dest)
 
             gi_changed = setup_slot_repo(clone_dest, m2_dir)
             if gi_changed:
@@ -712,6 +726,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 _exclude_symlinks(ws_slot_dir)
                 configure_slot_remotes(ws_slot_dir, ws_source)
                 configure_update_instead(ws_source)
+                install_post_commit_hook(ws_slot_dir)
                 (ws_slot_dir / ".workspace").touch()
 
                 repoint_wksp(clone_dest, ws_slot_dir)
@@ -720,6 +735,9 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
 
         primary_repo = repos[0]
         primary_wksp = slot_dir / primary_repo / "wksp"
+        if not primary_wksp.is_symlink():
+            print(f"WARN=primary_no_workspace repo={primary_repo}")
+            print("WARN_DETAIL=primary repo has no wksp symlink — .plan scaffold will be skipped")
         if primary_wksp.is_symlink():
             ws_path = primary_wksp.resolve()
             scaffold_script = Path.home() / ".claude" / "skills" / "work-start" / "scaffold.py"
@@ -834,6 +852,7 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
 
     _exclude_symlinks(clone_dest)
     _symlink_gitignored_assets(repo_path, clone_dest)
+    install_post_commit_hook(clone_dest)
     gi_changed = setup_slot_repo(clone_dest, m2_dir)
     if gi_changed:
         run_cmd(["git", "-C", str(clone_dest), "add", ".gitignore"])

@@ -646,6 +646,88 @@ class TestCreateSlot:
                 )
 
 
+class TestCreateSlotPrimaryWorkspace:
+    @patch("slot_manager.run_cmd")
+    def test_warns_when_primary_repo_has_no_workspace(self, mock_cmd, tmp_path, capsys):
+        """When the primary repo has no wksp symlink, create_slot should warn."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+        # No wksp symlink — this is the bug scenario
+
+        mock_cmd.return_value = (0, "", "")
+
+        result = slot_manager.create_slot(
+            family_root=family,
+            repos=["engine"],
+            branch="issue-42-spi",
+            issue="42",
+            issue_repo="casehubio/engine",
+            covers="42",
+            context="Add SPI layer",
+        )
+
+        captured = capsys.readouterr()
+        assert "WARN=primary_no_workspace" in captured.out
+
+    @patch("slot_manager.run_cmd")
+    def test_no_warning_when_primary_has_workspace(self, mock_cmd, tmp_path, capsys):
+        """No warning when primary repo has a wksp symlink."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+
+        mock_cmd.return_value = (0, "", "")
+
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            slot_manager.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-42-spi",
+                issue="42",
+                issue_repo="casehubio/engine",
+                covers="42",
+                context="Add SPI layer",
+            )
+
+        captured = capsys.readouterr()
+        assert "WARN=primary_no_workspace" not in captured.out
+
+    @patch("slot_manager.run_cmd")
+    def test_no_warning_when_only_secondary_has_no_workspace(self, mock_cmd, tmp_path, capsys):
+        """When only a secondary repo lacks wksp, no primary warning is emitted."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+        init_repo(family / "iot")
+        # iot has no wksp — but it's secondary, not primary
+
+        mock_cmd.return_value = (0, "", "")
+
+        with patch("slot_manager.resolve_workspace_source") as mock_resolve:
+            mock_resolve.side_effect = [
+                (ws_engine, "wsp-casehub-engine"),
+                None,  # iot has no workspace
+            ]
+            slot_manager.create_slot(
+                family_root=family,
+                repos=["engine", "iot"],
+                branch="issue-42-spi",
+                issue="42",
+                issue_repo="casehubio/engine",
+                covers="42",
+                context="Cross-repo work",
+            )
+
+        captured = capsys.readouterr()
+        assert "WARN=primary_no_workspace" not in captured.out
+
+
 class TestCreateSlotIsx:
     @patch("slot_manager.run_cmd")
     def test_create_isx_slot_preflight_fails(self, mock_cmd, tmp_path):
@@ -3977,3 +4059,70 @@ class TestListSlotsGhostFilter:
         nums = [s["number"] for s in slots]
         assert 1 in nums
         assert 2 not in nums
+
+
+class TestInstallPostCommitHook:
+    def test_installs_hook_in_clone(self, tmp_path):
+        """install_post_commit_hook creates an executable post-commit hook."""
+        clone = init_repo(tmp_path / "engine")
+        slot_manager.install_post_commit_hook(clone)
+        hook = clone / ".git" / "hooks" / "post-commit"
+        assert hook.exists()
+        assert os.access(hook, os.X_OK)
+        content = hook.read_text()
+        assert "git push" in content
+
+    def test_hook_pushes_to_origin(self, tmp_path):
+        """The hook content pushes to origin HEAD."""
+        clone = init_repo(tmp_path / "engine")
+        slot_manager.install_post_commit_hook(clone)
+        hook = clone / ".git" / "hooks" / "post-commit"
+        content = hook.read_text()
+        assert "origin" in content
+        assert "HEAD" in content
+
+    def test_hook_is_idempotent(self, tmp_path):
+        """Calling install twice doesn't duplicate or corrupt the hook."""
+        clone = init_repo(tmp_path / "engine")
+        slot_manager.install_post_commit_hook(clone)
+        content1 = (clone / ".git" / "hooks" / "post-commit").read_text()
+        slot_manager.install_post_commit_hook(clone)
+        content2 = (clone / ".git" / "hooks" / "post-commit").read_text()
+        assert content1 == content2
+
+    def test_hook_does_not_clobber_existing(self, tmp_path):
+        """If a post-commit hook already exists, don't overwrite it."""
+        clone = init_repo(tmp_path / "engine")
+        hooks_dir = clone / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        existing_hook = hooks_dir / "post-commit"
+        existing_hook.write_text("#!/bin/sh\necho custom\n")
+        existing_hook.chmod(0o755)
+        slot_manager.install_post_commit_hook(clone)
+        assert existing_hook.read_text() == "#!/bin/sh\necho custom\n"
+
+
+class TestCreateSlotInstallsHook:
+    @patch("slot_manager.run_cmd")
+    def test_create_slot_installs_post_commit_hook(self, mock_cmd, tmp_path):
+        """create_slot installs post-commit push hook in each repo clone."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        init_repo(family / "engine")
+
+        mock_cmd.return_value = (0, "", "")
+
+        result = slot_manager.create_slot(
+            family_root=family,
+            repos=["engine"],
+            branch="issue-42-spi",
+            issue="42",
+            issue_repo="casehubio/engine",
+            covers="42",
+            context="Test hook install",
+        )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+        hook = slot_dir / "engine" / ".git" / "hooks" / "post-commit"
+        assert hook.exists()
+        assert "git push" in hook.read_text()
