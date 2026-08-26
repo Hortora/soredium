@@ -3770,3 +3770,55 @@ class TestAddRepoWorkspaceRemotes:
         assert len(ws_calls) >= 1, (
             "add_repo did not call configure_slot_remotes on workspace clone"
         )
+
+
+class TestFindSlotByBranch:
+    def test_finds_match(self, tmp_path):
+        slots_dir = tmp_path / "slots" / "1"
+        slots_dir.mkdir(parents=True)
+        (slots_dir / ".slot").write_text("# Slot 1 — issue-42-feature\n\n## Repos\n- myrepo\n")
+        result = slot_manager.find_slot_by_branch(tmp_path, "issue-42-feature")
+        assert result is not None
+        assert result == (1, False)
+
+    def test_returns_landed_flag(self, tmp_path):
+        slots_dir = tmp_path / "slots" / "1"
+        slots_dir.mkdir(parents=True)
+        (slots_dir / ".slot").write_text("# Slot 1 — issue-42-feature\n\n## Repos\n- myrepo\n")
+        (slots_dir / ".landed").write_text("landed_shas=myrepo:abc123\n")
+        result = slot_manager.find_slot_by_branch(tmp_path, "issue-42-feature")
+        assert result == (1, True)
+
+    def test_no_match(self, tmp_path):
+        slots_dir = tmp_path / "slots" / "1"
+        slots_dir.mkdir(parents=True)
+        (slots_dir / ".slot").write_text("# Slot 1 — issue-42-feature\n\n## Repos\n- myrepo\n")
+        assert slot_manager.find_slot_by_branch(tmp_path, "other-branch") is None
+
+    def test_ignores_attic(self, tmp_path):
+        attic = tmp_path / "slots" / "attic" / "1"
+        attic.mkdir(parents=True)
+        (attic / ".slot").write_text("# Slot 1 — issue-42-feature\n\n## Repos\n- myrepo\n")
+        assert slot_manager.find_slot_by_branch(tmp_path, "issue-42-feature") is None
+
+    def test_ignores_ghost_dirs(self, tmp_path):
+        slots_dir = tmp_path / "slots" / "1"
+        slots_dir.mkdir(parents=True)
+        assert slot_manager.find_slot_by_branch(tmp_path, "anything") is None
+
+
+class TestListSlotsGhostFilter:
+    def test_skips_ghost_directories(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(slot_manager, "_wl", None)
+        real = tmp_path / "slots" / "1"
+        real.mkdir(parents=True)
+        (real / ".slot").write_text("# Slot 1 — issue-1-real\n\n## Repos\n- myrepo\n")
+        init_repo(real / "myrepo")
+        ghost = tmp_path / "slots" / "2"
+        ghost.mkdir(parents=True)
+        (ghost / "somedir").mkdir()
+
+        slots = slot_manager.list_slots(tmp_path)
+        nums = [s["number"] for s in slots]
+        assert 1 in nums
+        assert 2 not in nums

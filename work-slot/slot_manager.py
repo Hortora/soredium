@@ -57,6 +57,10 @@ SLOT_DIR_NAME = "slots"
 LEGACY_SLOT_DIR_NAME = "worktrees"
 
 
+class SlotCreationError(Exception):
+    pass
+
+
 def _resolve_slots_dir(family_root: Path) -> Path:
     """Return the slots directory, preferring slots/ over legacy worktrees/."""
     new = family_root / SLOT_DIR_NAME
@@ -66,6 +70,23 @@ def _resolve_slots_dir(family_root: Path) -> Path:
     if old.exists():
         return old
     return new
+
+
+def find_slot_by_branch(family_root: Path, branch: str) -> tuple[int, bool] | None:
+    """Check if an active slot already uses this branch name.
+    Returns (slot_number, is_landed) or None."""
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        slots_dir = family_root / dir_name
+        if not slots_dir.exists():
+            continue
+        for d in sorted(slots_dir.iterdir()):
+            if not d.is_dir() or not d.name.isdigit() or d.name == "attic":
+                continue
+            info = parse_slot_md(d)
+            if info.get("branch") == branch:
+                landed = (d / ".landed").exists()
+                return int(d.name), landed
+    return None
 
 
 def _resolve_slot_dir_for_number(family_root: Path, slot_num: int) -> Path:
@@ -1644,6 +1665,8 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
 
         for d in sorted(slots_dir.iterdir()):
             if not d.is_dir() or not d.name.isdigit():
+                continue
+            if not (d / ".slot").exists():
                 continue
             num = int(d.name)
             if num in archived_nums or num in seen:
