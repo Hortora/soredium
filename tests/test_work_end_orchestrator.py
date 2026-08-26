@@ -259,22 +259,86 @@ class TestRetry:
 class TestSkipStep:
     """skip_step= argument marks a step as skipped."""
 
-    def test_skip_step_marks_skipped(self, tmp_path):
+    def _run(self, tmp_path, **extra):
         from work_end_orchestrator import run_orchestrator
-        from close_progress import update_close_progress, read_close_progress
-        update_close_progress(tmp_path, "review", "done")
-        update_close_progress(tmp_path, "sweep_config", "done")
-        update_close_progress(tmp_path, "sweep_selected", "forage,write_content")
-        run_orchestrator({
+        args = {
             "workspace": str(tmp_path),
             "project": str(tmp_path / "project"),
             "branch": "issue-271-test",
             "base_branch": "main",
             "meta_state": "closing:review",
-            "skip_step": "forage",
-        })
+        }
+        args.update(extra)
+        return run_orchestrator(args)
+
+    def test_skip_step_marks_skipped(self, tmp_path):
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage,write_content")
+        self._run(tmp_path, skip_step="forage")
         progress = read_close_progress(tmp_path)
         assert progress.get("forage") == "skipped"
+
+    def test_skip_matches_last_yielded(self, tmp_path):
+        """Skip succeeds when skip_step matches what was last yielded."""
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage,write_content")
+        # First call yields forage (sets last_yielded=forage)
+        result = self._run(tmp_path)
+        assert result["ACTION"] == "forage"
+        # Skip forage — matches last_yielded
+        result = self._run(tmp_path, skip_step="forage")
+        assert result.get("ERROR") != "invalid_skip"
+        progress = read_close_progress(tmp_path)
+        assert progress.get("forage") == "skipped"
+
+    def test_skip_rejects_non_yielded_step(self, tmp_path):
+        """Skip fails when skip_step doesn't match last_yielded."""
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage,write_content")
+        # Yield forage (sets last_yielded=forage)
+        result = self._run(tmp_path)
+        assert result["ACTION"] == "forage"
+        # Try to skip write_content — doesn't match last_yielded
+        result = self._run(tmp_path, skip_step="write_content")
+        assert result.get("ERROR") == "invalid_skip"
+        assert result.get("LAST_YIELDED") == "forage"
+
+    def test_cannot_skip_ahead_past_yielded_step(self, tmp_path):
+        """Cannot skip write_content when protocol was just yielded."""
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage,protocol,write_content")
+        # Yield forage
+        result = self._run(tmp_path)
+        assert result["ACTION"] == "forage"
+        # Skip forage — orchestrator yields protocol next (last_yielded=protocol)
+        result = self._run(tmp_path, skip_step="forage")
+        assert result["ACTION"] == "protocol"
+        # Try to skip write_content when protocol was just yielded — blocked
+        result = self._run(tmp_path, skip_step="write_content")
+        assert result.get("ERROR") == "invalid_skip"
+        assert result.get("LAST_YIELDED") == "protocol"
+
+    def test_step_done_allows_next_step_to_yield(self, tmp_path):
+        """step_done advances the sequence; next yield overwrites last_yielded."""
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage,write_content")
+        # Yield forage
+        result = self._run(tmp_path)
+        assert result["ACTION"] == "forage"
+        # Complete forage via step_done
+        result = self._run(tmp_path, step_done="forage")
+        # Should yield write_content next
+        assert result["ACTION"] == "write_content"
 
 
 class TestIntegrationBranchMode:

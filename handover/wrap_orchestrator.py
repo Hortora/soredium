@@ -22,7 +22,7 @@ _work_end = Path(__file__).resolve().parent.parent / "work-end"
 sys.path.insert(0, str(_work_end))
 
 from close_progress import read_close_progress, update_close_progress
-from orchestrator_engine import run_loop, log_call
+from orchestrator_engine import run_loop, log_call, validate_skip, apply_step_done
 
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
@@ -140,18 +140,12 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     has_plan = args.get("has_plan", "no") == "yes"
 
     if args.get("skip_step"):
-        step = args["skip_step"]
-        update_close_progress(workspace, step, "skipped")
-        attempt_key = f"{step}_attempt"
-        progress = read_close_progress(workspace)
-        if attempt_key in progress:
-            update_close_progress(workspace, attempt_key, "0")
+        err = validate_skip(workspace, args["skip_step"])
+        if err:
+            return err
 
     if args.get("step_done"):
-        step = args["step_done"]
-        update_close_progress(workspace, step, "done")
-        if args.get("produced"):
-            update_close_progress(workspace, f"{step}_produced", args["produced"])
+        apply_step_done(workspace, args["step_done"], args.get("produced"))
 
     if args.get("sweep_selected") is not None:
         selected = args["sweep_selected"]

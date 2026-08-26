@@ -122,16 +122,55 @@ class TestWrapSweepConfig:
 
 
 class TestWrapSkipStep:
-    def test_skip_marks_step_done(self, tmp_path):
-        wo.run_orchestrator({
+    def _run(self, tmp_path, **extra):
+        args = {
             "workspace": str(tmp_path),
             "project": str(tmp_path),
             "branch": "issue-42-test",
-            "skip_step": "loose_ends",
             "dry_run": "yes",
-        })
+        }
+        args.update(extra)
+        return wo.run_orchestrator(args)
+
+    def test_skip_marks_step_done(self, tmp_path):
+        self._run(tmp_path, skip_step="loose_ends")
         progress = read_close_progress(tmp_path)
         assert progress.get("loose_ends") == "skipped"
+
+    def test_skip_rejects_non_yielded_step(self, tmp_path):
+        """Cannot skip a step that hasn't been yielded."""
+        write_close_progress(tmp_path, {
+            "loose_ends": "done",
+            "epic_hygiene": "done",
+            "wrap_sweep_config": "done",
+            "wrap_sweep_selected": "forage,write_content",
+        })
+        # Yield forage (sets last_yielded=forage)
+        result = self._run(tmp_path)
+        assert result["ACTION"] == "forage"
+        # Try to skip write_content — blocked
+        result = self._run(tmp_path, skip_step="write_content")
+        assert result.get("ERROR") == "invalid_skip"
+        assert result.get("LAST_YIELDED") == "forage"
+
+    def test_cannot_skip_ahead_past_yielded_step(self, tmp_path):
+        """Cannot skip a later step when an earlier one was just yielded."""
+        write_close_progress(tmp_path, {
+            "loose_ends": "done",
+            "epic_hygiene": "done",
+            "wrap_sweep_config": "done",
+            "wrap_sweep_selected": "forage,protocol,write_content",
+        })
+        # Yield forage
+        result = self._run(tmp_path)
+        assert result["ACTION"] == "forage"
+        # Skip forage — orchestrator yields protocol next
+        result = self._run(tmp_path, skip_step="forage")
+        assert result["ACTION"] == "protocol"
+        # Try to skip write_content when protocol was just yielded — blocked
+        result = self._run(tmp_path, skip_step="write_content")
+        assert result.get("ERROR") == "invalid_skip"
+        assert result.get("LAST_YIELDED") == "protocol"
 
 
 class TestWrapComplete:

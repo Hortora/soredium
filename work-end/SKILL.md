@@ -459,6 +459,24 @@ and commit to orphan notes branch.
 Judgment step failed after 3 retries. Present STEP, ATTEMPTS, REASON.
 Options: skip / retry / abort.
 
+<SKIP-ISOLATION>
+**Skipping is scoped to the failed step ONLY.** A failure in one sweep step
+(e.g. forage) does not justify skipping other sweep steps (e.g. write_content).
+Each step is independent — skip only the step named in STEP=.
+
+The orchestrator enforces this: `skip_step=` is validated against the last
+yielded step. Skipping a step that was not yielded returns ERROR=invalid_skip.
+
+**When you may pass skip_step:**
+- The orchestrator returned `CONTEXT=step_failed` for that specific STEP
+- The user explicitly asked to skip that specific step
+
+**When you may NOT pass skip_step:**
+- A different step failed and you want to "skip the rest of the sweep"
+- You think the step is unnecessary based on session context
+- You want to save time or tokens
+</SKIP-ISOLATION>
+
 **CONTEXT=rebase_conflict:**
 Rebase conflict needs manual resolution. User resolves, then pass
 conflict_resolved=yes to the orchestrator.

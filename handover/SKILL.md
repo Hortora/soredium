@@ -296,6 +296,24 @@ The user may skip them explicitly via `skip_step=`, but the orchestrator
 never offers "defer" as an option.
 </SESSION-BOUND-ITEMS>
 
+<SKIP-ISOLATION>
+**Skipping is scoped to the failed step ONLY.** A failure in one sweep step
+(e.g. forage) does not justify skipping other sweep steps (e.g. write_content).
+Each step is independent — skip only the step named in STEP=.
+
+The orchestrator enforces this: `skip_step=` is validated against the last
+yielded step. Skipping a step that was not yielded returns ERROR=invalid_skip.
+
+**When you may pass skip_step:**
+- The orchestrator returned `CONTEXT=step_failed` for that specific STEP
+- The user explicitly asked to skip that specific step
+
+**When you may NOT pass skip_step:**
+- A different step failed and you want to "skip the rest of the sweep"
+- You think the step is unnecessary based on session context
+- You want to save time or tokens
+</SKIP-ISOLATION>
+
 **Garden feedback handler** — same as work-end: runs `garden_feedback_table.py`,
 presents inverted-default table with skeptical framing. See work-end
 `CONTEXT=garden_feedback` for the full handler specification.

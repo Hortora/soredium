@@ -78,6 +78,7 @@ def _yield_judgment(step_name: str, workspace: Path,
     attempt = int(progress.get(attempt_key, "0")) + 1
 
     if attempt > MAX_JUDGMENT_RETRIES:
+        update_close_progress(workspace, "last_yielded", step_name)
         return {
             "ACTION": "user_input",
             "CONTEXT": "step_failed",
@@ -87,6 +88,7 @@ def _yield_judgment(step_name: str, workspace: Path,
         }
 
     update_close_progress(workspace, attempt_key, str(attempt))
+    update_close_progress(workspace, "last_yielded", step_name)
     result = {"ACTION": step_name}
     result.update(context)
     return result
@@ -98,6 +100,7 @@ def _yield_user_input(step_name: str, workspace: Path,
     attempt_key = f"{step_name}_attempt"
     attempt = int(progress.get(attempt_key, "0")) + 1
     if attempt > MAX_JUDGMENT_RETRIES:
+        update_close_progress(workspace, "last_yielded", step_name)
         return {
             "ACTION": "user_input",
             "CONTEXT": "step_failed",
@@ -106,7 +109,40 @@ def _yield_user_input(step_name: str, workspace: Path,
             "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
         }
     update_close_progress(workspace, attempt_key, str(attempt))
+    update_close_progress(workspace, "last_yielded", step_name)
     return {"ACTION": "user_input", **context}
+
+
+def validate_skip(workspace: Path, step: str) -> dict[str, str] | None:
+    """Validate skip_step against last_yielded. Returns error dict or None.
+
+    last_yielded is NOT cleared here — the next yield overwrites it.
+    This prevents the LLM from skipping multiple steps in sequence
+    without the orchestrator yielding each one first.
+    """
+    from close_progress import read_close_progress
+    progress = read_close_progress(workspace)
+    last = progress.get("last_yielded", "")
+    if last and step != last:
+        return {
+            "ACTION": "error",
+            "ERROR": "invalid_skip",
+            "STEP": step,
+            "LAST_YIELDED": last,
+            "REASON": f"Cannot skip '{step}' — only the last yielded step '{last}' can be skipped",
+        }
+    update_close_progress(workspace, step, "skipped")
+    attempt_key = f"{step}_attempt"
+    if attempt_key in progress:
+        update_close_progress(workspace, attempt_key, "0")
+    return None
+
+
+def apply_step_done(workspace: Path, step: str, produced: str | None = None) -> None:
+    """Mark a step done. last_yielded is NOT cleared — the next yield overwrites it."""
+    update_close_progress(workspace, step, "done")
+    if produced:
+        update_close_progress(workspace, f"{step}_produced", produced)
 
 
 def _make_error_result(step_key: str, attempt: int,
