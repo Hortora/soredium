@@ -1766,6 +1766,7 @@ def _map_db_to_disk_state(db_state: str) -> str:
     mapping = {
         "active": "active",
         "pending": "active",
+        "failed": "failed",
         "ready": "ready to land",
         "landed": "landed",
         "archived": "archived",

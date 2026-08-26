@@ -74,6 +74,8 @@ def _states_compatible(db_state: str, disk_state: str) -> bool:
         return True
     if db_state == "pending" and disk_state == "active":
         return True
+    if db_state == "failed":
+        return True
     if db_state == "ready" and disk_state in ("active", "ready"):
         return True
     return False
@@ -208,12 +210,21 @@ def strategy(divergences: list[dict]) -> list[dict]:
     for d in divergences:
         cls = d["class"]
         if cls == "ghost":
+            contents = d.get("disk_contents", [])
+            has_content = len(contents) > 0
+            db_state = d.get("db_state")
+            content_summary = "empty"
+            if has_content:
+                content_summary = f"contains: {', '.join(contents)}"
+                if db_state:
+                    content_summary += f", DB state: {db_state}"
             actions.append({
                 "slot": d["slot"],
                 "action": "quarantine",
                 "source": d["disk_path"],
-                "detail": f"move to quarantine/ — contents: {d.get('disk_contents', [])}",
-                "risk": "low",
+                "content": content_summary,
+                "detail": f"move to quarantine/ — {content_summary}",
+                "risk": "medium" if has_content else "low",
             })
         elif cls == "db-only":
             actions.append({
@@ -258,6 +269,8 @@ def execute(actions: list[dict], family_root: Path) -> list[dict]:
                                     "status": "skipped", "detail": "quarantine dest exists"})
                     continue
                 shutil.move(a["source"], str(dest))
+                if relocate_claude_projects:
+                    relocate_claude_projects(Path(a["source"]), dest)
                 results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
 
             elif a["action"] == "remove_db_record":

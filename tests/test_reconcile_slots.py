@@ -350,3 +350,69 @@ class TestExecuteGitHubActions:
         }]
         results = reconcile_slots.execute_github_actions(findings, family)
         assert results[0]["status"] == "needs-review"
+
+
+class TestQuarantineContentCheck:
+    def test_ghost_with_contents_reported_in_strategy(self, tmp_path):
+        divergences = [{
+            "slot": 54,
+            "class": "ghost",
+            "disk_path": str(tmp_path / "slots" / "54"),
+            "disk_contents": ["myrepo"],
+            "db_state": None,
+            "detail": "directory with no .slot file",
+        }]
+        actions = reconcile_slots.strategy(divergences)
+        assert len(actions) == 1
+        assert actions[0]["action"] == "quarantine"
+        assert "content" in actions[0]
+        assert "myrepo" in actions[0]["content"]
+
+    def test_empty_ghost_reported_as_empty(self, tmp_path):
+        divergences = [{
+            "slot": 55,
+            "class": "ghost",
+            "disk_path": str(tmp_path / "slots" / "55"),
+            "disk_contents": [],
+            "db_state": None,
+            "detail": "directory with no .slot file",
+        }]
+        actions = reconcile_slots.strategy(divergences)
+        assert len(actions) == 1
+        assert actions[0]["content"] == "empty"
+
+    def test_ghost_with_db_state_reported(self, tmp_path):
+        divergences = [{
+            "slot": 56,
+            "class": "ghost",
+            "disk_path": str(tmp_path / "slots" / "56"),
+            "disk_contents": ["engine"],
+            "db_state": "pending",
+            "detail": "directory with no .slot file",
+        }]
+        actions = reconcile_slots.strategy(divergences)
+        assert "pending" in actions[0]["content"]
+
+
+class TestQuarantineClaudeProjects:
+    def test_relocates_claude_projects(self, tmp_path, monkeypatch):
+        family = tmp_path / "family"
+        ghost_dir = family / "slots" / "99"
+        ghost_dir.mkdir(parents=True)
+
+        calls = []
+        monkeypatch.setattr(reconcile_slots, "relocate_claude_projects",
+                            lambda src, dst: calls.append((str(src), str(dst))) or 0)
+
+        actions = [{
+            "slot": 99,
+            "action": "quarantine",
+            "source": str(ghost_dir),
+            "content": "empty",
+            "detail": "test",
+            "risk": "low",
+        }]
+        results = reconcile_slots.execute(actions, family)
+        assert len(results) == 1
+        assert results[0]["status"] == "done"
+        assert len(calls) == 1
