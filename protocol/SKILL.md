@@ -241,24 +241,25 @@ Protocol sweep found N items:
   3. [enrich] externalised-scripts-require-tests — add violation_hint for recovery scripts
 ```
 
-Then use `AskUserQuestion` with `multiSelect: true` — all items as options:
+Then use `AskUserQuestion` — AskUserQuestion has a hard limit of 4 options,
+so present fixed choices (not one-per-candidate):
 
 ```python
 AskUserQuestion(questions=[{
     "question": "Which protocols to capture?",
     "header": "Protocols",
     "options": [
-        {"label": "Accept all", "description": "Capture all N items (default)"},
-        {"label": "[new] Archive must verify...", "description": "Standing rule from this session"},
-        {"label": "[enrich] externalised-scripts...", "description": "Existing protocol needs update"},
+        {"label": "Accept all (Recommended)", "description": "Capture all N items"},
+        {"label": "Select subset", "description": "List numbers to include (e.g. '1,3')"},
+        {"label": "Skip all", "description": "Nothing worth formalising"},
     ],
-    "multiSelect": true,
+    "multiSelect": false,
 }])
 ```
 
-- **Accept all selected** → capture everything, no further prompts
-- **Subset selected** → capture only selected items
-- **None selected** → skip sweep entirely
+- **Accept all** → capture everything, no further prompts
+- **Select subset** or **Other** → user lists numbers, capture only those
+- **Skip all** → skip sweep entirely
 
 **One prompt. No per-item confirmation.**
 

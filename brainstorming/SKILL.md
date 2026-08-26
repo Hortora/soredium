@@ -514,18 +514,20 @@ AskUserQuestion(questions=[{
     "header": "Review",
     "options": [
         {"label": "Skip", "description": "No review needed"},
-        {"label": "Review it yourself", "description": "Self-review — read and suggest changes before proceeding"},
-        {"label": "Light", "description": "~2 min — single pass"},
-        {"label": "Standard", "description": "~5 min — 2-3 rounds"},
+        {"label": "Light", "description": "~2 min — single pass, self-review available via Other"},
+        {"label": "Standard (Recommended)", "description": "~5 min — 2-3 rounds"},
         {"label": "Adversarial", "description": "~12 min — 4-6 rounds"},
     ],
     "multiSelect": false,
 }])
-# Append "(Recommended)" to the label of the recommended option
 ```
 
-When cross-module complexity is detected, add ordered variants as
-additional options (e.g., "Standard, ordered").
+If the user selects Other and asks for self-review: re-read the spec,
+propose changes, apply on confirmation, then re-present the depth prompt.
+
+When cross-module complexity is detected, note "ordered variant available
+via Other" in the Standard/Adversarial descriptions — do NOT add extra
+options (AskUserQuestion hard limit: 4 options max).
 
 3. If "Review it yourself": re-read the spec, propose changes, apply
    on confirmation, then re-present this prompt. Loop until the user

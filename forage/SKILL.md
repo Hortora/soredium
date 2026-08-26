@@ -428,25 +428,24 @@ Sweep found N items:
   4. [convention] Review outputs to ~/reviews/ not ~/adr/ — score 7/15
 ```
 
-Then use `AskUserQuestion` with `multiSelect: true` — all items as options
-(pre-selected by default). The user deselects any they don't want:
+Then use `AskUserQuestion` — AskUserQuestion has a hard limit of 4 options,
+so present fixed choices (not one-per-candidate):
 
 ```python
 AskUserQuestion(questions=[{
     "question": "Which items to capture?",
     "header": "Sweep",
     "options": [
-        {"label": "Accept all", "description": "Capture all N items (default)"},
-        {"label": "[gotcha] Silent push failure...", "description": "Score 12/15"},
-        {"label": "[technique] Boundary-aware path matching...", "description": "Score 9/15"},
-        # ... one per candidate
+        {"label": "Accept all (Recommended)", "description": "Capture all N items"},
+        {"label": "Select subset", "description": "List numbers to include (e.g. '1,3')"},
+        {"label": "Skip all", "description": "Nothing garden-worthy"},
     ],
-    "multiSelect": true,
+    "multiSelect": false,
 }])
 ```
 
-- **Accept all selected** → capture everything, no further prompts
-- **Subset selected** → capture only selected items
+- **Accept all** → capture everything, no further prompts
+- **Select subset** or **Other** → user lists numbers, capture only those
 - **None selected** → skip sweep entirely
 
 **One prompt. No per-item confirmation.**
