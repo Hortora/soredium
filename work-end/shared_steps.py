@@ -21,6 +21,7 @@ class StepDef:
     script_fn: Callable | None = None
     skip_fn: Callable | None = None
     action_context_fn: Callable | None = None
+    verify_fn: Callable | None = None
     from_state: str | None = None
     to_state: str | None = None
     event: str | None = None

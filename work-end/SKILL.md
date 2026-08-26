@@ -28,6 +28,18 @@ default to ON in the Sweep. They catch convention drift.
 (forage SWEEP, write-content) are permanently lost if the session ends without
 them. All other steps are Python scripts that consume no meaningful context.
 Execute the full sequence every time. Session length is not a factor.
+
+**Orchestrator errors are hard stops.** When the orchestrator returns
+`ERROR=`, STOP. Report the error to the user. Do NOT edit `.close-progress`
+directly. Do NOT manually execute the step the orchestrator would have run.
+Do NOT work around the error by skipping steps. Manual workarounds miss
+side effects (markers, DB state, cross-repo cleanup) that the orchestrator
+manages. Fix the root cause or escalate — never improvise.
+
+**Postcondition verification is enforced.** Review sub-steps require
+`produced=N` (finding count, 0 if clean). The forcing function verifies
+no open findings remain. The orchestrator rejects `step_done` if
+verification fails — this is not a suggestion, it is enforcement.
 </HARD-GATE>
 
 ### Red Flags — thoughts that mean STOP
@@ -39,6 +51,9 @@ Execute the full sequence every time. Session length is not a factor.
 | "I'll promote artifacts manually" | Run close_artifacts.py. The verification gate catches you. |
 | "I'd recommend skipping the sweep" | Present defaults ON. The user decides. |
 | "Session is getting long" | Session length is never a reason to skip session-bound items. |
+| "The orchestrator crashed, I'll do it manually" | Manual steps miss side effects. Fix the root cause or STOP. |
+| "I'll edit .close-progress to unstick it" | State machine violation. The orchestrator owns its state. |
+| "Code review was clean so I'll skip branch audit" | Each review sub-step is independent. Clean code review ≠ clean conformance. |
 
 ---
 

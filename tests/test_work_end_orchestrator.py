@@ -212,6 +212,113 @@ class TestSweepConfigGuard:
         assert result["ACTION"] == "forage"
 
 
+class TestPostconditionVerification:
+    """verify_fn rejects step_done when postconditions are not met."""
+
+    def _run(self, tmp_path, **extra):
+        from work_end_orchestrator import run_orchestrator
+        args = {
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        }
+        args.update(extra)
+        return run_orchestrator(args)
+
+    def test_code_review_without_produced_rejected(self, tmp_path):
+        result = self._run(tmp_path, step_done="code_review")
+        assert result["ERROR"] == "postcondition_failed"
+        assert result["STEP"] == "code_review"
+        assert "produced" in result["REASON"]
+
+    def test_code_review_with_produced_zero_accepted(self, tmp_path):
+        result = self._run(tmp_path, step_done="code_review", produced="0")
+        assert result.get("ERROR") != "postcondition_failed"
+
+    def test_branch_audit_without_produced_rejected(self, tmp_path):
+        result = self._run(tmp_path, step_done="branch_audit_conformance")
+        assert result["ERROR"] == "postcondition_failed"
+
+    def test_branch_audit_with_produced_accepted(self, tmp_path):
+        result = self._run(tmp_path, step_done="branch_audit_conformance", produced="3")
+        assert result.get("ERROR") != "postcondition_failed"
+
+    def test_forcing_function_with_open_findings_rejected(self, tmp_path):
+        import json
+        audit = tmp_path / ".audit"
+        audit.mkdir()
+        finding = {"status": "open", "detail": "test bug", "check": "t", "branch": "t"}
+        (audit / "findings.jsonl").write_text(json.dumps(finding) + "\n")
+        result = self._run(tmp_path, step_done="forcing_function")
+        assert result["ERROR"] == "postcondition_failed"
+        assert "open" in result["REASON"].lower()
+
+    def test_forcing_function_all_resolved_accepted(self, tmp_path):
+        import json
+        audit = tmp_path / ".audit"
+        audit.mkdir()
+        finding = {"status": "resolved", "detail": "fixed", "check": "t", "branch": "t"}
+        (audit / "findings.jsonl").write_text(json.dumps(finding) + "\n")
+        result = self._run(tmp_path, step_done="forcing_function")
+        assert result.get("ERROR") != "postcondition_failed"
+
+    def test_unverified_step_accepted_without_produced(self, tmp_path):
+        result = self._run(tmp_path, step_done="trajectory")
+        assert result.get("ERROR") != "postcondition_failed"
+
+
+class TestBranchScoping:
+    """Progress is scoped to current branch — stale branch progress discarded."""
+
+    def test_mismatched_branch_resets_progress(self, tmp_path):
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "_branch", "issue-100-old")
+        update_close_progress(tmp_path, "code_review", "done")
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-new",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("_branch") == "issue-271-new"
+        assert "code_review" not in progress or progress.get("code_review") != "done"
+
+    def test_matching_branch_preserves_progress(self, tmp_path):
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "_branch", "issue-271-test")
+        update_close_progress(tmp_path, "code_review", "done")
+        update_close_progress(tmp_path, "code_review_produced", "0")
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("code_review") == "done"
+
+    def test_branch_written_on_first_use(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from close_progress import read_close_progress
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("_branch") == "issue-271-test"
+
+
 class TestMainMode:
     """Main mode skips rebase, squash, stamp-related steps."""
 

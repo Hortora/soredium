@@ -200,6 +200,7 @@ class StepDef:
     script_fn: Callable | None = None
     skip_fn: Callable | None = None
     action_context_fn: Callable | None = None
+    verify_fn: Callable | None = None
     from_state: str | None = None
     to_state: str | None = None
     event: str | None = None
@@ -638,8 +639,7 @@ def _forcing_function_context(ctx):
     if findings_path.exists():
         for line in findings_path.read_text().splitlines():
             try:
-                import json as _json
-                entry = _json.loads(line)
+                entry = json.loads(line)
                 if entry.get("status", "open") == "open":
                     count += 1
             except (json.JSONDecodeError, ValueError):
@@ -647,24 +647,57 @@ def _forcing_function_context(ctx):
     return {"CONTEXT": "forcing_function", "OPEN_FINDINGS": str(count)}
 
 
+# --- Verify functions (postcondition checks) ---
+
+def _verify_produced_required(workspace: Path, produced: str | None) -> str | None:
+    if produced is None:
+        return "produced count required — pass produced=N (0 if clean)"
+    return None
+
+
+def _verify_forcing_function(workspace: Path, produced: str | None) -> str | None:
+    findings_path = workspace / ".audit" / "findings.jsonl"
+    if not findings_path.exists():
+        return None
+    _project = Path(__file__).resolve().parent.parent / "project"
+    sys.path.insert(0, str(_project))
+    try:
+        from findings import read_findings
+        findings = read_findings(findings_path)
+        open_findings = [f for f in findings if f.get("status", "open") == "open"]
+        if open_findings:
+            details = "; ".join(f.get("detail", "?")[:40] for f in open_findings[:3])
+            return f"{len(open_findings)} open finding(s): {details}"
+    except ImportError:
+        pass
+    return None
+
+
 STEPS: list[StepDef] = [
     # --- closing:review (sub-steps) ---
     StepDef("report_init", "closing:review", "mechanical",
             script_fn=_report_init_script),
     StepDef("code_review", "closing:review", "judgment",
-            action_context_fn=_diff_range_context),
+            action_context_fn=_diff_range_context,
+            verify_fn=_verify_produced_required),
     StepDef("branch_audit_conformance", "closing:review", "judgment",
-            action_context_fn=_dimension_context("conformance")),
+            action_context_fn=_dimension_context("conformance"),
+            verify_fn=_verify_produced_required),
     StepDef("branch_audit_coherence", "closing:review", "judgment",
-            action_context_fn=_dimension_context("coherence")),
+            action_context_fn=_dimension_context("coherence"),
+            verify_fn=_verify_produced_required),
     StepDef("branch_audit_structure", "closing:review", "judgment",
-            action_context_fn=_dimension_context("structure")),
+            action_context_fn=_dimension_context("structure"),
+            verify_fn=_verify_produced_required),
     StepDef("branch_audit_robustness", "closing:review", "judgment",
-            action_context_fn=_dimension_context("robustness")),
+            action_context_fn=_dimension_context("robustness"),
+            verify_fn=_verify_produced_required),
     StepDef("loose_ends", "closing:review", "judgment",
-            action_context_fn=_loose_ends_context),
+            action_context_fn=_loose_ends_context,
+            verify_fn=_verify_produced_required),
     StepDef("forcing_function", "closing:review", "judgment",
-            action_context_fn=_forcing_function_context),
+            action_context_fn=_forcing_function_context,
+            verify_fn=_verify_forcing_function),
     StepDef("sweep_config", "closing:review", "judgment",
             action_context_fn=lambda ctx: {"ITEMS": _sweep_defaults()}),
     StepDef("forage", "closing:review", "judgment",
@@ -827,13 +860,25 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             return err
 
     if args.get("step_done"):
-        if args["step_done"] == "sweep_config":
+        step_name = args["step_done"]
+        if step_name == "sweep_config":
             return {
                 "ACTION": "error",
                 "ERROR": "invalid_step_done",
                 "STEP": "sweep_config",
                 "REASON": "Use sweep_selected= to complete sweep_config",
             }
+        step_def = next((s for s in STEPS if s.name == step_name), None)
+        if step_def and step_def.verify_fn:
+            verify_error = step_def.verify_fn(workspace, args.get("produced"))
+            if verify_error:
+                rec("postcondition-failed", step=step_name, reason=verify_error)
+                return {
+                    "ACTION": "error",
+                    "ERROR": "postcondition_failed",
+                    "STEP": step_name,
+                    "REASON": verify_error,
+                }
         err = apply_step_done(workspace, args["step_done"], args.get("produced"),
                               mechanical_steps=MECHANICAL_STEPS)
         if err:
@@ -846,6 +891,15 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         update_close_progress(workspace, "sweep_selected", selected)
 
     progress = read_close_progress(workspace)
+
+    if progress and progress.get("_branch") and progress["_branch"] != branch:
+        rec("branch-mismatch-reset", stale_branch=progress["_branch"])
+        delete_close_progress(workspace)
+        progress = {}
+
+    if not progress.get("_branch") and branch:
+        update_close_progress(workspace, "_branch", branch)
+        progress["_branch"] = branch
 
     if progress.get("review") == "done" and "code_review" not in progress:
         for sub in REVIEW_SUB_STEPS:
