@@ -685,6 +685,28 @@ def log_transition(conn: sqlite3.Connection, event_name: str,
     conn.commit()
 
 
+@safe
+def record_step_failure(conn: sqlite3.Connection, mode: str,
+                        branch: str, step: str,
+                        attempts: int, reason: str,
+                        repo_path: str | None = None,
+                        issue_repo: str | None = None) -> None:
+    """Record a step failure event after final retry exhaustion."""
+    wid = None
+    if branch and repo_path:
+        wid = find_work_item(conn, branch, repo_path)
+    _log_event(conn, "step-failed", work_item_id=wid,
+               repo_path=repo_path,
+               metadata={
+                   "mode": mode,
+                   "step": step,
+                   "attempts": attempts,
+                   "reason": reason,
+                   "issue_repo": issue_repo or "",
+               })
+    conn.commit()
+
+
 # --- Queries ---
 
 def active_work(conn: sqlite3.Connection) -> list[dict]:

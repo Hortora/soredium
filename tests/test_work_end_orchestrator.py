@@ -255,6 +255,41 @@ class TestRetry:
         assert result.get("CONTEXT") == "step_failed"
         assert result.get("STEP") == "write_content"
 
+    def test_step_failed_records_to_worklog(self, tmp_path, monkeypatch):
+        """step_failed writes a step-failed event to the worklog DB."""
+        import json
+        db_path = str(tmp_path / "worklog.db")
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import worklog
+        mock_wl = type(sys)("mock_wl")
+        mock_wl.connect = lambda: worklog.connect(db_path)
+        mock_wl.record_step_failure = worklog.record_step_failure
+        monkeypatch.setattr("work_end_orchestrator._wl", mock_wl)
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage")
+        update_close_progress(tmp_path, "forage_attempt", "3")
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-271-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "covers": "271",
+            "issue_repo": "Hortora/soredium",
+        })
+        assert result.get("CONTEXT") == "step_failed"
+        conn = worklog.connect(db_path)
+        events = worklog.event_log(conn, event_type="step-failed")
+        assert len(events) == 1
+        meta = json.loads(events[0]["metadata"])
+        assert meta["step"] == "forage"
+        assert meta["mode"] == "close"
+        assert meta["attempts"] == 3
+        conn.close()
+
 
 class TestSkipStep:
     """skip_step= argument marks a step as skipped."""

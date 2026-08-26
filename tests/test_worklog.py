@@ -984,3 +984,55 @@ class TestV3Migration:
         ).fetchone()
         assert slot["resolution"] == "delivered"
         conn.close()
+
+
+class TestStepFailure:
+    def test_records_step_failure_event(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.record_step_failure(
+            conn, mode="wrap", branch="issue-42-test",
+            step="forage", attempts=3,
+            reason="Validation failed after 3 attempts",
+            repo_path="/repo/project",
+            issue_repo="Hortora/soredium",
+        )
+        events = worklog.event_log(conn, event_type="step-failed")
+        assert len(events) == 1
+        meta = json.loads(events[0]["metadata"])
+        assert meta["step"] == "forage"
+        assert meta["attempts"] == 3
+        assert meta["mode"] == "wrap"
+        assert meta["reason"] == "Validation failed after 3 attempts"
+        conn.close()
+
+    def test_links_to_work_item_when_available(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        wid = worklog.record_work_start(
+            conn, "issue-42-test", "/repo/project",
+            42, "Hortora/soredium",
+        )
+        worklog.record_step_failure(
+            conn, mode="close", branch="issue-42-test",
+            step="write_content", attempts=3,
+            reason="Validation failed after 3 attempts",
+            repo_path="/repo/project",
+        )
+        events = worklog.event_log(conn, event_type="step-failed")
+        assert len(events) == 1
+        assert events[0]["work_item_id"] == wid
+        conn.close()
+
+    def test_records_without_work_item(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.record_step_failure(
+            conn, mode="wrap", branch="orphan-branch",
+            step="protocol", attempts=3,
+            reason="timeout",
+        )
+        events = worklog.event_log(conn, event_type="step-failed")
+        assert len(events) == 1
+        assert events[0]["work_item_id"] is None
+        conn.close()

@@ -782,6 +782,21 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     result = _next_action(ctx)
     _log_call(workspace, meta_state, result, ctx.steps_executed, dry_run=dry_run)
 
+    if result.get("CONTEXT") == "step_failed" and _wl and not dry_run:
+        try:
+            conn = _wl.connect()
+            _wl.record_step_failure(
+                conn, mode="close", branch=branch,
+                step=result.get("STEP", ""),
+                attempts=int(result.get("ATTEMPTS", "0")),
+                reason=result.get("REASON", ""),
+                repo_path=str(project),
+                issue_repo=issue_repo,
+            )
+            conn.close()
+        except Exception:
+            pass
+
     if result.get("ACTION") == "complete" and _wl and not dry_run:
         try:
             conn = _wl.connect()
