@@ -401,7 +401,11 @@ def _merge_and_push_two_hop(
     if has_origin.returncode == 0:
         remote_push = _git(desc.original_path, "push", "origin", desc.base_branch, "--no-verify")
         if remote_push.returncode != 0:
+            # Local push succeeded — work is landed.  GitHub push failed
+            # (network, permissions, etc.) — treat as warning, not blocker.
             status.error = "github_push_failed"
+            status.pushed = True
+            _write_progress(progress_file, key, "pushed")
             return status
         ls = _git(desc.original_path, "ls-remote", "origin", desc.base_branch)
         if ls.returncode == 0 and ls.stdout.strip():
@@ -634,8 +638,13 @@ def land_batch(
             status = _merge_and_push_direct(desc, branch, progress_file)
         result.repos.append(status)
         if status.error:
-            failed_repos.append(desc.repo_path.name)
-            print(f"PUSH_FAIL={desc.repo_path.name} error={status.error}")
+            if status.error == "github_push_failed" and status.pushed:
+                # Local push succeeded — record landed SHA, warn instead of fail
+                landed_shas[desc.repo_path.name] = status.landed_sha
+                print(f"PUSH_WARN={desc.repo_path.name} error={status.error}")
+            else:
+                failed_repos.append(desc.repo_path.name)
+                print(f"PUSH_FAIL={desc.repo_path.name} error={status.error}")
         else:
             landed_shas[desc.repo_path.name] = status.landed_sha
 

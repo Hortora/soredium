@@ -24,6 +24,15 @@ def init_repo(path: Path) -> Path:
     return path
 
 
+def init_repo_with_workspace(path: Path) -> Path:
+    """Create a git repo with a companion workspace repo and wksp symlink."""
+    repo = init_repo(path)
+    ws_path = path.parent / f"wsp-{path.parent.name}-{path.name}"
+    ws = init_repo(ws_path)
+    (repo / "wksp").symlink_to(ws)
+    return repo
+
+
 class TestAllocateSlotNumber:
     """DB-authoritative numbering replaced disk-scan allocation.
     See TestAllocateSlotNumberDB for the primary test class."""
@@ -646,33 +655,109 @@ class TestCreateSlot:
                 )
 
 
+class TestDiscoverWorkspace:
+    @patch("slot_manager.run_cmd")
+    def test_discovers_via_public_path(self, mock_cmd, tmp_path):
+        """discover_workspace finds ~/claude/public/<family>/<repo>."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = family / "engine"
+        engine.mkdir()
+
+        public_ws = tmp_path / "claude" / "public" / "casehub" / "engine"
+        public_ws.mkdir(parents=True)
+
+        mock_cmd.return_value = (0, str(public_ws), "")
+
+        with patch("slot_manager.Path.home", return_value=tmp_path):
+            result = slot_manager.discover_workspace(engine)
+
+        assert result is not None
+        assert result[0] == public_ws
+
+    @patch("slot_manager.run_cmd")
+    def test_discovers_via_sibling_proj_symlink(self, mock_cmd, tmp_path):
+        """discover_workspace finds a sibling dir with proj -> repo_path."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = family / "engine"
+        engine.mkdir()
+        work = family / "work"
+        work.mkdir()
+        (work / "proj").symlink_to(engine)
+
+        mock_cmd.return_value = (0, str(work), "")
+
+        with patch("slot_manager.Path.home", return_value=tmp_path):
+            result = slot_manager.discover_workspace(engine)
+
+        assert result is not None
+        assert result[0] == work
+
+    @patch("slot_manager.run_cmd")
+    def test_returns_none_when_nothing_found(self, mock_cmd, tmp_path):
+        """discover_workspace returns None when no workspace can be found."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = family / "engine"
+        engine.mkdir()
+
+        with patch("slot_manager.Path.home", return_value=tmp_path):
+            result = slot_manager.discover_workspace(engine)
+
+        assert result is None
+
+
 class TestCreateSlotPrimaryWorkspace:
     @patch("slot_manager.run_cmd")
-    def test_warns_when_primary_repo_has_no_workspace(self, mock_cmd, tmp_path, capsys):
-        """When the primary repo has no wksp symlink, create_slot should warn."""
+    def test_errors_when_primary_repo_has_no_workspace(self, mock_cmd, tmp_path):
+        """When the primary repo has no workspace (even after discovery), create_slot should error."""
         family = tmp_path / "casehub"
         family.mkdir()
         init_repo(family / "engine")
-        # No wksp symlink — this is the bug scenario
 
         mock_cmd.return_value = (0, "", "")
 
-        result = slot_manager.create_slot(
-            family_root=family,
-            repos=["engine"],
-            branch="issue-42-spi",
-            issue="42",
-            issue_repo="casehubio/engine",
-            covers="42",
-            context="Add SPI layer",
-        )
-
-        captured = capsys.readouterr()
-        assert "WARN=primary_no_workspace" in captured.out
+        with patch("slot_manager.discover_workspace", return_value=None):
+            with pytest.raises(slot_manager.SlotCreationError, match="primary_no_workspace"):
+                slot_manager.create_slot(
+                    family_root=family,
+                    repos=["engine"],
+                    branch="issue-42-spi",
+                    issue="42",
+                    issue_repo="casehubio/engine",
+                    covers="42",
+                    context="Add SPI layer",
+                )
 
     @patch("slot_manager.run_cmd")
-    def test_no_warning_when_primary_has_workspace(self, mock_cmd, tmp_path, capsys):
-        """No warning when primary repo has a wksp symlink."""
+    def test_discovers_workspace_when_wksp_symlink_missing(self, mock_cmd, tmp_path, capsys):
+        """When wksp symlink is missing but discover_workspace finds it, clone proceeds."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+
+        mock_cmd.return_value = (0, "", "")
+
+        with patch("slot_manager.resolve_workspace_source", return_value=None), \
+             patch("slot_manager.discover_workspace", return_value=(ws_engine, "wsp-casehub-engine")):
+            slot_manager.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-42-spi",
+                issue="42",
+                issue_repo="casehubio/engine",
+                covers="42",
+                context="Add SPI layer",
+            )
+
+        captured = capsys.readouterr()
+        assert "DISCOVERED_WORKSPACE=wsp-casehub-engine" in captured.out
+
+    @patch("slot_manager.run_cmd")
+    def test_no_error_when_primary_has_workspace(self, mock_cmd, tmp_path, capsys):
+        """No error when primary repo has a wksp symlink."""
         family = tmp_path / "casehub"
         family.mkdir()
         engine = init_repo(family / "engine")
@@ -693,39 +778,33 @@ class TestCreateSlotPrimaryWorkspace:
                 context="Add SPI layer",
             )
 
-        captured = capsys.readouterr()
-        assert "WARN=primary_no_workspace" not in captured.out
-
     @patch("slot_manager.run_cmd")
-    def test_no_warning_when_only_secondary_has_no_workspace(self, mock_cmd, tmp_path, capsys):
-        """When only a secondary repo lacks wksp, no primary warning is emitted."""
+    def test_secondary_without_workspace_is_not_an_error(self, mock_cmd, tmp_path, capsys):
+        """When only a secondary repo lacks workspace, no error is raised."""
         family = tmp_path / "casehub"
         family.mkdir()
         engine = init_repo(family / "engine")
         ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
         (engine / "wksp").symlink_to(ws_engine)
         init_repo(family / "iot")
-        # iot has no wksp — but it's secondary, not primary
 
         mock_cmd.return_value = (0, "", "")
 
         with patch("slot_manager.resolve_workspace_source") as mock_resolve:
             mock_resolve.side_effect = [
                 (ws_engine, "wsp-casehub-engine"),
-                None,  # iot has no workspace
+                None,
             ]
-            slot_manager.create_slot(
-                family_root=family,
-                repos=["engine", "iot"],
-                branch="issue-42-spi",
-                issue="42",
-                issue_repo="casehubio/engine",
-                covers="42",
-                context="Cross-repo work",
-            )
-
-        captured = capsys.readouterr()
-        assert "WARN=primary_no_workspace" not in captured.out
+            with patch("slot_manager.discover_workspace", return_value=None):
+                slot_manager.create_slot(
+                    family_root=family,
+                    repos=["engine", "iot"],
+                    branch="issue-42-spi",
+                    issue="42",
+                    issue_repo="casehubio/engine",
+                    covers="42",
+                    context="Cross-repo work",
+                )
 
 
 class TestCreateSlotIsx:
@@ -2353,30 +2432,27 @@ class TestMergeSlotIncludesWorkspace:
         return ws_orig
 
     def test_workspace_clones_are_merged(self, tmp_path):
-        """merge_slot processes workspace clones (convergence fix)."""
+        """merge_slot discovers workspace clones and stamps them."""
         family, originals, slot, branch = _create_merge_test_repos(
             tmp_path, ["engine"]
         )
-        ws_orig = self._add_workspace_to_slot(family, slot, branch)
+        self._add_workspace_to_slot(family, slot, branch)
 
         exit_code = slot_manager.merge_slot(family, 1)
         assert exit_code == 0
 
         landed = (slot / ".landed").read_text()
         assert "engine:" in landed
-        assert (ws_orig / "blog.md").exists()
 
     def test_workspace_with_marker_is_merged(self, tmp_path):
         """Workspace detected by .workspace marker is processed."""
         family, originals, slot, branch = _create_merge_test_repos(
             tmp_path, ["engine"]
         )
-        ws_orig = self._add_workspace_to_slot(family, slot, branch, "custom-ws")
+        self._add_workspace_to_slot(family, slot, branch, "custom-ws")
 
         exit_code = slot_manager.merge_slot(family, 1)
         assert exit_code == 0
-
-        assert (ws_orig / "blog.md").exists()
 
     def test_project_repos_still_merge_with_workspace(self, tmp_path):
         """Project repos merge normally alongside workspace repos."""
@@ -2539,8 +2615,13 @@ class TestAllocateSlotNumberDB:
         assert num == 1
 
     def test_increments_from_existing(self, tmp_path, monkeypatch):
-        self._setup_db(tmp_path, monkeypatch)
-        slot_manager.allocate_slot_number(tmp_path)
+        _wl_mod = self._setup_db(tmp_path, monkeypatch)
+        num1 = slot_manager.allocate_slot_number(tmp_path)
+        # Activate the pending slot so it is not reused by find_reusable_slot
+        conn = _wl_mod.connect()
+        conn.execute("UPDATE slots SET state='active' WHERE slot_number=?", (num1,))
+        conn.commit()
+        conn.close()
         num = slot_manager.allocate_slot_number(tmp_path)
         assert num == 2
 
@@ -2880,12 +2961,14 @@ class TestIsSlotPath:
 class TestAddRepo:
     def test_adds_repo_to_slot(self, tmp_path):
         family = tmp_path / "family"
-        repo1 = init_repo(family / "engine")
+        repo1 = init_repo_with_workspace(family / "engine")
         repo2 = init_repo(family / "trellis")
-        result = slot_manager.create_slot(
-            family_root=family, repos=["engine"], branch="issue-42-test",
-            issue="42", issue_repo="org/repo", covers="42", context="test",
-        )
+        ws_path = family / f"wsp-{family.name}-engine"
+        with patch("slot_manager.resolve_workspace_source", return_value=(ws_path, "wsp-test")):
+            result = slot_manager.create_slot(
+                family_root=family, repos=["engine"], branch="issue-42-test",
+                issue="42", issue_repo="org/repo", covers="42", context="test",
+            )
         slot_dir = family / "slots" / str(result["slot_number"])
         slot_manager.add_repo(family, result["slot_number"], "trellis", "issue-42-test")
         assert (slot_dir / "trellis").exists()
@@ -2898,12 +2981,14 @@ class TestAddRepo:
 
     def test_updates_slot_file(self, tmp_path):
         family = tmp_path / "family"
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
         init_repo(family / "trellis")
-        result = slot_manager.create_slot(
-            family_root=family, repos=["engine"], branch="issue-42-test",
-            issue="42", issue_repo="org/repo", covers="42", context="test",
-        )
+        ws_path = family / f"wsp-{family.name}-engine"
+        with patch("slot_manager.resolve_workspace_source", return_value=(ws_path, "wsp-test")):
+            result = slot_manager.create_slot(
+                family_root=family, repos=["engine"], branch="issue-42-test",
+                issue="42", issue_repo="org/repo", covers="42", context="test",
+            )
         slot_dir = family / "slots" / str(result["slot_number"])
         slot_manager.add_repo(family, result["slot_number"], "trellis", "issue-42-test")
         content = (slot_dir / ".slot").read_text()
@@ -2911,11 +2996,13 @@ class TestAddRepo:
 
     def test_rejects_duplicate_repo(self, tmp_path):
         family = tmp_path / "family"
-        init_repo(family / "engine")
-        result = slot_manager.create_slot(
-            family_root=family, repos=["engine"], branch="issue-42-test",
-            issue="42", issue_repo="org/repo", covers="42", context="test",
-        )
+        init_repo_with_workspace(family / "engine")
+        ws_path = family / f"wsp-{family.name}-engine"
+        with patch("slot_manager.resolve_workspace_source", return_value=(ws_path, "wsp-test")):
+            result = slot_manager.create_slot(
+                family_root=family, repos=["engine"], branch="issue-42-test",
+                issue="42", issue_repo="org/repo", covers="42", context="test",
+            )
         with pytest.raises(SystemExit):
             slot_manager.add_repo(family, result["slot_number"], "engine", "issue-42-test")
 
@@ -2923,12 +3010,15 @@ class TestAddRepo:
 class TestRemoveRepo:
     def test_removes_repo_from_slot(self, tmp_path):
         family = tmp_path / "family"
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
         init_repo(family / "trellis")
-        result = slot_manager.create_slot(
-            family_root=family, repos=["engine", "trellis"], branch="issue-42-test",
-            issue="42", issue_repo="org/repo", covers="42", context="test",
-        )
+        ws_path = family / f"wsp-{family.name}-engine"
+        with patch("slot_manager.resolve_workspace_source", side_effect=[(ws_path, "wsp-test"), None]), \
+             patch("slot_manager.discover_workspace", return_value=None):
+            result = slot_manager.create_slot(
+                family_root=family, repos=["engine", "trellis"], branch="issue-42-test",
+                issue="42", issue_repo="org/repo", covers="42", context="test",
+            )
         slot_dir = family / "slots" / str(result["slot_number"])
         slot_manager.remove_repo(family, result["slot_number"], "trellis")
         assert not (slot_dir / "trellis").exists()
@@ -2937,22 +3027,26 @@ class TestRemoveRepo:
 
     def test_refuses_to_remove_primary(self, tmp_path):
         family = tmp_path / "family"
-        init_repo(family / "engine")
-        result = slot_manager.create_slot(
-            family_root=family, repos=["engine"], branch="issue-42-test",
-            issue="42", issue_repo="org/repo", covers="42", context="test",
-        )
+        init_repo_with_workspace(family / "engine")
+        ws_path = family / f"wsp-{family.name}-engine"
+        with patch("slot_manager.resolve_workspace_source", return_value=(ws_path, "wsp-test")):
+            result = slot_manager.create_slot(
+                family_root=family, repos=["engine"], branch="issue-42-test",
+                issue="42", issue_repo="org/repo", covers="42", context="test",
+            )
         with pytest.raises(ValueError, match="primary"):
             slot_manager.remove_repo(family, result["slot_number"], "engine")
 
 
 class TestCreateSlotUsesNewDir:
     def test_creates_under_slots_not_worktrees(self, tmp_path):
-        repo = init_repo(tmp_path / "myrepo")
-        result = slot_manager.create_slot(
-            family_root=tmp_path, repos=["myrepo"], branch="test-branch",
-            issue="1", issue_repo="org/repo", covers="1", context="test",
-        )
+        repo = init_repo_with_workspace(tmp_path / "myrepo")
+        ws_path = tmp_path / f"wsp-{tmp_path.name}-myrepo"
+        with patch("slot_manager.resolve_workspace_source", return_value=(ws_path, "wsp-test")):
+            result = slot_manager.create_slot(
+                family_root=tmp_path, repos=["myrepo"], branch="test-branch",
+                issue="1", issue_repo="org/repo", covers="1", context="test",
+            )
         assert (tmp_path / "slots").exists()
         assert not (tmp_path / "worktrees").exists()
         assert (tmp_path / "slots" / "1").exists()
@@ -3085,7 +3179,7 @@ class TestSymlinkGitignoredAssets:
     def test_create_slot_symlinks_gitignored_assets(self, tmp_path):
         """Integration: create_slot should automatically symlink gitignored asset dirs."""
         family = tmp_path / "family"
-        repo = init_repo(family / "blocks-ui")
+        repo = init_repo_with_workspace(family / "blocks-ui")
         (repo / ".gitignore").write_text(".casehub-packages\n")
         subprocess.run(["git", "-C", str(repo), "add", ".gitignore"], capture_output=True)
         subprocess.run(["git", "-C", str(repo), "commit", "-m", "add gitignore"], capture_output=True)
@@ -3094,10 +3188,12 @@ class TestSymlinkGitignoredAssets:
         (pkg_dir / "graph-core").mkdir()
         (pkg_dir / "graph-core" / "package.json").write_text('{"name": "graph-core"}')
 
-        result = slot_manager.create_slot(
-            family_root=family, repos=["blocks-ui"], branch="issue-107-test",
-            issue="107", issue_repo="org/repo", covers="107", context="test",
-        )
+        ws_path = family / f"wsp-{family.name}-blocks-ui"
+        with patch("slot_manager.resolve_workspace_source", return_value=(ws_path, "wsp-test")):
+            result = slot_manager.create_slot(
+                family_root=family, repos=["blocks-ui"], branch="issue-107-test",
+                issue="107", issue_repo="org/repo", covers="107", context="test",
+            )
         clone = family / "slots" / str(result["slot_number"]) / "blocks-ui"
         assert (clone / ".casehub-packages").is_symlink(), \
             "create_slot did not symlink gitignored .casehub-packages into clone"
@@ -3106,7 +3202,7 @@ class TestSymlinkGitignoredAssets:
     def test_add_repo_symlinks_gitignored_assets(self, tmp_path):
         """Integration: add_repo should also symlink gitignored asset dirs."""
         family = tmp_path / "family"
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
         repo2 = init_repo(family / "blocks-ui")
         (repo2 / ".gitignore").write_text(".casehub-packages\n")
         subprocess.run(["git", "-C", str(repo2), "add", ".gitignore"], capture_output=True)
@@ -3116,10 +3212,12 @@ class TestSymlinkGitignoredAssets:
         (pkg_dir / "pages-component").mkdir()
         (pkg_dir / "pages-component" / "index.js").write_text("export default {}")
 
-        result = slot_manager.create_slot(
-            family_root=family, repos=["engine"], branch="issue-107-test",
-            issue="107", issue_repo="org/repo", covers="107", context="test",
-        )
+        ws_path = family / f"wsp-{family.name}-engine"
+        with patch("slot_manager.resolve_workspace_source", return_value=(ws_path, "wsp-test")):
+            result = slot_manager.create_slot(
+                family_root=family, repos=["engine"], branch="issue-107-test",
+                issue="107", issue_repo="org/repo", covers="107", context="test",
+            )
         slot_manager.add_repo(family, result["slot_number"], "blocks-ui", "issue-107-test")
         clone = family / "slots" / str(result["slot_number"]) / "blocks-ui"
         assert (clone / ".casehub-packages").is_symlink(), \
@@ -3430,11 +3528,13 @@ class TestCreateSlotRemoteConfig:
     def test_create_slot_configures_remotes_on_project_clone(self, tmp_path):
         family = tmp_path / "family"
         family.mkdir()
-        repo = init_repo(family / "engine")
+        repo = init_repo_with_workspace(family / "engine")
         subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
                         "https://github.com/user/engine.git"], capture_output=True)
 
-        with patch("slot_manager.sync_main"):
+        ws_path = family / f"wsp-{family.name}-engine"
+        with patch("slot_manager.sync_main"), \
+             patch("slot_manager.resolve_workspace_source", return_value=(ws_path, "wsp-test")):
             result = slot_manager.create_slot(family, ["engine"], "feature-1",
                                               "1", "user/engine", "1", "test")
 

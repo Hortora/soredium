@@ -407,6 +407,46 @@ def resolve_workspace_source(repo_path: Path) -> tuple[Path, str] | None:
     return ws_root, f"wsp-{parent_name}-{ws_root.name}"
 
 
+def discover_workspace(repo_path: Path) -> tuple[Path, str] | None:
+    """Fallback workspace discovery when wksp symlink is missing.
+
+    Searches for a workspace git repo whose proj/ symlink points back to
+    repo_path. Checks ~/claude/public/<family>/<repo-name>/ and sibling
+    directories of repo_path that look like workspaces."""
+    repo_name = repo_path.name
+    family_name = repo_path.parent.name
+
+    candidates: list[Path] = []
+
+    public_ws = Path.home() / "claude" / "public" / family_name / repo_name
+    if public_ws.is_dir():
+        candidates.append(public_ws)
+
+    for sibling in repo_path.parent.iterdir():
+        if not sibling.is_dir() or sibling == repo_path:
+            continue
+        proj = sibling / "proj"
+        if proj.is_symlink():
+            try:
+                if proj.resolve() == repo_path.resolve():
+                    candidates.append(sibling)
+            except OSError:
+                pass
+
+    for candidate in candidates:
+        rc, stdout, _ = run_cmd(["git", "-C", str(candidate), "rev-parse", "--show-toplevel"])
+        if rc != 0:
+            continue
+        ws_root = Path(stdout.strip())
+        rc, url_out, _ = run_cmd(["git", "-C", str(ws_root), "remote", "get-url", "origin"])
+        if rc == 0 and url_out.strip():
+            name = Path(url_out.strip().rstrip("/")).stem
+            return ws_root, name
+        return ws_root, f"wsp-{family_name}-{repo_name}"
+
+    return None
+
+
 def _write_slot_settings(slot_dir: Path) -> Path:
     """Generate a slot-specific settings.xml that adds the global ~/.m2/repository
     as a file:// fallback remote. This lets Maven resolve artifacts from the host
@@ -704,6 +744,10 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                          "chore: add slot infrastructure to .gitignore"])
 
             ws_info = resolve_workspace_source(repo_path)
+            if not ws_info:
+                ws_info = discover_workspace(repo_path)
+                if ws_info:
+                    print(f"DISCOVERED_WORKSPACE={ws_info[1]} repo={repo_name}")
             if ws_info:
                 ws_source, ws_name = ws_info
                 ws_slot_dir = slot_dir / ws_name
@@ -736,8 +780,10 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         primary_repo = repos[0]
         primary_wksp = slot_dir / primary_repo / "wksp"
         if not primary_wksp.is_symlink():
-            print(f"WARN=primary_no_workspace repo={primary_repo}")
-            print("WARN_DETAIL=primary repo has no wksp symlink — .plan scaffold will be skipped")
+            raise SlotCreationError(
+                f"primary_no_workspace repo={primary_repo}: "
+                f"primary repo has no workspace clone — .plan cannot be scaffolded. "
+                f"Add a wksp symlink to {family_root / primary_repo} pointing to its workspace.")
         if primary_wksp.is_symlink():
             ws_path = primary_wksp.resolve()
             scaffold_script = Path.home() / ".claude" / "skills" / "work-start" / "scaffold.py"
@@ -1312,7 +1358,11 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     # Collect landed repos (may be partial if some repos failed)
     project_repos = [d.repo_path.name for d in descriptors if not d.is_workspace]
     landed_shas = {s.repo_path.name: s.landed_sha for s in result.repos if s.landed_sha}
-    failed_repos = [s.repo_path.name for s in result.repos if s.error]
+    # github_push_failed with pushed=True is non-blocking — local push succeeded
+    failed_repos = [
+        s.repo_path.name for s in result.repos
+        if s.error and not (s.error == "github_push_failed" and s.pushed)
+    ]
     stamped_repos = [s.repo_path.name for s in result.repos if s.stamped]
     shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
 
@@ -1845,6 +1895,20 @@ def _check_drift(family_root: Path, slots: list[dict],
                 print(f"WARN=db_drift type=ghost slot={num}")
             else:
                 print(f"WARN=db_drift type=disk-only slot={num}")
+
+    # Detect ghost directories: exist on disk but have no .slot file and
+    # are not tracked in the DB.  list_slots filters these out, so they
+    # won't appear in disk_nums — scan slot directories directly.
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        slots_dir = family_root / dir_name
+        if not slots_dir.exists():
+            continue
+        for d in slots_dir.iterdir():
+            if not d.is_dir() or not d.name.isdigit() or d.name == "attic":
+                continue
+            num = int(d.name)
+            if num not in disk_nums and num not in db_slots and num not in has_slot_file:
+                print(f"WARN=db_drift type=ghost slot={num}")
 
 
 def remove_slot(family_root: Path, slot_num: int, force: bool = False,
