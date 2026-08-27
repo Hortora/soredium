@@ -34,8 +34,12 @@ Auto-resolve transient states before entering closing:review:
 |-------------|--------|
 | `scaffolded` | Transition `auto_setup` → `active` |
 | `transitioning` | Transition `auto_refresh` → `active` |
-| `active` | Ready |
-| `closing:*` | Offer to continue from that gate |
+| `active` | Ready — proceed to enter closing:review |
+| `closing:*` | Interrupted close — run `close_resume.py` to detect and offer resume |
+
+**For `closing:*`:** The SKILL.md Step 2 handles this. Run `close_resume.py`
+to show what completed and what remains. If the user resumes, go straight
+to the orchestrator loop — it reads `.close-progress` and skips done steps.
 
 ## Queue Gate
 

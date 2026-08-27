@@ -38,6 +38,23 @@ If `HAS_PLAN=yes`, run `complete_active_issue` after confirming close.
 
 ## Step 2 — Enter closing state
 
+If `META_STATE` is already `closing:*`, check for an interrupted close:
+
+```bash
+python3 work-end/close_resume.py $WORKSPACE
+```
+
+If `INTERRUPTED=yes`, print the resume prompt verbatim and ask:
+> "Resume from [NEXT_STEP]? (Y/n)"
+
+On Y: skip the lifecycle transition (already in closing state), go
+straight to Step 3 — the orchestrator reads `.close-progress` and
+skips completed steps automatically.
+
+On n: offer abort (`abort=yes`) if in `closing:review` or `closing:verified`.
+
+If `META_STATE` is `active` (normal path):
+
 ```bash
 python3 ~/.claude/skills/project/lifecycle.py transition $PLAN_PATH work_end
 ```
