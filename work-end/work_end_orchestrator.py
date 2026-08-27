@@ -224,6 +224,44 @@ def _skip_no_covers(ctx: OrchestratorContext) -> bool:
     return not ctx.covers
 
 
+def _skip_no_upstream(ctx: OrchestratorContext) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(ctx.project), "remote", "get-url", "upstream"],
+        capture_output=True, text=True,
+    )
+    return result.returncode != 0
+
+
+def _upstream_pr_context(ctx: OrchestratorContext) -> dict[str, str]:
+    base = ctx.base_branch
+    fork_ahead = 0
+    upstream_ahead = 0
+    proc = subprocess.run(
+        ["git", "-C", str(ctx.project), "rev-list", "--count", f"upstream/{base}..origin/{base}"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        fork_ahead = int(proc.stdout.strip())
+    proc = subprocess.run(
+        ["git", "-C", str(ctx.project), "rev-list", "--count", f"origin/{base}..upstream/{base}"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        upstream_ahead = int(proc.stdout.strip())
+    upstream_url = ""
+    proc = subprocess.run(
+        ["git", "-C", str(ctx.project), "remote", "get-url", "upstream"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode == 0:
+        upstream_url = proc.stdout.strip()
+    return {
+        "FORK_AHEAD": str(fork_ahead),
+        "UPSTREAM_AHEAD": str(upstream_ahead),
+        "UPSTREAM_URL": upstream_url,
+    }
+
+
 def _is_sweep_deselected(step_name: str):
     def check(ctx: OrchestratorContext) -> bool:
         if "sweep_selected" not in ctx.progress:
@@ -576,6 +614,7 @@ JUDGMENT_STEPS_SET = {"code_review", "branch_audit_conformance",
                       "sweep_config", "forage", "protocol",
                       "update_claude_md", "impl_doc_sync", "adr",
                       "write_content", "trajectory", "squash",
+                      "upstream_pr",
                       "arc42_scan", "session_rename", "garden_feedback", "notes"}
 
 
@@ -781,6 +820,9 @@ STEPS: list[StepDef] = [
             script_fn=_cleanup_scaffold_script),
     StepDef("report_scaffold", "closing:stamped", "mechanical",
             script_fn=_report_scaffold_script),
+    StepDef("upstream_pr", "closing:stamped", "judgment",
+            skip_fn=_skip_no_upstream,
+            action_context_fn=_upstream_pr_context),
     StepDef("arc42_scan", "closing:stamped", "judgment",
             action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"}),
     StepDef("session_rename", "closing:stamped", "judgment",

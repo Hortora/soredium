@@ -252,6 +252,16 @@ def sync_main(project: str, workspace: str, base: str) -> int:
     if pre_sha_ok:
         _check_orphaned_branches(project, base, pre_sync_sha, warnings, "project")
 
+    if has_upstream:
+        fork_ahead = _rev_count(project, f"upstream/{base}..origin/{base}")
+        upstream_ahead = _rev_count(project, f"origin/{base}..upstream/{base}")
+        if fork_ahead > 0:
+            print(f"DRIFT=fork_ahead={fork_ahead}")
+        if upstream_ahead > 0:
+            print(f"DRIFT=upstream_ahead={upstream_ahead}")
+        if fork_ahead > 10 or upstream_ahead > 10:
+            warnings.append("significant_drift")
+
     _sync_repo(workspace, "origin", "origin", "main", warnings, "workspace")
     _verify_sync(workspace, "origin", "main", warnings, "workspace")
 

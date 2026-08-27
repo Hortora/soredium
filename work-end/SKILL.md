@@ -79,6 +79,7 @@ Call in a loop until `ACTION=complete`. Read the ACTION, dispatch:
 | `trajectory` | Read `handlers/execute.md` § trajectory |
 | `squash` | Read `handlers/execute.md` § squash |
 | `verify_recover` | Read `handlers/execute.md` § verify_recover |
+| `upstream_pr` | Read `handlers/upstream_pr.md` |
 | `user_input` | Read `handlers/user_input.md`, dispatch by CONTEXT |
 | `error` | Report to user. STOP. |
 | `complete` | Step 4 |
