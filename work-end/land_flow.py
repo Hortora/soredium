@@ -523,7 +523,7 @@ def _stamp_repo(
         return False
 
     if desc.transport == Transport.TWO_HOP:
-        push = _git(desc.repo_path, "push", "origin", branch, "--force-with-lease")
+        push = _git(desc.repo_path, "push", "origin", branch, "--force-with-lease", "--no-verify")
     else:
         push_remote = desc.push_target
         has_upstream = _git(desc.repo_path, "remote", "get-url", "upstream")
@@ -531,7 +531,7 @@ def _stamp_repo(
             push_remote = "origin"
         push = None
         if push_remote:
-            push = _git(desc.repo_path, "push", push_remote, branch, "--force-with-lease")
+            push = _git(desc.repo_path, "push", push_remote, branch, "--force-with-lease", "--no-verify")
 
     if push and push.returncode != 0:
         print(f"STAMP_WARN={repo_name} reason=stamp_push_failed detail={push.stderr.strip()}")

@@ -186,6 +186,32 @@ class TestRebaseSingleRepo:
         assert "feat: upstream work" in log
 
 
+    def test_rebase_onto_uses_onto_form(self, tmp_path: Path) -> None:
+        """rebase_onto= uses git rebase --onto to handle filter-repo'd branches."""
+        remote = _init_bare(tmp_path / "remote.git")
+        project = _init_repo(tmp_path / "project")
+        _git(project, "remote", "add", "origin", str(remote))
+        _git(project, "push", "origin", "main")
+
+        _git(project, "checkout", "-b", "issue-305-test")
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: feature")
+
+        old_base = _git(project, "merge-base", "main", "HEAD")
+
+        result = _run_execute(
+            "rebase",
+            f"project={project}",
+            "branch=issue-305-test",
+            "base_branch=main",
+            f"rebase_onto={old_base}",
+        )
+        assert result.returncode == 0
+        assert "REBASED=yes" in result.stdout
+        assert "REBASE_ONTO=" in result.stdout
+
+
 class TestLandSingleRepo:
     def test_land_pushes_and_stamps(self, tmp_path: Path) -> None:
         remote = _init_bare(tmp_path / "remote.git")

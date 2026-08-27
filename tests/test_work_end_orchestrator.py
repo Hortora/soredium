@@ -268,6 +268,31 @@ class TestPostconditionVerification:
         result = self._run(tmp_path, step_done="trajectory")
         assert result.get("ERROR") != "postcondition_failed"
 
+    def test_squash_without_verified_plan_rejected(self, tmp_path):
+        """Squash plan exists but verified:false — postcondition fails."""
+        import json
+        plan = tmp_path / ".squash-plan-project.json"
+        plan.write_text(json.dumps({"commits": [], "groups": [], "verified": False}))
+        result = self._run(tmp_path, step_done="squash",
+                           meta_state="closing:promoted")
+        assert result["ERROR"] == "postcondition_failed"
+        assert "verified" in result["REASON"].lower()
+
+    def test_squash_with_verified_plan_accepted(self, tmp_path):
+        """Squash plan exists with verified:true — postcondition passes."""
+        import json
+        plan = tmp_path / ".squash-plan-project.json"
+        plan.write_text(json.dumps({"commits": [], "groups": [], "verified": True}))
+        result = self._run(tmp_path, step_done="squash",
+                           meta_state="closing:promoted")
+        assert result.get("ERROR") != "postcondition_failed"
+
+    def test_squash_without_plan_file_accepted(self, tmp_path):
+        """No squash plan file — postcondition passes (manual squash)."""
+        result = self._run(tmp_path, step_done="squash",
+                           meta_state="closing:promoted")
+        assert result.get("ERROR") != "postcondition_failed"
+
 
 class TestBranchScoping:
     """Progress is scoped to current branch — stale branch progress discarded."""
@@ -1323,3 +1348,77 @@ class TestForceDone:
         from close_progress import read_close_progress
         progress = read_close_progress(tmp_path)
         assert progress.get("squash") == "done"
+
+
+class TestRebaseOnto:
+    """Issue 4: orchestrator passes rebase_onto when .rebase-onto-* file exists."""
+
+    def test_rebase_script_includes_onto(self, tmp_path, monkeypatch):
+        """_rebase_script reads .rebase-onto-<repo> and passes rebase_onto=."""
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"REBASED": "yes"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "review_pass", "done")
+        update_close_progress(tmp_path, "promote", "done")
+        update_close_progress(tmp_path, "report_promote", "done")
+        update_close_progress(tmp_path, "promote_pass", "done")
+        update_close_progress(tmp_path, "trajectory", "done")
+
+        project = tmp_path / "project"
+        project.mkdir(exist_ok=True)
+        onto_file = tmp_path / f".rebase-onto-{project.name}"
+        onto_file.write_text("abc123def\n")
+
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(project),
+            "branch": "issue-305-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+        })
+        rebase_calls = [c for c in calls if any("rebase" in str(a) for a in c)]
+        assert any("rebase_onto=abc123def" in str(c) for c in rebase_calls), (
+            f"Expected rebase_onto=abc123def in rebase call, got: {rebase_calls}"
+        )
+
+    def test_rebase_script_no_onto_without_file(self, tmp_path, monkeypatch):
+        """Without .rebase-onto-* file, rebase_onto is not passed."""
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"REBASED": "yes"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "review_pass", "done")
+        update_close_progress(tmp_path, "promote", "done")
+        update_close_progress(tmp_path, "report_promote", "done")
+        update_close_progress(tmp_path, "promote_pass", "done")
+        update_close_progress(tmp_path, "trajectory", "done")
+
+        project = tmp_path / "project"
+        project.mkdir(exist_ok=True)
+
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(project),
+            "branch": "issue-305-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+        })
+        rebase_calls = [c for c in calls if any("rebase" in str(a) for a in c)]
+        assert not any("rebase_onto" in str(c) for c in rebase_calls), (
+            f"rebase_onto should NOT be passed without .rebase-onto file, got: {rebase_calls}"
+        )

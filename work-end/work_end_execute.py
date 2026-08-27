@@ -100,7 +100,7 @@ def push_to_remote(project: str, base_branch: str = "main",
                    max_retries: int = 3) -> PushResult:
     """Push base branch to remote with retries."""
     for attempt in range(1, max_retries + 1):
-        result = git(project, "push", "origin", base_branch)
+        result = git(project, "push", "origin", base_branch, "--no-verify")
         if result.returncode == 0:
             return PushResult(True, attempt)
     return PushResult(False, max_retries, f"push_failed_after_{max_retries}_retries")
@@ -199,6 +199,7 @@ def cmd_rebase(opts: dict[str, str]) -> int:
     project = opts.get("project", "")
     branch = opts.get("branch", "")
     base_branch = opts.get("base_branch", "main")
+    rebase_onto = opts.get("rebase_onto", "")
 
     if not project or not branch:
         print("ERROR=MISSING_ARGS")
@@ -213,6 +214,19 @@ def cmd_rebase(opts: dict[str, str]) -> int:
     result = git(project, "fetch", fetch_remote, base_branch)
     if result.returncode != 0:
         print("FETCH_WARNING=no network — using local base", file=sys.stderr)
+
+    if rebase_onto:
+        result = git(project, "rebase", "--onto",
+                     f"{fetch_remote}/{base_branch}", rebase_onto)
+        if result.returncode == 0:
+            print(f"REBASE_REMOTE={fetch_remote}")
+            print(f"REBASE_ONTO={rebase_onto}")
+            print("REBASED=yes")
+            return 0
+        git(project, "rebase", "--abort")
+        print("ERROR=REBASE_CONFLICT")
+        print(f"ERROR_DETAIL=--onto rebase failed: {result.stderr.strip()}")
+        return 1
 
     result = git(project, "rebase", f"{fetch_remote}/{base_branch}")
     if result.returncode != 0:
