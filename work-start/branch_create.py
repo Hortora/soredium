@@ -18,7 +18,10 @@ Subcommands:
     sync-main <project> <workspace> [base=<branch>]
         Sync local main with remote before branch creation.
         Detects fork model (upstream, fork, or single remote) and
-        applies the correct fetch/rebase/push sequence.
+        applies the correct fetch/merge-or-rebase/push sequence.
+        Merges instead of rebasing when local commits are already
+        pushed to origin — preserves SHAs that feature branches
+        reference.
         Non-fatal — network errors warn but don't fail.
         Output: SYNCED=yes MODEL=upstream|fork|single [WARN=...]
 
@@ -129,7 +132,6 @@ def commit_scaffold(workspace: str, branch: str) -> int:
         print("ERROR=commit_failed")
         return 1
 
-    # Push with -u (non-fatal)
     push_ok, _ = run_git(workspace, "push", "-u", "origin", branch)
 
     print("COMMITTED=yes")
@@ -137,18 +139,92 @@ def commit_scaffold(workspace: str, branch: str) -> int:
     return 0
 
 
-def _check_ahead_and_push(repo: str, remote: str, base: str, warnings: list[str]) -> None:
-    """If local base is ahead of remote, push before rebasing to avoid losing commits."""
-    ok, count_str = run_git(repo, "rev-list", f"{remote}/{base}..{base}", "--count")
-    if ok and count_str.strip() and int(count_str.strip()) > 0:
-        ahead = int(count_str.strip())
-        print(f"AHEAD={ahead} repo={Path(repo).name} remote={remote}/{base}")
-        push_ok, _ = run_git(repo, "push", remote, base, "--no-verify")
-        if push_ok:
-            print(f"PUSHED_AHEAD={ahead} repo={Path(repo).name}")
-        else:
-            warnings.append(f"push_ahead_failed_{Path(repo).name}")
-            print(f"WARN=push_ahead_failed repo={Path(repo).name} ahead={ahead}")
+def _rev_count(repo: str, range_spec: str) -> int:
+    ok, out = run_git(repo, "rev-list", "--count", range_spec)
+    if ok and out.strip():
+        return int(out.strip())
+    return 0
+
+
+def _has_shared_fork_commits(repo: str, blessed_remote: str,
+                             origin_remote: str, base: str) -> int:
+    """Count commits on origin that aren't on the blessed remote.
+
+    These are fork-only commits already pushed. Rebase would rewrite
+    them with new SHAs, breaking any branch based on the old SHAs.
+    """
+    return _rev_count(repo, f"{blessed_remote}/{base}..{origin_remote}/{base}")
+
+
+def _sync_repo(repo: str, blessed_remote: str, origin_remote: str,
+               base: str, warnings: list[str], label: str) -> str:
+    """Sync a single repo. Returns 'merged', 'rebased', 'fast-forward', or 'skipped'."""
+    ok, _ = run_git(repo, "fetch", blessed_remote)
+    if not ok:
+        warnings.append(f"fetch_{label}_failed")
+        return "skipped"
+
+    if origin_remote != blessed_remote:
+        run_git(repo, "fetch", origin_remote)
+
+    if origin_remote != blessed_remote:
+        shared = _has_shared_fork_commits(repo, blessed_remote, origin_remote, base)
+        if shared > 0:
+            print(f"MERGE_REASON=shared_on_origin={shared} repo={Path(repo).name}")
+            ok, _ = run_git(repo, "merge", f"{blessed_remote}/{base}", "--no-edit")
+            if not ok:
+                run_git(repo, "merge", "--abort")
+                warnings.append(f"merge_{label}_failed")
+                return "skipped"
+            ok, _ = run_git(repo, "push", origin_remote, base, "--no-verify")
+            if not ok:
+                warnings.append(f"push_{label}_failed")
+            print(f"STRATEGY=merge repo={Path(repo).name}")
+            return "merged"
+
+    ok, _ = run_git(repo, "rebase", f"{blessed_remote}/{base}")
+    if not ok:
+        run_git(repo, "rebase", "--abort")
+        warnings.append(f"rebase_{label}_failed")
+        return "skipped"
+
+    if origin_remote != blessed_remote:
+        ok, _ = run_git(repo, "push", origin_remote, base, "--force-with-lease", "--no-verify")
+        if not ok:
+            warnings.append(f"push_{label}_failed")
+
+    behind = _rev_count(repo, f"{base}..{blessed_remote}/{base}")
+    strategy = "fast-forward" if behind == 0 else "rebase"
+    print(f"STRATEGY={strategy} repo={Path(repo).name}")
+    return strategy
+
+
+def _verify_sync(repo: str, blessed_remote: str, base: str,
+                 warnings: list[str], label: str) -> None:
+    """Post-sync verification: local main must contain all blessed commits."""
+    behind = _rev_count(repo, f"{base}..{blessed_remote}/{base}")
+    if behind > 0:
+        warnings.append(f"verify_{label}_behind={behind}")
+        print(f"VERIFY_FAIL={label} behind_blessed={behind} repo={Path(repo).name}")
+
+
+def _check_orphaned_branches(repo: str, base: str, pre_sync_sha: str,
+                             warnings: list[str], label: str) -> None:
+    """Check if any feature branches lost their merge-base with main."""
+    ok, branches = run_git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+    if not ok:
+        return
+    for branch in branches.splitlines():
+        branch = branch.strip()
+        if not branch or branch == base:
+            continue
+        ok, merge_base = run_git(repo, "merge-base", branch, base)
+        if not ok:
+            continue
+        ok, is_ancestor = run_git(repo, "merge-base", "--is-ancestor", merge_base.strip(), base)
+        if not ok:
+            warnings.append(f"orphaned_branch_{label}={branch}")
+            print(f"WARN=orphaned_branch repo={Path(repo).name} branch={branch}")
 
 
 def sync_main(project: str, workspace: str, base: str) -> int:
@@ -158,57 +234,26 @@ def sync_main(project: str, workspace: str, base: str) -> int:
     has_upstream, _ = run_git(project, "remote", "get-url", "upstream")
     has_fork, _ = run_git(project, "remote", "get-url", "fork")
 
+    pre_sha_ok, pre_sync_sha = run_git(project, "rev-parse", base)
+
     if has_upstream:
         model = "upstream"
-        ok, _ = run_git(project, "fetch", "upstream")
-        if not ok:
-            warnings.append("fetch_upstream_failed")
-        else:
-            _check_ahead_and_push(project, "upstream", base, warnings)
-            ok, _ = run_git(project, "rebase", f"upstream/{base}")
-            if not ok:
-                run_git(project, "rebase", "--abort")
-                warnings.append("rebase_upstream_failed")
-            else:
-                ok, _ = run_git(project, "push", "origin", base, "--force-with-lease", "--no-verify")
-                if not ok:
-                    warnings.append("push_origin_failed")
+        _sync_repo(project, "upstream", "origin", base, warnings, "upstream")
     elif has_fork:
         model = "fork"
-        ok, _ = run_git(project, "fetch", "origin")
-        if not ok:
-            warnings.append("fetch_origin_failed")
-        else:
-            _check_ahead_and_push(project, "origin", base, warnings)
-            ok, _ = run_git(project, "rebase", f"origin/{base}")
-            if not ok:
-                run_git(project, "rebase", "--abort")
-                warnings.append("rebase_origin_failed")
-            else:
-                ok, _ = run_git(project, "push", "fork", f"origin/{base}:{base}", "--force-with-lease", "--no-verify")
-                if not ok:
-                    warnings.append("push_fork_failed")
+        _sync_repo(project, "origin", "fork", base, warnings, "fork")
     else:
         model = "single"
-        ok, _ = run_git(project, "fetch", "origin")
-        if not ok:
-            warnings.append("fetch_origin_failed")
-        else:
-            _check_ahead_and_push(project, "origin", base, warnings)
-            ok, _ = run_git(project, "rebase", f"origin/{base}")
-            if not ok:
-                run_git(project, "rebase", "--abort")
-                warnings.append("rebase_origin_failed")
+        _sync_repo(project, "origin", "origin", base, warnings, "origin")
 
-    ws_ok, _ = run_git(workspace, "fetch", "origin")
-    if not ws_ok:
-        warnings.append("workspace_fetch_failed")
-    else:
-        _check_ahead_and_push(workspace, "origin", "main", warnings)
-        ws_ok, _ = run_git(workspace, "rebase", "origin/main")
-        if not ws_ok:
-            run_git(workspace, "rebase", "--abort")
-            warnings.append("workspace_rebase_failed")
+    blessed = "upstream" if has_upstream else "origin"
+    _verify_sync(project, blessed, base, warnings, "project")
+
+    if pre_sha_ok:
+        _check_orphaned_branches(project, base, pre_sync_sha, warnings, "project")
+
+    _sync_repo(workspace, "origin", "origin", "main", warnings, "workspace")
+    _verify_sync(workspace, "origin", "main", warnings, "workspace")
 
     synced = "yes" if not warnings else "partial"
     print(f"SYNCED={synced}")
