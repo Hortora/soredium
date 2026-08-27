@@ -1,21 +1,25 @@
 # Handler: wrap_sweep_config
 
-Present all items ON by default:
+**Always present the checklist.** If you believe an item already ran
+this session, mark it with evidence (what artifact exists) but still
+show it. The user decides whether to re-run or skip.
 
 ```
 Session wrap — create before writing the handover?
 
-[x] 1  forage sweep      check for gotchas, techniques, undocumented
+[✓] 1  forage sweep      (ran during work-end — 2 entries)
 [x] 2  protocol sweep    check for project rules worth formalising
 [x] 3  update-claude-md  sync any new workflow conventions
-[x] 4  write-content     capture this session's work as a diary entry
+[✓] 4  write-content     (diary entry written: 2026-08-27-...)
 
+Items marked ✓ already completed. Toggle to re-run.
 Type numbers to toggle, or "go" to proceed:
 ```
 
 Pass selections back: `sweep_selected=forage,protocol,update_claude_md,write_content`
 
-Do not recommend skipping. The user decides.
+You MUST present the checklist to the user. Always. Even if you believe
+every item already ran. The user decides — not you.
 
 Session-bound items (forage, protocol, write-content, garden feedback)
 depend on conversation context. They cannot be deferred — "defer to
