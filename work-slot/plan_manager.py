@@ -762,17 +762,36 @@ def remove_from_queue(plan_path: Path, issue_numbers: list[int]) -> list[int]:
 
 
 def append_to_queue(plan_path: Path, new_items: list[QueueItem],
-                    position: int | None = None) -> None:
+                    position: int | None = None) -> list[QueueItem]:
     tree = parse_plan(plan_path)
+    existing_nums = _collect_issue_numbers(tree.queue)
+    deduped = [item for item in new_items if item.issue_number not in existing_nums]
+    skipped = len(new_items) - len(deduped)
+    if skipped > 0:
+        for item in new_items:
+            if item.issue_number in existing_nums:
+                print(f"SKIPPED_DUP={item.issue_number}")
+    if not deduped:
+        return []
     if position is not None:
-        for i, item in enumerate(reversed(new_items)):
+        for i, item in enumerate(reversed(deduped)):
             tree.queue.insert(position, item)
     else:
-        tree.queue.extend(new_items)
+        tree.queue.extend(deduped)
     active = _find_active_leaf(tree.queue)
     if active:
         tree.current_issue = active.issue_number
     rewrite_plan(plan_path, tree)
+    return deduped
+
+
+def _collect_issue_numbers(items: list[QueueItem]) -> set[int]:
+    nums: set[int] = set()
+    for item in items:
+        nums.add(item.issue_number)
+        if item.children:
+            nums.update(_collect_issue_numbers(item.children))
+    return nums
 
 
 def append_deferred(plan_path: Path, title: str, scale: str,
@@ -1152,10 +1171,12 @@ def main() -> int:
             return 1
         pos_str = opts.get("position")
         position = int(pos_str) if pos_str else None
-        append_to_queue(plan_path, items, position=position)
-        for item in items:
+        added = append_to_queue(plan_path, items, position=position)
+        for item in added:
             print(f"APPENDED={item.repo}#{item.issue_number} — {item.title}")
-        print(f"APPENDED_COUNT={len(items)}")
+        print(f"APPENDED_COUNT={len(added)}")
+        if len(added) < len(items):
+            print(f"SKIPPED_DUPLICATES={len(items) - len(added)}")
         if position is not None:
             print(f"POSITION={position}")
         return 0
