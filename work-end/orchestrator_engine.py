@@ -239,6 +239,10 @@ def run_loop(
             if per_repo_judgment:
                 handled = per_repo_judgment(step, ctx)
                 if handled is not None:
+                    if not handled:
+                        update_close_progress(ctx.workspace, step.name, "done")
+                        ctx.steps_executed.append(step.name)
+                        continue
                     return handled
 
             context = step.action_context_fn(ctx) if step.action_context_fn else {}

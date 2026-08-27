@@ -1158,3 +1158,49 @@ class TestCloseReportIntegration:
         result = self._report_run(["render", str(rp)])
         assert "❌" in result.stdout
         assert "Verified" in result.stdout
+
+
+class TestPerRepoJudgmentCompletion:
+    """Per-repo judgment steps must advance to the next step when all repos are done."""
+
+    def test_all_repos_done_advances_past_step(self, tmp_path, monkeypatch):
+        """When all per-repo protocol steps are done/skipped, orchestrator
+        must advance to update_claude_md — not return empty output."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import run_orchestrator, REVIEW_SUB_STEPS
+        from close_progress import update_close_progress
+
+        update_close_progress(tmp_path, "_branch", "issue-34-test")
+        update_close_progress(tmp_path, "report_init", "done")
+        for sub in REVIEW_SUB_STEPS:
+            update_close_progress(tmp_path, sub, "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected",
+                              "forage,protocol,update_claude_md,impl_doc_sync,adr,write_content")
+        update_close_progress(tmp_path, "forage", "done")
+
+        update_close_progress(tmp_path, "protocol:chat-app", "done")
+        update_close_progress(tmp_path, "protocol:blocks-ui", "done")
+        update_close_progress(tmp_path, "protocol:qhorus", "skipped")
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        slot_file = slot_dir / ".slot"
+        slot_file.write_text("## Repos\n- chat-app (primary)\n- blocks-ui\n- qhorus\n")
+        for repo_name in ["chat-app", "blocks-ui", "qhorus"]:
+            repo_dir = slot_dir / repo_name
+            repo_dir.mkdir()
+            (repo_dir / ".git").mkdir()
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-34-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "in_slot": "yes",
+            "slot_path": str(slot_dir),
+        })
+        assert result.get("ACTION"), "Must return an ACTION, not empty output"
+        assert result["ACTION"].startswith("update_claude_md"), \
+            f"Expected update_claude_md after protocol done, got {result['ACTION']}"
