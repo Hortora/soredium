@@ -27,8 +27,9 @@ Standing rules and principles for the soredium skill collection and garden tooli
 |------|---------|------------|
 | [evidence-before-claims.md](evidence-before-claims.md) | Run the command, read the output, THEN claim the result — at every completion boundary | Any completion claim: commits, PRs, task completion, agent delegation |
 
-## Skill Script Externalisation
+## Skill Architecture
 
 | File | Summary | Applies to |
 |------|---------|------------|
 | [externalised-scripts-require-tests.md](externalised-scripts-require-tests.md) | Scripts and their pytest tests must be committed together — no script merges without tests | Any .py script added to a skill directory |
+| [skill-md-minimal-orchestrator-loop.md](skill-md-minimal-orchestrator-loop.md) | SKILL.md for orchestrated skills: loop + dispatch table only, handlers in lazy-loaded files | work-end, handover, future orchestrated skills |
