@@ -509,6 +509,34 @@ class NoQueueFile(Exception):
     pass
 
 
+def _append_landed(plan_path: Path, issue_number: int, title: str,
+                    branch: str, sha: str = "") -> None:
+    """Append a completed issue to the .landed ledger in the slot directory."""
+    slot_dir = plan_path.parent
+    if not (slot_dir / ".slot").exists():
+        slot_dir = slot_dir.parent
+        if not (slot_dir / ".slot").exists():
+            return
+    landed = slot_dir / ".landed"
+    from datetime import datetime, timezone
+    entry = f"issue={issue_number} title={title} branch={branch} sha={sha} date={datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n"
+    with open(landed, "a") as f:
+        f.write(entry)
+
+
+def _close_issue_on_advance(issue_repo: str, issue_number: int) -> None:
+    """Close a GitHub issue when advancing past it."""
+    if not issue_repo:
+        return
+    try:
+        subprocess.run(
+            ["gh", "issue", "close", str(issue_number), "--repo", issue_repo],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, Exception):
+        print(f"WARN=issue_close_failed issue={issue_number}")
+
+
 def advance(plan_path: Path,
             repo_path: str | None = None) -> AdvanceResult:
     tree = parse_plan(plan_path)
@@ -551,6 +579,13 @@ def advance(plan_path: Path,
 
     tree.current_issue = next_leaf.issue_number if next_leaf else None
     rewrite_plan(plan_path, tree)
+
+    branch = tree.state.get("branch", "") if tree.state else ""
+    issue_repo = tree.state.get("issue-repo", "") if tree.state else ""
+
+    _append_landed(plan_path, completed_leaf.issue_number,
+                   completed_leaf.title, branch)
+    _close_issue_on_advance(issue_repo, completed_leaf.issue_number)
 
     if repo_path:
         try:

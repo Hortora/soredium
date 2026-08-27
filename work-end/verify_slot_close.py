@@ -131,14 +131,34 @@ def check_no_stale_scaffold(workspace: str) -> dict:
 
 
 def _parse_landed_repos(slot_dir: str) -> set[str]:
+    """Parse .landed for repo names — handles both old (landed_shas=) and new (ledger) format."""
     landed = Path(slot_dir) / ".landed"
     if not landed.exists():
         return set()
+    repos: set[str] = set()
     for line in landed.read_text().splitlines():
         if line.startswith("landed_shas="):
             shas_str = line.split("=", 1)[1]
-            return {entry.split(":")[0] for entry in shas_str.split(",") if ":" in entry}
-    return set()
+            repos.update(entry.split(":")[0] for entry in shas_str.split(",") if ":" in entry)
+        if line.startswith("issue="):
+            repos.add("_has_ledger_entries")
+    return repos
+
+
+def _parse_landed_issues(slot_dir: str) -> set[int]:
+    """Parse .landed ledger for completed issue numbers."""
+    landed = Path(slot_dir) / ".landed"
+    if not landed.exists():
+        return set()
+    issues: set[int] = set()
+    for line in landed.read_text().splitlines():
+        for part in line.split():
+            if part.startswith("issue="):
+                try:
+                    issues.add(int(part.split("=", 1)[1]))
+                except ValueError:
+                    pass
+    return issues
 
 
 def _parse_slot_repos(slot_dir: str) -> set[str]:
