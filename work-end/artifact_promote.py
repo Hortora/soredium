@@ -30,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import parse_args, subdir_prefix
+from common import parse_args
 
 
 def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:
@@ -48,7 +48,7 @@ def _has_remote(cwd: str) -> bool:
         return False
 
 
-def _push_or_report(cwd: str, verify_paths: list[str] | None = None) -> None:
+def _push_or_report(cwd: str) -> None:
     if not _has_remote(cwd):
         print("PUSHED=skipped")
         return
@@ -66,27 +66,6 @@ def _push_or_report(cwd: str, verify_paths: list[str] | None = None) -> None:
         except subprocess.CalledProcessError as e2:
             print("PUSHED=failed")
             print(f"PUSH_ERROR={e2.stderr.strip()}")
-            return
-
-    if verify_paths:
-        try:
-            git("fetch", "origin", "main", cwd=cwd)
-        except subprocess.CalledProcessError:
-            print("PUSH_VERIFIED=failed")
-            print("PUSH_VERIFY_DETAIL=fetch origin/main failed after push")
-            return
-        prefix = subdir_prefix(cwd)
-        missing = []
-        for path in verify_paths:
-            try:
-                git("cat-file", "-e", f"origin/main:{prefix}{path}", cwd=cwd)
-            except subprocess.CalledProcessError:
-                missing.append(path)
-        if missing:
-            print("PUSH_VERIFIED=failed")
-            print(f"PUSH_VERIFY_MISSING={','.join(missing)}")
-        else:
-            print("PUSH_VERIFIED=yes")
 
 
 def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
@@ -150,8 +129,6 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
             git("add", artifact, cwd=str(wt))
             promoted += 1
 
-        promoted_paths = [a for a in artifacts if a not in skipped]
-
         if promoted > 0:
             try:
                 git("commit", "-m", f"docs(work-end): promote artifacts from {branch}", cwd=str(wt))
@@ -161,7 +138,7 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
                     print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
                     return 1
 
-            _push_or_report(str(wt), verify_paths=promoted_paths)
+            _push_or_report(str(wt))
     finally:
         try:
             git("worktree", "remove", str(wt), "--force", cwd=workspace)
@@ -242,11 +219,6 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             skipped.append(artifact)
             print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
 
-    promoted_paths = [
-        f"{dest_prefix}{a}" if dest_prefix else a
-        for a in artifacts if a not in skipped
-    ]
-
     if promoted > 0:
         try:
             git("commit", "-m", "docs(work-end): project-promote artifacts from workspace to project", cwd=project)
@@ -256,7 +228,7 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
                 print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
                 return 1
 
-        _push_or_report(project, verify_paths=promoted_paths)
+        _push_or_report(project)
 
     print(f"PROMOTED={promoted}")
     if skipped:

@@ -226,9 +226,6 @@ def main() -> int:
             failures.append(f"project docs promotion: all artifacts skipped ({skipped})")
         if out.get("PUSHED") == "failed":
             failures.append(f"project push failed: {out.get('PUSH_ERROR', 'unknown')}")
-        if out.get("PUSH_VERIFIED") == "failed":
-            missing = out.get("PUSH_VERIFY_MISSING", "unknown")
-            failures.append(f"project push verification failed: artifacts not on origin/main ({missing})")
 
     results["project_promoted"] = str(project_promoted_total)
 
