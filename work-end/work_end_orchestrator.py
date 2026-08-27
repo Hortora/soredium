@@ -618,6 +618,36 @@ JUDGMENT_STEPS_SET = {"code_review", "branch_audit_conformance",
                       "arc42_scan", "session_rename", "garden_feedback", "notes"}
 
 
+def _phase_skip(progress: dict[str, str], meta_state: str,
+                workspace: Path) -> dict[str, str]:
+    """Auto-complete steps whose phase is behind meta_state.
+
+    When meta_state=closing:stamped but close-progress has no review
+    entries, the loop would re-run review steps. This function fills
+    in the gaps so the loop skips past completed phases.
+    """
+    from close_progress import STEP_TO_PHASE, LIFECYCLE_PHASE_ORDER
+    if meta_state not in LIFECYCLE_PHASE_ORDER:
+        return progress
+    meta_idx = LIFECYCLE_PHASE_ORDER.index(meta_state)
+    if meta_idx == 0:
+        return progress
+    filled = False
+    for step_def in STEPS:
+        if step_def.name in progress:
+            continue
+        step_phase = STEP_TO_PHASE.get(step_def.name)
+        if not step_phase or step_phase not in LIFECYCLE_PHASE_ORDER:
+            continue
+        phase_idx = LIFECYCLE_PHASE_ORDER.index(step_phase)
+        if phase_idx < meta_idx:
+            progress[step_def.name] = "done"
+            filled = True
+    if filled:
+        write_close_progress(workspace, progress)
+    return progress
+
+
 def _reconcile(workspace: Path, project: Path,
                progress: dict[str, str],
                meta_state: str) -> tuple[dict[str, str], list[str]]:
@@ -895,6 +925,15 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     rec = lambda evt, **kw: _record(evt, branch, project, issue_repo, dry_run, **kw)
 
+    if args.get("force_done"):
+        step_name = args["force_done"]
+        update_close_progress(workspace, step_name, "done")
+        if args.get("produced"):
+            update_close_progress(workspace, f"{step_name}_produced", args["produced"])
+        last = read_close_progress(workspace).get("last_yielded", "")
+        if last == step_name:
+            update_close_progress(workspace, "last_yielded", "")
+
     if args.get("skip_step"):
         err = validate_skip(workspace, args["skip_step"])
         if err:
@@ -959,6 +998,8 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             rec("reconciliation-correction", meta_state=meta_state,
                 corrected_steps=",".join(corrections))
             write_close_progress(workspace, progress)
+
+    progress = _phase_skip(progress, meta_state, workspace)
 
     slot_repos = _parse_slot_repos(slot_path) if in_slot and slot_path else []
 

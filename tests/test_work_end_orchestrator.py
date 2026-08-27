@@ -646,24 +646,28 @@ class TestIntegrationBranchMode:
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "user_input"
         assert result.get("CONTEXT") == "arc42_scan"
+        assert result.get("STEP") == "arc42_scan"
         actions_seen.append("arc42_scan")
         self._complete(tmp_path, "arc42_scan")
 
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "user_input"
         assert result.get("CONTEXT") == "session_rename"
+        assert result.get("STEP") == "session_rename"
         actions_seen.append("session_rename")
         self._complete(tmp_path, "session_rename")
 
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "user_input"
         assert result.get("CONTEXT") == "garden_feedback"
+        assert result.get("STEP") == "garden_feedback"
         actions_seen.append("garden_feedback")
         self._complete(tmp_path, "garden_feedback")
 
         result = self._call(tmp_path, meta_state="closing:stamped")
         assert result["ACTION"] == "user_input"
         assert result.get("CONTEXT") == "notes"
+        assert result.get("STEP") == "notes"
         actions_seen.append("notes")
         self._complete(tmp_path, "notes")
 
@@ -1204,3 +1208,118 @@ class TestPerRepoJudgmentCompletion:
         assert result.get("ACTION"), "Must return an ACTION, not empty output"
         assert result["ACTION"].startswith("update_claude_md"), \
             f"Expected update_claude_md after protocol done, got {result['ACTION']}"
+
+
+class TestPhaseSkip:
+    """Issue 2: meta_state authority — steps in earlier phases are auto-completed."""
+
+    def _run(self, tmp_path, meta_state="closing:review", **extra):
+        from work_end_orchestrator import run_orchestrator
+        args = {
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-305-test",
+            "base_branch": "main",
+            "meta_state": meta_state,
+        }
+        args.update(extra)
+        return run_orchestrator(args)
+
+    def test_stamped_skips_review_steps(self, tmp_path, monkeypatch):
+        """When meta_state=closing:stamped, review-phase steps are auto-done."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        result = self._run(tmp_path, meta_state="closing:stamped",
+                           covers="305", issue_repo="Hortora/soredium")
+        assert result["ACTION"] != "code_review", (
+            "Review steps should be skipped when meta_state=closing:stamped"
+        )
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("code_review") == "done"
+        assert progress.get("branch_audit_conformance") == "done"
+        assert progress.get("sweep_config") == "done"
+
+    def test_promoted_skips_review_and_verified(self, tmp_path, monkeypatch):
+        """When meta_state=closing:promoted, review + verified phase steps are done."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        result = self._run(tmp_path, meta_state="closing:promoted")
+        assert result["ACTION"] == "trajectory", (
+            f"Expected trajectory at closing:promoted, got {result['ACTION']}"
+        )
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("promote") == "done"
+        assert progress.get("review_pass") == "done"
+
+    def test_no_skip_when_meta_matches_phase(self, tmp_path, monkeypatch):
+        """meta_state=closing:review does NOT skip review steps."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        result = self._run(tmp_path, meta_state="closing:review")
+        assert result["ACTION"] == "code_review"
+
+    def test_preserves_existing_progress(self, tmp_path, monkeypatch):
+        """Phase-skip does not overwrite already-done steps."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "code_review", "skipped")
+        self._run(tmp_path, meta_state="closing:stamped",
+                  covers="305", issue_repo="Hortora/soredium")
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("code_review") == "skipped"
+
+
+class TestForceDone:
+    """Issue 3: force_done bypasses all validation."""
+
+    def _run(self, tmp_path, **extra):
+        from work_end_orchestrator import run_orchestrator
+        args = {
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-305-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        }
+        args.update(extra)
+        return run_orchestrator(args)
+
+    def test_force_done_marks_mechanical_step(self, tmp_path, monkeypatch):
+        """force_done marks even mechanical steps as done (unlike step_done)."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        result = self._run(tmp_path, force_done="promote",
+                           meta_state="closing:promoted")
+        assert result.get("ERROR") != "invalid_step_done"
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("promote") == "done"
+
+    def test_force_done_skips_postcondition(self, tmp_path, monkeypatch):
+        """force_done bypasses verify_fn — no produced= required."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        result = self._run(tmp_path, force_done="code_review")
+        assert result.get("ERROR") != "postcondition_failed"
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("code_review") == "done"
+
+    def test_force_done_with_produced(self, tmp_path, monkeypatch):
+        """force_done can optionally record a produced count."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        self._run(tmp_path, force_done="squash", produced="3",
+                  meta_state="closing:promoted")
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("squash") == "done"
+        assert progress.get("squash_produced") == "3"
+
+    def test_force_done_clears_last_yielded(self, tmp_path, monkeypatch):
+        """force_done clears last_yielded to allow orchestrator to advance."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "last_yielded", "squash")
+        self._run(tmp_path, force_done="squash",
+                  meta_state="closing:promoted")
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("squash") == "done"

@@ -110,7 +110,7 @@ def _yield_user_input(step_name: str, workspace: Path,
         }
     update_close_progress(workspace, attempt_key, str(attempt))
     update_close_progress(workspace, "last_yielded", step_name)
-    return {"ACTION": "user_input", **context}
+    return {"ACTION": "user_input", "STEP": step_name, **context}
 
 
 def validate_skip(workspace: Path, step: str) -> dict[str, str] | None:
