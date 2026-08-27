@@ -130,6 +130,46 @@ def check_no_stale_scaffold(workspace: str) -> dict:
     return {"status": "pass"}
 
 
+def _parse_landed_repos(slot_dir: str) -> set[str]:
+    landed = Path(slot_dir) / ".landed"
+    if not landed.exists():
+        return set()
+    for line in landed.read_text().splitlines():
+        if line.startswith("landed_shas="):
+            shas_str = line.split("=", 1)[1]
+            return {entry.split(":")[0] for entry in shas_str.split(",") if ":" in entry}
+    return set()
+
+
+def _parse_slot_repos(slot_dir: str) -> set[str]:
+    slot_file = Path(slot_dir) / ".slot"
+    if not slot_file.exists():
+        return set()
+    repos: set[str] = set()
+    in_repos = False
+    for line in slot_file.read_text().splitlines():
+        if line.strip() == "## Repos":
+            in_repos = True
+            continue
+        if in_repos:
+            if line.startswith("##"):
+                break
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                name = stripped[2:].split("(")[0].strip()
+                if name:
+                    repos.add(name)
+    if not repos:
+        skip_prefixes = ("wsp-", ".m2", "attic")
+        for entry in sorted(Path(slot_dir).iterdir()):
+            if not entry.is_dir() or not (entry / ".git").exists():
+                continue
+            if any(entry.name.startswith(p) for p in skip_prefixes):
+                continue
+            repos.add(entry.name)
+    return repos
+
+
 def check_landed_marker(slot_dir: str) -> dict:
     landed = Path(slot_dir) / ".landed"
     if not landed.exists():
@@ -145,6 +185,21 @@ def check_landed_marker(slot_dir: str) -> dict:
             if failed:
                 return {"status": "warn", "detail": f"partial land — failed repos: {failed}"}
     return {"status": "pass"}
+
+
+def check_landed_completeness(slot_dir: str) -> dict:
+    """Verify all repos in .slot have SHAs in .landed."""
+    slot_repos = _parse_slot_repos(slot_dir)
+    if not slot_repos:
+        return {"status": "pass", "detail": "no repos in .slot"}
+    landed_repos = _parse_landed_repos(slot_dir)
+    missing = slot_repos - landed_repos
+    if missing:
+        return {"status": "fail", "detail": f"repos not in .landed: {', '.join(sorted(missing))}"}
+    extra = landed_repos - slot_repos
+    if extra:
+        return {"status": "warn", "detail": f"extra repos in .landed: {', '.join(sorted(extra))}"}
+    return {"status": "pass", "detail": f"{len(landed_repos)}/{len(slot_repos)} repos landed"}
 
 
 def check_original_sync(slot_dir: str, repo_name: str, original_path: str) -> dict:
@@ -261,6 +316,7 @@ def verify(
 
     if slot_dir:
         checks.append(("landed_marker", check_landed_marker(slot_dir)))
+        checks.append(("landed_completeness", check_landed_completeness(slot_dir)))
         checks.append(("phase_a_marker", check_slot_marker(slot_dir, ".phase-a-complete")))
         if original_repos:
             for repo_name, orig_path in original_repos.items():

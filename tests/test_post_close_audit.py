@@ -14,6 +14,7 @@ from verify_slot_close import (
     check_no_open_findings,
     check_no_stale_scaffold,
     check_landed_marker,
+    check_landed_completeness,
     check_on_main,
     check_slot_marker,
 )
@@ -97,6 +98,28 @@ class TestSlotMarker:
         (tmp_path / ".phase-a-complete").write_text("")
         result = check_slot_marker(str(tmp_path), ".phase-a-complete")
         assert result["status"] == "pass"
+
+
+class TestLandedCompleteness:
+    def test_all_repos_landed(self, tmp_path):
+        (tmp_path / ".slot").write_text("## Repos\n- pages (primary)\n- blocks-ui\n- examples\n")
+        (tmp_path / ".landed").write_text("landed_shas=pages:abc,blocks-ui:def,examples:ghi\n")
+        result = check_landed_completeness(str(tmp_path))
+        assert result["status"] == "pass"
+        assert "3/3" in result["detail"]
+
+    def test_missing_repo_in_landed(self, tmp_path):
+        (tmp_path / ".slot").write_text("## Repos\n- pages (primary)\n- blocks-ui\n- examples\n")
+        (tmp_path / ".landed").write_text("landed_shas=examples:abc\n")
+        result = check_landed_completeness(str(tmp_path))
+        assert result["status"] == "fail"
+        assert "blocks-ui" in result["detail"]
+        assert "pages" in result["detail"]
+
+    def test_no_landed_file(self, tmp_path):
+        (tmp_path / ".slot").write_text("## Repos\n- pages\n- blocks-ui\n")
+        result = check_landed_completeness(str(tmp_path))
+        assert result["status"] == "fail"
 
 
 class TestSlotPathFix:
