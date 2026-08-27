@@ -690,7 +690,7 @@ def _forcing_function_context(ctx):
 
 def _verify_produced_required(workspace: Path, produced: str | None) -> str | None:
     if produced is None:
-        return "produced count required — pass produced=N (0 if clean)"
+        return "produced count required — retry with: step_done=<STEP> produced=N (use 0 if no findings)"
     return None
 
 
