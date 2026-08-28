@@ -29,6 +29,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from common import parse_args, detect_topology
 
+_lib = Path.home() / ".claude" / "lib"
+if _lib.exists():
+    sys.path.insert(0, str(_lib))
+try:
+    import worklog as _wl
+except ImportError:
+    _wl = None
+
 
 # ---------------------------------------------------------------------------
 # Library API — typed interface for command layer
@@ -71,6 +79,26 @@ def safety_stash(repo: str, operation: str) -> bool:
     print(f"SAFETY_STASH_WARN=stash failed for {Path(repo).name}: {result.stderr.strip()}",
           file=sys.stderr)
     return False
+
+
+def _record_rebase_failure_event(project: str, branch: str,
+                                 base_branch: str, error_detail: str) -> None:
+    if not _wl:
+        return
+    try:
+        branch_count = git(project, "rev-list", "--count", f"{base_branch}..{branch}")
+        main_count = git(project, "rev-list", "--count", f"{branch}..{base_branch}")
+        conn = _wl.connect()
+        _wl.record_close_event(
+            conn, "rebase_failed", "close", branch,
+            repo_path=project,
+            commit_count=int(branch_count.stdout.strip()) if branch_count.returncode == 0 else 0,
+            main_ahead=int(main_count.stdout.strip()) if main_count.returncode == 0 else 0,
+            error_detail=error_detail[:500],
+        )
+        conn.close()
+    except Exception:
+        pass
 
 
 def rebase_onto_base(project: str, branch: str, base_branch: str = "main") -> RebaseResult:
@@ -224,6 +252,7 @@ def cmd_rebase(opts: dict[str, str]) -> int:
             print("REBASED=yes")
             return 0
         git(project, "rebase", "--abort")
+        _record_rebase_failure_event(project, branch, base_branch, result.stderr.strip())
         print("ERROR=REBASE_CONFLICT")
         print(f"ERROR_DETAIL=--onto rebase failed: {result.stderr.strip()}")
         return 1
@@ -231,6 +260,7 @@ def cmd_rebase(opts: dict[str, str]) -> int:
     result = git(project, "rebase", f"{fetch_remote}/{base_branch}")
     if result.returncode != 0:
         git(project, "rebase", "--abort")
+        _record_rebase_failure_event(project, branch, base_branch, result.stderr.strip())
         print("ERROR=REBASE_CONFLICT")
         print(f"ERROR_DETAIL={result.stderr.strip()}")
         return 1

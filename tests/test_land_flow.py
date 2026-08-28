@@ -648,3 +648,45 @@ class TestVerifyContentLanded:
         )
         result = _verify_content_landed(desc, "docs-only")
         assert result is None
+
+
+class TestRebaseFailureWorklog:
+    def test_rebase_failure_records_worklog_event(self, tmp_path, monkeypatch):
+        """Rebase failure records event via _record_rebase_failure."""
+        from land_flow import _record_rebase_failure
+        import land_flow
+
+        recorded = []
+        class FakeWl:
+            @staticmethod
+            def connect():
+                return FakeConn()
+            @staticmethod
+            def record_close_event(conn, event_type, mode, branch, **kwargs):
+                recorded.append({"event_type": event_type, "branch": branch, **kwargs})
+        class FakeConn:
+            def close(self):
+                pass
+            def commit(self):
+                pass
+
+        monkeypatch.setattr(land_flow, "_wl", FakeWl())
+        _record_rebase_failure(
+            repo_path="/tmp/test/engine", branch="feat-1",
+            commit_count=849, main_ahead=200,
+            error_detail="conflict in feature.py",
+        )
+        assert len(recorded) == 1
+        assert recorded[0]["event_type"] == "rebase_failed"
+        assert recorded[0]["branch"] == "feat-1"
+        assert recorded[0]["commit_count"] == 849
+
+    def test_record_rebase_failure_survives_missing_worklog(self, tmp_path, monkeypatch):
+        """No crash when worklog module is unavailable."""
+        import land_flow
+        monkeypatch.setattr(land_flow, "_wl", None)
+        from land_flow import _record_rebase_failure
+        _record_rebase_failure(
+            repo_path="/tmp/test/engine", branch="feat-1",
+            commit_count=10, main_ahead=5, error_detail="test",
+        )

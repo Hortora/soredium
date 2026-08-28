@@ -35,6 +35,24 @@ def _record_worklog_end(branch: str, repo_path: str, landed_sha: str) -> None:
         pass
 
 
+def _record_rebase_failure(repo_path: str, branch: str,
+                           commit_count: int, main_ahead: int,
+                           error_detail: str) -> None:
+    if not _wl:
+        return
+    try:
+        conn = _wl.connect()
+        _wl.record_close_event(
+            conn, "rebase_failed", "close", branch,
+            repo_path=repo_path,
+            commit_count=commit_count, main_ahead=main_ahead,
+            error_detail=error_detail[:500],
+        )
+        conn.close()
+    except Exception:
+        pass
+
+
 class Transport(Enum):
     DIRECT = "direct"
     TWO_HOP = "two-hop"
@@ -641,6 +659,15 @@ def land_batch(
             break
         if attempt == 3:
             assert failed_desc is not None
+            branch_count = _git(failed_desc.repo_path, "rev-list", "--count", f"{failed_desc.base_branch}..{branch}")
+            main_count = _git(failed_desc.repo_path, "rev-list", "--count", f"{branch}..{failed_desc.base_branch}")
+            _record_rebase_failure(
+                repo_path=str(failed_desc.repo_path),
+                branch=branch,
+                commit_count=int(branch_count.stdout.strip()) if branch_count.returncode == 0 else 0,
+                main_ahead=int(main_count.stdout.strip()) if main_count.returncode == 0 else 0,
+                error_detail="rebase_conflict_after_3_retries",
+            )
             result.repos.append(RepoStatus(
                 repo_path=failed_desc.repo_path, error="rebase_conflict",
             ))
