@@ -82,7 +82,7 @@ def _detect_slot(project: Path) -> tuple[Path | None, str | None]:
     _slot_mod_dir = Path(__file__).parent.parent / "work-slot"
     if str(_slot_mod_dir) not in sys.path:
         sys.path.insert(0, str(_slot_mod_dir))
-    from slot_manager import parse_slot_md
+    from slot_metadata import parse_slot_md
     info = parse_slot_md(slot_dir)
     repos = info.get("repos", [])
     primary = repos[0] if repos else None

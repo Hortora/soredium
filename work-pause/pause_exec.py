@@ -234,7 +234,7 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
         from plan_manager import detect as _plan_detect
         plan_info = _plan_detect(Path(workspace))
         if plan_info is None:
-            from slot_manager import is_slot_path as _is_slot_path
+            from slot_core import is_slot_path as _is_slot_path
             if _is_slot_path(project):
                 plan_info = _plan_detect(Path(project))
         if plan_info:

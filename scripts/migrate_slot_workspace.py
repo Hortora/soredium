@@ -13,10 +13,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
-from slot_manager import (
-    get_slot_repos, is_workspace_clone, resolve_workspace_source,
-    repoint_wksp, create_proj_symlink,
-)
+from slot_core import get_slot_repos, is_workspace_clone
+from slot_workspace import resolve_workspace_source, repoint_wksp, create_proj_symlink
 
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:

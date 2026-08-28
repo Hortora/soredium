@@ -44,7 +44,7 @@ except ImportError:
     _wl = None
 
 try:
-    from slot_manager import relocate_claude_projects, remove_claude_projects
+    from slot_claude import relocate_claude_projects, remove_claude_projects
 except ImportError:
     relocate_claude_projects = None
     remove_claude_projects = None

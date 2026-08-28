@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
-from slot_manager import is_project_repo
+from slot_core import is_project_repo
 
 
 def place_markers(family_root: Path, include_attic: bool = True) -> dict:

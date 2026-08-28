@@ -102,7 +102,8 @@ def check_isx_staleness(workspace: str, project: str) -> dict:
     slot_skill = Path(__file__).parent.parent / "work-slot"
     sys.path.insert(0, str(slot_skill))
     try:
-        from slot_manager import parse_slot_md, get_slot_repos
+        from slot_metadata import parse_slot_md
+        from slot_core import get_slot_repos
     except ImportError:
         return {"status": "skip"}
 
