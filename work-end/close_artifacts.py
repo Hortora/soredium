@@ -197,11 +197,16 @@ def main() -> int:
     project_promoted_total = 0
     read_source = str(scan_source) if scan_source != workspace else str(workspace)
 
+    covers_arg = f"covers={covers}" if covers else ""
+
     if proj_artifacts:
-        rc, out = run_script("artifact_promote.py", [
+        proj_args = [
             "to-project", str(project), read_source,
             f"artifacts={','.join(proj_artifacts)}",
-        ])
+        ]
+        if covers_arg:
+            proj_args.append(covers_arg)
+        rc, out = run_script("artifact_promote.py", proj_args)
         project_promoted_total += int(out.get("PROMOTED", "0"))
         if rc != 0:
             failures.append(f"project promotion: {out.get('ERROR', 'unknown')}")
@@ -213,11 +218,14 @@ def main() -> int:
 
     # Promote specs/adr to project with docs/ prefix
     if proj_docs_artifacts:
-        rc, out = run_script("artifact_promote.py", [
+        docs_args = [
             "to-project", str(project), read_source,
             f"artifacts={','.join(proj_docs_artifacts)}",
             "dest-prefix=docs/",
-        ])
+        ]
+        if covers_arg:
+            docs_args.append(covers_arg)
+        rc, out = run_script("artifact_promote.py", docs_args)
         project_promoted_total += int(out.get("PROMOTED", "0"))
         if rc != 0:
             failures.append(f"project docs promotion: {out.get('ERROR', 'unknown')}")

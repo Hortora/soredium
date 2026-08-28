@@ -166,6 +166,7 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
 def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
     artifacts_str = params.get("artifacts", "")
     dest_prefix = params.get("dest-prefix", "")
+    covers = params.get("covers", "")
 
     if not artifacts_str:
         print("ERROR=missing_artifacts")
@@ -220,15 +221,21 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
 
     if promoted > 0:
-        try:
-            git("commit", "-m", "docs(work-end): project-promote artifacts from workspace to project", cwd=project)
-        except subprocess.CalledProcessError as e:
-            if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
-                print("ERROR=commit_failed")
-                print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
-                return 1
+        has_staged = subprocess.run(
+            ["git", "-C", project, "diff", "--cached", "--quiet"],
+            capture_output=True,
+        ).returncode != 0
+        if has_staged:
+            issue_ref = f"  Refs #{covers.split(',')[0]}" if covers else ""
+            try:
+                git("commit", "-m", f"docs(work-end): project-promote artifacts from workspace{issue_ref}", cwd=project)
+            except subprocess.CalledProcessError as e:
+                if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
+                    print("ERROR=commit_failed")
+                    print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
+                    return 1
 
-        _push_or_report(project)
+            _push_or_report(project)
 
     print(f"PROMOTED={promoted}")
     if skipped:
