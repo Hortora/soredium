@@ -57,7 +57,14 @@ If `META_STATE` is `active` (normal path):
 
 ```bash
 python3 ~/.claude/skills/project/lifecycle.py transition $PLAN_PATH work_end
+python3 ~/.claude/skills/project/lifecycle.py commit-transition $PLAN_PATH from_state=active new_state=closing:review event=work_end
 ```
+
+Both calls are required. `transition` validates; `commit-transition` persists
+the state to `.plan`. Without `commit-transition`, the orchestrator's
+`is_stale()` sees `state: active` with `closing:review` progress entries,
+detects a mismatch, and wipes `.close-progress` on every invocation — causing
+the orchestrator to loop forever on `code_review`.
 
 **Abort:** from `closing:review` or `closing:verified` only. Pass
 `abort=yes`. Post-promotion states are forward-only.

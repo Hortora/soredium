@@ -83,6 +83,59 @@ def _git(repo: Path, *args: str) -> str:
     return r.stdout.strip()
 
 
+class TestCheckoutMainDirtyState:
+    def test_commits_dirty_workspace_before_switching(self, tmp_path):
+        """checkout_main should commit dirty workspace state before switching to main."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+
+        _git(project, "checkout", "-b", "feature")
+        _git(workspace, "checkout", "-b", "feature")
+
+        (workspace / ".plan").write_text("state: closing:stamped\n")
+        _git(workspace, "add", ".plan")
+        _git(workspace, "commit", "-m", "scaffold")
+
+        # Simulate orchestrator modifying .plan during close
+        (workspace / ".plan").write_text("state: idle\n")
+        # And creating an untracked file
+        (workspace / ".land-ledger.jsonl").write_text('{"event":"land"}\n')
+
+        result = checkout_main(str(project), str(workspace))
+        assert result == 0
+
+        branch = _git(workspace, "branch", "--show-current")
+        assert branch == "main"
+
+    def test_commits_dirty_project_before_switching(self, tmp_path):
+        """checkout_main should also handle dirty project state."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+
+        _git(project, "checkout", "-b", "feature")
+        _git(workspace, "checkout", "-b", "feature")
+
+        # Dirty project state
+        (project / "CLAUDE.md").write_text("updated\n")
+
+        result = checkout_main(str(project), str(workspace))
+        assert result == 0
+
+        branch = _git(project, "branch", "--show-current")
+        assert branch == "main"
+
+    def test_clean_state_still_works(self, tmp_path):
+        """checkout_main still works when both repos are clean."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+
+        _git(project, "checkout", "-b", "feature")
+        _git(workspace, "checkout", "-b", "feature")
+
+        result = checkout_main(str(project), str(workspace))
+        assert result == 0
+
+
 class TestCheckoutMainTopology:
     def test_checkout_main_uses_upstream_for_fork_model(self, tmp_path):
         """checkout_main should pull from upstream (blessed) for fork repos."""

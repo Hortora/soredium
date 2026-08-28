@@ -179,6 +179,21 @@ def checkout_main(project: str, workspace: str) -> int:
         print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
         return 1
 
+    # Commit any dirty state before switching — the orchestrator modifies
+    # workspace files (.plan, .land-ledger.jsonl) during close, and uncommitted
+    # changes block git checkout.
+    for repo_path, label in [(project, "project"), (workspace, "workspace")]:
+        status = subprocess.run(
+            ["git", "-C", repo_path, "status", "--porcelain"],
+            capture_output=True, text=True,
+        )
+        if status.stdout.strip():
+            try:
+                git("add", "-A", cwd=repo_path)
+                git("commit", "-m", "chore: commit lifecycle state before branch switch", cwd=repo_path)
+            except subprocess.CalledProcessError:
+                pass
+
     # Checkout main in both repos
     for repo_path, label in [(project, "project"), (workspace, "workspace")]:
         try:
