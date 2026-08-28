@@ -77,7 +77,11 @@ python3 work-end/work_end_orchestrator.py \
     [abort=yes] [conflict_resolved=yes]
 ```
 
-Call in a loop until `ACTION=complete`. Read the ACTION, dispatch:
+Call in a loop until `ACTION=complete`. If the output includes
+`META_STATE=<value>`, update `$META_STATE` for subsequent calls —
+lifecycle transitions advance the state mid-loop.
+
+Read the ACTION, dispatch:
 
 | ACTION | Do |
 |--------|----|
