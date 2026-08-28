@@ -296,6 +296,26 @@ def _repack_broken_alternates(slot_dir: Path, family_root: Path) -> int:
     return repacked
 
 
+def _has_unmerged_content(slot_dir: Path) -> list[str]:
+    """Return list of repo names with unmerged branch content vs main."""
+    unmerged = []
+    for repo_dir in sorted(slot_dir.iterdir()):
+        if not repo_dir.is_dir() or not (repo_dir / ".git").exists():
+            continue
+        rc, stdout, _ = run_cmd(
+            ["git", "branch", "--show-current"], cwd=str(repo_dir))
+        if rc != 0:
+            continue
+        branch = stdout.strip()
+        if not branch or branch == "main":
+            continue
+        rc, stdout, _ = run_cmd(
+            ["git", "diff", "--stat", f"main...{branch}"], cwd=str(repo_dir))
+        if rc == 0 and stdout.strip():
+            unmerged.append(repo_dir.name)
+    return unmerged
+
+
 def _teardown_isx(slot_dir: Path) -> None:
     info = parse_slot_md(slot_dir)
     if info.get("isolation_type") != "isx":
@@ -1640,6 +1660,12 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
     ensure_clone_layout(slot_dir)
+    unmerged = _has_unmerged_content(slot_dir)
+    if unmerged:
+        print(f"ERROR=unmerged_content slot={slot_num}")
+        print(f"ERROR_DETAIL=repos with unmerged branch content: {', '.join(unmerged)}")
+        print("HINT=land the branch content first, or manually verify it's already on main under different SHAs")
+        sys.exit(1)
     if not force and not is_slot_landed(slot_dir):
         print(f"ERROR=slot_not_landed slot={slot_num}")
         print("ERROR_DETAIL=slot has no .landed marker — work may be in progress")

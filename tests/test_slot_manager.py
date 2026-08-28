@@ -1626,6 +1626,7 @@ class TestArchiveSlot:
 
     def test_blocks_archive_without_landed_marker(self, tmp_path, capsys):
         family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "main"], capture_output=True)
 
         with pytest.raises(SystemExit):
             slot_manager.archive_slot(family, 1)
@@ -1637,6 +1638,7 @@ class TestArchiveSlot:
         rc, sha, _ = slot_manager.run_cmd(
             ["git", "-C", str(slot / "engine"), "rev-parse", "HEAD"]
         )
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "main"], capture_output=True)
         (slot / ".landed").write_text(
             f"branch=issue-42-test\nrepos=engine\nlanded_shas=engine:{sha.strip()}\n"
         )
@@ -1646,8 +1648,18 @@ class TestArchiveSlot:
         captured = capsys.readouterr()
         assert "ERROR=sha_not_on_main" in captured.out
 
+    def test_blocks_archive_with_unmerged_content(self, tmp_path, capsys):
+        """Unmerged content gate fires before landed/SHA checks — no force override."""
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+
+        with pytest.raises(SystemExit):
+            slot_manager.archive_slot(family, 1, force=True)
+        captured = capsys.readouterr()
+        assert "ERROR=unmerged_content" in captured.out
+
     def test_force_bypasses_all_checks(self, tmp_path):
         family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "main"], capture_output=True)
 
         slot_manager.archive_slot(family, 1, force=True)
 
@@ -2227,6 +2239,7 @@ class TestArchiveSlotPromotionGate:
     def test_force_archive_still_warns_about_promotion(self, tmp_path, capsys):
         """Even --force should warn about missing promotion stamp."""
         family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "main"], capture_output=True)
 
         slot_manager.archive_slot(family, 1, force=True)
 
@@ -3908,6 +3921,81 @@ class TestRepackBrokenAlternates:
         count = slot_manager._repack_broken_alternates(slot_a, tmp_path)
 
         assert count == 2
+
+
+class TestHasUnmergedContent:
+    """_has_unmerged_content detects repos with branch content not on main."""
+
+    def test_detects_unmerged_branch_content(self, tmp_path):
+        slots = tmp_path / "slots"
+        slot = slots / "10"
+        repo = init_repo(slot / "engine")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feat-1"],
+                        capture_output=True, check=True)
+        (repo / "feature.py").write_text("# feature\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat"],
+                        capture_output=True, check=True)
+
+        result = slot_manager._has_unmerged_content(slot)
+
+        assert result == ["engine"]
+
+    def test_returns_empty_when_on_main(self, tmp_path):
+        slots = tmp_path / "slots"
+        slot = slots / "10"
+        init_repo(slot / "engine")
+
+        result = slot_manager._has_unmerged_content(slot)
+
+        assert result == []
+
+    def test_returns_empty_when_branch_content_merged(self, tmp_path):
+        slots = tmp_path / "slots"
+        slot = slots / "10"
+        repo = init_repo(slot / "engine")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feat-1"],
+                        capture_output=True, check=True)
+        (repo / "feature.py").write_text("# feature\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat"],
+                        capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"],
+                        capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", "feat-1"],
+                        capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "checkout", "feat-1"],
+                        capture_output=True, check=True)
+
+        result = slot_manager._has_unmerged_content(slot)
+
+        assert result == []
+
+    def test_reports_multiple_repos_with_unmerged(self, tmp_path):
+        slots = tmp_path / "slots"
+        slot = slots / "10"
+        for name in ["engine", "worker"]:
+            repo = init_repo(slot / name)
+            subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feat-1"],
+                            capture_output=True, check=True)
+            (repo / "feature.py").write_text(f"# {name}\n")
+            subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat"],
+                            capture_output=True, check=True)
+
+        result = slot_manager._has_unmerged_content(slot)
+
+        assert sorted(result) == ["engine", "worker"]
+
+    def test_skips_non_git_directories(self, tmp_path):
+        slots = tmp_path / "slots"
+        slot = slots / "10"
+        init_repo(slot / "engine")
+        (slot / "not-a-repo").mkdir(parents=True)
+
+        result = slot_manager._has_unmerged_content(slot)
+
+        assert result == []
 
 
 class TestAddRepoWorkspaceRemotes:
