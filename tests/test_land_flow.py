@@ -597,3 +597,54 @@ class TestWorkspaceStampOnly:
         stamp = subprocess.run(["git", "-C", str(ws), "log", "-1", "--format=%s", branch],
                                capture_output=True, text=True).stdout.strip()
         assert "branch closed" in stamp, f"Workspace not stamped, tip: {stamp}"
+
+
+# ---------------------------------------------------------------------------
+# Content verification postcondition
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyContentLanded:
+    def test_returns_none_when_content_landed(self, tmp_path):
+        """Branch content on main → None (safe to stamp)."""
+        from land_flow import RepoDescriptor, Transport, _verify_content_landed
+        repo = _init_repo(tmp_path / "repos" / "engine")
+        _add_feature(repo, "feat-1", "feature.py")
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", "feat-1"], capture_output=True)
+        desc = RepoDescriptor(
+            repo_path=repo, original_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = _verify_content_landed(desc, "feat-1")
+        assert result is None
+
+    def test_returns_error_when_content_not_landed(self, tmp_path):
+        """Branch has source files not on main → error string."""
+        from land_flow import RepoDescriptor, Transport, _verify_content_landed
+        repo = _init_repo(tmp_path / "repos" / "engine")
+        _add_feature(repo, "feat-1", "feature.py")
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        desc = RepoDescriptor(
+            repo_path=repo, original_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = _verify_content_landed(desc, "feat-1")
+        assert result is not None
+        assert "content_not_landed" in result
+
+    def test_returns_none_for_docs_only_branch(self, tmp_path):
+        """Branch with only non-source files → None (no false positives)."""
+        from land_flow import RepoDescriptor, Transport, _verify_content_landed
+        repo = _init_repo(tmp_path / "repos" / "engine")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "docs-only"], capture_output=True)
+        (repo / "docs.md").write_text("# docs\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "docs"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        desc = RepoDescriptor(
+            repo_path=repo, original_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = _verify_content_landed(desc, "docs-only")
+        assert result is None

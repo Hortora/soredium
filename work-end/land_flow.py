@@ -76,6 +76,33 @@ def _git(repo: Path | str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+SOURCE_EXTENSIONS = (
+    ".java", ".kt", ".xml", ".yaml", ".yml", ".json",
+    ".properties", ".sql", ".py", ".ts", ".tsx", ".js",
+    ".jsx", ".css", ".scss", ".html",
+)
+
+
+def _verify_content_landed(desc: RepoDescriptor, branch: str) -> str | None:
+    """Return error string if branch source content is not on base_branch."""
+    result = _git(desc.repo_path, "diff", "--name-only",
+                  f"{desc.base_branch}...{branch}")
+    if result.returncode != 0:
+        return f"diff_failed repo={desc.repo_path.name}"
+    source_files = [f for f in result.stdout.strip().split("\n")
+                    if f and any(f.endswith(ext) for ext in SOURCE_EXTENSIONS)]
+    if not source_files:
+        return None
+    diff = _git(desc.repo_path, "diff", desc.base_branch, branch,
+                "--", *source_files)
+    if diff.returncode == 0 and diff.stdout.strip():
+        missing = [f for f in _git(desc.repo_path, "diff", "--name-only",
+                   desc.base_branch, branch, "--", *source_files)
+                   .stdout.strip().split("\n") if f]
+        return f"content_not_landed repo={desc.repo_path.name} files={len(missing)}"
+    return None
+
+
 def _read_progress(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
@@ -653,6 +680,25 @@ def land_batch(
         print(f"STAGE=push STATUS=partial failed={','.join(failed_repos)}")
     else:
         print("STAGE=push STATUS=pass")
+
+    # Step 3b: Verify content landed (postcondition)
+    print("STAGE=verify_content")
+    for desc in active:
+        if desc.is_workspace:
+            continue
+        if desc.repo_path.name in failed_repos:
+            continue
+        err = _verify_content_landed(desc, branch)
+        if err:
+            result.repos.append(RepoStatus(
+                repo_path=desc.repo_path, error="content_not_landed",
+            ))
+            result.success = False
+            print(f"CONTENT_NOT_LANDED={desc.repo_path.name}")
+    if not result.success:
+        print("STAGE=verify_content STATUS=fail")
+        return result
+    print("STAGE=verify_content STATUS=pass")
 
     # Step 4: Stamp all feature branches (even if some repos failed push —
     # repos that pushed successfully still need stamping)
