@@ -110,3 +110,23 @@ class TestIsStale:
     def test_drained_state_not_stale(self):
         progress = {"review": "done"}
         assert is_stale(progress, "drained") is False
+
+    def test_not_stale_when_plan_state_matches_progress(self, tmp_path):
+        """Regression: lifecycle transitions advance .plan but caller passes stale meta_state.
+        is_stale must read .plan to get the actual state, not trust the argument."""
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nstate: closing:promoted\nbranch: test\n")
+        progress = {"review": "done", "promote": "done", "trajectory": "done"}
+        assert is_stale(progress, "closing:review", plan_path=plan) is False
+
+    def test_still_stale_when_plan_state_behind_progress(self, tmp_path):
+        """Genuine stale: plan is active but progress has promoted-phase entries."""
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nstate: active\nbranch: test\n")
+        progress = {"review": "done", "promote": "done", "trajectory": "done"}
+        assert is_stale(progress, "active", plan_path=plan) is True
+
+    def test_stale_without_plan_path_uses_meta_state(self):
+        """Backward compat: no plan_path means trust meta_state argument."""
+        progress = {"review": "done", "promote": "done", "land": "done"}
+        assert is_stale(progress, "closing:review") is True

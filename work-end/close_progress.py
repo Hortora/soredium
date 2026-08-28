@@ -101,9 +101,23 @@ def delete_close_progress(workspace: Path) -> None:
             p.unlink()
 
 
-def is_stale(progress: dict[str, str], meta_state: str) -> bool:
+def _read_plan_state(plan_path: Path) -> str:
+    """Read the lifecycle state from a .plan file."""
+    for line in plan_path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("state:"):
+            return stripped.split(":", 1)[1].strip()
+    return ""
+
+
+def is_stale(progress: dict[str, str], meta_state: str,
+             plan_path: Path | None = None) -> bool:
     if not progress:
         return False
+    if plan_path and plan_path.exists():
+        actual_state = _read_plan_state(plan_path)
+        if actual_state and actual_state in LIFECYCLE_PHASE_ORDER:
+            meta_state = actual_state
     if meta_state not in LIFECYCLE_PHASE_ORDER:
         return False
     meta_idx = LIFECYCLE_PHASE_ORDER.index(meta_state)

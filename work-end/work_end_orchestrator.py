@@ -1006,7 +1006,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             progress[sub] = "done"
         write_close_progress(workspace, progress)
 
-    if is_stale(progress, meta_state):
+    if is_stale(progress, meta_state, plan_path=plan_path):
         rec("stale-progress-reset", meta_state=meta_state,
             progress_keys=",".join(progress.keys()))
         delete_close_progress(workspace)
@@ -1035,6 +1035,8 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     )
 
     result = _next_action(ctx)
+    if ctx.expected_state and ctx.expected_state != meta_state:
+        result["META_STATE"] = ctx.expected_state
     _log_call(workspace, meta_state, result, ctx.steps_executed, dry_run=dry_run)
 
     if result.get("ERROR") and not dry_run:
