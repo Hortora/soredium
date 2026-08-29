@@ -208,20 +208,72 @@ def _review_step_detail(step_name: str, progress: dict[str, str],
     return produced if produced else ""
 
 
+def _retry_detail(step_name: str, progress: dict[str, str]) -> str:
+    attempt_key = f"{step_name}_mechanical_attempt"
+    attempts = progress.get(attempt_key, "")
+    if attempts and int(attempts) > 0:
+        return f"{attempts} retries"
+    return ""
+
+
+def _per_repo_detail(step_name: str, progress: dict[str, str]) -> str:
+    repos: dict[str, str] = {}
+    prefix = f"{step_name}:"
+    for k, v in progress.items():
+        if k.startswith(prefix) and "_" not in k[len(prefix):]:
+            repo = k[len(prefix):]
+            repos[repo] = v
+    if not repos:
+        return ""
+    parts = []
+    for repo, status in sorted(repos.items()):
+        parts.append(f"{repo}:{status}")
+    return " ".join(parts)
+
+
+def _step_detail(step_name: str, progress: dict[str, str],
+                 sweep_key: str, sweep_steps: set[str],
+                 findings: list[dict]) -> str:
+    parts = []
+    if step_name in REVIEW_STEPS:
+        parts.append(_review_step_detail(step_name, progress, findings))
+    elif step_name in ("sweep_config", "wrap_sweep_config"):
+        parts.append(_sweep_config_detail(progress, sweep_key))
+    else:
+        produced = _produced_detail(step_name, progress)
+        if produced:
+            parts.append(produced)
+    retries = _retry_detail(step_name, progress)
+    if retries:
+        parts.append(retries)
+    per_repo = _per_repo_detail(step_name, progress)
+    if per_repo:
+        parts.append(per_repo)
+    return ", ".join(p for p in parts if p)
+
+
 def _build_rows(progress: dict[str, str], visible: list[tuple[str, str]],
                  sweep_key: str, sweep_steps: set[str],
                  findings: list[dict]) -> list[tuple[str, str, str]]:
     rows = []
     for step_name, label in visible:
         status = progress.get(step_name, "")
+        per_repo = _per_repo_detail(step_name, progress)
+        if not status and per_repo:
+            all_done = all(v == "done" for v in
+                           (progress.get(k) for k in progress
+                            if k.startswith(f"{step_name}:") and "_" not in k[len(f"{step_name}:"):])
+                           if v is not None)
+            status = "done" if all_done else "partial"
+
         if status == "done":
             status_text = "done"
-            if step_name in REVIEW_STEPS:
-                detail = _review_step_detail(step_name, progress, findings)
-            elif step_name in ("sweep_config", "wrap_sweep_config"):
-                detail = _sweep_config_detail(progress, sweep_key)
-            else:
-                detail = _produced_detail(step_name, progress)
+            detail = _step_detail(step_name, progress, sweep_key,
+                                  sweep_steps, findings)
+        elif status == "partial":
+            status_text = "partial"
+            detail = _step_detail(step_name, progress, sweep_key,
+                                  sweep_steps, findings)
         elif status == "skipped":
             status_text = "skipped"
             detail = _sweep_detail(step_name, progress, sweep_key, sweep_steps) or ""
@@ -255,6 +307,61 @@ def _render_table(rows: list[tuple[str, str, str]]) -> list[str]:
     return lines
 
 
+def _read_close_log(workspace: Path, mode: str = "close") -> list[dict]:
+    log_file = ".close-log.jsonl" if mode == "close" else ".wrap-log.jsonl"
+    log_path = workspace / log_file
+    if not log_path.exists():
+        return []
+    entries = []
+    for line in log_path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return entries
+
+
+INCIDENT_EVENTS = {
+    "step-error", "step-failed", "stale-progress-reset",
+    "reconciliation-correction", "branch-mismatch-reset",
+    "postcondition-failed", "invalid-skip", "invalid-step-done",
+}
+
+
+def _build_incidents(log_entries: list[dict]) -> list[str]:
+    incidents = []
+    for entry in log_entries:
+        event = entry.get("action", "") or entry.get("error", "")
+        meta = entry.get("metadata", {}) if isinstance(entry.get("metadata"), dict) else {}
+
+        if event in INCIDENT_EVENTS or entry.get("error"):
+            step = entry.get("step", "")
+            error = entry.get("error", "")
+            ts = entry.get("ts", "")[:19]
+            if event == "stale-progress-reset":
+                incidents.append(f"  {ts}  progress reset (stale)")
+            elif event == "reconciliation-correction":
+                corrected = meta.get("corrected_steps", entry.get("corrected_steps", ""))
+                incidents.append(f"  {ts}  reconciliation corrected: {corrected}")
+            elif event == "branch-mismatch-reset":
+                incidents.append(f"  {ts}  progress reset (branch mismatch)")
+            elif event == "step-failed":
+                attempts = meta.get("attempts", entry.get("attempts", ""))
+                reason = meta.get("reason", entry.get("reason", ""))
+                incidents.append(f"  {ts}  {step} failed after {attempts} attempts: {reason}")
+            elif event == "postcondition-failed":
+                reason = meta.get("reason", entry.get("reason", ""))
+                incidents.append(f"  {ts}  {step} postcondition failed: {reason}")
+            elif error and step:
+                retry = entry.get("retry", "")
+                retry_str = f" (attempt {retry})" if retry else ""
+                incidents.append(f"  {ts}  {step}: {error}{retry_str}")
+    return incidents
+
+
 def format_summary(progress: dict[str, str], mode: str = "close",
                    workspace: Path | None = None) -> str:
     if mode == "wrap":
@@ -275,6 +382,14 @@ def format_summary(progress: dict[str, str], mode: str = "close",
         lines.append("Findings:")
         for f in findings:
             lines.append(_finding_line(f))
+
+    if workspace:
+        log_entries = _read_close_log(workspace, mode)
+        incidents = _build_incidents(log_entries)
+        if incidents:
+            lines.append("")
+            lines.append("Incidents:")
+            lines.extend(incidents)
 
     return "\n".join(lines)
 

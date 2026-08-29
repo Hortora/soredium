@@ -219,6 +219,98 @@ class TestWrapSummary:
         assert "deselected" in write_line
 
 
+class TestRetryAndPerRepo:
+    def test_retry_count_shown(self):
+        progress = {
+            "promote": "done",
+            "promote_mechanical_attempt": "2",
+        }
+        output = format_summary(progress, "close")
+        lines = output.split("\n")
+        promote_line = [l for l in lines if "Promote" in l][0]
+        assert "2 retries" in promote_line
+
+    def test_per_repo_breakdown_shown(self):
+        progress = {
+            "rebase:engine": "done",
+            "rebase:blocks": "done",
+            "rebase:qhorus": "skipped",
+        }
+        output = format_summary(progress, "close")
+        lines = output.split("\n")
+        rebase_line = [l for l in lines if "Rebase" in l][0]
+        assert "engine:done" in rebase_line
+        assert "blocks:done" in rebase_line
+        assert "qhorus:skipped" in rebase_line
+
+    def test_per_repo_all_done_shows_done_status(self):
+        progress = {
+            "promote:engine": "done",
+            "promote:blocks": "done",
+        }
+        output = format_summary(progress, "close")
+        lines = output.split("\n")
+        promote_line = [l for l in lines if "Promote" in l][0]
+        assert "│ done" in promote_line
+
+    def test_per_repo_partial_shows_partial_status(self):
+        progress = {
+            "rebase:engine": "done",
+            "rebase:blocks": "skipped",
+        }
+        output = format_summary(progress, "close")
+        lines = output.split("\n")
+        rebase_line = [l for l in lines if "Rebase" in l][0]
+        assert "│ partial" in rebase_line
+
+
+class TestIncidents:
+    def test_step_error_shown(self, tmp_path):
+        log = [{"ts": "2026-08-29T10:00:00", "action": "step-error",
+                "step": "promote", "error": "push_failed", "retry": "1"}]
+        (tmp_path / ".close-log.jsonl").write_text(
+            "\n".join(json.dumps(e) for e in log) + "\n"
+        )
+        output = format_summary({"promote": "done"}, "close", workspace=tmp_path)
+        assert "Incidents:" in output
+        assert "promote" in output
+        assert "push_failed" in output
+
+    def test_stale_reset_shown(self, tmp_path):
+        log = [{"ts": "2026-08-29T10:00:00", "action": "stale-progress-reset",
+                "step": "", "error": ""}]
+        (tmp_path / ".close-log.jsonl").write_text(json.dumps(log[0]) + "\n")
+        output = format_summary({}, "close", workspace=tmp_path)
+        assert "progress reset (stale)" in output
+
+    def test_reconciliation_shown(self, tmp_path):
+        log = [{"ts": "2026-08-29T10:00:00", "action": "reconciliation-correction",
+                "step": "", "error": "", "corrected_steps": "land,verify"}]
+        (tmp_path / ".close-log.jsonl").write_text(json.dumps(log[0]) + "\n")
+        output = format_summary({}, "close", workspace=tmp_path)
+        assert "reconciliation corrected" in output
+        assert "land,verify" in output
+
+    def test_step_failed_shown(self, tmp_path):
+        log = [{"ts": "2026-08-29T10:00:00", "action": "step-failed",
+                "step": "forage", "error": "", "attempts": "3",
+                "reason": "timeout"}]
+        (tmp_path / ".close-log.jsonl").write_text(json.dumps(log[0]) + "\n")
+        output = format_summary({}, "close", workspace=tmp_path)
+        assert "forage failed after 3 attempts" in output
+
+    def test_no_incidents_no_section(self, tmp_path):
+        log = [{"ts": "2026-08-29T10:00:00", "action": "complete",
+                "step": "", "error": ""}]
+        (tmp_path / ".close-log.jsonl").write_text(json.dumps(log[0]) + "\n")
+        output = format_summary({"promote": "done"}, "close", workspace=tmp_path)
+        assert "Incidents:" not in output
+
+    def test_no_log_file_no_section(self, tmp_path):
+        output = format_summary({"promote": "done"}, "close", workspace=tmp_path)
+        assert "Incidents:" not in output
+
+
 class TestLegacyReviewMigration:
     def test_legacy_review_done_not_in_close_summary(self):
         """Legacy 'review=done' should not appear as a visible step."""
