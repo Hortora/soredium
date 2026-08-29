@@ -1135,39 +1135,69 @@ def _close_on_step_done(step: StepDef, ctx: OrchestratorContext, result: dict[st
 
 
 def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str] | None:
-    """Per-repo fan-out for slot-mode mechanical steps."""
+    """Per-repo fan-out for slot-mode mechanical steps.
+
+    Tries ALL remaining repos before reporting. Successful repos are
+    marked done immediately. Failures are collected and returned as a
+    consolidated report so the user sees the full picture.
+    """
     if step.name not in PER_REPO_EXECUTE_STEPS or not ctx.in_slot or not ctx.slot_repos:
         return None
     if ctx.per_repo_done(step.name):
         return {}
-    repo = ctx.next_repo_for(step.name)
-    if not repo:
-        return {}
-    ctx.current_repo_project = ctx.slot_path / repo if ctx.slot_path else None
-    ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo)
-    step_key = f"{step.name}:{repo}"
-    attempt_key = f"{step_key}_mechanical_attempt"
-    attempt = int(ctx.progress.get(attempt_key, "0"))
-    result = _close_execute_mechanical(step, ctx)
-    ctx.current_repo_project = None
-    ctx.current_repo_workspace = None
-    if result and "ERROR" in result:
-        error = result.get("ERROR", "")
-        if error in NON_RETRYABLE_ERRORS:
-            context = {"CONTEXT": f"{error.lower()}", "STEP": step_key, "REPO": repo}
-            context.update(result)
-            ctx.steps_executed.append(f"{step_key}:ERROR:classified")
-            return {"ACTION": "user_input", **context}
-        attempt += 1
-        update_close_progress(ctx.workspace, attempt_key, str(attempt))
-        ctx.steps_executed.append(f"{step_key}:ERROR:{attempt}")
+
+    failures: dict[str, dict[str, str]] = {}
+    retryable_failure: tuple[str, int, dict[str, str]] | None = None
+
+    for repo in ctx.slot_repos:
+        step_key = f"{step.name}:{repo}"
+        if ctx.progress.get(step_key) in ("done", "skipped"):
+            continue
+
+        ctx.current_repo_project = ctx.slot_path / repo if ctx.slot_path else None
+        ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo)
+        result = _close_execute_mechanical(step, ctx)
+        ctx.current_repo_project = None
+        ctx.current_repo_workspace = None
+
+        if result and "ERROR" in result:
+            error = result.get("ERROR", "")
+            if error in NON_RETRYABLE_ERRORS:
+                failures[repo] = result
+                ctx.steps_executed.append(f"{step_key}:ERROR:classified")
+            else:
+                attempt_key = f"{step_key}_mechanical_attempt"
+                attempt = int(ctx.progress.get(attempt_key, "0")) + 1
+                update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                ctx.steps_executed.append(f"{step_key}:ERROR:{attempt}")
+                if retryable_failure is None:
+                    retryable_failure = (step_key, attempt, result)
+        else:
+            ctx.last_output = result or {}
+            if step.name == "land":
+                ctx.landed_shas[repo] = (result or {}).get("LANDED_SHA", "")
+            update_close_progress(ctx.workspace, step_key, "done")
+            ctx.steps_executed.append(step_key)
+
+    if failures:
+        context: dict[str, str] = {
+            "ACTION": "user_input",
+            "CONTEXT": "per_repo_failures",
+            "STEP": step.name,
+            "FAILED_REPOS": ",".join(failures.keys()),
+        }
+        for repo, result in failures.items():
+            context[f"ERROR_{repo}"] = result.get("ERROR", "unknown")
+            context[f"DETAIL_{repo}"] = result.get("ERROR_DETAIL", "")
+            if result.get("CONFLICT_COUNT"):
+                context[f"CONFLICTS_{repo}"] = result.get("CONFLICT_COUNT", "")
+        return context
+
+    if retryable_failure:
+        step_key, attempt, result = retryable_failure
         from orchestrator_engine import _make_error_result
         return _make_error_result(step_key, attempt, result)
-    ctx.last_output = result or {}
-    if step.name == "land":
-        ctx.landed_shas[repo] = (result or {}).get("LANDED_SHA", "")
-    update_close_progress(ctx.workspace, step_key, "done")
-    ctx.steps_executed.append(step_key)
+
     return {}
 
 

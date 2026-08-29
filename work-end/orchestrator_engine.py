@@ -208,8 +208,6 @@ def run_loop(
     for step in steps:
         if step.skip_fn and step.skip_fn(ctx):
             continue
-        if ctx.done(step.name):
-            continue
 
         if step.step_type == "mechanical":
             if per_repo_mechanical:
@@ -218,6 +216,9 @@ def run_loop(
                     if handled:
                         return handled
                     continue
+
+            if ctx.done(step.name):
+                continue
 
             attempt_key = f"{step.name}_mechanical_attempt"
             attempt = int(ctx.progress.get(attempt_key, "0"))
@@ -243,6 +244,9 @@ def run_loop(
                 on_step_done(step, ctx, result or {})
             update_close_progress(ctx.workspace, step.name, "done")
             ctx.steps_executed.append(step.name)
+            continue
+
+        if ctx.done(step.name):
             continue
 
         if step.step_type == "judgment":

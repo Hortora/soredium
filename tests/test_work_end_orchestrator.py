@@ -1542,6 +1542,114 @@ class TestPerRepoEscalation:
         assert "engine" in result.get("STEP", "")
 
 
+class TestPerRepoTryAllThenReport:
+    """Non-retryable errors: try all repos before reporting failures."""
+
+    def _make_slot(self, tmp_path, repos):
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        for repo in repos:
+            repo_dir = slot_path / repo
+            repo_dir.mkdir()
+            (repo_dir / ".git").mkdir()
+        return slot_path
+
+    def test_tries_all_repos_before_reporting(self, tmp_path, monkeypatch):
+        """All repos attempted — user sees consolidated failure picture."""
+        results_by_repo = {
+            "blocks": {"ERROR": "REBASE_CONFLICT", "CONFLICT_COUNT": "2",
+                       "ERROR_DETAIL": "conflict"},
+            "engine": {"ERROR": "REBASE_CONFLICT", "CONFLICT_COUNT": "33",
+                       "ERROR_DETAIL": "many conflicts"},
+            "qhorus": {"REBASED": "yes"},
+        }
+        def dispatch(cmd, ws, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            for repo in results_by_repo:
+                if f"project={tmp_path / 'slot' / repo}" in cmd_str:
+                    return results_by_repo[repo]
+            return {}
+        monkeypatch.setattr("work_end_orchestrator._run_script", dispatch)
+        slot_path = self._make_slot(tmp_path, ["blocks", "engine", "qhorus"])
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "trajectory", "done")
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "engine"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+        assert result["ACTION"] == "user_input"
+        failed_repos = result.get("FAILED_REPOS", "")
+        assert "engine" in failed_repos, "engine failure not reported"
+        assert "blocks" in failed_repos, "blocks failure not reported"
+        assert "qhorus" not in failed_repos, "qhorus should have succeeded"
+
+    def test_successful_repos_marked_done_despite_failures(self, tmp_path, monkeypatch):
+        """Repos that succeed are marked done even when others fail."""
+        results_by_repo = {
+            "blocks": {"ERROR": "REBASE_CONFLICT", "ERROR_DETAIL": "conflict"},
+            "engine": {"REBASED": "yes"},
+        }
+        def dispatch(cmd, ws, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            for repo in results_by_repo:
+                if f"project={tmp_path / 'slot' / repo}" in cmd_str:
+                    return results_by_repo[repo]
+            return {}
+        monkeypatch.setattr("work_end_orchestrator._run_script", dispatch)
+        slot_path = self._make_slot(tmp_path, ["blocks", "engine"])
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "trajectory", "done")
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "engine"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("rebase:engine") == "done", "engine succeeded but not marked done"
+
+
+class TestDefenseInDepthPerRepo:
+    """ctx.done(step.name) must not bypass per-repo handling."""
+
+    def _make_slot(self, tmp_path, repos):
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        for repo in repos:
+            repo_dir = slot_path / repo
+            repo_dir.mkdir()
+            (repo_dir / ".git").mkdir()
+        return slot_path
+
+    def test_single_key_does_not_bypass_per_repo(self, tmp_path, monkeypatch):
+        """Even if promote=done exists, per_repo_mechanical still runs."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {"PROMOTED": "yes"})
+        slot_path = self._make_slot(tmp_path, ["engine", "blocks"])
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "promote", "done")
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "engine"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:verified",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("promote:blocks") == "done" or progress.get("promote:engine") == "done", (
+            "Per-repo promote was bypassed by single-key promote=done"
+        )
+
+
 class TestRebaseConflictNotRetryable:
     """REBASE_CONFLICT yields user_input immediately — no retries."""
 

@@ -100,3 +100,29 @@ Options:
 | Resolve manually | User resolves outside the orchestrator. When done, re-invoke with `conflict_resolved=yes` (add `conflict_repo={repo}` in slot mode). |
 | Skip rebase | Re-invoke with `conflict_resolved=yes` — the branch lands without rebasing. Merge to main will use `--no-ff` instead of `--ff-only`. |
 | Abort | Re-invoke with `abort=yes`. |
+
+## CONTEXT=per_repo_failures
+
+Slot mode: a per-repo step was attempted across all repos. Some succeeded
+(already marked done), some failed. The user sees the full picture.
+
+**Available context fields:** `STEP` (step name, e.g. "rebase"),
+`FAILED_REPOS` (comma-separated list of repos that failed),
+`ERROR_{repo}` and `DETAIL_{repo}` for each failed repo,
+`CONFLICTS_{repo}` (for rebase conflicts).
+
+**Present to the user:**
+
+```
+{STEP} results across repos:
+  engine:  FAILED — {ERROR_engine}: {DETAIL_engine} ({CONFLICTS_engine} conflicts)
+  blocks:  FAILED — {ERROR_blocks}: {DETAIL_blocks}
+  qhorus:  OK (done)
+
+Options per repo:
+  1. Resolve manually — fix conflicts, then pass conflict_resolved=yes conflict_repo={repo}
+  2. Skip — pass force_done={STEP}:{repo} to skip that repo's step
+  3. Abort — pass abort=yes to stop work-end entirely
+```
+
+Repos that succeeded are already marked done. Only failed repos need action.
