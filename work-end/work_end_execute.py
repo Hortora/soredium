@@ -101,6 +101,17 @@ def _record_rebase_failure_event(project: str, branch: str,
         pass
 
 
+def _report_conflict_scope(project: str) -> None:
+    """Print CONFLICT_COUNT and CONFLICT_FILES while rebase is still in progress."""
+    conflict_check = git(project, "diff", "--name-only", "--diff-filter=U")
+    if conflict_check.returncode == 0 and conflict_check.stdout.strip():
+        files = conflict_check.stdout.strip().splitlines()
+        print(f"CONFLICT_COUNT={len(files)}")
+        print(f"CONFLICT_FILES={','.join(files[:20])}")
+    else:
+        print("CONFLICT_COUNT=unknown")
+
+
 def rebase_onto_base(project: str, branch: str, base_branch: str = "main") -> RebaseResult:
     """Rebase branch onto base branch."""
     result = git(project, "fetch", "origin", base_branch)
@@ -251,6 +262,7 @@ def cmd_rebase(opts: dict[str, str]) -> int:
             print(f"REBASE_ONTO={rebase_onto}")
             print("REBASED=yes")
             return 0
+        _report_conflict_scope(project)
         git(project, "rebase", "--abort")
         _record_rebase_failure_event(project, branch, base_branch, result.stderr.strip())
         print("ERROR=REBASE_CONFLICT")
@@ -259,6 +271,7 @@ def cmd_rebase(opts: dict[str, str]) -> int:
 
     result = git(project, "rebase", f"{fetch_remote}/{base_branch}")
     if result.returncode != 0:
+        _report_conflict_scope(project)
         git(project, "rebase", "--abort")
         _record_rebase_failure_event(project, branch, base_branch, result.stderr.strip())
         print("ERROR=REBASE_CONFLICT")

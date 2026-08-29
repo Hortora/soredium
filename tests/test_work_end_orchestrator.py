@@ -1454,3 +1454,91 @@ class TestPlanlessLifecycle:
         assert result["META_STATE"] in ("closing:verified", "closing:promoted"), (
             f"Expected closing:verified or closing:promoted, got {result['META_STATE']}"
         )
+
+
+class TestRebaseConflictNotRetryable:
+    """REBASE_CONFLICT yields user_input immediately — no retries."""
+
+    def _setup_promoted(self, tmp_path):
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "trajectory", "done")
+
+    def test_rebase_conflict_yields_user_input_immediately(self, tmp_path, monkeypatch):
+        def fail_rebase(cmd, ws, **kw):
+            return {"ERROR": "REBASE_CONFLICT", "ERROR_DETAIL": "conflict in README.md",
+                    "CONFLICT_COUNT": "3", "CONFLICT_FILES": "README.md,src/main.py,lib/util.py"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", fail_rebase)
+        self._setup_promoted(tmp_path)
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+        })
+        assert result["ACTION"] == "user_input"
+        assert result["CONTEXT"] == "rebase_conflict"
+        assert result["CONFLICT_COUNT"] == "3"
+
+    def test_rebase_conflict_does_not_increment_retry_counter(self, tmp_path, monkeypatch):
+        def fail_rebase(cmd, ws, **kw):
+            return {"ERROR": "REBASE_CONFLICT", "ERROR_DETAIL": "conflict"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", fail_rebase)
+        self._setup_promoted(tmp_path)
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+        })
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert "rebase_mechanical_attempt" not in progress
+
+    def test_non_conflict_error_still_retries(self, tmp_path, monkeypatch):
+        """Non-REBASE_CONFLICT errors still go through generic retry."""
+        def fail_other(cmd, ws, **kw):
+            return {"ERROR": "push_failed", "ERROR_DETAIL": "remote rejected"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", fail_other)
+        self._setup_promoted(tmp_path)
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+        })
+        assert result["ACTION"] == "error"
+        assert result.get("RETRY") == "1"
+
+    def test_conflict_resolved_marks_rebase_done(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        self._setup_promoted(tmp_path)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import read_close_progress
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "conflict_resolved": "yes",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("rebase") == "done"
+
+    def test_conflict_resolved_with_repo_marks_per_repo_done(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        self._setup_promoted(tmp_path)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import read_close_progress
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "conflict_resolved": "yes",
+            "conflict_repo": "engine",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("rebase:engine") == "done"

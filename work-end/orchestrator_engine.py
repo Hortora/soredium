@@ -177,6 +177,7 @@ def run_loop(
     handle_lifecycle: Callable | None = None,
     per_repo_mechanical: Callable | None = None,
     per_repo_judgment: Callable | None = None,
+    on_mechanical_error: Callable | None = None,
     user_input_steps: set[str] | None = None,
     complete_summary: str = "Complete.",
 ) -> dict[str, str]:
@@ -194,6 +195,10 @@ def run_loop(
       None to fall through to normal execution.
     - per_repo_judgment(step, ctx) -> dict|None: handle per-repo fan-out
       for judgment steps in slot mode.
+    - on_mechanical_error(step, ctx, result) -> dict|None: classify mechanical
+      errors. Return a result dict to override the generic retry path (e.g.
+      for deterministic failures like rebase conflicts). Return None to fall
+      through to the default retry/escalate logic.
     - user_input_steps: set of step names that yield via user_input
       (not regular judgment yield).
     """
@@ -223,6 +228,11 @@ def run_loop(
                 result = _default_execute_mechanical(step, ctx)
 
             if result and "ERROR" in result:
+                if on_mechanical_error:
+                    override = on_mechanical_error(step, ctx, result)
+                    if override is not None:
+                        ctx.steps_executed.append(f"{step.name}:ERROR:classified")
+                        return override
                 attempt += 1
                 update_close_progress(ctx.workspace, attempt_key, str(attempt))
                 ctx.steps_executed.append(f"{step.name}:ERROR:{attempt}")

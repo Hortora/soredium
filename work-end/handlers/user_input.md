@@ -75,5 +75,28 @@ The orchestrator validates `skip_step=` against the last yielded step.
 
 ## CONTEXT=rebase_conflict
 
-Rebase conflict needs manual resolution. User resolves, then pass
-`conflict_resolved=yes` to the orchestrator.
+Rebase failed with conflicts. This is NOT retryable — the same conflicts
+will recur on every attempt. Present the situation and let the user decide.
+
+**Available context fields:** `CONFLICT_COUNT`, `CONFLICT_FILES`, `ERROR_DETAIL`,
+`STEP` (rebase or rebase:{repo} in slot mode), `REPO` (slot mode only).
+
+**Present to the user:**
+
+```
+Rebase onto {base_branch} failed — {CONFLICT_COUNT} conflicted file(s):
+  {CONFLICT_FILES}
+
+Options:
+  1. Resolve manually — you fix conflicts, then I continue with conflict_resolved=yes
+  2. Skip rebase — accept non-linear history (merge to main without rebasing)
+  3. Abort — stop work-end and return to active state
+```
+
+**After user chooses:**
+
+| Choice | Action |
+|--------|--------|
+| Resolve manually | User resolves outside the orchestrator. When done, re-invoke with `conflict_resolved=yes` (add `conflict_repo={repo}` in slot mode). |
+| Skip rebase | Re-invoke with `conflict_resolved=yes` — the branch lands without rebasing. Merge to main will use `--no-ff` instead of `--ff-only`. |
+| Abort | Re-invoke with `abort=yes`. |

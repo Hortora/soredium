@@ -944,6 +944,11 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     rec = lambda evt, **kw: _record(evt, branch, project, issue_repo, dry_run, **kw)
 
+    if args.get("conflict_resolved") == "yes":
+        conflict_repo = args.get("conflict_repo", "")
+        step_key = f"rebase:{conflict_repo}" if conflict_repo else "rebase"
+        update_close_progress(workspace, step_key, "done")
+
     if args.get("force_done"):
         step_name = args["force_done"]
         update_close_progress(workspace, step_name, "done")
@@ -1131,6 +1136,12 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
     ctx.current_repo_project = None
     ctx.current_repo_workspace = None
     if result and "ERROR" in result:
+        error = result.get("ERROR", "")
+        if error in NON_RETRYABLE_ERRORS:
+            context = {"CONTEXT": f"{error.lower()}", "STEP": step_key, "REPO": repo}
+            context.update(result)
+            ctx.steps_executed.append(f"{step_key}:ERROR:classified")
+            return {"ACTION": "user_input", **context}
         attempt += 1
         update_close_progress(ctx.workspace, attempt_key, str(attempt))
         ctx.steps_executed.append(f"{step_key}:ERROR:{attempt}")
@@ -1173,6 +1184,18 @@ def _parse_landed_shas(result: dict[str, str], ctx: OrchestratorContext) -> dict
 
 CLOSE_USER_INPUT_STEPS = {"arc42_scan", "session_rename", "garden_feedback", "notes"}
 
+NON_RETRYABLE_ERRORS = {"REBASE_CONFLICT"}
+
+
+def _close_mechanical_error(step: StepDef, ctx: OrchestratorContext,
+                            result: dict[str, str]) -> dict[str, str] | None:
+    error = result.get("ERROR", "")
+    if error not in NON_RETRYABLE_ERRORS:
+        return None
+    context = {"CONTEXT": f"{error.lower()}", "STEP": step.name}
+    context.update(result)
+    return {"ACTION": "user_input", **context}
+
 
 def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
     return run_loop(
@@ -1182,6 +1205,7 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
         handle_lifecycle=_fire_lifecycle,
         per_repo_mechanical=_close_per_repo_mechanical,
         per_repo_judgment=_close_per_repo_judgment,
+        on_mechanical_error=_close_mechanical_error,
         user_input_steps=CLOSE_USER_INPUT_STEPS,
         complete_summary="Close complete.",
     )
