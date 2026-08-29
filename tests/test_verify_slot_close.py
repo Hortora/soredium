@@ -186,6 +186,43 @@ class TestCheckLandedMarker:
         assert "no landed_shas" in result["detail"]
 
 
+class TestCheckLandedShasPopulated:
+    def test_pass_when_no_landed_file(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        result = verify_slot_close.check_landed_shas_populated(str(slot_dir))
+        assert result["status"] == "pass"
+
+    def test_pass_when_shas_present(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".landed").write_text("landed_shas=engine:abc123\n")
+        result = verify_slot_close.check_landed_shas_populated(str(slot_dir))
+        assert result["status"] == "pass"
+
+    def test_fail_when_empty_sha(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".landed").write_text(
+            "issue=42 title=Fix-login branch=issue-42 sha= date=2026-08-29\n"
+            "issue=43 title=Add-tests branch=issue-42 sha= date=2026-08-29\n"
+        )
+        result = verify_slot_close.check_landed_shas_populated(str(slot_dir))
+        assert result["status"] == "fail"
+        assert "42" in result["detail"]
+        assert "43" in result["detail"]
+        assert "land step incomplete" in result["detail"]
+
+    def test_pass_when_sha_populated(self, tmp_path: Path) -> None:
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".landed").write_text(
+            "issue=42 title=Fix-login branch=issue-42 sha=abc123 date=2026-08-29\n"
+        )
+        result = verify_slot_close.check_landed_shas_populated(str(slot_dir))
+        assert result["status"] == "pass"
+
+
 class TestCheckOriginalSync:
     def test_original_in_sync(self, tmp_path: Path) -> None:
         slot_dir = tmp_path / "slot"

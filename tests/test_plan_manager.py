@@ -383,6 +383,38 @@ class TestAdvance:
         assert result.safe_exit is True
         assert result.next_issue == 110
 
+    def test_advance_does_not_write_landed(self, tmp_path):
+        """advance() must not write .landed — SHAs are only known at land time."""
+        slot_dir = tmp_path
+        (slot_dir / ".slot").write_text("slot 1\n")
+        design = slot_dir / "design"
+        design.mkdir()
+        plan_file = design / ".plan"
+        plan_file.write_text(
+            "# Work Plan — test\n\n"
+            "## State\nbranch: test\nissue-repo: Org/repo\ncovers: 42\n\n"
+            "## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n"
+        )
+        plan_manager.advance(plan_file)
+        assert not (slot_dir / ".landed").exists()
+
+    def test_advance_does_not_close_github_issues(self, tmp_path):
+        """advance() must not close GitHub issues — that happens at closing:stamped."""
+        design = tmp_path / "design"
+        design.mkdir()
+        plan_file = design / ".plan"
+        plan_file.write_text(
+            "# Work Plan — test\n\n"
+            "## State\nbranch: test\nissue-repo: Org/repo\ncovers: 42\n\n"
+            "## Queue\n- [ ] #42 — A ← active\n- [ ] #43 — B\n"
+        )
+        with patch("subprocess.run") as mock_run:
+            plan_manager.advance(plan_file)
+            for call in mock_run.call_args_list:
+                args = call[0][0] if call[0] else call[1].get("args", [])
+                assert "issue" not in args or "close" not in args, \
+                    f"advance() must not close issues, but called: {args}"
+
     def test_dispatches_to_plan(self, tmp_path):
         design = tmp_path / "design"
         design.mkdir()

@@ -207,6 +207,24 @@ def check_landed_marker(slot_dir: str) -> dict:
     return {"status": "pass"}
 
 
+def check_landed_shas_populated(slot_dir: str) -> dict:
+    """Detect .landed entries with empty sha= — indicates land step never completed."""
+    landed = Path(slot_dir) / ".landed"
+    if not landed.exists():
+        return {"status": "pass", "detail": "no .landed file"}
+    empty_sha_issues = []
+    for line in landed.read_text().splitlines():
+        if "issue=" in line and "sha=" in line:
+            for part in line.split():
+                if part.startswith("sha=") and part == "sha=":
+                    issue_part = next((p for p in line.split() if p.startswith("issue=")), "")
+                    empty_sha_issues.append(issue_part.split("=", 1)[1] if "=" in issue_part else "?")
+    if empty_sha_issues:
+        return {"status": "fail",
+                "detail": f"landed entries with no SHA (land step incomplete): issues {', '.join(empty_sha_issues)}"}
+    return {"status": "pass"}
+
+
 def check_landed_completeness(slot_dir: str) -> dict:
     """Verify all repos in .slot have SHAs in .landed."""
     slot_repos = _parse_slot_repos(slot_dir)
@@ -336,6 +354,7 @@ def verify(
 
     if slot_dir:
         checks.append(("landed_marker", check_landed_marker(slot_dir)))
+        checks.append(("landed_shas_populated", check_landed_shas_populated(slot_dir)))
         checks.append(("landed_completeness", check_landed_completeness(slot_dir)))
         checks.append(("phase_a_marker", check_slot_marker(slot_dir, ".phase-a-complete")))
         if original_repos:
