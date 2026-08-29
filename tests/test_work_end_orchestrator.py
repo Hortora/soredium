@@ -1422,3 +1422,35 @@ class TestRebaseOnto:
         assert not any("rebase_onto" in str(c) for c in rebase_calls), (
             f"rebase_onto should NOT be passed without .rebase-onto file, got: {rebase_calls}"
         )
+
+
+class TestPlanlessLifecycle:
+    """Lifecycle transitions must emit META_STATE even without a .plan."""
+
+    def test_lifecycle_emits_meta_state_without_plan(self, tmp_path, monkeypatch):
+        """Without a .plan, lifecycle steps still update expected_state so
+        META_STATE is emitted and is_stale() doesn't wipe progress."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                     "branch_audit_coherence", "branch_audit_structure",
+                     "branch_audit_robustness", "loose_ends", "forcing_function",
+                     "sweep_config"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "_branch", "issue-310-test")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-310-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+        assert "META_STATE" in result, (
+            "Lifecycle transition must emit META_STATE even without a .plan"
+        )
+        assert result["META_STATE"] in ("closing:verified", "closing:promoted"), (
+            f"Expected closing:verified or closing:promoted, got {result['META_STATE']}"
+        )

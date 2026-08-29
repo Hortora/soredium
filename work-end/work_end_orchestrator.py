@@ -557,6 +557,7 @@ def _build_evidence(event, ctx):
 
 
 def _fire_lifecycle(step, ctx):
+    ctx.expected_state = step.to_state
     if not ctx.plan_path:
         return
     evidence = _build_evidence(step.event, ctx)
@@ -570,7 +571,6 @@ def _fire_lifecycle(step, ctx):
     if evidence:
         cmd.append(f"evidence={json.dumps(evidence)}")
     _run_script(cmd, ctx.workspace, dry_run=ctx.dry_run, call_log=ctx.call_log)
-    ctx.expected_state = step.to_state
 
 
 # --- Reconciliation ---
