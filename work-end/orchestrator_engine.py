@@ -215,7 +215,7 @@ def run_loop(
             if per_repo_mechanical:
                 handled = per_repo_mechanical(step, ctx)
                 if handled is not None:
-                    if "ERROR" in handled:
+                    if handled:
                         return handled
                     continue
 

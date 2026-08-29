@@ -622,13 +622,21 @@ JUDGMENT_STEPS_SET = {"code_review", "branch_audit_conformance",
                       "arc42_scan", "session_rename", "garden_feedback", "notes"}
 
 
+_ALL_PER_REPO_STEPS = PER_REPO_EXECUTE_STEPS | PER_REPO_SWEEP_STEPS
+
+
 def _phase_skip(progress: dict[str, str], meta_state: str,
-                workspace: Path) -> dict[str, str]:
+                workspace: Path,
+                slot_repos: list[str] | None = None) -> dict[str, str]:
     """Auto-complete steps whose phase is behind meta_state.
 
     When meta_state=closing:stamped but close-progress has no review
     entries, the loop would re-run review steps. This function fills
     in the gaps so the loop skips past completed phases.
+
+    In slot mode (slot_repos non-empty), per-repo steps get composite
+    keys (promote:engine=done) instead of a single key (promote=done).
+    A single key would make ctx.done() bypass the per-repo fan-out.
     """
     from close_progress import STEP_TO_PHASE, LIFECYCLE_PHASE_ORDER
     if meta_state not in LIFECYCLE_PHASE_ORDER:
@@ -638,15 +646,22 @@ def _phase_skip(progress: dict[str, str], meta_state: str,
         return progress
     filled = False
     for step_def in STEPS:
-        if step_def.name in progress:
-            continue
         step_phase = STEP_TO_PHASE.get(step_def.name)
         if not step_phase or step_phase not in LIFECYCLE_PHASE_ORDER:
             continue
         phase_idx = LIFECYCLE_PHASE_ORDER.index(step_phase)
-        if phase_idx < meta_idx:
-            progress[step_def.name] = "done"
-            filled = True
+        if phase_idx >= meta_idx:
+            continue
+        if slot_repos and step_def.name in _ALL_PER_REPO_STEPS:
+            for repo in slot_repos:
+                composite = f"{step_def.name}:{repo}"
+                if composite not in progress:
+                    progress[composite] = "done"
+                    filled = True
+        else:
+            if step_def.name not in progress:
+                progress[step_def.name] = "done"
+                filled = True
     if filled:
         write_close_progress(workspace, progress)
     return progress
@@ -1023,9 +1038,10 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
                 corrected_steps=",".join(corrections))
             write_close_progress(workspace, progress)
 
-    progress = _phase_skip(progress, meta_state, workspace)
-
     slot_repos = _parse_slot_repos(slot_path) if in_slot and slot_path else []
+
+    progress = _phase_skip(progress, meta_state, workspace,
+                           slot_repos=slot_repos or None)
 
     ctx = OrchestratorContext(
         workspace=workspace, project=project, branch=branch,
