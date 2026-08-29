@@ -12,6 +12,39 @@ sys.path.insert(0, str(_work_end))
 from progress_summary import format_summary
 
 
+class TestTableFormat:
+    def test_renders_bordered_table(self):
+        progress = {"code_review": "done"}
+        output = format_summary(progress, "close")
+        assert "┌" in output
+        assert "┘" in output
+        assert "│" in output
+        assert "Step" in output
+        assert "Status" in output
+        assert "Result" in output
+
+    def test_done_shows_done_status(self):
+        progress = {"code_review": "done", "code_review_produced": "0"}
+        output = format_summary(progress, "close")
+        lines = output.split("\n")
+        cr_line = [l for l in lines if "Code review" in l][0]
+        assert "│ done" in cr_line
+
+    def test_skipped_shows_skipped_status(self):
+        progress = {"protocol": "skipped", "sweep_config": "done", "sweep_selected": "forage"}
+        output = format_summary(progress, "close")
+        lines = output.split("\n")
+        proto_line = [l for l in lines if "Protocol" in l][0]
+        assert "│ skipped" in proto_line
+
+    def test_pending_shows_pending_status(self):
+        progress = {}
+        output = format_summary(progress, "close")
+        lines = output.split("\n")
+        cr_line = [l for l in lines if "Code review" in l][0]
+        assert "│ pending" in cr_line
+
+
 class TestCloseSummary:
     def test_review_sub_steps_shown(self):
         progress = {
@@ -45,23 +78,23 @@ class TestCloseSummary:
             "notes": "skipped",
         }
         output = format_summary(progress, "close")
-        assert "Close summary" in output
-        assert "✅ Code review" in output
-        assert "✅ Conformance" in output
-        assert "✅ Coherence" in output
-        assert "✅ Structure" in output
-        assert "✅ Robustness" in output
-        assert "✅ Loose ends" in output
-        assert "✅ Forcing function" in output
-        assert "✅ Forage SWEEP" in output
+        assert "Code review" in output
+        assert "Conformance" in output
+        assert "Coherence" in output
+        assert "Structure" in output
+        assert "Robustness" in output
+        assert "Loose ends" in output
+        assert "Forcing function" in output
+        assert "Forage SWEEP" in output
         assert "2 produced" in output
-        assert "⏭ CLAUDE.md sync" in output
-        assert "deselected" in output
+        lines = output.split("\n")
+        claude_line = [l for l in lines if "CLAUDE.md sync" in l][0]
+        assert "deselected" in claude_line
 
     def test_empty_progress(self):
         output = format_summary({}, "close")
-        assert "Close summary" in output
-        assert "not reached" in output
+        assert "Step" in output
+        assert "pending" in output
 
     def test_sweep_config_shows_selections(self):
         progress = {
@@ -167,10 +200,11 @@ class TestWrapSummary:
             "wip_commit": "done",
         }
         output = format_summary(progress, "wrap")
-        assert "Wrap summary" in output
-        assert "✅ Loose ends" in output
-        assert "✅ HANDOFF.md" in output
-        assert "⏭ Garden feedback" in output
+        assert "Loose ends" in output
+        assert "HANDOFF.md" in output
+        lines = output.split("\n")
+        gf_line = [l for l in lines if "Garden feedback" in l][0]
+        assert "skipped" in gf_line
 
     def test_wrap_deselected(self):
         progress = {
@@ -191,6 +225,7 @@ class TestLegacyReviewMigration:
         progress = {"review": "done"}
         output = format_summary(progress, "close")
         lines = output.split("\n")
-        step_lines = [l for l in lines if l.strip().startswith(("✅", "⏭", "⬜"))]
+        step_lines = [l for l in lines if "│" in l and "Step" not in l]
         for line in step_lines:
-            assert "Review" not in line or "Code review" in line
+            if "Review" in line:
+                assert "Code review" in line

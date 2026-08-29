@@ -208,28 +208,14 @@ def _review_step_detail(step_name: str, progress: dict[str, str],
     return produced if produced else ""
 
 
-def format_summary(progress: dict[str, str], mode: str = "close",
-                   workspace: Path | None = None) -> str:
-    if mode == "wrap":
-        visible = WRAP_VISIBLE_STEPS
-        sweep_key = "wrap_sweep_selected"
-        sweep_steps = WRAP_SWEEP_STEPS
-        title = "Wrap summary"
-    else:
-        visible = CLOSE_VISIBLE_STEPS
-        sweep_key = "sweep_selected"
-        sweep_steps = CLOSE_SWEEP_STEPS
-        title = "Close summary"
-
-    findings = _read_findings(workspace) if workspace else []
-
-    lines = [title, "─" * len(title)]
-
+def _build_rows(progress: dict[str, str], visible: list[tuple[str, str]],
+                 sweep_key: str, sweep_steps: set[str],
+                 findings: list[dict]) -> list[tuple[str, str, str]]:
+    rows = []
     for step_name, label in visible:
         status = progress.get(step_name, "")
-
         if status == "done":
-            icon = "✅"
+            status_text = "done"
             if step_name in REVIEW_STEPS:
                 detail = _review_step_detail(step_name, progress, findings)
             elif step_name in ("sweep_config", "wrap_sweep_config"):
@@ -237,18 +223,56 @@ def format_summary(progress: dict[str, str], mode: str = "close",
             else:
                 detail = _produced_detail(step_name, progress)
         elif status == "skipped":
-            icon = "⏭"
-            detail = _sweep_detail(step_name, progress, sweep_key, sweep_steps) or "skipped"
+            status_text = "skipped"
+            detail = _sweep_detail(step_name, progress, sweep_key, sweep_steps) or ""
         else:
-            icon = "⬜"
-            detail = "not reached"
+            status_text = "pending"
+            detail = ""
+        rows.append((label, status_text, detail))
+    return rows
 
-        suffix = f" — {detail}" if detail else ""
-        lines.append(f"  {icon} {label:<20s}{suffix}")
+
+def _render_table(rows: list[tuple[str, str, str]]) -> list[str]:
+    col1 = max(len(r[0]) for r in rows) + 2
+    col2 = max(len(r[1]) for r in rows) + 2
+    col3 = max((len(r[2]) for r in rows), default=0) + 2
+    col3 = max(col3, len("Result") + 2)
+
+    def hr(left, mid, right, fill="─"):
+        return f"{left}{fill * col1}{mid}{fill * col2}{mid}{fill * col3}{right}"
+
+    def row(a, b, c):
+        return f"│ {a:<{col1 - 2}} │ {b:<{col2 - 2}} │ {c:<{col3 - 2}} │"
+
+    lines = [
+        hr("┌", "┬", "┐"),
+        row("Step", "Status", "Result"),
+        hr("├", "┼", "┤"),
+    ]
+    for label, status, detail in rows:
+        lines.append(row(label, status, detail))
+    lines.append(hr("└", "┴", "┘"))
+    return lines
+
+
+def format_summary(progress: dict[str, str], mode: str = "close",
+                   workspace: Path | None = None) -> str:
+    if mode == "wrap":
+        visible = WRAP_VISIBLE_STEPS
+        sweep_key = "wrap_sweep_selected"
+        sweep_steps = WRAP_SWEEP_STEPS
+    else:
+        visible = CLOSE_VISIBLE_STEPS
+        sweep_key = "sweep_selected"
+        sweep_steps = CLOSE_SWEEP_STEPS
+
+    findings = _read_findings(workspace) if workspace else []
+    rows = _build_rows(progress, visible, sweep_key, sweep_steps, findings)
+    lines = _render_table(rows)
 
     if findings and mode == "close":
         lines.append("")
-        lines.append("  Findings:")
+        lines.append("Findings:")
         for f in findings:
             lines.append(_finding_line(f))
 
