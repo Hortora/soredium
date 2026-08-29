@@ -1617,6 +1617,39 @@ class TestPerRepoTryAllThenReport:
         assert progress.get("rebase:engine") == "done", "engine succeeded but not marked done"
 
 
+class TestReportOnComplete:
+    """ACTION=complete includes a REPORT with the progress summary table."""
+
+    def test_complete_includes_report(self, tmp_path, monkeypatch):
+        def mock_run(cmd, workspace, **kw):
+            return {"VERIFIED": "yes", "SWITCHED": "yes", "CLEANED": "yes"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", mock_run)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        for step in ["review", "sweep_config", "trajectory", "squash",
+                     "rebase", "land", "arc42_scan", "session_rename",
+                     "garden_feedback", "notes", "verify", "cleanup",
+                     "checkout_main", "cleanup_stack"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage,write_content")
+        update_close_progress(tmp_path, "forage", "done")
+        update_close_progress(tmp_path, "forage_produced", "2")
+        update_close_progress(tmp_path, "write_content", "done")
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:stamped",
+        })
+        assert result["ACTION"] == "complete"
+        report = result.get("REPORT", "")
+        assert "┌" in report
+        assert "Step" in report
+        assert "Status" in report
+        assert "Forage SWEEP" in report
+        assert "2 produced" in report
+
+
 class TestDefenseInDepthPerRepo:
     """ctx.done(step.name) must not bypass per-repo handling."""
 

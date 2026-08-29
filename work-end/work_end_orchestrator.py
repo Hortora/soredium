@@ -1069,19 +1069,34 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             attempts=int(result.get("ATTEMPTS", "0")),
             reason=result.get("REASON", ""))
 
-    if result.get("ACTION") == "complete" and _wl and not dry_run:
-        try:
-            conn = _wl.connect()
-            steps_data = _build_close_step_outcomes(progress)
-            _wl.record_session_boundary(
-                conn, mode="close", branch=branch,
-                issue_repo=issue_repo,
-                issue_number=int(covers.split(",")[0]) if covers else 0,
-                steps=steps_data,
-            )
-            conn.close()
-        except Exception:
-            pass
+    if result.get("ACTION") == "complete":
+        from progress_summary import format_summary
+        done_path = workspace / ".close-progress.done"
+        if done_path.exists():
+            final_progress = {}
+            for line in done_path.read_text().splitlines():
+                if "=" in line:
+                    k, _, v = line.partition("=")
+                    final_progress[k.strip()] = v.strip()
+        else:
+            final_progress = read_close_progress(workspace)
+        if final_progress:
+            result["REPORT"] = format_summary(final_progress, "close",
+                                              workspace=workspace)
+
+        if _wl and not dry_run:
+            try:
+                conn = _wl.connect()
+                steps_data = _build_close_step_outcomes(progress)
+                _wl.record_session_boundary(
+                    conn, mode="close", branch=branch,
+                    issue_repo=issue_repo,
+                    issue_number=int(covers.split(",")[0]) if covers else 0,
+                    steps=steps_data,
+                )
+                conn.close()
+            except Exception:
+                pass
 
     return result
 
@@ -1294,8 +1309,12 @@ def main():
             sys.exit(1)
 
     result = run_orchestrator(args)
+    report = result.pop("REPORT", None)
     for k, v in result.items():
         print(f"{k}={v}")
+    if report:
+        print()
+        print(report)
 
 
 if __name__ == "__main__":
