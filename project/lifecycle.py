@@ -503,6 +503,9 @@ def commit_transition(
     if repo_path:
         _emit_to_worklog(plan_path, result, repo_path, emit_metadata or None)
 
+    if result.new_state == 'idle' and result.from_state != 'idle':
+        plan_path.unlink(missing_ok=True)
+
 
 _DEFAULT_EXCLUDES = [
     '.idea/', 'target/', 'build/', 'node_modules/',

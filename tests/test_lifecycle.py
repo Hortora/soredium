@@ -374,12 +374,12 @@ class TestCommitTransition:
         with pytest.raises(StateError):
             commit_transition(meta, result)
 
-    def test_commit_to_idle_skips_write(self, tmp_path):
+    def test_commit_to_idle_deletes_plan(self, tmp_path):
         meta = tmp_path / ".plan"
         _write_plan(meta, state="closing:stamped", branch="x", date="2026-08-03")
         result = transition(meta, "cleanup_pass")
         commit_transition(meta, result)
-        assert read_state(meta) == "closing:stamped"
+        assert not meta.exists(), ".plan should be deleted on transition to idle"
 
     def test_commit_to_idle_checks_concurrent(self, tmp_path):
         meta = tmp_path / ".plan"
