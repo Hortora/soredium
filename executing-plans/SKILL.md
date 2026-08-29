@@ -31,6 +31,27 @@ If unavailable, **stop**. Plans specify IntelliJ operations for code changes —
 executing them with bash bypasses reference updates. If IntelliJ becomes
 unavailable mid-execution, stop and inform the user.
 
+**.plan guard:** Verify a `.plan` exists for the current branch:
+```bash
+python3 ~/.claude/skills/project/ctx.py
+```
+Read `HAS_PLAN`, `META_STATE`, and `BRANCH_MISMATCH` from output.
+
+- If `HAS_PLAN=no` → **stop**: "No .plan exists. Run `work start` to
+  create one before executing."
+- If `BRANCH_MISMATCH=yes` → **stop**: "The .plan belongs to branch
+  '{X}' but you're on '{Y}'. Run `work start` to create a .plan for
+  this branch."
+- If `META_STATE` starts with `closing` → **stop**: "The .plan is in
+  closing state. Run `work start` to begin new work."
+
+**Why this gate exists:** The Build flow (`brainstorming → writing-plans
+→ executing-plans`) can be entered without going through `work-start`.
+Without a `.plan`, task tracking (`inject-tasks`, `check-task`,
+`advance`) silently fails, and the next session cannot resume — the
+lifecycle sees no active work. This gate ensures `.plan` exists before
+any code is written.
+
 ### Step 1: Load and Review Plan
 
 1. Read the plan file (default: `docs/plans/YYYY-MM-DD-*.md` — writing-plans

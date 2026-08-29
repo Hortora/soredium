@@ -29,8 +29,12 @@ get approval.
 
 ## Branch Context
 
-If no feature branch exists, brainstorming results may not be tracked. Consider
-running work-start first to establish a branch and issue context.
+**Before brainstorming on main**, run `work start` to create a feature
+branch and `.plan`. Brainstorming on main without a branch means specs
+and decisions land in untracked workspace state, and the downstream
+Build flow (`writing-plans → executing-plans`) will fail at the `.plan`
+guard in `executing-plans` Step 0. If you proceed on main, you will
+need to run `work start` before execution can begin.
 
 ## Pipeline State
 
