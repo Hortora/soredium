@@ -1036,3 +1036,70 @@ class TestStepFailure:
         assert len(events) == 1
         assert events[0]["work_item_id"] is None
         conn.close()
+
+
+class TestCheckActiveWork:
+    """Duplicate work detection — query for active work on the same issue."""
+
+    def test_detects_active_work_on_same_issue(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.record_work_start(
+            conn, "issue-42-first", "/repo/engine",
+            issue_number=42, issue_repo="org/engine",
+        )
+        result = worklog.check_active_work(conn, 42, "org/engine")
+        assert len(result) == 1
+        assert result[0]["branch"] == "issue-42-first"
+        conn.close()
+
+    def test_ignores_ended_work(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.record_work_start(
+            conn, "issue-42-old", "/repo/engine",
+            issue_number=42, issue_repo="org/engine",
+        )
+        conn.execute("UPDATE work_items SET state='ended' WHERE branch='issue-42-old'")
+        conn.commit()
+        result = worklog.check_active_work(conn, 42, "org/engine")
+        assert len(result) == 0
+        conn.close()
+
+    def test_detects_across_repos(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.record_work_start(
+            conn, "issue-42-slot", "/slot/engine",
+            issue_number=42, issue_repo="org/engine",
+            location="slot",
+        )
+        result = worklog.check_active_work(conn, 42, "org/engine")
+        assert len(result) == 1
+        assert result[0]["location"] == "slot"
+        conn.close()
+
+    def test_returns_empty_for_no_matches(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.record_work_start(
+            conn, "issue-99-other", "/repo/engine",
+            issue_number=99, issue_repo="org/engine",
+        )
+        result = worklog.check_active_work(conn, 42, "org/engine")
+        assert len(result) == 0
+        conn.close()
+
+    def test_detects_covers_overlap(self, tmp_path):
+        """Issue in covers= list of an existing work item is detected."""
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        worklog.record_work_start(
+            conn, "issue-10-batch", "/repo/engine",
+            issue_number=10, issue_repo="org/engine",
+            covers="10,42,55",
+        )
+        result = worklog.check_active_work(conn, 42, "org/engine")
+        assert len(result) == 1
+        assert result[0]["branch"] == "issue-10-batch"
+        conn.close()

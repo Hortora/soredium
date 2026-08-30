@@ -1172,6 +1172,27 @@ def main() -> int:
             return 1
         pos_str = opts.get("position")
         position = int(pos_str) if pos_str else None
+        if opts.get('skip-duplicate-check') != 'yes':
+            _lib = _Path.home() / '.claude' / 'lib'
+            if _lib.exists() and str(_lib) not in _sys.path:
+                _sys.path.insert(0, str(_lib))
+            try:
+                import worklog as _wl
+                import os as _os
+                _db = _os.environ.get('WORKLOG_DB')
+                _conn = _wl.connect(_db) if _db else _wl.connect()
+                for item in items:
+                    active = _wl.check_active_work(_conn, item.issue_number, item.repo)
+                    if active:
+                        for a in active:
+                            print(f"DUPLICATE_CONFLICT=#{item.issue_number} active on {a['branch']} ({a['location']}) at {a['repo_path']}")
+                        print('DUPLICATE=yes')
+                        print('HINT=pass skip-duplicate-check=yes to override')
+                        _conn.close()
+                        return 1
+                _conn.close()
+            except Exception:
+                pass
         added = append_to_queue(plan_path, items, position=position)
         for item in added:
             print(f"APPENDED={item.repo}#{item.issue_number} — {item.title}")

@@ -410,6 +410,29 @@ def record_work_start(conn: sqlite3.Connection, branch: str, repo_path: str,
     return wid
 
 
+def check_active_work(conn: sqlite3.Connection, issue_number: int,
+                      issue_repo: str) -> list[dict]:
+    """Return active work items that cover the given issue.
+
+    Used by work-start, plan_manager append, and slot creation to detect
+    duplicate work before it starts. Returns a list of dicts with branch,
+    state, location, repo_path, and slot_id for each active work item.
+    """
+    rows = conn.execute(
+        """
+        SELECT wi.branch, wi.state, wi.location, wi.slot_id, r.path as repo_path
+        FROM work_item_issues wii
+        JOIN work_items wi ON wii.work_item_id = wi.id
+        JOIN repos r ON wi.repo_id = r.id
+        WHERE wii.issue_number = ?
+          AND wii.issue_repo = ?
+          AND wi.state IN ('active', 'paused')
+        """,
+        (issue_number, issue_repo),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 @safe
 def record_work_pause(conn: sqlite3.Connection, branch: str,
                       repo_path: str) -> None:

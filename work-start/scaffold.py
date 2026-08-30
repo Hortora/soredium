@@ -152,13 +152,35 @@ def main() -> int:
         print(f"ERROR=Workspace path does not exist: {workspace}", file=sys.stderr)
         return 1
 
+    covers = params.get("covers", "") or params.get("issue", "")
+    issue_repo = params.get("issue-repo", "")
+    if covers and issue_repo and _wl and params.get("skip-duplicate-check") != "yes":
+        try:
+            import os as _os
+            _db = _os.environ.get("WORKLOG_DB")
+            _conn = _wl.connect(_db) if _db else _wl.connect()
+            for n in covers.split(","):
+                n = n.strip()
+                if n.isdigit():
+                    active = _wl.check_active_work(_conn, int(n), issue_repo)
+                    if active:
+                        for item in active:
+                            print(f"DUPLICATE_CONFLICT=#{n} active on {item['branch']} ({item['location']}) at {item['repo_path']}")
+                        print("DUPLICATE=yes")
+                        print(f"HINT=pass skip-duplicate-check=yes to override")
+                        _conn.close()
+                        return 1
+            _conn.close()
+        except Exception:
+            pass
+
     try:
         result = scaffold(
             workspace=workspace,
             branch=params["branch"],
             project_sha=params["project-sha"],
             issue=params.get("issue", ""),
-            issue_repo=params.get("issue-repo", ""),
+            issue_repo=issue_repo,
             covers=params.get("covers", ""),
             today=params.get("date"),
             flyway_next_v=params.get("flyway-next-v", "unknown"),
