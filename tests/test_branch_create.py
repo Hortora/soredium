@@ -1,8 +1,11 @@
 """Tests for work-start/branch_create.py"""
 
 import subprocess
+import sys
 from pathlib import Path
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "work-start"))
 
 
 BRANCH_CREATE = Path(__file__).parent.parent / "work-start" / "branch_create.py"
@@ -459,3 +462,134 @@ def test_sync_main_rebases_when_no_pushed_commits(tmp_path):
     assert "STRATEGY=merge" not in result.stdout, "Should rebase/ff, not merge — no shared commits"
     assert (fork / "upstream-advance.md").exists()
     assert (fork / "unpushed.md").exists()
+
+
+class TestDuplicateDetection:
+    """Duplicate commit detection via message + patch-id."""
+
+    def test_get_patch_ids_returns_mapping(self, tmp_path):
+        project, bare = _init_repo_with_bare(tmp_path, "project")
+        (project / "file.txt").write_text("content")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "add file"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(project), "push", "origin", "main"],
+                       capture_output=True)
+        from branch_create import _get_patch_ids
+        result = _get_patch_ids(str(project), "HEAD~1..HEAD")
+        assert len(result) == 1
+        sha = list(result.values())[0]
+        assert len(sha) >= 7
+
+    def test_find_duplicates_detects_cherry_pick(self, tmp_path):
+        """Cherry-picked commit has same patch-id but different SHA."""
+        blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
+        fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
+
+        (fork / "feature.txt").write_text("feature work")
+        subprocess.run(["git", "-C", str(fork), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(fork), "commit", "-m", "feat: add feature"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(fork), "push", "origin", "main"],
+                       capture_output=True)
+
+        fork_sha = subprocess.run(
+            ["git", "-C", str(fork), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "-C", str(blessed), "fetch", str(fork_bare)],
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(blessed), "cherry-pick", fork_sha],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"],
+                       capture_output=True)
+
+        subprocess.run(["git", "-C", str(fork), "fetch", "upstream"],
+                       capture_output=True)
+
+        from branch_create import _find_duplicate_commits
+        dupes = _find_duplicate_commits(
+            str(fork), "upstream/main..main", "main..upstream/main"
+        )
+        assert len(dupes) == 1
+        assert dupes[0][2] == "feat: add feature"
+
+    def test_find_duplicates_ignores_different_content(self, tmp_path):
+        """Same message but different content — not a duplicate."""
+        blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
+        fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
+
+        (fork / "file.txt").write_text("fork version")
+        subprocess.run(["git", "-C", str(fork), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(fork), "commit", "-m", "fix: update file"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(fork), "push", "origin", "main"],
+                       capture_output=True)
+
+        (blessed / "file.txt").write_text("blessed version")
+        subprocess.run(["git", "-C", str(blessed), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(blessed), "commit", "-m", "fix: update file"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"],
+                       capture_output=True)
+
+        subprocess.run(["git", "-C", str(fork), "fetch", "upstream"],
+                       capture_output=True)
+
+        from branch_create import _find_duplicate_commits
+        dupes = _find_duplicate_commits(
+            str(fork), "upstream/main..main", "main..upstream/main"
+        )
+        assert len(dupes) == 0
+
+
+class TestSyncMainReconciliation:
+    """sync-main detects and reconciles duplicate commits."""
+
+    def test_reconciles_duplicate_commits(self, tmp_path):
+        blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
+        fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
+
+        # Fork adds a feature commit and pushes to its origin
+        (fork / "feature.txt").write_text("the feature")
+        subprocess.run(["git", "-C", str(fork), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(fork), "commit", "-m", "feat: the feature"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(fork), "push", "origin", "main"],
+                       capture_output=True)
+
+        # Blessed adds an independent commit first (diverges history)
+        (blessed / "upstream-only.txt").write_text("upstream work")
+        subprocess.run(["git", "-C", str(blessed), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(blessed), "commit", "-m", "chore: upstream work"],
+                       capture_output=True, check=True)
+
+        # Then blessed cherry-picks the fork's commit (creates duplicate with different SHA)
+        fork_sha = subprocess.run(
+            ["git", "-C", str(fork), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "-C", str(blessed), "fetch", str(fork_bare)],
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(blessed), "cherry-pick", fork_sha],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"],
+                       capture_output=True)
+
+        workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+
+        result = subprocess.run(
+            ["python3", str(BRANCH_CREATE), "sync-main",
+             str(fork), str(workspace), "base=main"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "DUPLICATE_COMMITS=1" in result.stdout
+        assert "STRATEGY=reconcile" in result.stdout
+
+        log = subprocess.run(
+            ["git", "-C", str(fork), "log", "--oneline", "--grep=feat: the feature"],
+            capture_output=True, text=True,
+        )
+        lines = [l for l in log.stdout.strip().splitlines() if l.strip()]
+        assert len(lines) == 1, f"Expected 1 commit, got {len(lines)}: {log.stdout}"

@@ -156,9 +156,133 @@ def _has_shared_fork_commits(repo: str, blessed_remote: str,
     return _rev_count(repo, f"{blessed_remote}/{base}..{origin_remote}/{base}")
 
 
+def _get_patch_ids(repo: str, rev_range: str) -> dict[str, str]:
+    """Map patch-id -> commit SHA for commits in the given range."""
+    ok, log_out = run_git(repo, "log", "--format=%H", rev_range)
+    if not ok or not log_out.strip():
+        return {}
+    result = {}
+    for sha in log_out.strip().splitlines():
+        sha = sha.strip()
+        if not sha:
+            continue
+        diff_proc = subprocess.run(
+            ["git", "-C", repo, "diff-tree", "-p", sha],
+            capture_output=True, text=True,
+        )
+        if diff_proc.returncode != 0 or not diff_proc.stdout.strip():
+            continue
+        pid_proc = subprocess.run(
+            ["git", "patch-id", "--stable"],
+            input=diff_proc.stdout,
+            capture_output=True, text=True,
+        )
+        if pid_proc.returncode == 0 and pid_proc.stdout.strip():
+            parts = pid_proc.stdout.strip().split()
+            if len(parts) >= 1:
+                result[parts[0]] = sha
+    return result
+
+
+def _find_duplicate_commits(repo: str, local_range: str,
+                            remote_range: str) -> list[tuple[str, str, str]]:
+    """Find commits with identical content on both sides of a merge.
+
+    Two-stage: message pre-filter (fast) then patch-id confirmation (precise).
+    Returns [(local_sha, remote_sha, subject)] for confirmed duplicates.
+    """
+    ok, local_log = run_git(repo, "log", "--format=%H %s", local_range)
+    if not ok or not local_log.strip():
+        return []
+    ok, remote_log = run_git(repo, "log", "--format=%H %s", remote_range)
+    if not ok or not remote_log.strip():
+        return []
+
+    def parse_log(raw: str) -> list[tuple[str, str]]:
+        entries = []
+        for line in raw.strip().splitlines():
+            parts = line.split(" ", 1)
+            if len(parts) == 2:
+                entries.append((parts[0], parts[1]))
+        return entries
+
+    local_commits = parse_log(local_log)
+    remote_commits = parse_log(remote_log)
+
+    remote_by_subject: dict[str, list[str]] = {}
+    for sha, subj in remote_commits:
+        remote_by_subject.setdefault(subj, []).append(sha)
+
+    candidates = []
+    for local_sha, subj in local_commits:
+        if subj in remote_by_subject:
+            for remote_sha in remote_by_subject[subj]:
+                candidates.append((local_sha, remote_sha, subj))
+
+    if not candidates:
+        return []
+
+    local_patches = _get_patch_ids(repo, local_range)
+    remote_patches = _get_patch_ids(repo, remote_range)
+
+    local_sha_to_pid = {sha: pid for pid, sha in local_patches.items()}
+    remote_sha_to_pid = {sha: pid for pid, sha in remote_patches.items()}
+
+    confirmed = []
+    for local_sha, remote_sha, subj in candidates:
+        local_pid = local_sha_to_pid.get(local_sha)
+        remote_pid = remote_sha_to_pid.get(remote_sha)
+        if local_pid and remote_pid and local_pid == remote_pid:
+            confirmed.append((local_sha, remote_sha, subj))
+
+    return confirmed
+
+
+def _rebase_dropping(repo: str, blessed_remote: str, base: str,
+                     drop_shas: set[str]) -> bool:
+    """Rebase onto blessed, dropping commits whose SHAs are in drop_shas."""
+    import os
+    import tempfile
+
+    if not drop_shas:
+        ok, _ = run_git(repo, "rebase", f"{blessed_remote}/{base}")
+        return ok
+
+    short_shas = set()
+    for sha in drop_shas:
+        short_shas.add(sha[:7])
+
+    fd, script_path = tempfile.mkstemp(suffix=".py")
+    os.close(fd)
+    with open(script_path, "w") as f:
+        f.write("import sys\n")
+        f.write(f"drops = {short_shas!r}\n")
+        f.write("path = sys.argv[1]\n")
+        f.write("with open(path) as fh: lines = fh.readlines()\n")
+        f.write("kept = []\n")
+        f.write("for line in lines:\n")
+        f.write("    parts = line.split()\n")
+        f.write("    if len(parts) >= 2 and parts[0] == 'pick':\n")
+        f.write("        if any(parts[1].startswith(s) for s in drops):\n")
+        f.write("            continue\n")
+        f.write("    kept.append(line)\n")
+        f.write("with open(path, 'w') as fh: fh.writelines(kept)\n")
+
+    env = dict(os.environ)
+    env["GIT_SEQUENCE_EDITOR"] = f"python3 {script_path}"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo, "rebase", "-i", f"{blessed_remote}/{base}"],
+            capture_output=True, text=True, env=env,
+        )
+        return proc.returncode == 0
+    finally:
+        os.unlink(script_path)
+
+
 def _sync_repo(repo: str, blessed_remote: str, origin_remote: str,
                base: str, warnings: list[str], label: str) -> str:
-    """Sync a single repo. Returns 'merged', 'rebased', 'fast-forward', or 'skipped'."""
+    """Sync a single repo. Returns 'merged', 'rebased', 'fast-forward', 'reconciled', or 'skipped'."""
     ok, _ = run_git(repo, "fetch", blessed_remote)
     if not ok:
         warnings.append(f"fetch_{label}_failed")
@@ -166,6 +290,33 @@ def _sync_repo(repo: str, blessed_remote: str, origin_remote: str,
 
     if origin_remote != blessed_remote:
         run_git(repo, "fetch", origin_remote)
+
+    local_range = f"{blessed_remote}/{base}..{base}"
+    remote_range = f"{base}..{blessed_remote}/{base}"
+    duplicates = _find_duplicate_commits(repo, local_range, remote_range)
+
+    if duplicates:
+        for local_sha, remote_sha, subj in duplicates:
+            print(f"DUPLICATE_DETAIL={local_sha[:12]}:{remote_sha[:12]}:{subj[:60]}")
+        print(f"DUPLICATE_COMMITS={len(duplicates)} repo={Path(repo).name}")
+
+        blessed_patches = _get_patch_ids(repo, remote_range)
+        local_patches = _get_patch_ids(repo, local_range)
+        drop_shas = {sha for pid, sha in local_patches.items()
+                     if pid in blessed_patches}
+
+        ok = _rebase_dropping(repo, blessed_remote, base, drop_shas)
+        if not ok:
+            run_git(repo, "rebase", "--abort")
+            warnings.append(f"reconcile_{label}_failed")
+            return "skipped"
+
+        if origin_remote != blessed_remote:
+            run_git(repo, "push", origin_remote, base, "--force-with-lease", "--no-verify")
+
+        print(f"RECONCILED={len(drop_shas)} repo={Path(repo).name}")
+        print(f"STRATEGY=reconcile repo={Path(repo).name}")
+        return "reconciled"
 
     if origin_remote != blessed_remote:
         shared = _has_shared_fork_commits(repo, blessed_remote, origin_remote, base)
