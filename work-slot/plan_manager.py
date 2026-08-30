@@ -1173,7 +1173,7 @@ def main() -> int:
         pos_str = opts.get("position")
         position = int(pos_str) if pos_str else None
         if opts.get('skip-duplicate-check') != 'yes':
-            _lib = _Path.home() / '.claude' / 'lib'
+            _lib = Path.home() / '.claude' / 'lib'
             if _lib.exists() and str(_lib) not in _sys.path:
                 _sys.path.insert(0, str(_lib))
             try:

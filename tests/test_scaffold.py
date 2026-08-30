@@ -33,6 +33,7 @@ def required_args(**overrides) -> list[str]:
         "project-sha": "abc1234",
         "date": "2026-06-08",
         "issue-repo": "test/repo",
+        "skip-duplicate-check": "yes",
     }
     defaults.update(overrides)
     return [f"{k}={v}" for k, v in defaults.items()]
@@ -246,3 +247,87 @@ class TestScaffoldIssueActivate:
         assert result.returncode == 0
         out = parse(result)
         assert out["CREATED"] == "yes"
+
+
+class TestDuplicateWorkGate:
+    """scaffold.py blocks when issue is already active elsewhere."""
+
+    def _run_with_db(self, workspace, db_path, *extra_args):
+        env = {**os.environ, "WORKLOG_DB": db_path}
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), str(workspace)] + list(extra_args),
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_blocks_when_issue_active_elsewhere(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        db_path = str(tmp_path / "test-worklog.db")
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import worklog
+        conn = worklog.connect(db_path)
+        worklog.record_work_start(
+            conn, "issue-42-first", str(tmp_path / "other-repo"),
+            issue_number=42, issue_repo="Org/repo",
+        )
+        conn.close()
+        result = self._run_with_db(ws, db_path, *required_args(
+            issue="42", **{"issue-repo": "Org/repo",
+                           "skip-duplicate-check": "no"}))
+        assert result.returncode == 1
+        out = parse(result)
+        assert out.get("DUPLICATE") == "yes"
+        assert not (ws / ".plan").exists(), "scaffold should not have been created"
+
+    def test_allows_when_no_active_work(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        db_path = str(tmp_path / "test-worklog.db")
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import worklog
+        conn = worklog.connect(db_path)
+        conn.close()
+        result = self._run_with_db(ws, db_path, *required_args(
+            issue="42", **{"issue-repo": "Org/repo",
+                           "skip-duplicate-check": "no"}))
+        assert result.returncode == 0
+        out = parse(result)
+        assert out.get("CREATED") == "yes"
+
+    def test_override_with_skip_flag(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        db_path = str(tmp_path / "test-worklog.db")
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import worklog
+        conn = worklog.connect(db_path)
+        worklog.record_work_start(
+            conn, "issue-42-first", str(tmp_path / "other-repo"),
+            issue_number=42, issue_repo="Org/repo",
+        )
+        conn.close()
+        result = self._run_with_db(ws, db_path, *required_args(
+            issue="42", **{"issue-repo": "Org/repo"}))
+        assert result.returncode == 0
+        out = parse(result)
+        assert out.get("CREATED") == "yes"
+
+    def test_detects_covers_overlap(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        db_path = str(tmp_path / "test-worklog.db")
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        import worklog
+        conn = worklog.connect(db_path)
+        worklog.record_work_start(
+            conn, "issue-10-batch", str(tmp_path / "other-repo"),
+            issue_number=10, issue_repo="Org/repo",
+            covers="10,42",
+        )
+        conn.close()
+        result = self._run_with_db(ws, db_path, *required_args(
+            issue="42", **{"issue-repo": "Org/repo",
+                           "skip-duplicate-check": "no"}))
+        assert result.returncode == 1
+        out = parse(result)
+        assert out.get("DUPLICATE") == "yes"

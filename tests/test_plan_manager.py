@@ -1477,3 +1477,72 @@ class TestRemoveFromQueue:
         plan.write_text(REORDER_PLAN)
         removed = plan_manager.remove_from_queue(plan, [999])
         assert removed == []
+
+
+class TestAppendDuplicateGate:
+    """CLI append blocks when issue is already active in worklog."""
+
+    PLAN_MANAGER_SCRIPT = str(Path(__file__).parent.parent / "work-slot" / "plan_manager.py")
+    SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
+
+    def test_append_blocks_when_issue_active(self, tmp_path):
+        import subprocess, os
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        db_path = str(tmp_path / "test-worklog.db")
+        sys.path.insert(0, str(self.SCRIPTS_DIR))
+        import worklog
+        conn = worklog.connect(db_path)
+        worklog.record_work_start(
+            conn, "issue-99-other", str(tmp_path / "other-repo"),
+            issue_number=99, issue_repo="test/repo",
+        )
+        conn.close()
+        env = {**os.environ, "WORKLOG_DB": db_path}
+        result = subprocess.run(
+            [sys.executable, self.PLAN_MANAGER_SCRIPT, "append", str(plan),
+             "issues=test/repo#99:New work"],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 1
+        assert "DUPLICATE=yes" in result.stdout
+
+    def test_append_allows_when_no_active_work(self, tmp_path):
+        import subprocess, os
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        db_path = str(tmp_path / "test-worklog.db")
+        sys.path.insert(0, str(self.SCRIPTS_DIR))
+        import worklog
+        conn = worklog.connect(db_path)
+        conn.close()
+        env = {**os.environ, "WORKLOG_DB": db_path}
+        result = subprocess.run(
+            [sys.executable, self.PLAN_MANAGER_SCRIPT, "append", str(plan),
+             "issues=test/repo#99:New work"],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "APPENDED=" in result.stdout
+
+    def test_append_override_skips_check(self, tmp_path):
+        import subprocess, os
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        db_path = str(tmp_path / "test-worklog.db")
+        sys.path.insert(0, str(self.SCRIPTS_DIR))
+        import worklog
+        conn = worklog.connect(db_path)
+        worklog.record_work_start(
+            conn, "issue-99-other", str(tmp_path / "other-repo"),
+            issue_number=99, issue_repo="test/repo",
+        )
+        conn.close()
+        env = {**os.environ, "WORKLOG_DB": db_path}
+        result = subprocess.run(
+            [sys.executable, self.PLAN_MANAGER_SCRIPT, "append", str(plan),
+             "issues=test/repo#99:New work", "skip-duplicate-check=yes"],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "APPENDED=" in result.stdout
