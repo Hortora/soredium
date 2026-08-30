@@ -104,6 +104,9 @@ def check_branch_mismatch(
 ) -> Optional[Finding]:
     if not plan_path.exists():
         return None
+    plan_state = _read_plan_field(plan_path, "state")
+    if plan_state == "drained":
+        return None
     plan_branch = _read_plan_field(plan_path, "branch")
     if not plan_branch:
         return None

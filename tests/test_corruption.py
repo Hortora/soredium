@@ -122,6 +122,14 @@ class TestS5BranchMismatch:
         _write_plan(plan, branch="develop")
         assert check_branch_mismatch(plan, tmp_path, current_branch="develop", base_branch="develop") is None
 
+    def test_drained_plan_skips_branch_mismatch(self, tmp_path):
+        """Drained plans have a stale branch field — don't flag it."""
+        from corruption import check_branch_mismatch
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-42-foo", state="drained")
+        finding = check_branch_mismatch(plan, tmp_path, current_branch="main", base_branch="main")
+        assert finding is None, "Drained plans should not trigger branch mismatch"
+
 
 class TestS7StalePlanOnMain:
     def test_stale_plan_on_main(self, tmp_path):

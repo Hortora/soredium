@@ -239,6 +239,19 @@ def write_state(plan_path: Path, state: str) -> None:
     tmp_path.replace(plan_path)
 
 
+def write_branch(plan_path: Path, branch: str) -> None:
+    """Write branch field to .plan's ## State section atomically."""
+    content = plan_path.read_text()
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith('branch:'):
+            lines[i] = f'branch: {branch}'
+            break
+    tmp = plan_path.parent / '.plan.tmp'
+    tmp.write_text(chr(10).join(lines) + chr(10))
+    tmp.replace(plan_path)
+
+
 _DEPRECATED_EVENTS = {
     'work_epic': ('work', "work_epic is deprecated — epic detection is now automatic. Use 'work' instead."),
     'slot_epic': ('slot_create', "slot_epic is deprecated — epic detection is now automatic. Use 'slot_create' instead."),
@@ -495,6 +508,9 @@ def commit_transition(
             )
         if result.new_state != 'idle':
             write_state(plan_path, result.new_state)
+
+    if result.new_state == 'drained' and plan_path.exists():
+        write_branch(plan_path, 'main')
 
     emit_metadata = dict(metadata) if metadata else {}
     if evidence is not None:

@@ -381,6 +381,16 @@ class TestCommitTransition:
         commit_transition(meta, result)
         assert not meta.exists(), ".plan should be deleted on transition to idle"
 
+    def test_commit_to_drained_updates_branch_to_base(self, tmp_path):
+        """Drained transition should update branch: to base_branch."""
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:stamped", branch="issue-42-foo", date="2026-08-03")
+        result = transition(meta, "cleanup_main")
+        commit_transition(meta, result)
+        content = meta.read_text()
+        assert "branch: main" in content, "branch should be updated to main on drained transition"
+        assert "issue-42-foo" not in content, "old branch name should be gone"
+
     def test_commit_to_idle_checks_concurrent(self, tmp_path):
         meta = tmp_path / ".plan"
         _write_plan(meta, state="closing:stamped", branch="x", date="2026-08-03")
