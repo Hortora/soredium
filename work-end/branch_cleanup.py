@@ -83,6 +83,12 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
     if design_dir.is_dir() and not any(design_dir.iterdir()):
         design_dir.rmdir()
 
+    slot_path = params.get("slot_path", "")
+    if slot_path:
+        slot_plan = Path(slot_path) / ".plan"
+        if slot_plan.exists():
+            slot_plan.unlink()
+
     try:
         git("commit", "-m", "chore(work-end): cleanup branch scaffold", cwd=workspace)
     except subprocess.CalledProcessError as e:

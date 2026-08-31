@@ -451,8 +451,11 @@ def _cleanup_stack_script(ctx):
 def _cleanup_scaffold_script(ctx):
     if ctx.on_main:
         return None
-    return [sys.executable, str(CLEANUP_SCRIPT),
-            "cleanup-scaffold", str(ctx.workspace)]
+    cmd = [sys.executable, str(CLEANUP_SCRIPT),
+           "cleanup-scaffold", str(ctx.workspace)]
+    if ctx.in_slot and ctx.slot_path:
+        cmd.append(f"slot_path={ctx.slot_path}")
+    return cmd
 
 
 def _report_scaffold_script(ctx):

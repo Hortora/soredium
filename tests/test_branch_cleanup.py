@@ -195,3 +195,30 @@ class TestCheckoutMainTopology:
 
         branch = _git(project, "branch", "--show-current")
         assert branch == "main"
+
+
+class TestCleanupSlotPlan:
+    def test_removes_slot_plan_when_slot_path_provided(self, tmp_path):
+        ws = init_repo(tmp_path / "workspace")
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".plan").write_text("state: scaffolded\nbranch: issue-42-test\n")
+        (ws / ".plan").write_text("state: active\nbranch: issue-42-test\n")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True)
+        result = cleanup_scaffold(str(ws), {"slot_path": str(slot_dir)})
+        assert result == 0
+        assert not (slot_dir / ".plan").exists(), "slot .plan should be deleted"
+        assert not (ws / ".plan").exists(), "workspace .plan should also be deleted"
+
+    def test_leaves_slot_plan_when_no_slot_path(self, tmp_path):
+        ws = init_repo(tmp_path / "workspace")
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".plan").write_text("state: scaffolded\nbranch: issue-42-test\n")
+        (ws / ".plan").write_text("state: active\nbranch: issue-42-test\n")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True)
+        result = cleanup_scaffold(str(ws), {})
+        assert result == 0
+        assert (slot_dir / ".plan").exists(), "slot .plan should NOT be touched without slot_path"
