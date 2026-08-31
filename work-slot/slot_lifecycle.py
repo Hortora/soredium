@@ -121,7 +121,7 @@ def allocate_slot_number(family_root: Path) -> int:
 
 def create_slot(family_root: Path, repos: list[str], branch: str,
                 issue: str, issue_repo: str, covers: str,
-                context: str,
+                context: str, description: str = "",
                 isx: bool = False, isx_template: str = "",
                 isx_instance: str = "") -> dict:
     if isx and not _check_isx_available():
@@ -252,6 +252,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
 
         write_slot_md(slot_dir, slot_num, repos, branch, issue,
                       issue_repo, covers, context,
+                      description=description,
                       isolation_type="isx" if isx else "",
                       isx_instance=instance_name if isx else "",
                       isx_template=isx_template if isx else "")

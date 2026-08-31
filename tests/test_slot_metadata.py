@@ -201,6 +201,49 @@ class TestParseSlotMdIsolation:
         assert result["issue"] == "42"
 
 
+class TestSlotDescription:
+    def test_write_includes_description(self, tmp_path):
+        slot_metadata.write_slot_md(
+            tmp_path, 1, ["engine"], "issue-42-spi",
+            "42", "casehubio/engine", "42", "Add SPI layer",
+            description="Implement the SPI extraction for engine module separation.",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert "## Description" in content
+        assert "SPI extraction" in content
+
+    def test_write_without_description_omits_section(self, tmp_path):
+        slot_metadata.write_slot_md(
+            tmp_path, 1, ["engine"], "issue-42-spi",
+            "42", "casehubio/engine", "42", "Add SPI layer",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert "## Description" not in content
+
+    def test_parse_reads_description(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 1 — issue-42-spi\n\n"
+            "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
+            "## Description\nImplement SPI extraction for module separation.\n"
+            "This enables independent deployment of engine consumers.\n\n"
+            "## What to do\nAdd SPI layer\n\n"
+            "## Repos\n- engine (primary)\n"
+        )
+        result = slot_metadata.parse_slot_md(tmp_path)
+        assert "SPI extraction" in result.get("description", "")
+        assert "independent deployment" in result.get("description", "")
+
+    def test_parse_empty_description(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 1 — issue-42-spi\n\n"
+            "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
+            "## What to do\nAdd SPI layer\n\n"
+            "## Repos\n- engine (primary)\n"
+        )
+        result = slot_metadata.parse_slot_md(tmp_path)
+        assert result.get("description", "") == ""
+
+
 class TestIsSlotLanded:
     def test_true_with_landed_marker(self, tmp_path):
         (tmp_path / ".landed").write_text("branch=test\n")
