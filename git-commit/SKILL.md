@@ -342,7 +342,25 @@ python3 ~/.claude/skills/git-commit/commit_exec.py commit <project> message=<con
 ```
 Read `COMMITTED=yes, SHA=<sha>` from output. If `ERROR=nothing_to_commit` → warn user.
 
-### Step 8 — Handle edge cases
+### Step 8 — Push (slot mode)
+
+After committing, check if the repo is inside a slot clone. Slot commits
+MUST be pushed for durability — `git clone --shared` objects live only in
+the clone's `.git/objects/` and are lost if the clone is destroyed.
+
+```bash
+python3 ~/.claude/skills/git-commit/commit_exec.py is-slot <project>
+```
+
+If `IS_SLOT=yes`:
+```bash
+git -C <project> push -u origin HEAD --no-verify
+```
+
+If push fails: warn but do not block. The post-commit hook is a fallback.
+If `IS_SLOT=no`: do not push (the user decides when to push non-slot work).
+
+### Step 9 — Handle edge cases
 
 | Situation | Action |
 |---|---|

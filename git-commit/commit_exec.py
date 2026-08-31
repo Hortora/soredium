@@ -200,6 +200,16 @@ def main() -> int:
         project = sys.argv[2]
         return sync_lockfile(project)
 
+    elif cmd == "is-slot":
+        if len(sys.argv) < 3:
+            print("ERROR=missing_args")
+            return 1
+        project = sys.argv[2]
+        parts = Path(project).resolve().parts
+        is_slot = "slots" in parts or "worktrees" in parts
+        print(f"IS_SLOT={'yes' if is_slot else 'no'}")
+        return 0
+
     else:
         print("ERROR=unknown_subcommand")
         return 1
