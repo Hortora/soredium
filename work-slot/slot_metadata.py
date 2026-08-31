@@ -51,9 +51,9 @@ def write_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
                   description: str = "",
                   isolation_type: str = "", isx_instance: str = "",
                   isx_template: str = "") -> None:
-    content = f"# Slot {slot_number} — {branch}\n"
-    if title:
-        content += f"title: {title}\n"
+    heading = title if title else branch
+    content = f"# Slot {slot_number} — {heading}\n"
+    content += f"slug: {branch}\n"
     content += f"""
 ## Issue
 {issue_repo}#{issue}
@@ -92,9 +92,12 @@ def parse_slot_md(slot_dir: Path) -> dict:
     description_lines: list[str] = []
     for line in content.splitlines():
         if line.startswith("# Slot") and "—" in line:
-            result["branch"] = line.split("—", 1)[1].strip()
-        if line.startswith("title:"):
-            result["title"] = line.split(":", 1)[1].strip()
+            heading_val = line.split("—", 1)[1].strip()
+            result["title"] = heading_val
+            if not result.get("branch"):
+                result["branch"] = heading_val
+        if line.startswith("slug:"):
+            result["branch"] = line.split(":", 1)[1].strip()
         if line.startswith("Covers:"):
             result["covers"] = line.split(":", 1)[1].strip()
         if line.startswith("## Issue"):

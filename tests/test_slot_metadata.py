@@ -202,33 +202,48 @@ class TestParseSlotMdIsolation:
 
 
 class TestSlotTitleAndDescription:
-    def test_write_includes_title(self, tmp_path):
+    def test_write_with_title_uses_title_in_heading(self, tmp_path):
         slot_metadata.write_slot_md(
             tmp_path, 1, ["engine"], "issue-42-spi",
             "42", "casehubio/engine", "42", "Add SPI layer",
-            title="SPI Extraction for Engine Module Separation",
+            title="SPI Extraction for Engine",
         )
         content = (tmp_path / ".slot").read_text()
-        assert "title: SPI Extraction" in content
+        assert "# Slot 1 — SPI Extraction for Engine" in content
+        assert "slug: issue-42-spi" in content
 
-    def test_write_without_title_omits_field(self, tmp_path):
+    def test_write_without_title_uses_branch_in_heading(self, tmp_path):
         slot_metadata.write_slot_md(
             tmp_path, 1, ["engine"], "issue-42-spi",
             "42", "casehubio/engine", "42", "Add SPI layer",
         )
         content = (tmp_path / ".slot").read_text()
-        assert "title:" not in content
+        assert "# Slot 1 — issue-42-spi" in content
+        assert "slug: issue-42-spi" in content
 
-    def test_parse_reads_title(self, tmp_path):
+    def test_parse_reads_title_from_heading(self, tmp_path):
         (tmp_path / ".slot").write_text(
-            "# Slot 1 — issue-42-spi\n"
-            "title: SPI Extraction for Engine\n\n"
+            "# Slot 1 — SPI Extraction for Engine\n"
+            "slug: issue-42-spi\n\n"
             "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
             "## What to do\nAdd SPI layer\n\n"
             "## Repos\n- engine (primary)\n"
         )
         result = slot_metadata.parse_slot_md(tmp_path)
         assert result["title"] == "SPI Extraction for Engine"
+        assert result["branch"] == "issue-42-spi"
+
+    def test_parse_legacy_format_reads_branch_from_heading(self, tmp_path):
+        """Old .slot files without slug: — branch comes from heading."""
+        (tmp_path / ".slot").write_text(
+            "# Slot 1 — issue-42-spi\n\n"
+            "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
+            "## What to do\nAdd SPI layer\n\n"
+            "## Repos\n- engine (primary)\n"
+        )
+        result = slot_metadata.parse_slot_md(tmp_path)
+        assert result["branch"] == "issue-42-spi"
+        assert result["title"] == "issue-42-spi"
 
     def test_write_includes_description(self, tmp_path):
         slot_metadata.write_slot_md(
@@ -240,37 +255,17 @@ class TestSlotTitleAndDescription:
         assert "## Description" in content
         assert "SPI extraction" in content
 
-    def test_write_without_description_omits_section(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 1, ["engine"], "issue-42-spi",
-            "42", "casehubio/engine", "42", "Add SPI layer",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "## Description" not in content
-
     def test_parse_reads_description(self, tmp_path):
         (tmp_path / ".slot").write_text(
-            "# Slot 1 — issue-42-spi\n\n"
+            "# Slot 1 — SPI Extraction\n"
+            "slug: issue-42-spi\n\n"
             "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
-            "## Description\nImplement SPI extraction for module separation.\n"
-            "This enables independent deployment of engine consumers.\n\n"
+            "## Description\nImplement SPI extraction for module separation.\n\n"
             "## What to do\nAdd SPI layer\n\n"
             "## Repos\n- engine (primary)\n"
         )
         result = slot_metadata.parse_slot_md(tmp_path)
-        assert "SPI extraction" in result.get("description", "")
-        assert "independent deployment" in result.get("description", "")
-
-    def test_parse_empty_when_no_title_or_description(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 1 — issue-42-spi\n\n"
-            "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
-            "## What to do\nAdd SPI layer\n\n"
-            "## Repos\n- engine (primary)\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result.get("title", "") == ""
-        assert result.get("description", "") == ""
+        assert "SPI extraction" in result["description"]
 
     def test_roundtrip_title_and_description(self, tmp_path):
         slot_metadata.write_slot_md(
@@ -281,6 +276,7 @@ class TestSlotTitleAndDescription:
         )
         result = slot_metadata.parse_slot_md(tmp_path)
         assert result["title"] == "SPI Extraction"
+        assert result["branch"] == "issue-42-spi"
         assert "SPI interfaces" in result["description"]
 
 

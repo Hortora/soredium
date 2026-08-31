@@ -68,10 +68,10 @@ def backfill_slot(slot_dir: Path, dry_run: bool = False) -> dict[str, str]:
         return {"status": "skipped", "reason": "no .slot file"}
 
     content = slot_file.read_text()
-    has_title = "title:" in content.split("\n## ")[0] if "\n## " in content else "title:" in content
+    has_slug = "slug:" in content
     has_description = "## Description" in content
-    if has_title and has_description:
-        return {"status": "skipped", "reason": "already has title and description"}
+    if has_slug and has_description:
+        return {"status": "skipped", "reason": "already has slug and description"}
 
     issue_repo = ""
     issue_num = ""
@@ -97,10 +97,17 @@ def backfill_slot(slot_dir: Path, dry_run: bool = False) -> dict[str, str]:
 
     lines = content.splitlines()
 
-    if gh_title and not has_title:
+    if not has_slug:
         for i, line in enumerate(lines):
-            if line.startswith("# Slot"):
-                lines.insert(i + 1, f"title: {gh_title}")
+            if line.startswith("# Slot") and "—" in line:
+                old_slug = line.split("—", 1)[1].strip()
+                if gh_title:
+                    slot_prefix = line.split("—", 1)[0].strip()
+                    lines[i] = f"{slot_prefix} — {gh_title}"
+                if i + 1 < len(lines) and lines[i + 1].startswith("title:"):
+                    lines[i + 1] = f"slug: {old_slug}"
+                else:
+                    lines.insert(i + 1, f"slug: {old_slug}")
                 break
 
     if description and not has_description:
