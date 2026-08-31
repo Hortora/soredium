@@ -42,6 +42,41 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
     return 0
 
 
+def find_active_sessions(slot_dir: Path) -> list[tuple[int, str, str]]:
+    """Find processes with open file descriptors inside slot_dir.
+
+    Uses lsof +D for recursive scan. Returns [(pid, command, path)].
+    Fails open (returns []) if lsof is unavailable or times out.
+    """
+    import subprocess as _sp
+    try:
+        result = _sp.run(
+            ["lsof", "+D", str(slot_dir)],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, _sp.TimeoutExpired):
+        return []
+    if not result.stdout.strip():
+        return []
+    sessions = []
+    seen_pids: set[int] = set()
+    for line in result.stdout.strip().splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[1])
+        except ValueError:
+            continue
+        if pid in seen_pids:
+            continue
+        seen_pids.add(pid)
+        cmd = parts[0]
+        path = parts[-1] if len(parts) >= 9 else ""
+        sessions.append((pid, cmd, path))
+    return sessions
+
+
 def sweep_orphaned_claude_projects(family_root: Path) -> int:
     """Rename project dirs for archived slots whose archiving session has exited.
 

@@ -1996,3 +1996,80 @@ def _create_clone_test_repos(tmp_path, repo_names):
     )
     return family, originals, slot, branch
 
+
+
+class TestFindActiveSessions:
+    def test_returns_empty_for_inactive_dir(self, tmp_path):
+        from slot_claude import find_active_sessions
+        result = find_active_sessions(tmp_path)
+        assert result == []
+
+    def test_detects_process_in_dir(self, tmp_path):
+        import time
+        test_file = tmp_path / "hold.txt"
+        test_file.write_text("hold")
+        proc = subprocess.Popen(
+            ["tail", "-f", str(test_file)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            time.sleep(0.5)
+            from slot_claude import find_active_sessions
+            result = find_active_sessions(tmp_path)
+            pids = [r[0] for r in result]
+            assert proc.pid in pids, f"Expected pid {proc.pid} in {pids}"
+        finally:
+            proc.terminate()
+            proc.wait()
+
+
+class TestArchiveSlotSessionGuard:
+    def test_blocks_when_active_session(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "slot_claude.find_active_sessions",
+            lambda d: [(12345, "claude", str(d / "blocks"))],
+        )
+        monkeypatch.setattr("slot_lifecycle._has_unmerged_content", lambda d: [])
+        monkeypatch.setattr("slot_lifecycle.ensure_clone_layout", lambda d: None)
+        monkeypatch.setattr("slot_lifecycle.verify_landed_shas", lambda d, f: (True, []))
+        slot_dir = tmp_path / "slots" / "99"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".landed").write_text("landed_shas=abc:123\n")
+        (slot_dir / ".slot").write_text("## Repos\n- blocks (primary)\n")
+        repo = slot_dir / "blocks"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+
+        with pytest.raises(SystemExit) as exc_info:
+            slot_lifecycle.archive_slot(tmp_path, 99, force=False)
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "ERROR=active_sessions" in captured.out
+
+    def test_force_overrides_active_session(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "slot_claude.find_active_sessions",
+            lambda d: [(12345, "claude", str(d / "blocks"))],
+        )
+        monkeypatch.setattr('slot_lifecycle._has_unmerged_content', lambda d: [])
+        monkeypatch.setattr('slot_lifecycle.ensure_clone_layout', lambda d: None)
+        monkeypatch.setattr('slot_lifecycle.verify_landed_shas', lambda d, f: (True, []))
+        monkeypatch.setattr('slot_lifecycle._repack_broken_alternates', lambda d, f: 0)
+        monkeypatch.setattr('slot_lifecycle._teardown_isx', lambda d: None)
+        monkeypatch.setattr('slot_lifecycle.sweep_orphaned_claude_projects', lambda f: 0)
+        monkeypatch.setattr('slot_lifecycle._escape_slot_cwd', lambda d, f: (False, None))
+        monkeypatch.setattr('slot_lifecycle.relocate_claude_projects', lambda s, d: 0)
+
+        slot_dir = tmp_path / "slots" / "99"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".landed").write_text("landed_shas=abc:123\n")
+        (slot_dir / ".slot").write_text("## Repos\n- blocks (primary)\n")
+        repo = slot_dir / "blocks"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        attic = tmp_path / "slots" / "attic"
+        attic.mkdir(parents=True)
+
+        slot_lifecycle.archive_slot(tmp_path, 99, force=True)
+        captured = capsys.readouterr()
+        assert "WARN=active_sessions_overridden" in captured.out

@@ -611,6 +611,21 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
                 print(f"ERROR_DETAIL={f}")
             print("HINT=pass --force to override, or investigate the failed merge")
             sys.exit(1)
+    from slot_claude import find_active_sessions
+    active = find_active_sessions(slot_dir)
+    if active:
+        if not force:
+            for pid, cmd, path in active:
+                print(f"ACTIVE_SESSION={pid}:{cmd}:{path}")
+            print(f"ERROR=active_sessions slot={slot_num}")
+            print(f"ERROR_DETAIL={len(active)} active process(es) in slot directory")
+            print("HINT=close the session first, or pass --force to override")
+            sys.exit(1)
+        else:
+            for pid, cmd, path in active:
+                print(f"WARN_ACTIVE_SESSION={pid}:{cmd}:{path}")
+            print(f"WARN=active_sessions_overridden slot={slot_num}")
+
     has_promotion_stamp = any(
         (sub / ".artifacts-promoted").exists() or (sub / "design" / ".artifacts-promoted").exists()
         for sub in slot_dir.iterdir()
