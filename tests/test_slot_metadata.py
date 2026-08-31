@@ -201,7 +201,35 @@ class TestParseSlotMdIsolation:
         assert result["issue"] == "42"
 
 
-class TestSlotDescription:
+class TestSlotTitleAndDescription:
+    def test_write_includes_title(self, tmp_path):
+        slot_metadata.write_slot_md(
+            tmp_path, 1, ["engine"], "issue-42-spi",
+            "42", "casehubio/engine", "42", "Add SPI layer",
+            title="SPI Extraction for Engine Module Separation",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert "title: SPI Extraction" in content
+
+    def test_write_without_title_omits_field(self, tmp_path):
+        slot_metadata.write_slot_md(
+            tmp_path, 1, ["engine"], "issue-42-spi",
+            "42", "casehubio/engine", "42", "Add SPI layer",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert "title:" not in content
+
+    def test_parse_reads_title(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 1 — issue-42-spi\n"
+            "title: SPI Extraction for Engine\n\n"
+            "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
+            "## What to do\nAdd SPI layer\n\n"
+            "## Repos\n- engine (primary)\n"
+        )
+        result = slot_metadata.parse_slot_md(tmp_path)
+        assert result["title"] == "SPI Extraction for Engine"
+
     def test_write_includes_description(self, tmp_path):
         slot_metadata.write_slot_md(
             tmp_path, 1, ["engine"], "issue-42-spi",
@@ -233,7 +261,7 @@ class TestSlotDescription:
         assert "SPI extraction" in result.get("description", "")
         assert "independent deployment" in result.get("description", "")
 
-    def test_parse_empty_description(self, tmp_path):
+    def test_parse_empty_when_no_title_or_description(self, tmp_path):
         (tmp_path / ".slot").write_text(
             "# Slot 1 — issue-42-spi\n\n"
             "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
@@ -241,7 +269,19 @@ class TestSlotDescription:
             "## Repos\n- engine (primary)\n"
         )
         result = slot_metadata.parse_slot_md(tmp_path)
+        assert result.get("title", "") == ""
         assert result.get("description", "") == ""
+
+    def test_roundtrip_title_and_description(self, tmp_path):
+        slot_metadata.write_slot_md(
+            tmp_path, 1, ["engine"], "issue-42-spi",
+            "42", "casehubio/engine", "42", "Add SPI layer",
+            title="SPI Extraction",
+            description="Extract SPI interfaces from engine runtime.",
+        )
+        result = slot_metadata.parse_slot_md(tmp_path)
+        assert result["title"] == "SPI Extraction"
+        assert "SPI interfaces" in result["description"]
 
 
 class TestIsSlotLanded:

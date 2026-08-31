@@ -47,11 +47,14 @@ def _read_promotion_stamp(slot_dir: Path) -> tuple[list[str], list[str], str]:
 def write_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
                   branch: str, issue: str, issue_repo: str,
                   covers: str, context: str,
+                  title: str = "",
                   description: str = "",
                   isolation_type: str = "", isx_instance: str = "",
                   isx_template: str = "") -> None:
-    content = f"""# Slot {slot_number} — {branch}
-
+    content = f"# Slot {slot_number} — {branch}\n"
+    if title:
+        content += f"title: {title}\n"
+    content += f"""
 ## Issue
 {issue_repo}#{issue}
 Covers: {covers}
@@ -78,7 +81,7 @@ def parse_slot_md(slot_dir: Path) -> dict:
     if not slot_md.exists():
         return {}
     content = slot_md.read_text()
-    result: dict = {"repos": [], "context": "", "description": "", "issue": "", "issue_repo": "", "covers": "", "is_epic": False, "isolation_type": "", "isx_instance": "", "isx_template": ""}
+    result: dict = {"repos": [], "context": "", "title": "", "description": "", "issue": "", "issue_repo": "", "covers": "", "is_epic": False, "isolation_type": "", "isx_instance": "", "isx_template": ""}
 
     in_issue = False
     in_what = False
@@ -90,6 +93,8 @@ def parse_slot_md(slot_dir: Path) -> dict:
     for line in content.splitlines():
         if line.startswith("# Slot") and "—" in line:
             result["branch"] = line.split("—", 1)[1].strip()
+        if line.startswith("title:"):
+            result["title"] = line.split(":", 1)[1].strip()
         if line.startswith("Covers:"):
             result["covers"] = line.split(":", 1)[1].strip()
         if line.startswith("## Issue"):

@@ -16,18 +16,23 @@ import sys
 from pathlib import Path
 
 
-def _gh_issue_body(repo: str, issue_num: str) -> str:
+def _gh_issue(repo: str, issue_num: str) -> tuple[str, str]:
+    """Fetch issue title and body. Returns (title, body)."""
     try:
         result = subprocess.run(
             ["gh", "issue", "view", issue_num, "--repo", repo,
-             "--json", "body", "--jq", ".body"],
+             "--json", "title,body", "--jq", ".title + \"\\n---BODY---\\n\" + .body"],
             capture_output=True, text=True, timeout=15,
         )
         if result.returncode == 0:
-            return result.stdout.strip()
+            output = result.stdout.strip()
+            if "---BODY---" in output:
+                title, body = output.split("---BODY---", 1)
+                return title.strip(), body.strip()
+            return output, ""
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
-    return ""
+    return "", ""
 
 
 def _extract_description(body: str) -> str:
@@ -63,8 +68,10 @@ def backfill_slot(slot_dir: Path, dry_run: bool = False) -> dict[str, str]:
         return {"status": "skipped", "reason": "no .slot file"}
 
     content = slot_file.read_text()
-    if "## Description" in content:
-        return {"status": "skipped", "reason": "already has description"}
+    has_title = "title:" in content.split("\n## ")[0] if "\n## " in content else "title:" in content
+    has_description = "## Description" in content
+    if has_title and has_description:
+        return {"status": "skipped", "reason": "already has title and description"}
 
     issue_repo = ""
     issue_num = ""
@@ -79,34 +86,39 @@ def backfill_slot(slot_dir: Path, dry_run: bool = False) -> dict[str, str]:
     if not issue_repo or not issue_num:
         return {"status": "skipped", "reason": "no issue ref found"}
 
-    body = _gh_issue_body(issue_repo, issue_num)
-    description = _extract_description(body)
+    gh_title, body = _gh_issue(issue_repo, issue_num)
+    description = _extract_description(body) if not has_description else ""
 
-    if not description:
-        return {"status": "skipped", "reason": "no description extracted from issue body"}
+    if not gh_title and not description:
+        return {"status": "skipped", "reason": "no data from GitHub"}
 
     if dry_run:
-        return {"status": "would_update", "description": description[:80]}
+        return {"status": "would_update", "title": gh_title[:60], "description": description[:80]}
 
     lines = content.splitlines()
-    insert_idx = None
-    for i, line in enumerate(lines):
-        if line.startswith("## What to do"):
-            insert_idx = i
-            break
 
-    if insert_idx is None:
+    if gh_title and not has_title:
         for i, line in enumerate(lines):
-            if line.startswith("## Repos"):
-                insert_idx = i
+            if line.startswith("# Slot"):
+                lines.insert(i + 1, f"title: {gh_title}")
                 break
 
-    if insert_idx is not None:
-        lines.insert(insert_idx, f"## Description\n{description}\n")
-        slot_file.write_text("\n".join(lines) + "\n")
-        return {"status": "updated", "description": description[:80]}
+    if description and not has_description:
+        insert_idx = None
+        for i, line in enumerate(lines):
+            if line.startswith("## What to do"):
+                insert_idx = i
+                break
+        if insert_idx is None:
+            for i, line in enumerate(lines):
+                if line.startswith("## Repos"):
+                    insert_idx = i
+                    break
+        if insert_idx is not None:
+            lines.insert(insert_idx, f"## Description\n{description}\n")
 
-    return {"status": "skipped", "reason": "no insertion point found"}
+    slot_file.write_text("\n".join(lines) + "\n")
+    return {"status": "updated", "title": gh_title[:60], "description": description[:80]}
 
 
 def main():
