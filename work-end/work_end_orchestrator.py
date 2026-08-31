@@ -65,7 +65,7 @@ def _log_call(workspace: Path, meta_state: str, result: dict[str, str],
                      extra={"meta_state": meta_state, "context": result.get("CONTEXT", "")})
 
 
-SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "impl_doc_sync", "adr", "write_content"]
+SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "impl_doc_sync", "doc_freshness_gate", "adr", "write_content"]
 
 WORK_END_DIR = Path(__file__).parent
 
@@ -132,7 +132,7 @@ def _parse_slot_repos(slot_path: Path) -> list[str]:
     return sorted(dir_repos)
 
 
-PER_REPO_SWEEP_STEPS = {"protocol", "update_claude_md", "impl_doc_sync"}
+PER_REPO_SWEEP_STEPS = {"protocol", "update_claude_md", "impl_doc_sync", "doc_freshness_gate"}
 PER_REPO_EXECUTE_STEPS = {"promote", "rebase", "land"}
 
 
@@ -631,7 +631,7 @@ JUDGMENT_STEPS_SET = {"code_review", "branch_audit_conformance",
                       "branch_audit_coherence", "branch_audit_structure",
                       "branch_audit_robustness", "loose_ends", "forcing_function",
                       "sweep_config", "forage", "protocol",
-                      "update_claude_md", "impl_doc_sync", "adr",
+                      "update_claude_md", "impl_doc_sync", "doc_freshness_gate", "adr",
                       "write_content", "trajectory", "squash",
                       "upstream_pr",
                       "arc42_scan", "session_rename", "garden_feedback", "notes"}
@@ -825,6 +825,8 @@ STEPS: list[StepDef] = [
             skip_fn=_is_sweep_deselected("update_claude_md")),
     StepDef("impl_doc_sync", "closing:review", "judgment",
             skip_fn=_is_sweep_deselected("impl_doc_sync")),
+    StepDef("doc_freshness_gate", "closing:review", "judgment",
+            skip_fn=_is_sweep_deselected("doc_freshness_gate")),
     StepDef("adr", "closing:review", "judgment",
             skip_fn=_is_sweep_deselected("adr")),
     StepDef("write_content", "closing:review", "judgment",

@@ -36,6 +36,7 @@ STEP_TO_PHASE = {
     "protocol": "closing:review",
     "update_claude_md": "closing:review",
     "impl_doc_sync": "closing:review",
+    "doc_freshness_gate": "closing:review",
     "adr": "closing:review",
     "write_content": "closing:review",
     "promote": "closing:verified",

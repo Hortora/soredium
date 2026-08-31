@@ -102,6 +102,7 @@ Read the ACTION, dispatch:
 | `protocol` | Invoke protocol SWEEP |
 | `update_claude_md` | Invoke update-claude-md |
 | `impl_doc_sync` | Invoke implementation-doc-sync |
+| `doc_freshness_gate` | Read `handlers/doc_freshness.md` |
 | `adr` | Invoke adr |
 | `write_content` | Invoke write-content (diary) |
 | `trajectory` | Read `handlers/execute.md` § trajectory |
