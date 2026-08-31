@@ -202,29 +202,32 @@ class TestParseSlotMdIsolation:
 
 
 class TestSlotTitleAndDescription:
-    def test_write_with_title_uses_title_in_heading(self, tmp_path):
+    def test_write_with_title(self, tmp_path):
         slot_metadata.write_slot_md(
             tmp_path, 1, ["engine"], "issue-42-spi",
             "42", "casehubio/engine", "42", "Add SPI layer",
             title="SPI Extraction for Engine",
         )
         content = (tmp_path / ".slot").read_text()
-        assert "# Slot 1 — SPI Extraction for Engine" in content
+        assert "# Slot 1\n" in content
         assert "slug: issue-42-spi" in content
+        assert "title: SPI Extraction for Engine" in content
 
-    def test_write_without_title_uses_branch_in_heading(self, tmp_path):
+    def test_write_without_title_omits_title_field(self, tmp_path):
         slot_metadata.write_slot_md(
             tmp_path, 1, ["engine"], "issue-42-spi",
             "42", "casehubio/engine", "42", "Add SPI layer",
         )
         content = (tmp_path / ".slot").read_text()
-        assert "# Slot 1 — issue-42-spi" in content
+        assert "# Slot 1\n" in content
         assert "slug: issue-42-spi" in content
+        assert "title:" not in content
 
-    def test_parse_reads_title_from_heading(self, tmp_path):
+    def test_parse_reads_title_and_slug(self, tmp_path):
         (tmp_path / ".slot").write_text(
-            "# Slot 1 — SPI Extraction for Engine\n"
-            "slug: issue-42-spi\n\n"
+            "# Slot 1\n"
+            "slug: issue-42-spi\n"
+            "title: SPI Extraction for Engine\n\n"
             "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
             "## What to do\nAdd SPI layer\n\n"
             "## Repos\n- engine (primary)\n"
@@ -234,7 +237,7 @@ class TestSlotTitleAndDescription:
         assert result["branch"] == "issue-42-spi"
 
     def test_parse_legacy_format_reads_branch_from_heading(self, tmp_path):
-        """Old .slot files without slug: — branch comes from heading."""
+        """Old .slot files with # Slot N — branch — branch comes from heading."""
         (tmp_path / ".slot").write_text(
             "# Slot 1 — issue-42-spi\n\n"
             "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
@@ -243,7 +246,6 @@ class TestSlotTitleAndDescription:
         )
         result = slot_metadata.parse_slot_md(tmp_path)
         assert result["branch"] == "issue-42-spi"
-        assert result["title"] == "issue-42-spi"
 
     def test_write_includes_description(self, tmp_path):
         slot_metadata.write_slot_md(
@@ -257,8 +259,9 @@ class TestSlotTitleAndDescription:
 
     def test_parse_reads_description(self, tmp_path):
         (tmp_path / ".slot").write_text(
-            "# Slot 1 — SPI Extraction\n"
-            "slug: issue-42-spi\n\n"
+            "# Slot 1\n"
+            "slug: issue-42-spi\n"
+            "title: SPI Extraction\n\n"
             "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
             "## Description\nImplement SPI extraction for module separation.\n\n"
             "## What to do\nAdd SPI layer\n\n"

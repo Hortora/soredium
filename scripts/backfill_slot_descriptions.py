@@ -101,13 +101,19 @@ def backfill_slot(slot_dir: Path, dry_run: bool = False) -> dict[str, str]:
         for i, line in enumerate(lines):
             if line.startswith("# Slot") and "—" in line:
                 old_slug = line.split("—", 1)[1].strip()
-                if gh_title:
-                    slot_prefix = line.split("—", 1)[0].strip()
-                    lines[i] = f"{slot_prefix} — {gh_title}"
-                if i + 1 < len(lines) and lines[i + 1].startswith("title:"):
-                    lines[i + 1] = f"slug: {old_slug}"
+                slot_num = line.split("—", 1)[0].strip()
+                lines[i] = slot_num
+                insert_after = i + 1
+                if insert_after < len(lines) and lines[insert_after].startswith("title:"):
+                    lines[insert_after] = f"slug: {old_slug}"
+                    if gh_title:
+                        lines.insert(insert_after + 1, f"title: {gh_title}")
                 else:
-                    lines.insert(i + 1, f"slug: {old_slug}")
+                    new_fields = [f"slug: {old_slug}"]
+                    if gh_title:
+                        new_fields.append(f"title: {gh_title}")
+                    for j, field in enumerate(new_fields):
+                        lines.insert(insert_after + j, field)
                 break
 
     if description and not has_description:
