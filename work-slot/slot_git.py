@@ -76,6 +76,12 @@ def install_post_commit_hook(clone_path: Path) -> None:
 
 
 def sync_main(repo_path: str) -> None:
+    """Fetch remote-tracking refs so git clone --shared sees latest main.
+
+    Does NOT rebase or modify the local branch — the source repo may be
+    on a feature branch. git clone --shared --branch main reads from
+    origin/main (remote-tracking ref), not the local main branch.
+    """
     rc, _, _ = run_cmd(["git", "-C", repo_path, "fetch", "origin"])
     if rc != 0:
         print(f"WARN=fetch_failed repo={repo_path}")
@@ -83,10 +89,6 @@ def sync_main(repo_path: str) -> None:
     rc, _, _ = run_cmd(["git", "-C", repo_path, "remote", "get-url", "upstream"])
     if rc == 0:
         run_cmd(["git", "-C", repo_path, "fetch", "upstream"])
-        run_cmd(["git", "-C", repo_path, "rebase", "upstream/main"])
-        run_cmd(["git", "-C", repo_path, "push", "origin", "main"])
-    else:
-        run_cmd(["git", "-C", repo_path, "rebase", "origin/main"])
 
 
 def _exclude_symlinks(clone_path: Path) -> None:

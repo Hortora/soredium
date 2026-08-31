@@ -446,3 +446,47 @@ class TestSymlinkGitignoredAssets:
         assert linked == []
         assert not (clone / ".env").exists()
 
+
+
+class TestSyncMainDoesNotMutateBranch:
+    def test_sync_main_preserves_feature_branch_when_origin_advanced(self, tmp_path):
+        """sync_main must not rebase the source repo when it is on a feature branch."""
+        repo = init_repo_with_remote(tmp_path / "repo")
+        bare = tmp_path / ".repo-bare.git"
+
+        # Create a second clone, push a new commit to origin/main
+        other = tmp_path / "other"
+        subprocess.run(["git", "clone", str(bare), str(other)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(other), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(other), "config", "user.email", "t@t"], capture_output=True)
+        (other / "upstream.txt").write_text("new upstream work")
+        subprocess.run(["git", "-C", str(other), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(other), "commit", "-m", "feat: upstream advance"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(other), "push", "origin", "main"],
+                       capture_output=True, check=True)
+
+        # Switch source repo to a feature branch with its own commit
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feature-work"],
+                       capture_output=True, check=True)
+        (repo / "feature.txt").write_text("work in progress")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "wip: feature"],
+                       capture_output=True, check=True)
+        feature_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        slot_git.sync_main(str(repo))
+
+        current_branch = subprocess.run(
+            ["git", "-C", str(repo), "branch", "--show-current"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        current_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert current_branch == "feature-work", f"Branch changed to {current_branch}"
+        assert current_sha == feature_sha, "HEAD SHA changed — rebase mutated the feature branch"
