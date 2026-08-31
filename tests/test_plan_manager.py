@@ -1546,3 +1546,49 @@ class TestAppendDuplicateGate:
         )
         assert result.returncode == 0
         assert "APPENDED=" in result.stdout
+
+
+COMPLETED_EPIC_PLAN = """# Work Plan — issue-50-weighted
+
+## Queue
+- [x] test/repo#50 — Weighted profiles (epic)
+  - [x] test/repo#51 — Add weight field
+  - [x] test/repo#52 — Scoring subsystem
+- [ ] test/repo#32 — Update API docs ← active
+
+## Session State
+Current: #32 — Update API docs
+Started: 2026-08-04
+"""
+
+PARTIAL_EPIC_PLAN = """# Work Plan — issue-50-weighted
+
+## Queue
+- [ ] test/repo#50 — Weighted profiles (epic)
+  - [x] test/repo#51 — Add weight field
+  - [ ] test/repo#52 — Scoring subsystem ← active
+
+## Session State
+Current: #52 — Scoring subsystem
+Started: 2026-08-04
+"""
+
+
+class TestGetCompletedEpicParents:
+    def test_returns_completed_epic_parents(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(COMPLETED_EPIC_PLAN)
+        result = plan_manager.get_completed_epic_parents(plan)
+        assert 50 in result
+
+    def test_excludes_incomplete_epics(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PARTIAL_EPIC_PLAN)
+        result = plan_manager.get_completed_epic_parents(plan)
+        assert 50 not in result
+
+    def test_returns_empty_for_no_epics(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        result = plan_manager.get_completed_epic_parents(plan)
+        assert result == []

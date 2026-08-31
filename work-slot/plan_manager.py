@@ -697,6 +697,22 @@ def _mark_parent_epics_if_done(items: list[QueueItem]) -> None:
                 item.completed = True
 
 
+def get_completed_epic_parents(plan_path: Path) -> list[int]:
+    """Return issue numbers of epic parents where all children are completed."""
+    tree = parse_plan(plan_path)
+    result: list[int] = []
+    _collect_completed_epics(tree.queue, result)
+    return result
+
+
+def _collect_completed_epics(items: list, result: list[int]) -> None:
+    for item in items:
+        if item.is_epic and item.children:
+            _collect_completed_epics(item.children, result)
+            if item.completed or all(c.completed for c in item.children):
+                result.append(item.issue_number)
+
+
 def reorder_queue(plan_path: Path, order: list[int]) -> list[int]:
     """Reorder top-level queue items by issue number. Returns the new order.
 

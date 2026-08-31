@@ -951,6 +951,33 @@ class TestMechanicalStepWiring:
         close_calls = [c for c in calls if any("close-issues" in str(a) for a in c)]
         assert len(close_calls) >= 1, f"Expected close-issues call, got: {calls}"
 
+    def test_close_issues_includes_completed_epic_parents(self, tmp_path, monkeypatch):
+        """close_issues includes epic parent issue numbers from .plan."""
+        plan_path = tmp_path / ".plan"
+        plan_path.write_text(
+            "# Work Plan — issue-50-weighted\n\n"
+            "## State\nbranch: issue-50-weighted\nstate: closing:stamped\n"
+            "issue-repo: Hortora/soredium\ncovers: 51,52\n\n"
+            "## Queue\n"
+            "- [x] Hortora/soredium#50 — Weighted profiles (epic)\n"
+            "  - [x] Hortora/soredium#51 — Add weight field\n"
+            "  - [x] Hortora/soredium#52 — Scoring subsystem\n\n"
+            "## Session State\n"
+        )
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"CLOSED": "3"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+        self._setup_to_step(tmp_path, "close_issues", meta_state="closing:stamped",
+                            covers="51,52")
+        self._run(tmp_path, meta_state="closing:stamped", covers="51,52",
+                  plan_path=str(plan_path))
+        close_calls = [c for c in calls if any("close-issues" in str(a) for a in c)]
+        assert len(close_calls) >= 1
+        covers_arg = [a for a in close_calls[0] if "covers=" in str(a)][0]
+        assert "50" in covers_arg, f"Epic parent #50 should be in covers: {covers_arg}"
+
     def test_verify_calls_verify_slot_close(self, tmp_path, monkeypatch):
         """verify step calls verify_slot_close.py."""
         calls = []

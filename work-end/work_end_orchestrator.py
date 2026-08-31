@@ -379,8 +379,23 @@ def _write_landed_script(ctx):
 
 
 def _close_issues_script(ctx):
+    covers = ctx.covers
+    if ctx.plan_path and ctx.plan_path.exists():
+        try:
+            _slot_dir = Path(__file__).parent.parent / "work-slot"
+            if str(_slot_dir) not in sys.path:
+                sys.path.insert(0, str(_slot_dir))
+            from plan_manager import get_completed_epic_parents
+            epic_parents = get_completed_epic_parents(ctx.plan_path)
+            if epic_parents:
+                existing = set(n.strip() for n in covers.split(",") if n.strip())
+                for ep in epic_parents:
+                    if str(ep) not in existing:
+                        covers = f"{covers},{ep}" if covers else str(ep)
+        except Exception:
+            pass
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
-            "close-issues", f"repo={ctx.issue_repo}", f"covers={ctx.covers}"]
+            "close-issues", f"repo={ctx.issue_repo}", f"covers={covers}"]
 
 
 def _report_close_issues_script(ctx):
