@@ -690,3 +690,43 @@ class TestRebaseFailureWorklog:
             repo_path="/tmp/test/engine", branch="feat-1",
             commit_count=10, main_ahead=5, error_detail="test",
         )
+
+
+class TestPreflightUntrackedFiles:
+    def test_untracked_files_do_not_block_landing(self, tmp_path):
+        """Untracked files (?? prefix) should not cause dirty_worktree error."""
+        original = _init_repo(tmp_path / "original")
+        (original / "untracked.png").write_text("screenshot")
+
+        from land_flow import _preflight_two_hop, RepoDescriptor, Transport
+        desc = RepoDescriptor(
+            repo_path=tmp_path / "clone",
+            original_path=original,
+            push_target="origin",
+            base_branch="main",
+            is_workspace=False,
+            transport=Transport.TWO_HOP,
+        )
+        result = _preflight_two_hop(desc)
+        assert result is None or "dirty_worktree" not in result, (
+            f"Untracked files should not block: {result}"
+        )
+
+    def test_staged_changes_still_block(self, tmp_path):
+        """Staged but uncommitted changes should still block."""
+        original = _init_repo(tmp_path / "original")
+        (original / "dirty.txt").write_text("modified")
+        subprocess.run(["git", "-C", str(original), "add", "dirty.txt"],
+                       capture_output=True)
+
+        from land_flow import _preflight_two_hop, RepoDescriptor, Transport
+        desc = RepoDescriptor(
+            repo_path=tmp_path / "clone",
+            original_path=original,
+            push_target="origin",
+            base_branch="main",
+            is_workspace=False,
+            transport=Transport.TWO_HOP,
+        )
+        result = _preflight_two_hop(desc)
+        assert result is not None and "dirty_worktree" in result

@@ -310,14 +310,15 @@ def _preflight_two_hop(desc: RepoDescriptor) -> str | None:
     status = _git(original, "status", "--porcelain")
     if status.returncode == 0 and status.stdout.strip():
         unmerged = {"UU", "AA", "DD", "AU", "UA", "DU", "UD"}
-        has_unmerged = any(
-            line[:2] in unmerged for line in status.stdout.strip().splitlines()
-        )
+        lines = status.stdout.strip().splitlines()
+        has_unmerged = any(line[:2] in unmerged for line in lines)
         if has_unmerged:
             return f"unmerged_conflict path={original}"
-        cur = _git(original, "branch", "--show-current")
-        if cur.returncode == 0 and cur.stdout.strip() == "main":
-            return f"dirty_worktree path={original}"
+        has_tracked_changes = any(not line.startswith("??") for line in lines)
+        if has_tracked_changes:
+            cur = _git(original, "branch", "--show-current")
+            if cur.returncode == 0 and cur.stdout.strip() == "main":
+                return f"dirty_worktree path={original}"
 
     has_origin = _git(original, "remote", "get-url", "origin")
     if has_origin.returncode != 0:
