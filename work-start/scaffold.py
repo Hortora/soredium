@@ -95,7 +95,7 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
     if plan_content:
         plan_path.write_text(plan_content)
     else:
-        from plan_manager import build_plan_content, QueueItem
+        from plan_manager import build_plan_content, QueueItem, IssueRef
 
         state = {
             "branch": branch,
@@ -110,9 +110,8 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
         }
 
         if issue:
-            items = [QueueItem(issue_number=int(issue),
-                               title=f"Issue #{issue}", active=True,
-                               repo=issue_repo)]
+            items = [QueueItem(ref=IssueRef(repo=issue_repo, number=int(issue)),
+                               title=f"Issue #{issue}", active=True)]
         else:
             items = []
         plan_path.write_text(build_plan_content(branch, items, today, state=state))
