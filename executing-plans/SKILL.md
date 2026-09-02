@@ -185,11 +185,28 @@ python3 ~/.claude/skills/project/ctx.py
 
 Read `HAS_PLAN` and `PLAN_POSITION` from the output.
 
-- **If `HAS_PLAN=yes` and the queue has remaining issues** → this plan
-  is done but the branch has more work. Run `work next` to advance to
-  the next issue — do NOT invoke work-end.
-- **If no plan, or the queue is complete** → invoke work-end for final
-  review, squash, push, and branch closure.
+**4a. Advance queue (unconditional, mechanical):**
+
+If `HAS_PLAN=yes` and the queue has remaining issues:
+
+1. Run `work next` immediately — this advances the queue, closes the
+   GitHub issue, and sets the next issue as active.
+2. Report: "Advanced to #<next>. Issue #<completed> closed."
+
+This is not a user choice. Queue advancement is a mechanical consequence
+of task completion.
+
+**4b. Offer session choice:**
+
+After advancing (or if no advance was needed):
+
+- If queue has remaining issues (just advanced):
+  - **Continue** → proceed to next issue's plan
+  - **Wrap** → invoke handover (queue already advanced, next session
+    starts clean at the new active issue)
+
+- If queue is complete, or no plan exists:
+  - Invoke work-end for final review, squash, push, and branch closure.
 
 ## When to Stop and Ask for Help
 
