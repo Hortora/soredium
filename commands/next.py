@@ -50,7 +50,7 @@ def execute(cwd: str | None = None, **_kwargs) -> list:
                                         "No active issue in plan", False))
             return events
 
-        completed_issue = active[0].issue_number
+        completed_issue = active[0].ref
         result = advance(plan_path, tree)
 
         next_leaves = flatten(parse_plan(plan_path.read_text()))
@@ -59,7 +59,7 @@ def execute(cwd: str | None = None, **_kwargs) -> list:
 
         events.append(PlanAdvanced(
             completed_issue=completed_issue,
-            next_issue=next_active[0].issue_number if next_active else None,
+            next_issue=next_active[0].ref if next_active else None,
             next_title=next_active[0].title if next_active else None,
             position=f"{sum(1 for l in next_leaves if l.completed)}/{len(next_leaves)}",
             queue_complete=len(remaining) == 0,

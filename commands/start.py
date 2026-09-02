@@ -11,7 +11,7 @@ from commands.events import (
 from commands.registry import resolve_context, derive_actions
 
 
-def execute(issues: list[int] | None = None, cwd: str | None = None,
+def execute(issues: list['IssueRef'] | None = None, cwd: str | None = None,
             decide_fn: Callable | None = None, **_kwargs) -> list:
     """Create branch, scaffold, and plan for given issues."""
     events: list = []
@@ -34,7 +34,7 @@ def execute(issues: list[int] | None = None, cwd: str | None = None,
         sys.path.insert(0, str(work_start_dir))
 
     issue = issues[0]
-    branch = f"issue-{issue}-work"
+    branch = f"issue-{issue.number}-work"
 
     # Step 1: Create branches
     events.append(StepProgress("start", "creating_branches", None))
@@ -71,9 +71,9 @@ def execute(issues: list[int] | None = None, cwd: str | None = None,
             workspace=workspace,
             branch=branch,
             project_sha=project_sha,
-            issue=str(issue),
-            issue_repo=ctx.owner_repo or "",
-            covers=" ".join(str(i) for i in issues),
+            issue=str(issue.number),
+            issue_repo=issue.repo,
+            covers=" ".join(str(i.number) for i in issues),
             plan=len(issues) > 1,
         )
     except Exception as e:

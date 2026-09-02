@@ -5,6 +5,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "work-slot"))
+from plan_manager import IssueRef
 from commands.events import StateChanged
 
 
@@ -74,10 +76,10 @@ class Context:
     base_branch: str
     meta_path: str | None
     has_queue: bool
-    issue: int | None
+    issue: IssueRef | None
     is_epic: bool
     epic_batch: str | None
-    epic_active_issue: int | None
+    epic_active_issue: IssueRef | None
 
 
 def resolve_context(cwd: str | None = None) -> Context:
@@ -101,7 +103,10 @@ def resolve_context(cwd: str | None = None) -> Context:
                 pass
 
     issue_str = raw.get("ISSUE_N") or raw.get("PLAN_ACTIVE_ISSUE") or ""
-    issue = int(issue_str) if issue_str.isdigit() else None
+    try:
+        issue = IssueRef.parse(issue_str) if issue_str and '/' in issue_str else None
+    except ValueError:
+        issue = None
 
     workspace = raw.get("WORKSPACE") or None
     meta_path = None
@@ -127,7 +132,7 @@ def resolve_context(cwd: str | None = None) -> Context:
         issue=issue,
         is_epic=raw.get("IS_EPIC") == "yes",
         epic_batch=raw.get("EPIC_BATCH") or None,
-        epic_active_issue=int(raw["EPIC_ACTIVE_ISSUE"]) if raw.get("EPIC_ACTIVE_ISSUE", "").isdigit() else None,
+        epic_active_issue=IssueRef.parse(raw["EPIC_ACTIVE_ISSUE"]) if raw.get("EPIC_ACTIVE_ISSUE", "") and '/' in raw.get("EPIC_ACTIVE_ISSUE", "") else None,
     )
 
 

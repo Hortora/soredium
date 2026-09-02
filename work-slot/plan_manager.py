@@ -13,6 +13,32 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+@dataclass(frozen=True)
+class IssueRef:
+    repo: str
+    number: int
+
+    def __post_init__(self):
+        if not self.repo or '/' not in self.repo:
+            raise ValueError(
+                f"IssueRef requires repo-qualified format, "
+                f"got repo='{self.repo}'"
+            )
+        object.__setattr__(self, 'repo', self.repo.lower())
+
+    def __str__(self) -> str:
+        return f"{self.repo}#{self.number}"
+
+    @classmethod
+    def parse(cls, s: str) -> 'IssueRef':
+        m = re.match(r'^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$', s)
+        if not m:
+            raise ValueError(
+                f"Invalid issue reference '{s}' — must be owner/repo#N"
+            )
+        return cls(m.group(1), int(m.group(2)))
+
+
 @dataclass
 class TaskItem:
     name: str
@@ -22,7 +48,7 @@ class TaskItem:
 
 @dataclass
 class QueueItem:
-    issue_number: int
+    ref: IssueRef
     title: str
     completed: bool = False
     active: bool = False
@@ -30,7 +56,6 @@ class QueueItem:
     children: list['QueueItem'] = field(default_factory=list)
     batch: str | None = None
     tasks: list[TaskItem] = field(default_factory=list)
-    repo: str = ""
 
 
 @dataclass
@@ -47,7 +72,7 @@ class DeferredItem:
 class PlanTree:
     heading: str
     queue: list[QueueItem]
-    current_issue: int | None
+    current_issue: IssueRef | None
     started: str
     last_wrap: str | None = None
     deferred: list[DeferredItem] = field(default_factory=list)
@@ -56,19 +81,18 @@ class PlanTree:
 
 @dataclass
 class LeafItem:
-    issue_number: int
+    ref: IssueRef
     title: str
     completed: bool
     active: bool
-    parent_epic: int | None
+    parent_epic: IssueRef | None
     batch: str | None
-    repo: str = ""
 
 
 @dataclass
 class AdvanceResult:
-    completed: int
-    next_issue: int | None
+    completed: IssueRef
+    next_issue: IssueRef | None
     next_title: str | None = None
     batch_complete: bool = False
     epic_complete: bool = False
@@ -87,7 +111,7 @@ _DEFERRED_RE = re.compile(
 )
 _TASK_BATCH_RE = re.compile(r'^\s*- \[([ x])\]\s*Batch\s+\d+:\s*(.+)')
 _TASK_ITEM_RE = re.compile(r'^\s*- \[([ x])\]\s*Task\s+\d+:\s*(.+)')
-_CURRENT_RE = re.compile(r'^Current:\s*(?:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#(\d+)')
+_CURRENT_RE = re.compile(r'^Current:\s*(?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#)?(\d+)')
 _STARTED_RE = re.compile(r'^Started:\s*(.+)')
 _LAST_WRAP_RE = re.compile(r'^Last wrap:\s*(.+)')
 
@@ -115,7 +139,8 @@ def _read_plan_state(plan_path: Path) -> dict[str, str]:
 
 
 def _emit_issue_events(plan_path: Path, repo_path: str,
-                       completed: int, next_issue: int | None) -> None:
+                       completed: IssueRef,
+                       next_issue: IssueRef | None) -> None:
     try:
         _scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
         if _scripts_dir not in _sys.path:
@@ -124,14 +149,15 @@ def _emit_issue_events(plan_path: Path, repo_path: str,
 
         fields = _read_plan_state(plan_path)
         branch = fields.get("branch", "")
-        issue_repo = fields.get("issue-repo", "")
         if not branch:
             return
 
         conn = worklog.connect()
-        worklog.record_issue_complete(conn, branch, repo_path, completed, issue_repo)
+        worklog.record_issue_complete(conn, branch, repo_path,
+                                      completed.number, completed.repo)
         if next_issue is not None:
-            worklog.record_issue_activate(conn, branch, repo_path, next_issue, issue_repo)
+            worklog.record_issue_activate(conn, branch, repo_path,
+                                          next_issue.number, next_issue.repo)
         conn.close()
     except Exception as e:
         print(f"WARN=worklog_error detail={e}")
@@ -140,13 +166,6 @@ def _emit_issue_events(plan_path: Path, repo_path: str,
 def _indent_level(line: str) -> int:
     return len(line) - len(line.lstrip())
 
-
-def _backfill_repo(items: list[QueueItem], default_repo: str) -> None:
-    for item in items:
-        if not item.repo:
-            item.repo = default_repo
-        if item.children:
-            _backfill_repo(item.children, default_repo)
 
 
 def parse_plan(plan_path: Path) -> PlanTree:
@@ -210,7 +229,12 @@ def parse_plan(plan_path: Path) -> PlanTree:
             stripped = line.strip()
             m = _CURRENT_RE.match(stripped)
             if m:
-                current_issue = int(m.group(1))
+                repo_str = m.group(1) or ""
+                num = int(m.group(2))
+                if repo_str:
+                    current_issue = IssueRef(repo_str, num)
+                else:
+                    current_issue = None
             m = _STARTED_RE.match(stripped)
             if m:
                 started = m.group(1).strip()
@@ -225,10 +249,6 @@ def parse_plan(plan_path: Path) -> PlanTree:
 
     queue = _parse_queue_lines(queue_lines)
     deferred = _parse_deferred_lines(deferred_lines)
-
-    default_repo = state_dict.get("issue-repo", "")
-    if default_repo:
-        _backfill_repo(queue, default_repo)
 
     if state_dict and not started:
         started = state_dict.get("date", "")
@@ -262,8 +282,13 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
         if item_m:
             indent = len(item_m.group(1))
             completed = item_m.group(2) == "x"
-            repo = item_m.group(3) or ""
-            issue_num = int(item_m.group(4))
+            repo = item_m.group(3)
+            if not repo:
+                raise ValueError(
+                    f"Bare issue number in queue line: '{line.strip()}' "
+                    f"— must be owner/repo#N format"
+                )
+            ref = IssueRef(repo, int(item_m.group(4)))
             title_raw = item_m.group(5).strip()
             title = _EPIC_MARKER_RE.sub("", title_raw).strip()
             title = _ACTIVE_MARKER_RE.sub("", title).strip()
@@ -271,13 +296,12 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
             active = bool(_ACTIVE_MARKER_RE.search(item_m.group(0)))
 
             item = QueueItem(
-                issue_number=issue_num,
+                ref=ref,
                 title=title,
                 completed=completed,
                 active=active,
                 is_epic=is_epic,
                 batch=current_batch,
-                repo=repo,
             )
 
             if is_epic:
@@ -362,19 +386,18 @@ def flatten_leaves(tree: PlanTree) -> list[LeafItem]:
 
 
 def _flatten_items(items: list[QueueItem], result: list[LeafItem],
-                   parent_epic: int | None) -> None:
+                   parent_epic: IssueRef | None) -> None:
     for item in items:
         if item.is_epic and item.children:
-            _flatten_items(item.children, result, parent_epic=item.issue_number)
+            _flatten_items(item.children, result, parent_epic=item.ref)
         else:
             result.append(LeafItem(
-                issue_number=item.issue_number,
+                ref=item.ref,
                 title=item.title,
                 completed=item.completed,
                 active=item.active,
                 parent_epic=parent_epic,
                 batch=item.batch,
-                repo=item.repo,
             ))
 
 
@@ -428,11 +451,9 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
         lines.append("state: active")
         active_leaf = _find_active_leaf(items)
         if active_leaf:
-            ref = f"{active_leaf.repo}#{active_leaf.issue_number}" if active_leaf.repo else f"#{active_leaf.issue_number}"
-            if active_leaf.repo:
-                lines.append(f"issue-repo: {active_leaf.repo}")
-            lines.append(f"covers: {active_leaf.issue_number}")
-            lines.append(f"Current: {ref} — {active_leaf.title}")
+            lines.append(f"issue-repo: {active_leaf.ref.repo}")
+            lines.append(f"covers: {active_leaf.ref}")
+            lines.append(f"Current: {active_leaf.ref} — {active_leaf.title}")
         else:
             lines.append("Current: none")
         lines.append(f"date: {date}")
@@ -444,16 +465,11 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
 
 
 def _write_item(item: QueueItem, lines: list[str], indent: int) -> None:
-    if not item.repo:
-        raise ValueError(
-            f"QueueItem #{item.issue_number} has no repo — "
-            f"every issue reference must be repo-qualified (owner/repo#N)"
-        )
     prefix = "  " * indent
     check = "x" if item.completed else " "
     epic_marker = " (epic)" if item.is_epic else ""
     active_marker = " ← active" if item.active else ""
-    lines.append(f"{prefix}- [{check}] {item.repo}#{item.issue_number} — {item.title}{epic_marker}{active_marker}")
+    lines.append(f"{prefix}- [{check}] {item.ref} — {item.title}{epic_marker}{active_marker}")
 
     if item.is_epic and item.children:
         current_batch = None
@@ -523,19 +539,19 @@ def advance(plan_path: Path,
 
     if active_idx is None:
         return AdvanceResult(
-            completed=0, next_issue=None,
+            completed=IssueRef("_/none", 0), next_issue=None,
             epic_complete=True, has_deferred=len(tree.deferred) > 0,
         )
 
     completed_leaf = leaves[active_idx]
 
-    _mark_completed(tree.queue, completed_leaf.issue_number)
+    _mark_completed(tree.queue, completed_leaf.ref)
     _mark_parent_epics_if_done(tree.queue)
 
     next_leaf = None
     if active_idx + 1 < len(leaves):
         next_leaf = leaves[active_idx + 1]
-        _mark_active(tree.queue, next_leaf.issue_number)
+        _mark_active(tree.queue, next_leaf.ref)
 
     batch_complete = False
     safe_exit = False
@@ -550,22 +566,22 @@ def advance(plan_path: Path,
     epic_complete = next_leaf is None
     has_deferred = epic_complete and len(tree.deferred) > 0
 
-    tree.current_issue = next_leaf.issue_number if next_leaf else None
+    tree.current_issue = next_leaf.ref if next_leaf else None
     rewrite_plan(plan_path, tree)
 
     if repo_path:
         try:
             _emit_issue_events(
                 plan_path, repo_path,
-                completed_leaf.issue_number,
-                next_leaf.issue_number if next_leaf else None,
+                completed_leaf.ref,
+                next_leaf.ref if next_leaf else None,
             )
         except Exception as e:
             print(f"WARN=worklog_error detail={e}")
 
     return AdvanceResult(
-        completed=completed_leaf.issue_number,
-        next_issue=next_leaf.issue_number if next_leaf else None,
+        completed=completed_leaf.ref,
+        next_issue=next_leaf.ref if next_leaf else None,
         next_title=next_leaf.title if next_leaf else None,
         batch_complete=batch_complete,
         epic_complete=epic_complete,
@@ -582,32 +598,32 @@ def advance_issue(plan_path: Path | None,
 
 
 def complete_active_issue(plan_path: Path,
-                          repo_path: str) -> int | None:
+                          repo_path: str) -> IssueRef | None:
     tree = parse_plan(plan_path)
     active = _find_active_leaf(tree.queue)
     if not active:
         return None
-    _emit_issue_events(plan_path, repo_path, active.issue_number, next_issue=None)
-    return active.issue_number
+    _emit_issue_events(plan_path, repo_path, active.ref, next_issue=None)
+    return active.ref
 
 
-def _mark_completed(items: list[QueueItem], issue_number: int) -> bool:
+def _mark_completed(items: list[QueueItem], ref: IssueRef) -> bool:
     for item in items:
-        if item.issue_number == issue_number and not item.is_epic:
+        if item.ref == ref and not item.is_epic:
             item.completed = True
             item.active = False
             item.tasks = []
             return True
         if item.is_epic and item.children:
-            if _mark_completed(item.children, issue_number):
+            if _mark_completed(item.children, ref):
                 return True
     return False
 
 
-def mark_completed(plan_path: Path, issue_number: int) -> bool:
+def mark_completed(plan_path: Path, ref: IssueRef) -> bool:
     """Mark an issue as completed [x] in the plan. Public API for work_health.py."""
     tree = parse_plan(plan_path)
-    changed = _mark_completed(tree.queue, issue_number)
+    changed = _mark_completed(tree.queue, ref)
     if changed:
         rewrite_plan(plan_path, tree)
     return changed
@@ -667,24 +683,24 @@ def create_main_plan(workspace_path: Path, items: list[dict],
     plan_path = workspace_path / ".plan"
     queue_items = []
     for i, item in enumerate(items):
+        repo = item.get("repo", issue_repo)
         queue_items.append(QueueItem(
-            issue_number=item["number"],
+            ref=IssueRef(repo, item["number"]),
             title=item["title"],
             active=(i == 0),
-            repo=item.get("repo", issue_repo),
         ))
     content = build_plan_content(project_name, queue_items, str(date.today()))
     plan_path.write_text(content)
     return plan_path
 
 
-def _mark_active(items: list[QueueItem], issue_number: int) -> bool:
+def _mark_active(items: list[QueueItem], ref: IssueRef) -> bool:
     for item in items:
-        if item.issue_number == issue_number and not item.is_epic:
+        if item.ref == ref and not item.is_epic:
             item.active = True
             return True
         if item.is_epic and item.children:
-            if _mark_active(item.children, issue_number):
+            if _mark_active(item.children, ref):
                 return True
     return False
 
@@ -697,83 +713,83 @@ def _mark_parent_epics_if_done(items: list[QueueItem]) -> None:
                 item.completed = True
 
 
-def get_completed_epic_parents(plan_path: Path) -> list[int]:
-    """Return issue numbers of epic parents where all children are completed."""
+def get_completed_epic_parents(plan_path: Path) -> list[IssueRef]:
+    """Return refs of epic parents where all children are completed."""
     tree = parse_plan(plan_path)
-    result: list[int] = []
+    result: list[IssueRef] = []
     _collect_completed_epics(tree.queue, result)
     return result
 
 
-def _collect_completed_epics(items: list, result: list[int]) -> None:
+def _collect_completed_epics(items: list, result: list[IssueRef]) -> None:
     for item in items:
         if item.is_epic and item.children:
             _collect_completed_epics(item.children, result)
             if item.completed or all(c.completed for c in item.children):
-                result.append(item.issue_number)
+                result.append(item.ref)
 
 
-def reorder_queue(plan_path: Path, order: list[int]) -> list[int]:
-    """Reorder top-level queue items by issue number. Returns the new order.
+def reorder_queue(plan_path: Path, order: list[IssueRef]) -> list[IssueRef]:
+    """Reorder top-level queue items by IssueRef. Returns the new order.
 
-    `order` is a list of issue numbers in the desired sequence.
+    `order` is a list of IssueRefs in the desired sequence.
     Items not in `order` keep their relative position at the end.
     The active marker stays on the first uncompleted item.
     """
     tree = parse_plan(plan_path)
-    by_issue = {item.issue_number: item for item in tree.queue}
+    by_ref = {item.ref: item for item in tree.queue}
     reordered: list[QueueItem] = []
-    seen: set[int] = set()
-    for num in order:
-        if num in by_issue and num not in seen:
-            reordered.append(by_issue[num])
-            seen.add(num)
+    seen: set[IssueRef] = set()
+    for ref in order:
+        if ref in by_ref and ref not in seen:
+            reordered.append(by_ref[ref])
+            seen.add(ref)
     for item in tree.queue:
-        if item.issue_number not in seen:
+        if item.ref not in seen:
             reordered.append(item)
     for item in reordered:
         item.active = False
     _set_first_uncompleted_active(reordered)
     tree.queue = reordered
     active = _find_active_leaf(tree.queue)
-    tree.current_issue = active.issue_number if active else None
+    tree.current_issue = active.ref if active else None
     rewrite_plan(plan_path, tree)
-    return [item.issue_number for item in reordered]
+    return [item.ref for item in reordered]
 
 
-def remove_from_queue(plan_path: Path, issue_numbers: list[int]) -> list[int]:
-    """Remove items from the queue by issue number. Returns removed numbers.
+def remove_from_queue(plan_path: Path, refs: list[IssueRef]) -> list[IssueRef]:
+    """Remove items from the queue by IssueRef. Returns removed refs.
 
     Refuses to remove the currently active item — advance or complete it first.
     Recalculates active marker after removal.
     """
     tree = parse_plan(plan_path)
-    to_remove = set(issue_numbers)
+    to_remove = set(refs)
     active = _find_active_leaf(tree.queue)
-    if active and active.issue_number in to_remove:
+    if active and active.ref in to_remove:
         raise ValueError(
-            f"Cannot remove active item #{active.issue_number} — "
+            f"Cannot remove active item {active.ref} — "
             f"advance or complete it first"
         )
-    removed: list[int] = []
+    removed: list[IssueRef] = []
 
     def _filter(items: list[QueueItem]) -> list[QueueItem]:
         kept: list[QueueItem] = []
         for item in items:
-            if item.issue_number in to_remove and not item.children:
-                removed.append(item.issue_number)
+            if item.ref in to_remove and not item.children:
+                removed.append(item.ref)
                 continue
             if item.children:
                 item.children = _filter(item.children)
-                if not item.children and item.issue_number in to_remove:
-                    removed.append(item.issue_number)
+                if not item.children and item.ref in to_remove:
+                    removed.append(item.ref)
                     continue
             kept.append(item)
         return kept
 
     tree.queue = _filter(tree.queue)
     new_active = _find_active_leaf(tree.queue)
-    tree.current_issue = new_active.issue_number if new_active else None
+    tree.current_issue = new_active.ref if new_active else None
     rewrite_plan(plan_path, tree)
     return removed
 
@@ -781,13 +797,13 @@ def remove_from_queue(plan_path: Path, issue_numbers: list[int]) -> list[int]:
 def append_to_queue(plan_path: Path, new_items: list[QueueItem],
                     position: int | None = None) -> list[QueueItem]:
     tree = parse_plan(plan_path)
-    existing_nums = _collect_issue_numbers(tree.queue)
-    deduped = [item for item in new_items if item.issue_number not in existing_nums]
+    existing_refs = _collect_refs(tree.queue)
+    deduped = [item for item in new_items if item.ref not in existing_refs]
     skipped = len(new_items) - len(deduped)
     if skipped > 0:
         for item in new_items:
-            if item.issue_number in existing_nums:
-                print(f"SKIPPED_DUP={item.issue_number}")
+            if item.ref in existing_refs:
+                print(f"SKIPPED_DUP={item.ref}")
     if not deduped:
         return []
     if position is not None:
@@ -797,18 +813,18 @@ def append_to_queue(plan_path: Path, new_items: list[QueueItem],
         tree.queue.extend(deduped)
     active = _find_active_leaf(tree.queue)
     if active:
-        tree.current_issue = active.issue_number
+        tree.current_issue = active.ref
     rewrite_plan(plan_path, tree)
     return deduped
 
 
-def _collect_issue_numbers(items: list[QueueItem]) -> set[int]:
-    nums: set[int] = set()
+def _collect_refs(items: list[QueueItem]) -> set[IssueRef]:
+    refs: set[IssueRef] = set()
     for item in items:
-        nums.add(item.issue_number)
+        refs.add(item.ref)
         if item.children:
-            nums.update(_collect_issue_numbers(item.children))
-    return nums
+            refs.update(_collect_refs(item.children))
+    return refs
 
 
 def append_deferred(plan_path: Path, title: str, scale: str,
@@ -842,14 +858,15 @@ def promote_deferred(plan_path: Path,
 
     next_issue_num = 9000
     for existing in tree.queue:
-        if existing.issue_number >= next_issue_num:
-            next_issue_num = existing.issue_number + 1
+        if existing.ref.number >= next_issue_num:
+            next_issue_num = existing.ref.number + 1
     issue_repo = tree.state.get("issue-repo", "") if tree.state else ""
+    if not issue_repo:
+        raise ValueError("Cannot promote deferred items — no issue-repo in plan state")
     for d in to_promote:
         tree.queue.append(QueueItem(
-            issue_number=next_issue_num,
+            ref=IssueRef(issue_repo, next_issue_num),
             title=d.title,
-            repo=issue_repo,
         ))
         next_issue_num += 1
 
@@ -880,14 +897,15 @@ def promote_selected(plan_path: Path,
 
     next_issue_num = 9000
     for existing in tree.queue:
-        if existing.issue_number >= next_issue_num:
-            next_issue_num = existing.issue_number + 1
+        if existing.ref.number >= next_issue_num:
+            next_issue_num = existing.ref.number + 1
     issue_repo = tree.state.get("issue-repo", "") if tree.state else ""
+    if not issue_repo:
+        raise ValueError("Cannot promote deferred items — no issue-repo in plan state")
     for d in to_promote:
         tree.queue.append(QueueItem(
-            issue_number=next_issue_num,
+            ref=IssueRef(issue_repo, next_issue_num),
             title=d.title,
-            repo=issue_repo,
         ))
         next_issue_num += 1
 
@@ -933,7 +951,8 @@ def detect(workspace_path: Path) -> dict | None:
     return {
         "has_plan": True,
         "plan_path": str(plan_path),
-        "active_issue": active.issue_number if active else None,
+        "active_issue": str(active.ref) if active else None,
+        "active_issue_repo": active.ref.repo if active else None,
         "active_title": active.title if active else None,
         "completed_count": completed_count,
         "total_count": total_count,
@@ -947,27 +966,27 @@ def detect(workspace_path: Path) -> dict | None:
 _SCOPE_CHILD_RE = re.compile(r'^- \[([ x])\]\s+#(\d+)\s*(?:—\s*(.+))?')
 
 
-def _gh_issue_body(issue_number: int, issue_repo: str) -> str:
+def _gh_issue_body(ref: IssueRef) -> str:
     result = subprocess.run(
-        ["gh", "issue", "view", str(issue_number), "--repo", issue_repo,
+        ["gh", "issue", "view", str(ref.number), "--repo", ref.repo,
          "--json", "body", "--jq", ".body"],
         capture_output=True, text=True,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def _gh_issue_title(issue_number: int, issue_repo: str) -> str:
+def _gh_issue_title(ref: IssueRef) -> str:
     result = subprocess.run(
-        ["gh", "issue", "view", str(issue_number), "--repo", issue_repo,
+        ["gh", "issue", "view", str(ref.number), "--repo", ref.repo,
          "--json", "title", "--jq", ".title"],
         capture_output=True, text=True,
     )
-    return result.stdout.strip() if result.returncode == 0 else f"Issue #{issue_number}"
+    return result.stdout.strip() if result.returncode == 0 else f"Issue #{ref.number}"
 
 
-def detect_epic(issue_number: int, issue_repo: str) -> QueueItem:
-    body = _gh_issue_body(issue_number, issue_repo)
-    title = _gh_issue_title(issue_number, issue_repo)
+def detect_epic(ref: IssueRef) -> QueueItem:
+    body = _gh_issue_body(ref)
+    title = _gh_issue_title(ref)
 
     in_scope = False
     children: list[QueueItem] = []
@@ -989,33 +1008,32 @@ def detect_epic(issue_number: int, issue_repo: str) -> QueueItem:
                 child_title = (m.group(3) or "").strip()
                 if not checked:
                     if not child_title:
-                        child_title = _gh_issue_title(child_num, issue_repo)
-                    children.append(QueueItem(child_num, child_title, repo=issue_repo))
+                        child_title = _gh_issue_title(IssueRef(ref.repo, child_num))
+                    children.append(QueueItem(ref=IssueRef(ref.repo, child_num), title=child_title))
 
     if children:
-        return QueueItem(issue_number, title, is_epic=True, children=children, repo=issue_repo)
-    return QueueItem(issue_number, title, repo=issue_repo)
+        return QueueItem(ref=ref, title=title, is_epic=True, children=children)
+    return QueueItem(ref=ref, title=title)
 
 
-def build_queue(issue_numbers: list[int], issue_repo: str,
+def build_queue(refs: list[IssueRef],
                 visited: set[int] | None = None) -> list[QueueItem]:
     if visited is None:
         visited = set()
 
     queue: list[QueueItem] = []
-    for n in issue_numbers:
-        if n in visited:
+    for ref in refs:
+        if ref.number in visited:
             continue
-        visited.add(n)
+        visited.add(ref.number)
 
-        item = detect_epic(n, issue_repo)
+        item = detect_epic(ref)
         if item.is_epic and item.children:
-            child_numbers = [c.issue_number for c in item.children]
-            item.children = build_queue(child_numbers, issue_repo, visited)
+            child_refs = [c.ref for c in item.children]
+            item.children = build_queue(child_refs, visited)
 
         queue.append(item)
 
-    # Set first leaf as active
     if queue and not any(_find_active_leaf(queue) is not None for _ in [1]):
         _set_first_leaf_active(queue)
 
@@ -1032,12 +1050,12 @@ def _set_first_leaf_active(items: list[QueueItem]) -> bool:
     return False
 
 
-def _tick_github_checkboxes(issue_repo: str, epic_number: int,
+def _tick_github_checkboxes(epic_ref: IssueRef,
                             completed_issues: list[int]) -> bool:
     """Tick checkboxes on the GitHub epic issue body. Returns True on success."""
     try:
         r = subprocess.run(
-            ["gh", "api", f"repos/{issue_repo}/issues/{epic_number}",
+            ["gh", "api", f"repos/{epic_ref.repo}/issues/{epic_ref.number}",
              "--jq", ".body"],
             capture_output=True, text=True, timeout=30,
         )
@@ -1055,7 +1073,7 @@ def _tick_github_checkboxes(issue_repo: str, epic_number: int,
             return True
         r = subprocess.run(
             ["gh", "api", "-X", "PATCH",
-             f"repos/{issue_repo}/issues/{epic_number}",
+             f"repos/{epic_ref.repo}/issues/{epic_ref.number}",
              "-f", f"body={updated}"],
             capture_output=True, text=True, timeout=30,
         )
@@ -1071,6 +1089,26 @@ def _parse_cli_args(args: list[str]) -> dict[str, str]:
             k, _, v = arg.partition("=")
             result[k.strip()] = v.strip()
     return result
+
+
+def _resolve_ref(ref_str: str, tree: PlanTree) -> IssueRef:
+    """Resolve a ref string — full ref or bare number within loaded plan."""
+    try:
+        return IssueRef.parse(ref_str)
+    except ValueError:
+        pass
+    if ref_str.isdigit():
+        num = int(ref_str)
+        matches = [item for item in tree.queue if item.ref.number == num]
+        if len(matches) == 1:
+            return matches[0].ref
+        if len(matches) > 1:
+            repos = [str(m.ref) for m in matches]
+            raise ValueError(
+                f"Ambiguous issue number #{num} — matches: {', '.join(repos)}. "
+                f"Use full owner/repo#N format."
+            )
+    raise ValueError(f"Cannot resolve '{ref_str}' — use owner/repo#N format")
 
 
 def main() -> int:
@@ -1179,9 +1217,8 @@ def main() -> int:
                       file=_sys.stderr)
                 return 1
             items.append(QueueItem(
-                issue_number=int(m.group(2)),
+                ref=IssueRef(m.group(1), int(m.group(2))),
                 title=title.strip(),
-                repo=m.group(1),
             ))
         if not items:
             print("ERROR=no valid items parsed", file=_sys.stderr)
@@ -1198,10 +1235,10 @@ def main() -> int:
                 _db = _os.environ.get('WORKLOG_DB')
                 _conn = _wl.connect(_db) if _db else _wl.connect()
                 for item in items:
-                    active = _wl.check_active_work(_conn, item.issue_number, item.repo)
+                    active = _wl.check_active_work(_conn, item.ref.number, item.ref.repo)
                     if active:
                         for a in active:
-                            print(f"DUPLICATE_CONFLICT=#{item.issue_number} active on {a['branch']} ({a['location']}) at {a['repo_path']}")
+                            print(f"DUPLICATE_CONFLICT={item.ref} active on {a['branch']} ({a['location']}) at {a['repo_path']}")
                         print('DUPLICATE=yes')
                         print('HINT=pass skip-duplicate-check=yes to override')
                         _conn.close()
@@ -1211,7 +1248,7 @@ def main() -> int:
                 pass
         added = append_to_queue(plan_path, items, position=position)
         for item in added:
-            print(f"APPENDED={item.repo}#{item.issue_number} — {item.title}")
+            print(f"APPENDED={item.ref} — {item.title}")
         print(f"APPENDED_COUNT={len(added)}")
         if len(added) < len(items):
             print(f"SKIPPED_DUPLICATES={len(items) - len(added)}")
@@ -1234,26 +1271,32 @@ def main() -> int:
     elif command == "reorder":
         order_str = opts.get("order", "")
         if not order_str:
-            print("ERROR=order is required (format: 245,193,42)", file=_sys.stderr)
+            print("ERROR=order is required (format: owner/repo#245,owner/repo#193)", file=_sys.stderr)
             return 1
-        order = [int(x.strip()) for x in order_str.split(",") if x.strip()]
+        tree = parse_plan(plan_path)
+        try:
+            order = [_resolve_ref(x.strip(), tree) for x in order_str.split(",") if x.strip()]
+        except ValueError as e:
+            print(f"ERROR={e}", file=_sys.stderr)
+            return 1
         result_order = reorder_queue(plan_path, order)
-        print(f"ORDER={','.join(str(n) for n in result_order)}")
+        print(f"ORDER={','.join(str(r) for r in result_order)}")
         return 0
 
     elif command == "remove":
         issues_str = opts.get("issues", "")
         if not issues_str:
-            print("ERROR=issues is required (format: 961,42)", file=_sys.stderr)
+            print("ERROR=issues is required (format: owner/repo#961,owner/repo#42)", file=_sys.stderr)
             return 1
-        issue_nums = [int(x.strip()) for x in issues_str.split(",") if x.strip()]
+        tree = parse_plan(plan_path)
         try:
-            removed = remove_from_queue(plan_path, issue_nums)
+            refs = [_resolve_ref(x.strip(), tree) for x in issues_str.split(",") if x.strip()]
+            removed = remove_from_queue(plan_path, refs)
         except ValueError as e:
             print(f"ERROR={e}", file=_sys.stderr)
             return 1
-        for n in removed:
-            print(f"REMOVED={n}")
+        for r in removed:
+            print(f"REMOVED={r}")
         print(f"REMOVED_COUNT={len(removed)}")
         return 0
 
@@ -1261,7 +1304,7 @@ def main() -> int:
         repo = opts.get("repo", "")
         result = advance(plan_path, repo_path=repo if repo else None)
         print(f"COMPLETED={result.completed}")
-        if result.next_issue:
+        if result.next_issue is not None:
             print(f"NEXT_ISSUE={result.next_issue}")
             if result.next_title:
                 print(f"NEXT_TITLE={result.next_title}")

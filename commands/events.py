@@ -1,7 +1,12 @@
 """Typed event dataclasses — the contract between command and UI layers."""
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "work-slot"))
+from plan_manager import IssueRef
 
 
 # ---------------------------------------------------------------------------
@@ -29,14 +34,14 @@ class HealthCheck:
 
 @dataclass
 class BriefReady:
-    issue: int | None
+    issue: IssueRef | None
     branch: str
     state: str
     queue_position: str | None
     health: list[HealthCheck]
     is_epic: bool
     epic_batch: str | None
-    epic_active_issue: int | None
+    epic_active_issue: IssueRef | None
 
 
 @dataclass
@@ -54,7 +59,7 @@ class StatusReady:
 
 @dataclass
 class ContinueReady:
-    issue: int | None
+    issue: IssueRef | None
     branch: str
     state: str
     handoff_summary: str | None
@@ -65,7 +70,7 @@ class ContinueReady:
 
 @dataclass
 class Recommendation:
-    issue: int
+    issue: IssueRef
     title: str
     strategic_role: str | None
     readiness: str | None
@@ -84,14 +89,14 @@ class WhatNextReady:
 @dataclass
 class BranchCreated:
     branch: str
-    issues: list[int]
+    issues: list[IssueRef]
     plan_path: str | None
 
 
 @dataclass
 class PlanAdvanced:
-    completed_issue: int
-    next_issue: int | None
+    completed_issue: IssueRef
+    next_issue: IssueRef | None
     next_title: str | None
     position: str
     queue_complete: bool
@@ -100,7 +105,7 @@ class PlanAdvanced:
 @dataclass
 class WorkEnded:
     branch: str
-    issues_closed: list[int]
+    issues_closed: list[IssueRef]
 
 
 @dataclass
@@ -153,7 +158,7 @@ class StepProgress:
 
 @dataclass
 class IssueContext:
-    issue: int
+    issue: IssueRef
     title: str
     branch: str
     plan_position: str | None
@@ -164,7 +169,7 @@ class IssueContext:
 @dataclass
 class SessionStarted:
     provider: str
-    issue: int | None
+    issue: IssueRef | None
 
 
 @dataclass
@@ -182,7 +187,7 @@ class RepoSlotInfo:
     slot: str | None
     branch: str
     state: str
-    issue: int | None
+    issue: IssueRef | None
     plan_position: str | None
     tmux_session: str | None
     project_path: str

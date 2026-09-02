@@ -12,13 +12,18 @@ Chain: continue <-> next <-> end <-> find
 from __future__ import annotations
 
 import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "work-slot"))
+from plan_manager import IssueRef
 
 
-def _check_issue_state(issue_number: str, issue_repo: str) -> str:
-    if not issue_number or not issue_repo:
+def _check_issue_state(ref: IssueRef) -> str:
+    if not ref:
         return "UNKNOWN"
     result = subprocess.run(
-        ["gh", "issue", "view", issue_number, "--repo", issue_repo,
+        ["gh", "issue", "view", str(ref.number), "--repo", ref.repo,
          "--json", "state", "--jq", ".state"],
         capture_output=True, text=True, timeout=10,
     )

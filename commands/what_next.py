@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "work-slot"))
+from plan_manager import IssueRef
 from commands.events import WhatNextReady, Recommendation
 from commands.registry import resolve_context
 
@@ -24,7 +26,7 @@ def execute(cwd: str | None = None, **_kwargs) -> WhatNextReady:
         items = what_next_typed(repo)
         return WhatNextReady(recommendations=[
             Recommendation(
-                issue=item.issue_number,
+                issue=IssueRef(repo, item.issue_number),
                 title=item.title,
                 strategic_role=item.strategic_role,
                 readiness=item.readiness,
