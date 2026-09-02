@@ -152,6 +152,20 @@ class TestS7StalePlanOnMain:
         _write_plan(plan, branch="main", state="active")
         assert check_stale_plan_on_main(plan, meta_state="active", base_branch="main", on_main=True) is None
 
+    def test_closing_stamped_on_main_is_benign(self, tmp_path):
+        from corruption import check_stale_plan_on_main
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-99-bar", state="closing:stamped")
+        assert check_stale_plan_on_main(plan, meta_state="closing:stamped", base_branch="main", on_main=True) is None
+
+    def test_closing_review_on_main_still_fires(self, tmp_path):
+        from corruption import check_stale_plan_on_main
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-99-bar", state="closing:review")
+        finding = check_stale_plan_on_main(plan, meta_state="closing:review", base_branch="main", on_main=True)
+        assert finding is not None
+        assert finding.scenario == "S7_STALE_PLAN_ON_MAIN"
+
     def test_not_on_main_returns_none(self, tmp_path):
         from corruption import check_stale_plan_on_main
         plan = tmp_path / ".plan"

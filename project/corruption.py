@@ -134,7 +134,7 @@ def check_stale_plan_on_main(
     plan_branch = _read_plan_field(plan_path, "branch")
     if not plan_branch or plan_branch == base_branch:
         return None
-    if meta_state == "drained":
+    if meta_state in ("drained", "closing:stamped"):
         return None
     return Finding(
         scenario="S7_STALE_PLAN_ON_MAIN",
