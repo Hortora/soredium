@@ -697,6 +697,11 @@ def land_batch(
         if not desc.is_workspace or desc.transport != Transport.DIRECT:
             continue
         _git(desc.repo_path, "checkout", branch)
+        _git(desc.repo_path, "add", "-A")
+        status = _git(desc.repo_path, "status", "--porcelain")
+        if status.returncode == 0 and status.stdout.strip():
+            _git(desc.repo_path, "commit", "-m",
+                 "chore: commit pending workspace state before close")
         to_strip = [f for f in LIFECYCLE_FILES if (desc.repo_path / f).exists()]
         if to_strip:
             _git(desc.repo_path, "rm", "--ignore-unmatch", "--", *to_strip)
