@@ -35,11 +35,13 @@ This skill controls where individual entries are cross-posted to blog platforms.
 python3 ~/.claude/skills/project/ctx.py
 ```
 
-Read `BLOG_DIR` and `HAS_BLOG_ROUTING` from the output.
+Read `BLOG_DIR`, `HAS_BLOG_ROUTING`, `IN_SLOT`, and `WORKSPACE` from the output.
 
-If `BLOG_DIR` is non-empty, use it directly. Otherwise fall back to `blog/` relative to CWD.
+ctx.py already validates `BLOG_DIR` against the slot boundary — if the configured
+path escapes the slot, `BLOG_DIR` is returned empty.
 
-Resolve `BLOG_DIR` to an **absolute path** before proceeding.
+If `BLOG_DIR` is non-empty, use it directly. Otherwise fall back to `blog/`
+relative to `WORKSPACE` (or CWD if `WORKSPACE` is not set).
 
 ### Step 1 — Load routing config
 

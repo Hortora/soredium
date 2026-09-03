@@ -25,6 +25,7 @@ Exit codes:
     1  missing required args or I/O error
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -125,11 +126,13 @@ def ensure_workspace(project: Path) -> Path:
 
     proj_link = workspace / "proj"
     if not proj_link.exists():
-        proj_link.symlink_to(project.resolve())
+        rel_to_project = os.path.relpath(project.resolve(), workspace.resolve())
+        proj_link.symlink_to(rel_to_project)
     wksp_link = project / "wksp"
     if wksp_link.is_symlink():
         wksp_link.unlink()
-    wksp_link.symlink_to(workspace)
+    rel_to_workspace = os.path.relpath(workspace.resolve(), project.resolve())
+    wksp_link.symlink_to(rel_to_workspace)
 
     return workspace
 

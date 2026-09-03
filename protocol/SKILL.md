@@ -111,19 +111,19 @@ No implementation detail — refs: covers that.
 
 ## Locating the Protocols Directory
 
-Before any operation, resolve the protocols path:
+Before any operation, resolve paths via ctx.py:
 
 ```bash
-# Find project root
-PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
-
-# Protocols directory
-PROTOCOLS_DIR="$PROJECT_ROOT/docs/protocols"
+python3 ~/.claude/skills/project/ctx.py
 ```
 
-If `docs/protocols/` does not exist at the project root, check whether the current
-project uses a parent-repo layout (`parent/docs/protocols/`). If still not found,
-ask the user to confirm the path before proceeding.
+Read `PROJECT` and `HAS_PROTOCOLS_DIR` from the output.
+
+Set `PROTOCOLS_DIR="$PROJECT/docs/protocols"`.
+
+If `HAS_PROTOCOLS_DIR=no`, check whether the current project uses a parent-repo
+layout (`parent/docs/protocols/`). If still not found, ask the user to confirm
+the path before proceeding.
 
 ---
 
@@ -181,9 +181,8 @@ Create the subdirectory if needed.
 **Step 6 — Commit**
 
 ```bash
-PROTOCOLS_GIT_ROOT=$(git -C "$PROTOCOLS_DIR" rev-parse --show-toplevel)
-git -C "$PROTOCOLS_GIT_ROOT" add <relative-path-to-entry>
-git -C "$PROTOCOLS_GIT_ROOT" commit -m "protocol(PP-YYYYMMDD-xxxxxx): <slug>"
+git -C "$PROJECT" add <relative-path-to-entry>
+git -C "$PROJECT" commit -m "protocol(PP-YYYYMMDD-xxxxxx): <slug>"
 ```
 
 **Step 7 — Update the indexes**
@@ -283,10 +282,7 @@ whether a constraint is already formalised.
 **Step 1 — Resolve path and search**
 
 ```bash
-PROJECT_ROOT=$(git rev-parse --show-toplevel)
-PROTOCOLS_DIR="$PROJECT_ROOT/docs/protocols"
-
-# Search title, applies_to, violation_hint in all protocol files
+# $PROJECT and $PROTOCOLS_DIR resolved in "Locating the Protocols Directory"
 grep -rli "<keyword>" "$PROTOCOLS_DIR" --include="*.md" | grep -v INDEX | grep -v PENDING
 ```
 
@@ -316,8 +312,8 @@ or as a periodic sanity check.
 **Step 1 — Count entries**
 
 ```bash
-PROJECT_ROOT=$(git rev-parse --show-toplevel)
-ls "$PROJECT_ROOT/docs/protocols/"*.md | grep -v INDEX | grep -v PENDING | wc -l
+# $PROJECT and $PROTOCOLS_DIR resolved in "Locating the Protocols Directory"
+ls "$PROTOCOLS_DIR/"*.md | grep -v INDEX | grep -v PENDING | wc -l
 ```
 
 **Step 2 — Check required fields**

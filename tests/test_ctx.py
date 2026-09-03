@@ -1055,6 +1055,37 @@ class TestClaudeMdFields:
         data = parse(run_ctx(repo))
         assert data["BLOG_DIR"] == ""
 
+    def test_blog_dir_cleared_when_escapes_slot(self, tmp_path):
+        """BLOG_DIR emptied when absolute path escapes slot boundary."""
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot\n\n## Repos\n- engine (primary)\n")
+        claude_md = '**Blog directory:** `/Users/shared/workspace/blog/`\n'
+        project = init_repo(slot_dir / "engine", claude_md)
+        data = parse(run_ctx(project))
+        assert data["BLOG_DIR"] == "", "absolute path escaping slot should be cleared"
+
+    def test_blog_dir_kept_when_relative_in_slot(self, tmp_path):
+        """BLOG_DIR kept when relative (not absolute) in slot context."""
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot\n\n## Repos\n- engine (primary)\n")
+        claude_md = '**Blog directory:** `blog/`\n'
+        project = init_repo(slot_dir / "engine", claude_md)
+        data = parse(run_ctx(project))
+        assert data["BLOG_DIR"] == "blog/"
+
+    def test_blog_dir_kept_when_inside_slot(self, tmp_path):
+        """BLOG_DIR kept when absolute but inside the slot boundary."""
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("# Slot\n\n## Repos\n- engine (primary)\n")
+        blog_path = str(slot_dir / "engine" / "blog")
+        claude_md = f'**Blog directory:** `{blog_path}/`\n'
+        project = init_repo(slot_dir / "engine", claude_md)
+        data = parse(run_ctx(project))
+        assert data["BLOG_DIR"] == f"{blog_path}/"
+
     def test_project_name_extracted(self, tmp_path):
         """PROJECT_NAME extracted from '**Name:** soredium'."""
         claude_md = """

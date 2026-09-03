@@ -236,6 +236,13 @@ def resolve(cwd=None) -> dict[str, str]:
 
     m = re.search(r"\*\*Blog directory:\*\*\s*`([^`]+)`", claude_text)
     blog_dir = m.group(1) if m else ""
+    if blog_dir and topo.slot_dir:
+        expanded = Path(blog_dir).expanduser()
+        if expanded.is_absolute():
+            try:
+                expanded.relative_to(topo.slot_dir)
+            except ValueError:
+                blog_dir = ""
 
     has_blog_routing = _check_file(
         Path.home() / ".claude" / "blog-routing.yaml",

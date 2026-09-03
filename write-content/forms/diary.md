@@ -79,11 +79,20 @@ Don't cap it; don't pad it. End when the point is made.
 
 **Resolve blog directory:**
 
+Run `ctx.py` first (if not already run this session) to get `WORKSPACE`, `IN_SLOT`, and `SLOT_PATH`:
 ```bash
-python3 ~/.claude/skills/write-content/resolve_artifact_dir.py blog <WORKSPACE> <CLAUDE_MD_PATH> [slot_root=<SLOT_ROOT>]
+python3 ~/.claude/skills/project/ctx.py
 ```
 
-Read `ARTIFACT_DIR` from output. Resolve to an absolute path.
+Then resolve the blog directory. When `IN_SLOT=yes`, pass `slot_root` to
+prevent escape to shared repos:
+```bash
+python3 ~/.claude/skills/write-content/resolve_artifact_dir.py blog <WORKSPACE> <CLAUDE_MD_PATH> slot_root=<SLOT_PATH>
+```
+Omit `slot_root=` when `IN_SLOT=no`.
+
+Read `ARTIFACT_DIR` from output. If `WARNING` is non-empty, the configured
+path escaped the slot boundary — the resolver fell back to `<WORKSPACE>/blog/`.
 
 **Load voice:** check `~/claude-workspace/writing-styles/` for personal
 style files. Load personal style or fall back to `voice/common-voice.md`.

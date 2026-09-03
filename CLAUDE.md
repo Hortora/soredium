@@ -470,6 +470,10 @@ python3 scripts/place_workspace_markers.py <family-root>         # bootstrap .wo
 python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root>  # migrate old-structure slot to per-repo workspaces
 python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root> --dry-run  # preview migration
 
+# Fix absolute wksp/proj/CLAUDE.md symlinks (one-time migration)
+python3 scripts/fix_absolute_symlinks.py              # dry-run: shows what needs changing
+python3 scripts/fix_absolute_symlinks.py --apply       # apply fixes
+
 # Ecosystem mining pipeline
 python3 scripts/run_pipeline.py          # orchestrate: registry -> extract -> cluster -> delta -> report
 python3 scripts/validate_candidates.py   # human validation gate (accept/reject/skip candidates)

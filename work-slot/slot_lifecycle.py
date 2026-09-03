@@ -51,6 +51,7 @@ from slot_git import (
 from slot_workspace import (
     validate_slot_wksp, resolve_workspace_source, discover_workspace,
     _unignore_subdir, repoint_wksp, create_proj_symlink, replicate_claude_md,
+    validate_claude_md_paths,
 )
 from slot_query import find_slot_by_branch
 
@@ -215,6 +216,12 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 create_proj_symlink(ws_slot_dir, clone_dest)
                 replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
 
+                path_warnings = validate_claude_md_paths(
+                    ws_slot_dir / "CLAUDE.md", slot_dir,
+                )
+                for w in path_warnings:
+                    print(f"WARN=absolute_path_in_claude_md repo={repo_name} {w}")
+
         primary_repo = repos[0]
         primary_wksp = slot_dir / primary_repo / "wksp"
         if not primary_wksp.is_symlink():
@@ -280,6 +287,12 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         if wksp_failures:
             raise SlotCreationError(
                 "wksp_validation_failed: " + "; ".join(wksp_failures))
+
+        for ws_clone in sorted(slot_dir.iterdir()):
+            ws_claude = ws_clone / "CLAUDE.md"
+            if ws_clone.is_dir() and ws_claude.exists():
+                for w in validate_claude_md_paths(ws_claude, slot_dir):
+                    print(f"WARN=absolute_path_in_claude_md {w}")
     except Exception:
         if slot_dir.exists():
             shutil.rmtree(str(slot_dir), ignore_errors=True)
@@ -394,6 +407,12 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             repoint_wksp(clone_dest, ws_subdir)
             create_proj_symlink(ws_subdir, clone_dest)
             replicate_claude_md(repo_path, ws_subdir, clone_dest)
+
+            path_warnings = validate_claude_md_paths(
+                ws_subdir / "CLAUDE.md", slot_dir,
+            )
+            for w in path_warnings:
+                print(f"WARN=absolute_path_in_claude_md repo={repo_name} {w}")
 
     configure_slot_remotes(clone_dest, repo_path)
     configure_update_instead(repo_path)

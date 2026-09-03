@@ -58,6 +58,17 @@ class TestHappyPath:
         assert gitignore.exists()
         assert "wksp" in gitignore.read_text().splitlines()
 
+    def test_symlinks_are_relative(self, tmp_path):
+        ws = tmp_path / "workspace"
+        proj = tmp_path / "project"
+        ws.mkdir(); proj.mkdir()
+        run(ws, proj)
+        import os
+        proj_target = os.readlink(ws / "proj")
+        wksp_target = os.readlink(proj / "wksp")
+        assert not proj_target.startswith("/"), f"proj/ symlink is absolute: {proj_target}"
+        assert not wksp_target.startswith("/"), f"wksp/ symlink is absolute: {wksp_target}"
+
     def test_output_contains_all_keys(self, tmp_path):
         ws = tmp_path / "workspace"
         proj = tmp_path / "project"

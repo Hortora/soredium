@@ -127,6 +127,24 @@ def create_proj_symlink(ws_subdir: Path, repo_worktree: Path) -> None:
     proj.symlink_to(rel)
 
 
+def validate_claude_md_paths(claude_path: Path, slot_dir: Path) -> list[str]:
+    """Check a CLAUDE.md for absolute paths that escape the slot boundary.
+    Returns list of warnings (empty = clean)."""
+    warnings: list[str] = []
+    if not claude_path.exists():
+        return warnings
+    content = claude_path.resolve().read_text() if claude_path.is_symlink() else claude_path.read_text()
+    home = str(Path.home())
+    slot_str = str(slot_dir.resolve())
+    for i, line in enumerate(content.splitlines(), 1):
+        if home in line and slot_str not in line:
+            if "add-dir" in line.lower() or "project repo" in line.lower() or "git -C" in line:
+                warnings.append(
+                    f"{claude_path.name}:{i}: absolute path escapes slot — {line.strip()}"
+                )
+    return warnings
+
+
 def replicate_claude_md(repo_path: Path, ws_subdir: Path, repo_worktree: Path) -> None:
     orig_wksp = repo_path / "wksp"
     if not orig_wksp.is_symlink():

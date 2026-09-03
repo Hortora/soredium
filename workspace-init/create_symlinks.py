@@ -55,27 +55,29 @@ def main() -> int:
     proj_symlink = workspace / "proj"
     wksp_symlink = project / "wksp"
 
-    # Create workspace/proj → project
+    # Create workspace/proj → project (relative symlink)
     try:
         if proj_symlink.is_symlink():
             proj_symlink.unlink()
         elif proj_symlink.exists():
             print(f"ERROR=Cannot create proj/ symlink — path exists and is not a symlink: {proj_symlink}")
             return 1
-        proj_symlink.symlink_to(project)
+        rel_to_project = os.path.relpath(project, workspace)
+        proj_symlink.symlink_to(rel_to_project)
     except OSError as e:
         print(f"ERROR=Failed to create proj/ symlink: {e}")
         print(f"Failed to create proj/ symlink: {e}", file=sys.stderr)
         return 1
 
-    # Create project/wksp → workspace
+    # Create project/wksp → workspace (relative symlink)
     try:
         if wksp_symlink.is_symlink():
             wksp_symlink.unlink()
         elif wksp_symlink.exists():
             print(f"ERROR=Cannot create wksp/ symlink — path exists and is not a symlink: {wksp_symlink}")
             return 1
-        wksp_symlink.symlink_to(workspace)
+        rel_to_workspace = os.path.relpath(workspace, project)
+        wksp_symlink.symlink_to(rel_to_workspace)
     except OSError as e:
         print(f"ERROR=Failed to create wksp/ symlink: {e}")
         print(f"Failed to create wksp/ symlink: {e}", file=sys.stderr)

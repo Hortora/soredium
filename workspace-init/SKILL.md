@@ -15,8 +15,8 @@ Creates a companion workspace at `~/claude/private/<project>/` or
 related projects, the workspace can be nested under a shared parent folder
 (e.g. `~/claude/private/casehub/claudony/`). Run once per project, per machine.
 
-After running, open Claude in the workspace — CLAUDE.md instructs Claude to
-`add-dir` the project automatically at session start.
+After running, open Claude in the workspace — the `proj/` symlink provides
+access to the project repo. All paths in CLAUDE.md are relative.
 
 ---
 
@@ -125,9 +125,9 @@ decision. The user can set one default for all, or override per repo:
 > | ledger   | untracked | C — symlink only |
 > | qhorus   | missing   | init — create with /init first |
 >
-> A = migrate content to workspace CLAUDE.md, git rm from project, symlink back
-> B = keep in project, workspace CLAUDE.md @includes it
-> C = untracked — create workspace CLAUDE.md, symlink project→workspace
+> A = migrate content to workspace CLAUDE.md, git rm from project, symlink project→wksp/CLAUDE.md
+> B = keep in project, workspace CLAUDE.md symlinks to proj/CLAUDE.md
+> C = untracked — create workspace CLAUDE.md, symlink project→wksp/CLAUDE.md
 > init = missing — run /init to create, then treat as A or B
 >
 > Accept defaults, or specify overrides (e.g. 'engine=B, work=B, rest=A'):"
@@ -278,7 +278,7 @@ CLAUDE.md HANDLING  (decisions collected in Q7 — shown here for confirmation)
 ├──────────┼───────────────┼──────────────────────────────────────────────┤
 │ engine   │ committed     │ A — migrate to workspace + symlink back       │
 │ work     │ committed     │ A — migrate to workspace + symlink back       │
-│ ledger   │ untracked     │ C — symlink project→workspace                 │
+│ ledger   │ untracked     │ C — symlink project→wksp/CLAUDE.md            │
 │ qhorus   │ missing       │ init — run /init first, then A               │
 │ ...      │ ...           │ ...                                           │
 └──────────┴───────────────┴──────────────────────────────────────────────┘
@@ -352,18 +352,15 @@ Draft the family CLAUDE.md and show to user for acceptance before writing:
 
 ## Member Repos
 
-| Repo | Local path | Child workspace |
-|------|-----------|-----------------|
-| <project> | <project-path> | `<INFERRED_PARENT>/<project>/` |
+| Repo | Child workspace |
+|------|-----------------|
+| <project> | `<INFERRED_PARENT>/<project>/` |
 <one row per sibling found, marking those without a child workspace as "—">
 
-Note: repos without a child workspace can still be loaded with add-dir on demand.
+Note: repos without a child workspace can still be loaded via their child workspace's `proj/` symlink.
 
-## Session Start
-
-Open Claude here for cross-repo work. Load the repos relevant to your session:
-  add-dir <path-to-repo-1>
-  add-dir <path-to-repo-2>
+All paths are relative — no absolute paths. Each child workspace has a `proj/` symlink
+to its project repo. Use `<child>/proj/` to reach a repo from the family root.
 
 ## Shared Artifacts
 
@@ -503,15 +500,13 @@ incorporating the newly created content.
 Draft:
 
 ```
-# <project> Workspace
+# CLAUDE.md
 
 **Name:** <project>
-**Project repo:** <absolute-path-to-project>
 **Workspace type:** <private|public>
 
-## Session Start
-
-Run `add-dir <absolute-path-to-project>` and `add-dir <absolute-path-to-workspace>` before any other work.
+All paths are relative — no absolute paths. Convention: `proj/` in workspace
+reaches the project repo; `wksp/` in the project repo reaches the workspace.
 
 ## Artifact Locations
 
@@ -535,18 +530,30 @@ Run `add-dir <absolute-path-to-project>` and `add-dir <absolute-path-to-workspac
 - `adr/` — architecture decision records with INDEX.md
 - `blog/` — project diary entries with INDEX.md
 
+## Document Locations
+
+Key documents and where to find them. All paths are relative.
+Convention: `proj/` in workspace reaches the project repo; `wksp/` in the project repo reaches the workspace.
+
+| Document | Path from project root | Path from workspace root |
+|----------|----------------------|------------------------|
+| HANDOFF.md | `wksp/HANDOFF.md` | `HANDOFF.md` |
+| Blog entries | `wksp/blog/` | `blog/` |
+| Plans | `wksp/plans/` | `plans/` |
+| Specs | `docs/specs/` | `proj/docs/specs/` |
+| ADRs | `docs/adr/` | `proj/docs/adr/` |
+
 ## Git Discipline
 
 Two git repositories are active in every session:
-- **Workspace** (`<absolute-path-to-workspace>`) — plans, blog (staging), snapshots, handover
-- **Project repo** (`<absolute-path-to-project>`) — source code, ADRs (`docs/adr/`), specs
+- **Workspace** (current directory when opened here) — plans, blog (staging), snapshots, handover
+- **Project repo** (via `proj/` symlink) — source code, ADRs (`docs/adr/`), specs
 
-Never rely on CWD for git operations — the session may have started in either repo. Always use explicit paths:
+Use the `proj/` and `wksp/` symlinks for cross-repo operations:
 ```bash
-git -C <absolute-path-to-workspace> add <file>    # workspace artifacts
-git -C <absolute-path-to-project> add <file>      # project artifacts
+git add <file>                  # workspace artifacts (when CWD is workspace)
+git -C proj/ add <file>         # project artifacts (via symlink)
 ```
-The file path determines the repo: if the file lives under the workspace path, use the workspace; if under the project path, use the project.
 
 ## Rules
 
@@ -568,7 +575,7 @@ Per-artifact routing destinations (optional). If absent, all artifacts route to 
 | snapshots  | workspace   | stay in workspace permanently |
 | handover   | workspace   | |
 
-**Blog directory:** `<absolute-path-to-workspace>/blog/`
+**Blog directory:** `blog/`
 
 Valid destinations: `project` · `workspace` · `mdproctor.github.io` · `alternative ~/path/to/repo/`
 
@@ -664,12 +671,12 @@ asked and answered before proceeding**:
 >
 > **A — Migrate to workspace** *(recommended)*
 >    Content moves to workspace CLAUDE.md. Removed from project with `git rm`.
->    Symlink created: `project/CLAUDE.md → workspace/CLAUDE.md`
+>    Symlink created: `project/CLAUDE.md → wksp/CLAUDE.md` (relative via wksp symlink)
 >    Opening Claude anywhere loads the same config.
 >
 > **B — Keep in project repo**
->    CLAUDE.md stays committed in the project. Workspace CLAUDE.md gets
->    `@<project-path>/CLAUDE.md` so both locations load the full config.
+>    CLAUDE.md stays committed in the project. Workspace CLAUDE.md symlinks
+>    to `proj/CLAUDE.md` so both locations load the same config.
 >
 > Reply **A** or **B** — this cannot be skipped:"
 
@@ -683,30 +690,28 @@ cat "<project-path>/CLAUDE.md" >> "$BASE/CLAUDE.md"
 git -C "<project-path>" rm CLAUDE.md
 git -C "<project-path>" commit -m "chore: migrate CLAUDE.md to workspace"
 
-# Create symlink so opening Claude in the project still loads full config
-ln -sf "$BASE/CLAUDE.md" "<project-path>/CLAUDE.md"
+# Create relative symlink via wksp/ so opening Claude in the project loads full config
+ln -sf "wksp/CLAUDE.md" "<project-path>/CLAUDE.md"
 echo "CLAUDE.md" >> "<project-path>/.git/info/exclude"
 ```
 
 **If B (keep in project repo):**
 ```bash
-# Add @include of the project CLAUDE.md to the workspace CLAUDE.md
-echo "" >> "$BASE/CLAUDE.md"
-echo "@<project-path>/CLAUDE.md" >> "$BASE/CLAUDE.md"
+# Workspace CLAUDE.md symlinks to project — project is the source of truth
+ln -sf "proj/CLAUDE.md" "$BASE/CLAUDE.md"
 ```
 Tell the user:
-> "CLAUDE.md stays in the project repo. The workspace CLAUDE.md now includes
-> it via `@<project-path>/CLAUDE.md` — opening Claude in either location
-> loads the full config."
+> "CLAUDE.md stays in the project repo. The workspace CLAUDE.md symlinks
+> to `proj/CLAUDE.md` — opening Claude in either location loads the same config."
 
 ---
 
 **CASE 3 — CLAUDE.md exists but is not committed (untracked)**
 
-Create the symlink pointing to the workspace CLAUDE.md so config is shared,
-and exclude the symlink from git tracking:
+Create a relative symlink via wksp/ so config is shared, and exclude the
+symlink from git tracking:
 ```bash
-ln -sf "$BASE/CLAUDE.md" "<project-path>/CLAUDE.md"
+ln -sf "wksp/CLAUDE.md" "<project-path>/CLAUDE.md"
 echo "CLAUDE.md" >> "<project-path>/.git/info/exclude"
 ```
 
@@ -1062,14 +1067,14 @@ more recent file as `workspace/HANDOFF.md` and discard the older one.
 >
 > **To start working:**
 > 1. Open Claude in `~/claude/<privacy>/<project>/`
-> 2. CLAUDE.md will instruct Claude to run `add-dir` on the project automatically
+> 2. `proj/` symlink gives access to the project repo — all paths are relative
 >
 > **Navigation symlinks:**
 > - In workspace: `proj/` → project directory (`cd proj` to jump to the project)
 > - In project: `wksp/` → workspace directory (`cd wksp` to jump to the workspace)
 >
-> **CLAUDE.md:** workspace CLAUDE.md symlinks to the project's committed CLAUDE.md.
-> Opening Claude in either location loads the same config.
+> **CLAUDE.md:** shared via `proj/`/`wksp/` symlinks (direction depends on Q7 decision).
+> Opening Claude in either location loads the same config. All paths are relative.
 >
 > **Tip:** This skill is large and one-off. Run `/clear` now to free up context
 > before starting real work.
@@ -1131,7 +1136,7 @@ If n → skip. Do not ask again this session.
 - [ ] Family root CLAUDE.md created or updated (Step 1b) if nested path chosen: member repos table includes new repo, artifact dirs exist at family root
 - [ ] Family root `.gitignore` written with all sibling repo names — child workspaces excluded from family repo tracking
 - [ ] Directory exists at correct path with all subdirs
-- [ ] `CLAUDE.md` contains session-start `add-dir` instruction and artifact locations table
+- [ ] `CLAUDE.md` contains relative path convention and artifact locations table — no absolute paths
 - [ ] `HANDOFF.md` and `IDEAS.md` exist as stubs
 - [ ] `snapshots/INDEX.md`, `adr/INDEX.md`, `blog/INDEX.md` exist
 - [ ] `specs/` and `plans/` directories exist

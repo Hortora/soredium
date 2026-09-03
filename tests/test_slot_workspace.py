@@ -270,6 +270,93 @@ class TestUnignoreSubdir:
 
 
 
+class TestValidateClaudeMdPaths:
+    def test_detects_absolute_add_dir(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        claude_md = slot_dir / "CLAUDE.md"
+        claude_md.write_text(
+            "# Workspace\n"
+            f"Run `add-dir {Path.home()}/claude/casehub/engine` before work.\n"
+        )
+        warnings = slot_workspace.validate_claude_md_paths(claude_md, slot_dir)
+        assert len(warnings) == 1
+        assert "add-dir" in warnings[0]
+
+    def test_detects_absolute_project_repo(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        claude_md = slot_dir / "CLAUDE.md"
+        claude_md.write_text(
+            "# Workspace\n"
+            f"**Project repo:** {Path.home()}/claude/casehub/work\n"
+        )
+        warnings = slot_workspace.validate_claude_md_paths(claude_md, slot_dir)
+        assert len(warnings) == 1
+        assert "project repo" in warnings[0].lower()
+
+    def test_detects_absolute_git_c(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        claude_md = slot_dir / "CLAUDE.md"
+        claude_md.write_text(
+            "# Workspace\n"
+            f"git -C {Path.home()}/claude/casehub/work add file\n"
+        )
+        warnings = slot_workspace.validate_claude_md_paths(claude_md, slot_dir)
+        assert len(warnings) == 1
+        assert "git -C" in warnings[0]
+
+    def test_clean_file_no_warnings(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        claude_md = slot_dir / "CLAUDE.md"
+        claude_md.write_text(
+            "# Workspace\n"
+            "All paths are relative. Use `proj/` to reach the project.\n"
+            "git -C proj/ add file\n"
+        )
+        warnings = slot_workspace.validate_claude_md_paths(claude_md, slot_dir)
+        assert warnings == []
+
+    def test_ignores_paths_inside_slot(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        claude_md = slot_dir / "CLAUDE.md"
+        claude_md.write_text(
+            "# Workspace\n"
+            f"git -C {slot_dir}/engine add file\n"
+        )
+        warnings = slot_workspace.validate_claude_md_paths(claude_md, slot_dir)
+        assert warnings == []
+
+    def test_nonexistent_file_no_warnings(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        warnings = slot_workspace.validate_claude_md_paths(
+            slot_dir / "nonexistent.md", slot_dir,
+        )
+        assert warnings == []
+
+    def test_follows_symlink(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        proj_dir = slot_dir / "work"
+        proj_dir.mkdir()
+        proj_claude = proj_dir / "CLAUDE.md"
+        proj_claude.write_text(
+            "# Workspace\n"
+            f"**Project repo:** {Path.home()}/claude/casehub/work\n"
+        )
+        ws_dir = slot_dir / "wsp"
+        ws_dir.mkdir()
+        ws_claude = ws_dir / "CLAUDE.md"
+        ws_claude.symlink_to(proj_claude)
+
+        warnings = slot_workspace.validate_claude_md_paths(ws_claude, slot_dir)
+        assert len(warnings) == 1
+
+
 class TestValidateSlotWksp:
     def test_passes_when_symlinks_resolve(self, tmp_path):
         """All repo clones have working wksp/ symlinks."""
