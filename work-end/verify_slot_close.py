@@ -23,7 +23,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 from common import parse_args
+from plan_io import parse_covers
 
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -414,7 +418,7 @@ def main() -> int:
         return 1
 
     covers_str = opts.get("covers", "")
-    covers = [int(x) for x in covers_str.split(",") if x.strip()] if covers_str else None
+    covers = parse_covers(covers_str) if covers_str else None
     issue_repo = opts.get("issue_repo", "")
 
     slot_dir = opts.get("slot_dir", "")

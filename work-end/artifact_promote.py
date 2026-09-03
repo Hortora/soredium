@@ -30,7 +30,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 from common import parse_args
+from plan_io import parse_covers
 
 
 def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:
@@ -226,7 +230,7 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             capture_output=True,
         ).returncode != 0
         if has_staged:
-            issue_ref = f"  Refs #{covers.split(',')[0]}" if covers else ""
+            issue_ref = f"  Refs #{parse_covers(covers)[0]}" if covers else ""
             try:
                 git("commit", "-m", f"docs(work-end): project-promote artifacts from workspace{issue_ref}", cwd=project)
             except subprocess.CalledProcessError as e:
@@ -252,7 +256,7 @@ def close_issues(repo: str, params: dict[str, str]) -> int:
         print("ERROR_DETAIL=covers= argument required")
         return 1
 
-    issues = [n.strip() for n in covers_str.split(",") if n.strip()]
+    issues = [str(n) for n in parse_covers(covers_str)]
     if not issues:
         print("CLOSED=0")
         return 0

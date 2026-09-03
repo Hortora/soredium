@@ -4,7 +4,13 @@
 Atomic write-then-rename. Stale detection via lifecycle state comparison.
 """
 import os
+import sys
 from pathlib import Path
+
+_project_dir = Path(__file__).resolve().parent.parent / "project"
+if str(_project_dir) not in sys.path:
+    sys.path.insert(0, str(_project_dir))
+from plan_io import read_field as _read_plan_field
 
 PROGRESS_FILE = ".close-progress"
 PROGRESS_TMP = ".close-progress.tmp"
@@ -104,11 +110,7 @@ def delete_close_progress(workspace: Path) -> None:
 
 def _read_plan_state(plan_path: Path) -> str:
     """Read the lifecycle state from a .plan file."""
-    for line in plan_path.read_text().splitlines():
-        stripped = line.strip()
-        if stripped.startswith("state:"):
-            return stripped.split(":", 1)[1].strip()
-    return ""
+    return _read_plan_field(plan_path, "state") or ""
 
 
 def is_stale(progress: dict[str, str], meta_state: str,

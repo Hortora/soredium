@@ -27,10 +27,14 @@ from orchestrator_engine import run_loop, log_call, validate_skip, apply_step_do
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
     sys.path.insert(0, str(_lib))
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 try:
     import worklog as _wl
 except ImportError:
     _wl = None
+from plan_io import parse_covers
 from shared_steps import (
     StepDef,
     OrchestratorContextBase,
@@ -217,7 +221,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             _wl.record_session_boundary(
                 conn, mode="wrap", branch=branch,
                 issue_repo=issue_repo,
-                issue_number=int(covers.split(",")[0]) if covers else 0,
+                issue_number=parse_covers(covers)[0] if covers else 0,
                 steps=steps_data,
             )
             conn.close()

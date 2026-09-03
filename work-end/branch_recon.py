@@ -21,7 +21,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 from common import parse_args
+from plan_io import parse_covers
 
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -49,7 +53,7 @@ def gh_issue(issue_repo: str, number: str) -> dict:
 def gather_issues(issue_repo: str, covers: str) -> list[dict]:
     if not covers or not issue_repo:
         return []
-    numbers = [n.strip().lstrip("#") for n in covers.split(",") if n.strip()]
+    numbers = [str(n) for n in parse_covers(covers)]
     return [gh_issue(issue_repo, n) for n in numbers]
 
 

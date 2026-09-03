@@ -18,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import subprocess as _sp
+
+from plan_io import read_field, write_field
 import sys
 from pathlib import Path
 from typing import Optional
@@ -165,91 +167,24 @@ INVALID_MESSAGES: dict[tuple[str, str], str] = {
 
 
 def read_state(plan_path: Path) -> Optional[str]:
-    """Read lifecycle state from .plan's ## State section (or legacy .meta).
-    Returns None if file doesn't exist.
-    Raises CorruptedState if state: field has unrecognised value."""
+    """Read lifecycle state from .plan's ## State section."""
     if not plan_path.exists():
         return None
-    in_state_section = False
-    has_sections = False
-    for line in plan_path.read_text().splitlines():
-        if line.strip() == '## State':
-            in_state_section = True
-            has_sections = True
-            continue
-        if line.startswith('## '):
-            in_state_section = False
-            continue
-        if in_state_section and line.startswith('state:'):
-            raw = line.split(':', 1)[1].strip()
-            if raw in VALID_STATES:
-                return raw
-            raise CorruptedState(plan_path, raw)
-    if has_sections:
+    raw = read_field(plan_path, 'state')
+    if raw is None:
         return 'active'
-    for line in plan_path.read_text().splitlines():
-        if line.startswith('state:'):
-            raw = line.split(':', 1)[1].strip()
-            if raw in VALID_STATES:
-                return raw
-            raise CorruptedState(plan_path, raw)
-    return 'active'
+    if raw in VALID_STATES:
+        return raw
+    raise CorruptedState(plan_path, raw)
 
 
 def write_state(plan_path: Path, state: str) -> None:
     """Write lifecycle state to .plan's ## State section atomically."""
-    content = plan_path.read_text()
-    lines = content.splitlines()
-
-    in_state_section = False
-    has_sections = any(l.strip() == '## State' for l in lines)
-    state_line_idx = None
-
-    if has_sections:
-        for i, line in enumerate(lines):
-            if line.strip() == '## State':
-                in_state_section = True
-                continue
-            if line.startswith('## '):
-                in_state_section = False
-                continue
-            if in_state_section and line.startswith('state:'):
-                state_line_idx = i
-                break
-    else:
-        for i, line in enumerate(lines):
-            if line.startswith('state:'):
-                state_line_idx = i
-                break
-
-    if state_line_idx is not None:
-        lines[state_line_idx] = f'state: {state}'
-    else:
-        inserted = False
-        for i, line in enumerate(lines):
-            if line.startswith('branch:'):
-                lines.insert(i + 1, f'state: {state}')
-                inserted = True
-                break
-        if not inserted:
-            lines.append(f'state: {state}')
-
-    tmp_path = plan_path.parent / '.plan.tmp'
-    tmp_path.write_text('\n'.join(lines) + '\n')
-    tmp_path.replace(plan_path)
-
+    write_field(plan_path, 'state', state)
 
 def write_branch(plan_path: Path, branch: str) -> None:
     """Write branch field to .plan's ## State section atomically."""
-    content = plan_path.read_text()
-    lines = content.splitlines()
-    for i, line in enumerate(lines):
-        if line.startswith('branch:'):
-            lines[i] = f'branch: {branch}'
-            break
-    tmp = plan_path.parent / '.plan.tmp'
-    tmp.write_text(chr(10).join(lines) + chr(10))
-    tmp.replace(plan_path)
+    write_field(plan_path, 'branch', branch)
 
 
 _DEPRECATED_EVENTS = {
@@ -307,27 +242,8 @@ _LIFECYCLE_TO_WORKLOG: dict[str, str | None] = {
 
 
 def _read_branch(plan_path: Path) -> Optional[str]:
-    """Read branch name from .plan's ## State section (or legacy .meta)."""
-    if not plan_path.exists():
-        return None
-    in_state_section = False
-    has_sections = False
-    for line in plan_path.read_text().splitlines():
-        if line.strip() == '## State':
-            in_state_section = True
-            has_sections = True
-            continue
-        if line.startswith('## '):
-            in_state_section = False
-            continue
-        if in_state_section and line.startswith('branch:'):
-            return line.split(':', 1)[1].strip()
-    if has_sections:
-        return None
-    for line in plan_path.read_text().splitlines():
-        if line.startswith('branch:'):
-            return line.split(':', 1)[1].strip()
-    return None
+    """Read branch name from .plan's ## State section."""
+    return read_field(plan_path, 'branch')
 
 
 def _emit_to_worklog(

@@ -13,10 +13,14 @@ from pathlib import Path
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
     sys.path.insert(0, str(_lib))
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 try:
     import worklog as _wl
 except ImportError:
     _wl = None
+from plan_io import parse_covers
 
 from slot_core import (
     SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
@@ -232,7 +236,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                     f"covers={covers}",
                     "force=yes",
                 ]
-                cover_list = [c.strip() for c in covers.split(",") if c.strip()]
+                cover_list = [str(c) for c in parse_covers(covers)]
                 if len(cover_list) > 1:
                     plan_content = _build_epic_plan(
                         branch, issue_repo, cover_list,
@@ -561,7 +565,7 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         epic_num = int(slot_info.get("issue", "0"))
         epic_repo = slot_info.get("issue_repo", "")
         covers_str = slot_info.get("covers", "")
-        completed = [int(x) for x in covers_str.split(",") if x.strip()]
+        completed = parse_covers(covers_str)
         if epic_num and epic_repo and completed:
             try:
                 from plan_manager import _tick_github_checkboxes
@@ -638,7 +642,7 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     slot_info = parse_slot_md(slot_dir)
     if slot_info.get("is_epic"):
         covers_str = slot_info.get("covers", "")
-        completed = [int(x) for x in covers_str.split(",") if x.strip()]
+        completed = parse_covers(covers_str)
         if completed:
             fixed = _fix_stale_checkboxes(slot_dir / ".slot", completed)
             if fixed:

@@ -47,6 +47,10 @@ except ImportError:
 _slot_dir = str(Path(__file__).resolve().parent.parent / "work-slot")
 if _slot_dir not in sys.path:
     sys.path.insert(0, _slot_dir)
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from plan_io import parse_covers
 
 
 REQUIRED = {"branch", "project-sha"}
@@ -158,17 +162,15 @@ def main() -> int:
             import os as _os
             _db = _os.environ.get("WORKLOG_DB")
             _conn = _wl.connect(_db) if _db else _wl.connect()
-            for n in covers.split(","):
-                n = n.strip()
-                if n.isdigit():
-                    active = _wl.check_active_work(_conn, int(n), issue_repo)
-                    if active:
-                        for item in active:
-                            print(f"DUPLICATE_CONFLICT=#{n} active on {item['branch']} ({item['location']}) at {item['repo_path']}")
-                        print("DUPLICATE=yes")
-                        print(f"HINT=pass skip-duplicate-check=yes to override")
-                        _conn.close()
-                        return 1
+            for n in parse_covers(covers):
+                active = _wl.check_active_work(_conn, n, issue_repo)
+                if active:
+                    for item in active:
+                        print(f"DUPLICATE_CONFLICT=#{n} active on {item['branch']} ({item['location']}) at {item['repo_path']}")
+                    print("DUPLICATE=yes")
+                    print(f"HINT=pass skip-duplicate-check=yes to override")
+                    _conn.close()
+                    return 1
             _conn.close()
         except Exception:
             pass

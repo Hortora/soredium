@@ -21,7 +21,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 from common import parse_args
+from plan_io import read_plan
 
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -56,22 +60,10 @@ def check_meta_exists(workspace: str, current_branch: str = "") -> dict:
     if not target.exists():
         return {"status": "needs_input", "detail": "no-meta"}
 
-    meta_data = {}
-    in_state = False
-    has_sections = False
-    for line in target.read_text().splitlines():
-        if line.strip() == "## State":
-            in_state = True
-            has_sections = True
-            continue
-        if line.startswith("## "):
-            in_state = False
-            continue
-        if has_sections and not in_state:
-            continue
-        if ":" in line:
-            k, _, v = line.partition(":")
-            meta_data[k.strip()] = v.strip()
+    state = read_plan(target)
+    if state is None:
+        return {"status": "needs_input", "detail": "no-meta"}
+    meta_data = state.fields
 
     plan_branch = meta_data.get("branch", "")
     if current_branch and plan_branch and plan_branch != current_branch:

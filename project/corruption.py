@@ -8,7 +8,6 @@ Spec: issue-262-lifecycle-corruption-recovery
 """
 from __future__ import annotations
 
-import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +19,7 @@ if str(_project_dir) not in sys.path:
     sys.path.insert(0, str(_project_dir))
 
 from lifecycle import VALID_STATES
+from plan_io import read_plan, read_field, parse_covers, has_uncompleted_items
 
 
 @dataclass
@@ -41,42 +41,13 @@ def _git(repo: Path, *args: str, timeout: int = 10) -> tuple[str, int]:
         return "", 1
 
 
-def _read_plan_field(plan_path: Path, field_name: str) -> Optional[str]:
-    if not plan_path.exists():
-        return None
-    in_state = False
-    has_sections = False
-    for line in plan_path.read_text().splitlines():
-        if line.strip() == "## State":
-            in_state = True
-            has_sections = True
-            continue
-        if line.startswith("## "):
-            in_state = False
-            continue
-        should_check = in_state if has_sections else True
-        if should_check and line.startswith(f"{field_name}:"):
-            return line.split(":", 1)[1].strip()
-    return None
-
-
 def check_missing_state(plan_path: Path) -> Optional[Finding]:
-    if not plan_path.exists():
+    state = read_plan(plan_path)
+    if state is None:
         return None
-    in_state = False
-    has_sections = False
-    for line in plan_path.read_text().splitlines():
-        if line.strip() == "## State":
-            in_state = True
-            has_sections = True
-            continue
-        if line.startswith("## "):
-            in_state = False
-            continue
-        should_check = in_state if has_sections else True
-        if should_check and line.startswith("state:"):
-            return None
-    if not has_sections:
+    if not state.fields:
+        return None
+    if "state" in state.fields:
         return None
     return Finding(
         scenario="S1_MISSING_STATE",
@@ -104,10 +75,10 @@ def check_branch_mismatch(
 ) -> Optional[Finding]:
     if not plan_path.exists():
         return None
-    plan_state = _read_plan_field(plan_path, "state")
+    plan_state = read_field(plan_path, "state")
     if plan_state == "drained":
         return None
-    plan_branch = _read_plan_field(plan_path, "branch")
+    plan_branch = read_field(plan_path, "branch")
     if not plan_branch:
         return None
     if plan_branch == current_branch:
@@ -131,7 +102,7 @@ def check_stale_plan_on_main(
 ) -> Optional[Finding]:
     if not on_main or not plan_path.exists():
         return None
-    plan_branch = _read_plan_field(plan_path, "branch")
+    plan_branch = read_field(plan_path, "branch")
     if not plan_branch or plan_branch == base_branch:
         return None
     if meta_state in ("drained", "closing:stamped"):
@@ -147,7 +118,7 @@ def check_stale_plan_on_main(
 def check_branch_exists(plan_path: Path, project: Path) -> Optional[Finding]:
     if not plan_path.exists():
         return None
-    plan_branch = _read_plan_field(plan_path, "branch")
+    plan_branch = read_field(plan_path, "branch")
     if not plan_branch:
         return None
     local_out, _ = _git(project, "branch", "--list", plan_branch)
@@ -176,7 +147,7 @@ def check_closing_postconditions(
     if not meta_state.startswith("closing:"):
         return None
     sub = meta_state.split(":", 1)[1]
-    plan_branch = _read_plan_field(plan_path, "branch") or ""
+    plan_branch = read_field(plan_path, "branch") or ""
 
     checks: dict[str, tuple[list[str], str]] = {
         "promoted": (
@@ -240,16 +211,16 @@ def check_active_all_closed(
         return None
     if not plan_path.exists():
         return None
-    covers = _read_plan_field(plan_path, "covers")
+    covers = read_field(plan_path, "covers")
     if not covers:
         return None
-    issue_repo = _read_plan_field(plan_path, "issue-repo") or owner_repo
-    issue_nums = [n.strip() for n in covers.split(",") if n.strip()]
+    issue_repo = read_field(plan_path, "issue-repo") or owner_repo
+    issue_nums = parse_covers(covers)
     all_closed = True
     for num in issue_nums:
         try:
             result = subprocess.run(
-                ["gh", "issue", "view", num, "--repo", issue_repo,
+                ["gh", "issue", "view", str(num), "--repo", issue_repo,
                  "--json", "state", "--jq", ".state"],
                 capture_output=True, text=True, timeout=5,
             )
@@ -260,10 +231,14 @@ def check_active_all_closed(
             return None
     if not all_closed:
         return None
+    plan_state = read_plan(plan_path)
+    if plan_state and has_uncompleted_items(plan_state):
+        return None
+    total = len(plan_state.queue_items) if plan_state else 0
     return Finding(
         scenario="S3_ACTIVE_ALL_CLOSED",
         severity="warning",
-        detail=f"state: active but all issues in covers ({covers}) are CLOSED on GitHub",
+        detail=f"state: active, all covers ({covers}) CLOSED, queue: 0 uncompleted / {total} total items",
         actions=["transition_to_drained", "mark_complete_and_next", "reopen_issues"],
     )
 
@@ -271,42 +246,19 @@ def check_active_all_closed(
 def check_queue_consistency(plan_path: Path, owner_repo: str) -> Optional[Finding]:
     if not owner_repo or not plan_path.exists():
         return None
-    content = plan_path.read_text()
-    in_queue = False
-    issues: list[tuple[int, bool, str]] = []
-    for line in content.splitlines():
-        if line.strip() == "## Queue":
-            in_queue = True
-            continue
-        if line.startswith("## "):
-            in_queue = False
-            continue
-        if not in_queue:
-            continue
-        m = re.match(r'\s*- \[([ x])\] #(\d+)\s*—\s*(.+?)(?:\s*←.*)?$', line)
-        if m:
-            completed = m.group(1) == "x"
-            issue_num = int(m.group(2))
-            title = m.group(3).strip()
-            issues.append((issue_num, completed, title))
-
-    if not issues:
+    plan_state = read_plan(plan_path)
+    if plan_state is None or not plan_state.queue_items:
         return None
 
-    issue_repo = _read_plan_field(plan_path, "issue-repo") or owner_repo
-
-    covers_raw = _read_plan_field(plan_path, "covers") or ""
-    covers_nums = set()
-    for c in covers_raw.split(","):
-        c = c.strip()
-        if c.isdigit():
-            covers_nums.add(int(c))
+    issue_repo = plan_state.fields.get("issue-repo", owner_repo)
+    covers_raw = plan_state.fields.get("covers", "")
+    covers_nums = set(parse_covers(covers_raw))
 
     inconsistencies: list[str] = []
-    for num, completed, plan_title in issues:
+    for item in plan_state.queue_items:
         try:
             result = subprocess.run(
-                ["gh", "issue", "view", str(num), "--repo", issue_repo,
+                ["gh", "issue", "view", str(item.number), "--repo", issue_repo,
                  "--json", "state,title", "--jq", "[.state, .title] | @tsv"],
                 capture_output=True, text=True, timeout=5,
             )
@@ -317,16 +269,16 @@ def check_queue_consistency(plan_path: Path, owner_repo: str) -> Optional[Findin
                 continue
             gh_state, gh_title = parts
 
-            if plan_title and gh_title and plan_title.lower() not in gh_title.lower() and gh_title.lower() not in plan_title.lower():
+            if item.title and gh_title and item.title.lower() not in gh_title.lower() and gh_title.lower() not in item.title.lower():
                 if owner_repo != issue_repo:
                     continue
 
-            if not completed and gh_state == "CLOSED":
-                inconsistencies.append(f"#{num} unchecked but CLOSED")
-            elif completed and gh_state == "OPEN":
-                if num in covers_nums:
+            if not item.completed and gh_state == "CLOSED":
+                inconsistencies.append(f"#{item.number} unchecked but CLOSED")
+            elif item.completed and gh_state == "OPEN":
+                if item.number in covers_nums:
                     continue
-                inconsistencies.append(f"#{num} checked but OPEN")
+                inconsistencies.append(f"#{item.number} checked but OPEN")
         except subprocess.TimeoutExpired:
             return None
 

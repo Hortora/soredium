@@ -252,7 +252,16 @@ class TestS3ActiveAllClosed:
     def test_all_closed_returns_warning(self, tmp_path, monkeypatch):
         from corruption import check_active_all_closed
         plan = tmp_path / ".plan"
-        _write_plan(plan)
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-42-foo", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: 42", "",
+            "## Queue",
+            "- [x] Hortora/soredium#42 — Fix foo",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
 
         def mock_run(*args, **kwargs):
             return type('R', (), {'stdout': 'CLOSED\n', 'returncode': 0})()
@@ -273,6 +282,51 @@ class TestS3ActiveAllClosed:
 
         monkeypatch.setattr("corruption.subprocess.run", mock_run)
         assert check_active_all_closed(plan, "active", owner_repo="Hortora/soredium") is None
+
+    def test_all_closed_but_queue_has_uncompleted_returns_none(self, tmp_path, monkeypatch):
+        """#327: design issue closed, cross-repo implementation continues."""
+        from corruption import check_active_all_closed
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-74-design", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: 74", "",
+            "## Queue",
+            "- [x] Hortora/soredium#74 — Design session",
+            "- [ ] casehubio/blocks#231 — Extract summarisation types ← active",
+            "- [ ] casehubio/blocks#233 — Refactor pipeline",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        def mock_run(*args, **kwargs):
+            return type('R', (), {'stdout': 'CLOSED\n', 'returncode': 0})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        finding = check_active_all_closed(plan, "active", owner_repo="Hortora/soredium")
+        assert finding is None, "Should not fire when queue has uncompleted cross-repo items"
+
+    def test_all_closed_empty_queue_still_fires(self, tmp_path, monkeypatch):
+        """Regression guard: S3 fires when covers closed AND queue is empty."""
+        from corruption import check_active_all_closed
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-74-design", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: 74", "",
+            "## Queue", "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        def mock_run(*args, **kwargs):
+            return type('R', (), {'stdout': 'CLOSED\n', 'returncode': 0})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        finding = check_active_all_closed(plan, "active", owner_repo="Hortora/soredium")
+        assert finding is not None, "Should fire when covers closed and queue is empty"
+        assert finding.scenario == "S3_ACTIVE_ALL_CLOSED"
 
 
 class TestS8QueueConsistency:
@@ -362,6 +416,30 @@ class TestS8QueueConsistency:
         monkeypatch.setattr("corruption.subprocess.run", mock_run)
         result = check_queue_consistency(plan, owner_repo="Hortora/soredium")
         assert result is None
+
+    def test_cross_repo_queue_items_parsed(self, tmp_path, monkeypatch):
+        """#327: cross-repo queue items must be visible to consistency check.
+        An unchecked cross-repo item that is CLOSED should be flagged."""
+        from corruption import check_queue_consistency
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-74-design", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: 74", "",
+            "## Queue",
+            "- [ ] casehubio/blocks#231 — Extract summarisation types",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        def mock_run(*args, **kwargs):
+            return type('R', (), {'stdout': 'CLOSED\tExtract summarisation types\n', 'returncode': 0})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        result = check_queue_consistency(plan, owner_repo="Hortora/soredium")
+        assert result is not None, "Cross-repo unchecked+CLOSED items must be detected"
+        assert "#231 unchecked but CLOSED" in result.detail
 
     def test_non_covers_checked_but_open_still_flagged(self, tmp_path, monkeypatch):
         from corruption import check_queue_consistency

@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from lifecycle import is_closed, ClosureState
+from plan_io import read_field
 
 
 def _git(repo, *args, timeout=10):
@@ -72,21 +73,7 @@ def check_meta_consistency(project, workspace, base_branch="main"):
     state_file = plan_path if plan_path.exists() else meta_path
     if not state_file.exists():
         return "CHECK=meta_consistency STATUS=ok"
-    meta_branch = None
-    in_state = False
-    has_sections = False
-    for line in state_file.read_text().splitlines():
-        if line.strip() == "## State":
-            in_state = True
-            has_sections = True
-            continue
-        if line.startswith("## "):
-            in_state = False
-            continue
-        should_check = in_state if has_sections else True
-        if should_check and line.startswith("branch:"):
-            meta_branch = line.split(":", 1)[1].strip()
-            break
+    meta_branch = read_field(state_file, "branch")
     if not meta_branch:
         return "CHECK=meta_consistency STATUS=ok"
     current, _ = _git(workspace, "branch", "--show-current")
@@ -247,19 +234,9 @@ def check_branch_closure(project, workspace):
             branches_to_check.add(e["branch"])
     state_file = Path(workspace) / ".plan"
     if state_file.exists():
-        in_state = False
-        has_sections = False
-        for line in state_file.read_text().splitlines():
-            if line.strip() == "## State":
-                in_state = True
-                has_sections = True
-                continue
-            if line.startswith("## "):
-                in_state = False
-                continue
-            should_check = in_state if has_sections else True
-            if should_check and line.startswith("branch:"):
-                branches_to_check.add(line.split(":", 1)[1].strip())
+        plan_branch = read_field(state_file, "branch")
+        if plan_branch:
+            branches_to_check.add(plan_branch)
     if not branches_to_check:
         return "CHECK=branch_closure STATUS=ok"
     findings = []

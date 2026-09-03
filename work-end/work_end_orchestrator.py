@@ -81,10 +81,14 @@ MECHANICAL_STEPS = None  # populated after STEPS is defined
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
     sys.path.insert(0, str(_lib))
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 try:
     import worklog as _wl
 except ImportError:
     _wl = None
+from plan_io import parse_covers
 
 
 def _parse_slot_repos(slot_path: Path) -> list[str]:
@@ -388,9 +392,9 @@ def _close_issues_script(ctx):
             from plan_manager import get_completed_epic_parents
             epic_parents = get_completed_epic_parents(ctx.plan_path)
             if epic_parents:
-                existing = set(n.strip() for n in covers.split(",") if n.strip())
+                existing = set(parse_covers(covers))
                 for ep in epic_parents:
-                    if str(ep) not in existing:
+                    if ep.number not in existing:
                         covers = f"{covers},{ep}" if covers else str(ep)
         except Exception:
             pass
@@ -1111,7 +1115,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
                 _wl.record_session_boundary(
                     conn, mode="close", branch=branch,
                     issue_repo=issue_repo,
-                    issue_number=int(covers.split(",")[0]) if covers else 0,
+                    issue_number=parse_covers(covers)[0] if covers else 0,
                     steps=steps_data,
                 )
                 conn.close()

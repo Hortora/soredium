@@ -10,7 +10,13 @@ import functools
 import json
 import os
 import sqlite3
+import sys
 from pathlib import Path
+
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from plan_io import parse_covers
 
 SCHEMA_VERSION = 4
 
@@ -260,7 +266,7 @@ def confirm_slot_create(conn: sqlite3.Connection, slot_number: int,
     if sid is None:
         raise ValueError(f"No pending slot {slot_number} for {family_root}")
     conn.execute("UPDATE slots SET state='active' WHERE id=?", (sid,))
-    issue_nums = [int(n.strip()) for n in (covers or str(issue_number)).split(",") if n.strip()]
+    issue_nums = parse_covers(covers) if covers else [issue_number]
     for repo_path in repos:
         repo_id = _ensure_repo_strict(conn, repo_path, family_root=family_root)
         wi_cur = conn.execute(
@@ -398,7 +404,7 @@ def record_work_start(conn: sqlite3.Connection, branch: str, repo_path: str,
         (branch, repo_id, location, slot_id, work_path, _now()),
     )
     wid = cur.lastrowid
-    issue_nums = [int(n.strip()) for n in (covers or str(issue_number)).split(",") if n.strip()]
+    issue_nums = parse_covers(covers) if covers else [issue_number]
     for num in issue_nums:
         conn.execute(
             "INSERT INTO work_item_issues (work_item_id, issue_number, issue_repo, is_primary) "
@@ -487,7 +493,7 @@ def record_slot_create(conn: sqlite3.Connection, slot_number: int,
         (slot_number, family_root, _now()),
     )
     sid = cur.lastrowid
-    issue_nums = [int(n.strip()) for n in (covers or str(issue_number)).split(",") if n.strip()]
+    issue_nums = parse_covers(covers) if covers else [issue_number]
     for repo_path in repos:
         repo_id = ensure_repo(conn, repo_path, family_root=family_root)
         if repo_id is None:
