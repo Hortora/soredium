@@ -547,56 +547,132 @@ class TestWriteProgressAtomic:
         assert result["repo:branch"] == "pushed", "Prior progress must survive"
 
 
-class TestWorkspaceStampOnly:
-    """Workspace repos are stamp-only in land_batch — no merge to main."""
+class TestDirectWorkspaceMergeAndCleanup:
+    """DIRECT workspace repos get merged to main with lifecycle file cleanup (#326)."""
 
-    def test_workspace_skipped_in_merge_push(self, tmp_path: Path):
-        """Workspace repos should not go through merge+push in land_batch."""
-        from land_flow import RepoDescriptor, Transport, land_batch
+    def _setup_workspace_with_lifecycle(self, tmp_path, branch="issue-326-test"):
+        """Create project + workspace with lifecycle files on workspace branch."""
         proj = _init_repo(tmp_path / "project")
         ws = _init_repo(tmp_path / "workspace")
-        branch = "issue-285-test"
         _add_feature(proj, branch, "feature.py")
-        _add_feature(ws, branch, "spec.md")
 
-        progress = tmp_path / ".progress"
+        subprocess.run(["git", "-C", str(ws), "checkout", "-b", branch],
+                       capture_output=True, check=True)
+        (ws / "specs").mkdir(exist_ok=True)
+        (ws / "specs" / "design.md").write_text("# Design spec\n")
+        (ws / ".plan").write_text("branch: " + branch + "\nstate: active\n")
+        (ws / "JOURNAL.md").write_text("# Journal\n")
+        (ws / ".execute-progress").write_text("default=promoted\n")
+        (ws / ".land-ledger.jsonl").write_text("{}\n")
+        (ws / ".artifacts-promoted").write_text("timestamp=2026-01-01\n")
+        (ws / ".close-progress").write_text("code_review=done\n")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "feat: workspace artifacts"],
+                       capture_output=True, check=True)
+        return proj, ws
+
+    def test_direct_workspace_merged_to_main(self, tmp_path: Path):
+        """DIRECT workspace branch content (specs) should be on main after land."""
+        from land_flow import RepoDescriptor, Transport, land_batch
+        proj, ws = self._setup_workspace_with_lifecycle(tmp_path)
+        branch = "issue-326-test"
+
         descs = [
             RepoDescriptor(repo_path=proj, original_path=proj, base_branch="main",
                            push_target="origin", is_workspace=False, transport=Transport.DIRECT),
             RepoDescriptor(repo_path=ws, original_path=ws, base_branch="main",
                            push_target="origin", is_workspace=True, transport=Transport.DIRECT),
         ]
-        result = land_batch(descs, branch, progress)
+        result = land_batch(descs, branch, tmp_path / ".progress")
         assert result.success
 
-        main_sha = subprocess.run(["git", "-C", str(ws), "rev-parse", "main"],
-                                  capture_output=True, text=True).stdout.strip()
-        init_log = subprocess.run(["git", "-C", str(ws), "log", "--oneline", "main"],
-                                  capture_output=True, text=True).stdout.strip()
-        assert "spec.md" not in init_log, "Workspace main should not have branch content"
+        subprocess.run(["git", "-C", str(ws), "checkout", "main"], capture_output=True)
+        assert (ws / "specs" / "design.md").exists(), "Specs should be on workspace main"
 
-    def test_workspace_still_stamped(self, tmp_path: Path):
-        """Workspace branch must still be stamped even without merge."""
+    def test_lifecycle_files_cleaned_from_main(self, tmp_path: Path):
+        """Lifecycle files must NOT exist on workspace main after land."""
         from land_flow import RepoDescriptor, Transport, land_batch
-        proj = _init_repo(tmp_path / "project")
-        ws = _init_repo(tmp_path / "workspace")
-        branch = "issue-285-stamp"
-        _add_feature(proj, branch, "feature.py")
-        _add_feature(ws, branch, "spec.md")
+        proj, ws = self._setup_workspace_with_lifecycle(tmp_path)
+        branch = "issue-326-test"
 
-        progress = tmp_path / ".progress"
         descs = [
             RepoDescriptor(repo_path=proj, original_path=proj, base_branch="main",
                            push_target="origin", is_workspace=False, transport=Transport.DIRECT),
             RepoDescriptor(repo_path=ws, original_path=ws, base_branch="main",
                            push_target="origin", is_workspace=True, transport=Transport.DIRECT),
         ]
-        result = land_batch(descs, branch, progress)
+        result = land_batch(descs, branch, tmp_path / ".progress")
+        assert result.success
+
+        subprocess.run(["git", "-C", str(ws), "checkout", "main"], capture_output=True)
+        for f in [".plan", "JOURNAL.md", ".execute-progress",
+                  ".land-ledger.jsonl", ".artifacts-promoted", ".close-progress"]:
+            assert not (ws / f).exists(), f"{f} should NOT be on workspace main"
+
+    def test_workspace_stamped_after_merge(self, tmp_path: Path):
+        """Workspace branch still gets stamped after merge."""
+        from land_flow import RepoDescriptor, Transport, land_batch
+        proj, ws = self._setup_workspace_with_lifecycle(tmp_path)
+        branch = "issue-326-test"
+
+        descs = [
+            RepoDescriptor(repo_path=proj, original_path=proj, base_branch="main",
+                           push_target="origin", is_workspace=False, transport=Transport.DIRECT),
+            RepoDescriptor(repo_path=ws, original_path=ws, base_branch="main",
+                           push_target="origin", is_workspace=True, transport=Transport.DIRECT),
+        ]
+        result = land_batch(descs, branch, tmp_path / ".progress")
         assert result.success
 
         stamp = subprocess.run(["git", "-C", str(ws), "log", "-1", "--format=%s", branch],
                                capture_output=True, text=True).stdout.strip()
         assert "branch closed" in stamp, f"Workspace not stamped, tip: {stamp}"
+
+    def test_workspace_pushed_to_remote(self, tmp_path: Path):
+        """Workspace main pushed to remote after merge+cleanup."""
+        from land_flow import RepoDescriptor, Transport, land_batch
+        proj, ws = self._setup_workspace_with_lifecycle(tmp_path)
+        branch = "issue-326-test"
+
+        descs = [
+            RepoDescriptor(repo_path=proj, original_path=proj, base_branch="main",
+                           push_target="origin", is_workspace=False, transport=Transport.DIRECT),
+            RepoDescriptor(repo_path=ws, original_path=ws, base_branch="main",
+                           push_target="origin", is_workspace=True, transport=Transport.DIRECT),
+        ]
+        result = land_batch(descs, branch, tmp_path / ".progress")
+        assert result.success
+
+        ws_status = next(s for s in result.repos if s.repo_path == ws)
+        assert ws_status.pushed, "Workspace should be pushed"
+        assert ws_status.merged, "Workspace should be merged"
+
+
+class TestTwoHopWorkspaceStampOnly:
+    """TWO_HOP workspace repos remain stamp-only — no merge (slot mode)."""
+
+    def test_two_hop_workspace_not_merged(self, tmp_path: Path):
+        """Slot workspace clones should NOT be merged — stamp only."""
+        from land_flow import RepoDescriptor, Transport, land_batch
+        proj_orig = _init_repo(tmp_path / "proj-orig")
+        ws_orig = _init_repo(tmp_path / "ws-orig")
+        branch = "issue-326-slot"
+        proj_clone = _make_slot_clone(proj_orig, tmp_path / "proj-clone", branch)
+        ws_clone = _make_slot_clone(ws_orig, tmp_path / "ws-clone", branch)
+
+        descs = [
+            RepoDescriptor(repo_path=proj_clone, original_path=proj_orig, push_target="local",
+                           base_branch="main", is_workspace=False, transport=Transport.TWO_HOP),
+            RepoDescriptor(repo_path=ws_clone, original_path=ws_orig, push_target="local",
+                           base_branch="main", is_workspace=True, transport=Transport.TWO_HOP),
+        ]
+        result = land_batch(descs, branch, tmp_path / ".progress")
+        assert result.success
+        assert all(s.stamped for s in result.repos)
+
+        log = subprocess.run(["git", "-C", str(ws_orig), "log", "--oneline", "main"],
+                             capture_output=True, text=True).stdout.strip()
+        assert "slot feature" not in log, "Slot workspace should NOT be merged to original"
 
 
 # ---------------------------------------------------------------------------

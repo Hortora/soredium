@@ -181,6 +181,7 @@ class TestCmdStamp:
 
         subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
         subprocess.run(["git", "-C", str(project), "rebase", "feature"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "push", "origin", "main"], capture_output=True)
 
         result = cmd_stamp(str(project), {"branch": "feature", "base_branch": "main"})
         assert result == 0

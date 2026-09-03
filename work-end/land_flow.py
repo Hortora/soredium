@@ -94,6 +94,13 @@ def _git(repo: Path | str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+LIFECYCLE_FILES = [
+    ".plan", "JOURNAL.md", ".execute-progress",
+    ".land-ledger.jsonl", ".artifacts-promoted",
+    ".close-progress", ".close-report.json",
+    ".close-log.jsonl", ".wrap-log.jsonl",
+]
+
 SOURCE_EXTENSIONS = (
     ".java", ".kt", ".xml", ".yaml", ".yml", ".json",
     ".properties", ".sql", ".py", ".ts", ".tsx", ".js",
@@ -481,8 +488,11 @@ def _merge_and_push_direct(
 
     merge = _git(desc.repo_path, "merge", "--ff-only", branch)
     if merge.returncode != 0:
-        status.error = "merge_failed"
-        return status
+        if desc.is_workspace:
+            merge = _git(desc.repo_path, "merge", branch, "--no-edit")
+        if merge.returncode != 0:
+            status.error = "merge_failed"
+            return status
     status.merged = True
     _write_progress(progress_file, key, "merged")
 
@@ -620,10 +630,10 @@ def land_batch(
     if not active:
         return result
 
-    # Step 1: Preflight (skip workspace — stamp only, no push needed)
+    # Step 1: Preflight (skip TWO_HOP workspace — slot clones are stamp only)
     print("STAGE=preflight")
     for desc in active:
-        if desc.is_workspace:
+        if desc.is_workspace and desc.transport == Transport.TWO_HOP:
             continue
         if desc.transport == Transport.TWO_HOP:
             err = _preflight_two_hop(desc)
@@ -643,13 +653,29 @@ def land_batch(
                 result.rescued[desc.repo_path.name] = meta["rescued"]
     print("STAGE=preflight STATUS=pass")
 
-    # Step 2: Rebase (skip workspace — stamp only)
+    # Step 1.5: Strip lifecycle files from DIRECT workspace branches before
+    # rebase (#326). Without this, the cleanup commit from a prior landing
+    # (which deleted these files from main) conflicts with the branch's
+    # commits that create them. Stripping first makes rebase conflict-free
+    # and gives linear history.
+    for desc in active:
+        if not desc.is_workspace or desc.transport != Transport.DIRECT:
+            continue
+        _git(desc.repo_path, "checkout", branch)
+        to_strip = [f for f in LIFECYCLE_FILES if (desc.repo_path / f).exists()]
+        if to_strip:
+            _git(desc.repo_path, "rm", "--ignore-unmatch", "--", *to_strip)
+            _git(desc.repo_path, "commit", "-m",
+                 "chore: strip lifecycle files before close")
+            print(f"LIFECYCLE_STRIP={desc.repo_path.name} removed={len(to_strip)}")
+
+    # Step 2: Rebase (skip TWO_HOP workspace — slot clones are stamp only)
     for attempt in range(1, 4):
         print(f"STAGE=rebase ATTEMPT={attempt}")
         rebase_ok = True
         failed_desc = None
         for desc in active:
-            if desc.is_workspace:
+            if desc.is_workspace and desc.transport == Transport.TWO_HOP:
                 continue
             if not _rebase_repo(desc, branch):
                 rebase_ok = False
@@ -676,13 +702,13 @@ def land_batch(
             print("STAGE=rebase STATUS=fail")
             return result
 
-    # Step 3: Merge + Push (project repos only — workspace uses selective promotion)
+    # Step 3: Merge + Push (skip TWO_HOP workspace — slot clones are stamp only)
     print("STAGE=push")
     landed_shas: dict[str, str] = {}
     failed_repos: list[str] = []
 
     for desc in active:
-        if desc.is_workspace:
+        if desc.is_workspace and desc.transport == Transport.TWO_HOP:
             result.repos.append(RepoStatus(
                 repo_path=desc.repo_path, merged=True, pushed=True,
             ))

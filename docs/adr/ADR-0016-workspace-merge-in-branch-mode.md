@@ -34,18 +34,18 @@ Merge DIRECT workspace repos to main during `land_batch()`, with atomic post-mer
 
 ### Key Design Choices
 
-1. **Cleanup is inside `land_flow.py`**, between merge and push — not in a separate script at a different lifecycle point. This is what all previous attempts got wrong.
+1. **Strip lifecycle files before rebase, not after merge.** Post-merge cleanup leaves a deletion commit on main that conflicts with the next branch's lifecycle files during rebase — the same conflict pattern that caused the original five fix attempts to fail. Pre-rebase strip removes lifecycle files from the workspace branch before rebase, making it conflict-free and preserving linear history.
 
-2. **Definitive lifecycle file list** maintained in one place:
+2. **Definitive lifecycle file list** at module level in `land_flow.py` (`LIFECYCLE_FILES`):
    ```
    .plan, JOURNAL.md, .execute-progress, .land-ledger.jsonl,
    .artifacts-promoted, .close-progress, .close-report.json,
    .close-log.jsonl, .wrap-log.jsonl
    ```
 
-3. **Transport type distinguishes slot vs branch**: `TWO_HOP` = slot (stamp only), `DIRECT` = branch (merge + cleanup).
+3. **Transport type distinguishes slot vs branch**: `TWO_HOP` = slot (stamp only), `DIRECT` = branch (strip + rebase + merge).
 
-4. **Merge strategy**: try ff-only first; fall back to regular merge for workspace repos since they aren't rebased.
+4. **Non-ff merge fallback** in `_merge_and_push_direct` as a safety net for edge cases where rebase still fails.
 
 ## Consequences
 
