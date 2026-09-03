@@ -653,29 +653,16 @@ def land_batch(
                 result.rescued[desc.repo_path.name] = meta["rescued"]
     print("STAGE=preflight STATUS=pass")
 
-    # Step 1.5: Strip lifecycle files from DIRECT workspace branches before
-    # rebase (#326). Without this, the cleanup commit from a prior landing
-    # (which deleted these files from main) conflicts with the branch's
-    # commits that create them. Stripping first makes rebase conflict-free
-    # and gives linear history.
-    for desc in active:
-        if not desc.is_workspace or desc.transport != Transport.DIRECT:
-            continue
-        _git(desc.repo_path, "checkout", branch)
-        to_strip = [f for f in LIFECYCLE_FILES if (desc.repo_path / f).exists()]
-        if to_strip:
-            _git(desc.repo_path, "rm", "--ignore-unmatch", "--", *to_strip)
-            _git(desc.repo_path, "commit", "-m",
-                 "chore: strip lifecycle files before close")
-            print(f"LIFECYCLE_STRIP={desc.repo_path.name} removed={len(to_strip)}")
-
-    # Step 2: Rebase (skip TWO_HOP workspace — slot clones are stamp only)
+    # Step 2: Rebase (skip ALL workspace repos — workspace branches are not
+    # rebased because rebase replays individual commits, and early commits
+    # create lifecycle files that conflict with main's cleanup history.
+    # Workspace merges use non-ff merge instead. See ADR-0016.)
     for attempt in range(1, 4):
         print(f"STAGE=rebase ATTEMPT={attempt}")
         rebase_ok = True
         failed_desc = None
         for desc in active:
-            if desc.is_workspace and desc.transport == Transport.TWO_HOP:
+            if desc.is_workspace:
                 continue
             if not _rebase_repo(desc, branch):
                 rebase_ok = False
@@ -701,6 +688,21 @@ def land_batch(
             result.success = False
             print("STAGE=rebase STATUS=fail")
             return result
+
+    # Step 2.5: Strip lifecycle files from DIRECT workspace branches before
+    # merge (#326). These files are branch-scoped state that must never
+    # reach main. Stripping from the branch before merge (not after) means
+    # the merge result is clean regardless of merge strategy.
+    for desc in active:
+        if not desc.is_workspace or desc.transport != Transport.DIRECT:
+            continue
+        _git(desc.repo_path, "checkout", branch)
+        to_strip = [f for f in LIFECYCLE_FILES if (desc.repo_path / f).exists()]
+        if to_strip:
+            _git(desc.repo_path, "rm", "--ignore-unmatch", "--", *to_strip)
+            _git(desc.repo_path, "commit", "-m",
+                 "chore: strip lifecycle files before close")
+            print(f"LIFECYCLE_STRIP={desc.repo_path.name} removed={len(to_strip)}")
 
     # Step 3: Merge + Push (skip TWO_HOP workspace — slot clones are stamp only)
     print("STAGE=push")

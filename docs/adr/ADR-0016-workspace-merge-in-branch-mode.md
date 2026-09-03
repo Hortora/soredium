@@ -30,11 +30,14 @@ The verify → LLM manual merge → lifecycle file leak → corruption chain has
 
 ## Decision
 
-Merge DIRECT workspace repos to main during `land_batch()`, with atomic post-merge lifecycle file cleanup. Keep stamp-only for TWO_HOP workspace repos (slot mode).
+Merge DIRECT workspace repos to main during `land_batch()`, with pre-merge lifecycle file stripping. Keep stamp-only for TWO_HOP workspace repos (slot mode).
 
 ### Key Design Choices
 
-1. **Strip lifecycle files before rebase, not after merge.** Post-merge cleanup leaves a deletion commit on main that conflicts with the next branch's lifecycle files during rebase — the same conflict pattern that caused the original five fix attempts to fail. Pre-rebase strip removes lifecycle files from the workspace branch before rebase, making it conflict-free and preserving linear history.
+1. **Strip lifecycle files before merge, skip rebase for workspace.** Three approaches were tried:
+   - Post-merge cleanup: leaves a deletion commit on main that conflicts with the next branch's lifecycle files during rebase
+   - Pre-rebase strip: doesn't help because rebase replays individual commits from the base — early commits (scaffold) create lifecycle files that conflict with main's cleanup history
+   - **Pre-merge strip + skip rebase**: strip lifecycle files from the workspace branch, then merge (non-ff if needed). No rebase means no per-commit conflict replay. Non-linear workspace history is acceptable for methodology artifacts.
 
 2. **Definitive lifecycle file list** at module level in `land_flow.py` (`LIFECYCLE_FILES`):
    ```
@@ -43,9 +46,9 @@ Merge DIRECT workspace repos to main during `land_batch()`, with atomic post-mer
    .close-log.jsonl, .wrap-log.jsonl
    ```
 
-3. **Transport type distinguishes slot vs branch**: `TWO_HOP` = slot (stamp only), `DIRECT` = branch (strip + rebase + merge).
+3. **Transport type distinguishes slot vs branch**: `TWO_HOP` = slot (stamp only), `DIRECT` = branch (strip + merge). Rebase skip uses `is_workspace` (both transport types) because the rebase conflict issue affects all workspace repos.
 
-4. **Non-ff merge fallback** in `_merge_and_push_direct` as a safety net for edge cases where rebase still fails.
+4. **Non-ff merge fallback** in `_merge_and_push_direct` handles workspace branches that diverged from main.
 
 ## Consequences
 
