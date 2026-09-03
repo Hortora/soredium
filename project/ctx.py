@@ -194,6 +194,7 @@ def resolve(cwd=None) -> dict[str, str]:
         current_branch=current_branch,
         on_main=state.on_main,
         owner_repo=owner_repo,
+        slot_dir=topo.slot_dir,
     )
 
     # Branch mismatch — guard against empty strings from git failure (F6)

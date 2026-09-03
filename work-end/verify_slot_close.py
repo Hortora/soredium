@@ -124,6 +124,20 @@ def check_no_open_findings(workspace: str) -> dict:
     return {"status": "pass"}
 
 
+def check_artifacts_promoted(workspace: str, on_main: bool = False) -> dict:
+    """Verify artifact promotion happened (stamp exists)."""
+    if on_main:
+        return {"status": "pass", "detail": "on-main mode — no branch promotion"}
+    ws = Path(workspace)
+    for candidate in [
+        ws / ".artifacts-promoted",
+        ws / "design" / ".artifacts-promoted",
+    ]:
+        if candidate.exists():
+            return {"status": "pass", "detail": str(candidate.relative_to(ws))}
+    return {"status": "warn", "detail": "no .artifacts-promoted stamp found"}
+
+
 def check_no_stale_scaffold(workspace: str) -> dict:
     stale = []
     for name in [".execute-progress", ".land-ledger.jsonl", ".artifacts-promoted"]:
@@ -350,6 +364,7 @@ def verify(
         checks.append(("workspace_pushed", check_main_pushed(workspace, base)))
         checks.append(("project_on_main", check_on_main(project, "project")))
         checks.append(("workspace_on_main", check_on_main(workspace, "workspace")))
+        checks.append(("artifacts_promoted", check_artifacts_promoted(workspace, on_main)))
         checks.append(("no_open_findings", check_no_open_findings(workspace)))
         checks.append(("no_stale_scaffold", check_no_stale_scaffold(workspace)))
 
@@ -389,6 +404,14 @@ def verify(
         print("VERIFIED=yes")
     else:
         print("VERIFIED=no")
+
+    if all_pass and slot_dir:
+        archive_result = next(
+            (r for n, r in checks if n == "archive_status"), None,
+        )
+        if archive_result and archive_result.get("detail", "").startswith("landed but"):
+            print("SUGGEST=archive_slot")
+
     return all_pass
 
 

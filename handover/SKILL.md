@@ -43,6 +43,9 @@ next session" means "lose forever."
 python3 ~/.claude/skills/project/ctx.py
 ```
 
+**Structural integrity gate:** If `CORRUPTION_COUNT` > 0, stop and report.
+A handover written against a corrupted workspace captures wrong state.
+
 ### Step 2 — The Loop
 
 ```bash

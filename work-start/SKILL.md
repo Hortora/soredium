@@ -33,6 +33,11 @@ Run the bundled context script — no shell variable assignments:
 python3 ~/.claude/skills/project/ctx.py
 ```
 
+**Structural integrity gate:** If `CORRUPTION_COUNT` > 0, stop and report
+the findings. Do not create branches or scaffold while structural corruption
+exists — crossed symlinks or slot-escaping paths would set up work in the
+wrong repo.
+
 Use the printed values as **concrete strings** in all subsequent commands.
 `WORKSPACE` is the git root of the workspace. `PROJECT` follows the `proj/` symlink
 to the project repo. All git commands use `-C <WORKSPACE>` or `-C <PROJECT>` explicitly.

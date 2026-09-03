@@ -40,6 +40,10 @@ Commit messages describe **WHAT changed and WHY**. Not who or what wrote them. T
 python3 ~/.claude/skills/project/ctx.py
 ```
 
+**Structural integrity gate:** If `CORRUPTION_COUNT` > 0, stop and report
+the findings. Do not commit while structural corruption exists — commits
+with crossed symlinks or slot-escaping paths land in the wrong repo.
+
 Read `PROJECT_TYPE`, `MATURITY_STAGE`, and `ISSUES_STATUS` from the output.
 
 `PROJECT_TYPE` may be comma-separated (e.g. `java,ts`) for mixed-language repos.

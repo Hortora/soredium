@@ -23,6 +23,11 @@ Call the orchestrator. Follow its output. That is the job.
 python3 ~/.claude/skills/project/ctx.py
 ```
 
+**Structural integrity gate:** If `CORRUPTION_COUNT` > 0, stop and report
+the findings. Do not proceed with work-end while structural corruption
+exists — merging or pushing with crossed symlinks or slot-escaping paths
+would land content in the wrong repo.
+
 Use: `WORKSPACE`, `PROJECT`, `CURRENT_BRANCH`, `PROJECT_SHA`, `ISSUE_N`,
 `COVERS`, `OWNER_REPO`, `BASE_BRANCH`, `META_STATE`, `HAS_PLAN`,
 `PLAN_PATH`, `ON_MAIN`, `IN_SLOT`, `SLOT_PATH`.
@@ -121,6 +126,15 @@ python3 work-end/verify_slot_close.py $PROJECT branch=$BRANCH workspace=$WORKSPA
 ```
 
 Print both outputs verbatim. Do not compose your own summary.
+
+**Post-verification actions:**
+
+If `VERIFIED=yes` and `SUGGEST=archive_slot`:
+> "All checks passed. Slot is landed but not archived.
+>  Archive now? (y/n)"
+>
+> y → `python3 ~/.claude/skills/work-slot/slot_manager.py archive-slot <family-root> slot=<N>`
+> n → "Slot left active — archive later with `work-slot archive`."
 
 ---
 

@@ -594,3 +594,105 @@ class TestDiagnose:
         scenarios = {f.scenario for f in findings}
         assert "S1_MISSING_STATE" in scenarios
         assert "S7_STALE_PLAN_ON_MAIN" in scenarios
+
+
+class TestS10SymlinkRoundtrip:
+    def test_correct_roundtrip_no_finding(self, tmp_path):
+        from corruption import check_symlink_roundtrip
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        project.mkdir()
+        workspace.mkdir()
+        (workspace / "proj").symlink_to(project)
+        (project / "wksp").symlink_to(workspace)
+        assert check_symlink_roundtrip(project, workspace) is None
+
+    def test_crossed_proj_detected(self, tmp_path):
+        from corruption import check_symlink_roundtrip
+        project = tmp_path / "engine"
+        wrong_project = tmp_path / "work"
+        workspace = tmp_path / "wsp-engine"
+        project.mkdir()
+        wrong_project.mkdir()
+        workspace.mkdir()
+        (workspace / "proj").symlink_to(wrong_project)
+        (project / "wksp").symlink_to(workspace)
+        finding = check_symlink_roundtrip(project, workspace)
+        assert finding is not None
+        assert finding.scenario == "S10_SYMLINK_CROSSED"
+        assert "proj" in finding.detail
+
+    def test_crossed_wksp_detected(self, tmp_path):
+        from corruption import check_symlink_roundtrip
+        project = tmp_path / "engine"
+        workspace = tmp_path / "wsp-engine"
+        wrong_workspace = tmp_path / "wsp-work"
+        project.mkdir()
+        workspace.mkdir()
+        wrong_workspace.mkdir()
+        (workspace / "proj").symlink_to(project)
+        (project / "wksp").symlink_to(wrong_workspace)
+        finding = check_symlink_roundtrip(project, workspace)
+        assert finding is not None
+        assert finding.scenario == "S10_SYMLINK_CROSSED"
+        assert "wksp" in finding.detail
+
+    def test_single_repo_skipped(self, tmp_path):
+        from corruption import check_symlink_roundtrip
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        assert check_symlink_roundtrip(repo, repo) is None
+
+    def test_no_symlinks_skipped(self, tmp_path):
+        from corruption import check_symlink_roundtrip
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        project.mkdir()
+        workspace.mkdir()
+        assert check_symlink_roundtrip(project, workspace) is None
+
+
+class TestS11SlotBoundary:
+    def test_paths_inside_slot_no_finding(self, tmp_path):
+        from corruption import check_slot_boundary
+        slot = tmp_path / "slots" / "169"
+        project = slot / "engine"
+        workspace = slot / "wsp-engine"
+        slot.mkdir(parents=True)
+        project.mkdir()
+        workspace.mkdir()
+        assert check_slot_boundary(project, workspace, slot) is None
+
+    def test_project_escapes_slot(self, tmp_path):
+        from corruption import check_slot_boundary
+        slot = tmp_path / "slots" / "169"
+        shared_project = tmp_path / "engine"
+        workspace = slot / "wsp-engine"
+        slot.mkdir(parents=True)
+        shared_project.mkdir()
+        workspace.mkdir()
+        finding = check_slot_boundary(shared_project, workspace, slot)
+        assert finding is not None
+        assert finding.scenario == "S11_SLOT_ESCAPE"
+        assert "project" in finding.detail
+
+    def test_workspace_escapes_slot(self, tmp_path):
+        from corruption import check_slot_boundary
+        slot = tmp_path / "slots" / "169"
+        project = slot / "engine"
+        shared_workspace = tmp_path / "public" / "engine"
+        slot.mkdir(parents=True)
+        project.mkdir()
+        shared_workspace.mkdir(parents=True)
+        finding = check_slot_boundary(project, shared_workspace, slot)
+        assert finding is not None
+        assert finding.scenario == "S11_SLOT_ESCAPE"
+        assert "workspace" in finding.detail
+
+    def test_no_slot_skipped(self, tmp_path):
+        from corruption import check_slot_boundary
+        project = tmp_path / "project"
+        workspace = tmp_path / "workspace"
+        project.mkdir()
+        workspace.mkdir()
+        assert check_slot_boundary(project, workspace, None) is None

@@ -323,6 +323,55 @@ def check_orphaned_wksp(project: Path) -> Optional[Finding]:
     return None
 
 
+def check_symlink_roundtrip(project: Path, workspace: Path) -> Optional[Finding]:
+    """S10: proj/wksp symlinks should round-trip back to the same repos."""
+    if project == workspace:
+        return None
+    proj_link = workspace / "proj"
+    wksp_link = project / "wksp"
+    if not proj_link.is_symlink() or not wksp_link.is_symlink():
+        return None
+    if not proj_link.exists() or not wksp_link.exists():
+        return None
+    proj_resolved = proj_link.resolve()
+    wksp_resolved = wksp_link.resolve()
+    if proj_resolved != project.resolve():
+        return Finding(
+            scenario="S10_SYMLINK_CROSSED",
+            severity="error",
+            detail=f"workspace/proj -> {proj_resolved}, expected {project.resolve()}",
+            actions=["repoint_proj", "ignore"],
+        )
+    if wksp_resolved != workspace.resolve():
+        return Finding(
+            scenario="S10_SYMLINK_CROSSED",
+            severity="error",
+            detail=f"project/wksp -> {wksp_resolved}, expected {workspace.resolve()}",
+            actions=["repoint_wksp", "ignore"],
+        )
+    return None
+
+
+def check_slot_boundary(
+    project: Path, workspace: Path, slot_dir: Optional[Path],
+) -> Optional[Finding]:
+    """S11: In a slot, all resolved paths must be inside the slot boundary."""
+    if slot_dir is None:
+        return None
+    slot_resolved = slot_dir.resolve()
+    for label, path in [("project", project), ("workspace", workspace)]:
+        try:
+            path.resolve().relative_to(slot_resolved)
+        except ValueError:
+            return Finding(
+                scenario="S11_SLOT_ESCAPE",
+                severity="error",
+                detail=f"{label} path {path.resolve()} is outside slot boundary {slot_resolved}",
+                actions=["repoint_symlinks", "ignore"],
+            )
+    return None
+
+
 def diagnose(
     plan_path: Optional[Path],
     meta_state: str,
@@ -332,12 +381,21 @@ def diagnose(
     current_branch: str = "",
     on_main: bool = False,
     owner_repo: str = "",
+    slot_dir: Optional[Path] = None,
 ) -> list[Finding]:
     findings: list[Finding] = []
 
     s9 = check_orphaned_wksp(project)
     if s9:
         findings.append(s9)
+
+    s10 = check_symlink_roundtrip(project, workspace)
+    if s10:
+        findings.append(s10)
+
+    s11 = check_slot_boundary(project, workspace, slot_dir)
+    if s11:
+        findings.append(s11)
 
     if plan_path is None or not plan_path.exists():
         return findings

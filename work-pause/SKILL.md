@@ -28,6 +28,8 @@ Run the bundled context script — no shell variable assignments, no CLAUDE.md s
 python3 ~/.claude/skills/project/ctx.py
 ```
 
+**Structural integrity gate:** If `CORRUPTION_COUNT` > 0, stop and report.
+
 Use `WORKSPACE`, `PROJECT`, `BASE_BRANCH`, `CURRENT_BRANCH`, `PLAN_PATH` from
 the output as concrete strings.
 
