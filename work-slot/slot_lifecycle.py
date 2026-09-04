@@ -59,7 +59,7 @@ from slot_query import find_slot_by_branch
 def _build_epic_plan(branch: str, issue_repo: str, cover_list: list[str],
                      date: str) -> str | None:
     """Build a .plan from the epic's child issue list. Fetches titles from GitHub."""
-    from plan_manager import QueueItem, build_plan_content
+    from plan_manager import QueueItem, IssueRef, build_plan_content
     items: list[QueueItem] = []
     for num_str in cover_list:
         try:
@@ -71,7 +71,7 @@ def _build_epic_plan(branch: str, issue_repo: str, cover_list: list[str],
             "--json", "title", "--jq", ".title",
         ])
         title = title_out.strip() if rc == 0 and title_out.strip() else f"Issue #{num}"
-        items.append(QueueItem(issue_number=num, title=title, repo=issue_repo))
+        items.append(QueueItem(ref=IssueRef(issue_repo, num), title=title))
     if not items:
         return None
     items[0].active = True
