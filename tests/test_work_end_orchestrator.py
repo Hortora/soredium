@@ -1796,3 +1796,169 @@ class TestRebaseConflictNotRetryable:
         })
         progress = read_close_progress(tmp_path)
         assert progress.get("rebase:engine") == "done"
+
+    def test_conflict_resolved_preserves_trajectory_done(self, tmp_path, monkeypatch):
+        """#330: conflict_resolved must not wipe trajectory=done."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        self._setup_promoted(tmp_path)
+        from close_progress import read_close_progress
+        progress_before = read_close_progress(tmp_path)
+        assert progress_before.get("trajectory") == "done", "precondition: trajectory was done"
+
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "conflict_resolved": "yes",
+            "conflict_repo": "engine",
+        })
+        progress_after = read_close_progress(tmp_path)
+        assert progress_after.get("trajectory") == "done", (
+            f"trajectory=done was wiped by conflict_resolved. "
+            f"Progress after: {progress_after}"
+        )
+
+    def test_conflict_resolved_slot_mode_preserves_trajectory(self, tmp_path, monkeypatch):
+        """#330: In slot mode, conflict_resolved for one repo must not wipe trajectory."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        self._setup_promoted(tmp_path)
+        from close_progress import update_close_progress, read_close_progress
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- work (primary)\n- engine\n- ledger\n")
+        for repo in ("work", "engine", "ledger"):
+            d = slot_dir / repo
+            d.mkdir()
+            (d / ".git").mkdir()
+        update_close_progress(tmp_path, "rebase:work", "done")
+        update_close_progress(tmp_path, "rebase:ledger", "done")
+        update_close_progress(tmp_path, "_branch", "issue-238-test")
+
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_dir / "work"),
+            "branch": "issue-238-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_dir),
+            "conflict_resolved": "yes",
+            "conflict_repo": "engine",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("trajectory") == "done", (
+            f"#330: trajectory=done wiped in slot mode after conflict_resolved. "
+            f"Progress: {progress}"
+        )
+        assert progress.get("rebase:engine") == "done"
+        assert progress.get("rebase:work") == "done"
+        assert progress.get("rebase:ledger") == "done"
+
+    def test_conflict_resolved_stale_meta_preserves_trajectory(self, tmp_path, monkeypatch):
+        """#330: When LLM passes meta_state ahead of plan state, phase_skip + is_stale
+        must not wipe trajectory. Scenario: plan says closing:promoted, LLM passes
+        closing:stamped (from a previous output). _phase_skip fills closing:stamped
+        entries, then is_stale sees them as ahead of the plan → wipes everything."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        from close_progress import update_close_progress, read_close_progress, write_close_progress
+
+        update_close_progress(tmp_path, "trajectory", "done")
+        update_close_progress(tmp_path, "_branch", "issue-238-test")
+        update_close_progress(tmp_path, "rebase:work", "done")
+        update_close_progress(tmp_path, "rebase:ledger", "done")
+
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nbranch: issue-238-test\nstate: closing:promoted\n")
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- work (primary)\n- engine\n- ledger\n")
+        for repo in ("work", "engine", "ledger"):
+            d = slot_dir / repo
+            d.mkdir()
+            (d / ".git").mkdir()
+
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_dir / "work"),
+            "branch": "issue-238-test", "base_branch": "main",
+            "meta_state": "closing:stamped",
+            "plan_path": str(plan),
+            "in_slot": "yes",
+            "slot_path": str(slot_dir),
+            "conflict_resolved": "yes",
+            "conflict_repo": "engine",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("trajectory") == "done", (
+            f"#330: trajectory wiped when meta_state=closing:stamped but plan=closing:promoted. "
+            f"Progress: {progress}"
+        )
+
+    def test_phase_skip_then_conflict_resolved_wipes_trajectory(self, tmp_path, monkeypatch):
+        """#330 REPRODUCTION: Two-call sequence that causes the infinite loop.
+
+        Call 1: LLM passes meta_state=closing:stamped (from a previous output).
+                _phase_skip fills closing:stamped entries and writes to disk.
+                Orchestrator returns trajectory action.
+
+        Call 2: LLM passes conflict_resolved=yes, meta_state=closing:promoted.
+                is_stale reads plan (closing:promoted), sees closing:stamped
+                entries from Call 1 → stale → wipes everything including trajectory.
+        """
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        from close_progress import update_close_progress, read_close_progress
+        from work_end_orchestrator import run_orchestrator
+
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nbranch: issue-238-test\nstate: closing:promoted\n")
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- work (primary)\n- engine\n")
+        for repo in ("work", "engine"):
+            d = slot_dir / repo
+            d.mkdir()
+            (d / ".git").mkdir()
+
+        update_close_progress(tmp_path, "trajectory", "done")
+        update_close_progress(tmp_path, "_branch", "issue-238-test")
+
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_dir / "work"),
+            "branch": "issue-238-test", "base_branch": "main",
+            "meta_state": "closing:stamped",
+            "plan_path": str(plan),
+            "in_slot": "yes",
+            "slot_path": str(slot_dir),
+        })
+
+        progress_after_call1 = read_close_progress(tmp_path)
+        has_stamped_entries = any(
+            k for k in progress_after_call1
+            if k.startswith("close_issues") or k.startswith("verify")
+            or k.startswith("checkout_main")
+        )
+
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_dir / "work"),
+            "branch": "issue-238-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "plan_path": str(plan),
+            "in_slot": "yes",
+            "slot_path": str(slot_dir),
+            "conflict_resolved": "yes",
+            "conflict_repo": "engine",
+        })
+
+        progress_final = read_close_progress(tmp_path)
+        assert progress_final.get("trajectory") == "done", (
+            f"#330 REPRODUCED: trajectory wiped after phase_skip+is_stale interaction. "
+            f"Call 1 had stamped entries: {has_stamped_entries}. "
+            f"Final progress: {progress_final}"
+        )

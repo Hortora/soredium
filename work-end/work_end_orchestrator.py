@@ -1064,7 +1064,13 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     slot_repos = _parse_slot_repos(slot_path) if in_slot and slot_path else []
 
-    progress = _phase_skip(progress, meta_state, workspace,
+    phase_skip_state = meta_state
+    if plan_path and plan_path.exists():
+        from close_progress import _read_plan_state, LIFECYCLE_PHASE_ORDER
+        actual = _read_plan_state(plan_path)
+        if actual and actual in LIFECYCLE_PHASE_ORDER:
+            phase_skip_state = actual
+    progress = _phase_skip(progress, phase_skip_state, workspace,
                            slot_repos=slot_repos or None)
 
     ctx = OrchestratorContext(
