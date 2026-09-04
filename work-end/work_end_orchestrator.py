@@ -699,13 +699,14 @@ def _reconcile(workspace: Path, project: Path,
     for step, status in list(progress.items()):
         if status != "done":
             continue
-        if step.startswith("report_") or step.startswith("fallback_"):
+        if step.startswith("report_") or step.startswith("fallback_") or step.startswith("_"):
             continue
-        if "_attempt" in step or step == "sweep_selected":
+        if "_attempt" in step or step in ("sweep_selected", "last_yielded"):
             continue
         if step in JUDGMENT_STEPS_SET:
             continue
-        step_phase = STEP_TO_PHASE.get(step, "closing:review")
+        base_step = step.split(":")[0] if ":" in step else step
+        step_phase = STEP_TO_PHASE.get(base_step, "closing:review")
         step_idx = LIFECYCLE_PHASE_ORDER.index(step_phase) if step_phase in LIFECYCLE_PHASE_ORDER else 0
         if step_idx >= meta_idx:
             continue

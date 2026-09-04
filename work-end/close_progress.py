@@ -127,6 +127,10 @@ def is_stale(progress: dict[str, str], meta_state: str,
     max_progress_idx = 0
     for step in progress:
         base_step = step.split("_attempt")[0] if "_attempt" in step else step
+        if ":" in base_step:
+            base_step = base_step.split(":")[0]
+        if base_step.startswith("_") or base_step in ("last_yielded", "sweep_selected"):
+            continue
         phase = STEP_TO_PHASE.get(base_step, "closing:review")
         if phase in LIFECYCLE_PHASE_ORDER:
             idx = LIFECYCLE_PHASE_ORDER.index(phase)

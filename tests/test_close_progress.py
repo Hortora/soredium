@@ -130,3 +130,31 @@ class TestIsStale:
         """Backward compat: no plan_path means trust meta_state argument."""
         progress = {"review": "done", "promote": "done", "land": "done"}
         assert is_stale(progress, "closing:review") is True
+
+    def test_per_repo_keys_resolve_to_base_step_phase(self):
+        """#332: rebase:engine should map to rebase (closing:promoted), not default."""
+        progress = {
+            "trajectory": "done",
+            "rebase:work": "done",
+            "rebase:engine": "done",
+            "_branch": "issue-238-test",
+        }
+        assert is_stale(progress, "closing:promoted") is False
+
+    def test_per_repo_keys_detect_genuine_staleness(self):
+        """#332: per-repo keys from a later phase should still detect staleness."""
+        progress = {
+            "close_issues:work": "done",
+            "close_issues:engine": "done",
+        }
+        assert is_stale(progress, "closing:promoted") is True
+
+    def test_metadata_keys_ignored(self):
+        """#332: _branch, last_yielded, sweep_selected are metadata, not steps."""
+        progress = {
+            "trajectory": "done",
+            "_branch": "issue-238-test",
+            "last_yielded": "squash",
+            "sweep_selected": "forage,protocol",
+        }
+        assert is_stale(progress, "closing:promoted") is False
