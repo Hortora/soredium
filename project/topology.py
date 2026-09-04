@@ -122,11 +122,17 @@ def resolve(cwd: str | None = None) -> Topology:
 
     project_str = cwd_root
     workspace_str = cwd_root
+    _cwd_resolved = Path(cwd_root).resolve()
     if proj_symlink.exists() or proj_symlink.is_symlink():
         resolved = _resolve_symlink_target(proj_symlink)
-        if resolved:
+        if resolved and Path(resolved).resolve() != _cwd_resolved:
             workspace_str = cwd_root
             project_str = resolved
+        elif (wksp_symlink.exists() or wksp_symlink.is_symlink()):
+            resolved = _resolve_symlink_target(wksp_symlink)
+            if resolved:
+                project_str = cwd_root
+                workspace_str = resolved
     elif wksp_symlink.exists() or wksp_symlink.is_symlink():
         resolved = _resolve_symlink_target(wksp_symlink)
         if resolved:

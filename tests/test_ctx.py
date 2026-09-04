@@ -97,6 +97,28 @@ class TestPathResolution:
         assert Path(out["PROJECT"]).resolve() == project.resolve()
         assert Path(out["WORKSPACE"]).resolve() == workspace.resolve()
 
+    def test_self_referencing_proj_falls_through_to_wksp(self, tmp_path):
+        """proj -> . (self-reference) is skipped; wksp used instead."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "proj").symlink_to(".")
+        (project / "wksp").symlink_to(workspace)
+
+        data = parse(run_ctx(project))
+
+        assert data["WORKSPACE"] == str(workspace)
+        assert data["PROJECT"] == str(project)
+        assert data["SINGLE_REPO"] == "no"
+
+    def test_self_referencing_proj_without_wksp_is_single(self, tmp_path):
+        """proj -> . with no wksp → single-repo mode."""
+        repo = init_repo(tmp_path / "repo")
+        (repo / "proj").symlink_to(".")
+
+        data = parse(run_ctx(repo))
+
+        assert data["SINGLE_REPO"] == "yes"
+
     def test_current_branch_captured(self, tmp_path):
         """CURRENT_BRANCH reflects the active git branch."""
         repo = init_repo(tmp_path / "project")

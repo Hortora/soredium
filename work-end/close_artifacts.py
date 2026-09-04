@@ -142,6 +142,19 @@ def main() -> int:
         print(f"ERROR_DETAIL={project}")
         return 1
 
+    ws_git_root = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if ws_git_root.returncode == 0:
+        workspace = Path(ws_git_root.stdout.strip())
+    proj_git_root = subprocess.run(
+        ["git", "-C", str(project), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if proj_git_root.returncode == 0:
+        project = Path(proj_git_root.stdout.strip())
+
     artifacts = scan_artifacts(scan_source)
     routing = resolve_routing(scan_source)
 
