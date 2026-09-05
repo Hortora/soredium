@@ -33,12 +33,23 @@ def _git_root(path: str | Path) -> str | None:
 class Topology:
     layout: Literal["single", "dual", "slot"]
     project: Path
+    git_root: Path
     workspace: Path
     workspace_root: Path
     slot_dir: Path | None
     primary_repo: str | None
     in_worktree: bool
     main_worktree_root: Path | None
+
+    @property
+    def is_scoped(self) -> bool:
+        return self.project != self.git_root
+
+    @property
+    def scope_rel(self) -> str:
+        if not self.is_scoped:
+            return ""
+        return str(self.project.relative_to(self.git_root))
 
 
 def _resolve_symlink_target(symlink: Path) -> str | None:
@@ -89,6 +100,23 @@ def _detect_slot(project: Path) -> tuple[Path | None, str | None]:
     return slot_dir, primary
 
 
+def _find_symlink_up(start: Path, git_root: Path, name: str) -> Path | None:
+    """Walk from start toward git_root looking for a symlink named 'name'."""
+    check = start.resolve()
+    root = git_root.resolve()
+    while True:
+        candidate = check / name
+        if candidate.is_symlink():
+            return candidate
+        if check == root:
+            break
+        parent = check.parent
+        if parent == check:
+            break
+        check = parent
+    return None
+
+
 def resolve(cwd: str | None = None) -> Topology:
     if cwd is None:
         cwd = os.getcwd()
@@ -96,6 +124,9 @@ def resolve(cwd: str | None = None) -> Topology:
     cwd_root = _run("git", "rev-parse", "--show-toplevel", cwd=cwd)
     if not cwd_root:
         raise RuntimeError("Not in a git repository")
+
+    cwd_path = Path(cwd).resolve()
+    cwd_git_root = Path(cwd_root).resolve()
 
     wt_output = _run("git", "worktree", "list", "--porcelain", cwd=cwd)
     main_wt_root = None
@@ -107,37 +138,52 @@ def resolve(cwd: str | None = None) -> Topology:
 
     in_worktree = bool(
         main_wt_root
-        and Path(main_wt_root).resolve() != Path(cwd_root).resolve()
+        and Path(main_wt_root).resolve() != cwd_git_root
     )
     main_worktree_path = Path(main_wt_root) if in_worktree and main_wt_root else None
 
-    # In a worktree, check CWD first — slot worktrees have their own wksp
-    if in_worktree:
-        cwd_wksp = Path(cwd_root) / "wksp"
-        symlink_root = Path(cwd_root) if (cwd_wksp.is_symlink() and cwd_wksp.is_dir()) else main_worktree_path
-    else:
-        symlink_root = Path(cwd_root)
-    proj_symlink = symlink_root / "proj"
-    wksp_symlink = symlink_root / "wksp"
+    project_str = str(cwd_git_root)
+    workspace_str = str(cwd_git_root)
 
-    project_str = cwd_root
-    workspace_str = cwd_root
-    _cwd_resolved = Path(cwd_root).resolve()
-    if proj_symlink.exists() or proj_symlink.is_symlink():
-        resolved = _resolve_symlink_target(proj_symlink)
-        if resolved and Path(resolved).resolve() != _cwd_resolved:
-            workspace_str = cwd_root
-            project_str = resolved
-        elif (wksp_symlink.exists() or wksp_symlink.is_symlink()):
+    if in_worktree:
+        # Worktree: check worktree root first, then main worktree
+        cwd_wksp = cwd_git_root / "wksp"
+        symlink_root = cwd_git_root if (cwd_wksp.is_symlink() and cwd_wksp.is_dir()) else main_worktree_path
+        proj_symlink = symlink_root / "proj"
+        wksp_symlink = symlink_root / "wksp"
+
+        if proj_symlink.exists() or proj_symlink.is_symlink():
+            resolved = _resolve_symlink_target(proj_symlink)
+            if resolved and Path(resolved).resolve() != Path(str(symlink_root)).resolve():
+                workspace_str = str(symlink_root)
+                project_str = resolved
+            elif wksp_symlink.exists() or wksp_symlink.is_symlink():
+                resolved = _resolve_symlink_target(wksp_symlink)
+                if resolved:
+                    project_str = str(symlink_root)
+                    workspace_str = resolved
+        elif wksp_symlink.exists() or wksp_symlink.is_symlink():
             resolved = _resolve_symlink_target(wksp_symlink)
             if resolved:
-                project_str = cwd_root
+                project_str = str(symlink_root)
                 workspace_str = resolved
-    elif wksp_symlink.exists() or wksp_symlink.is_symlink():
-        resolved = _resolve_symlink_target(wksp_symlink)
-        if resolved:
-            project_str = cwd_root
-            workspace_str = resolved
+    else:
+        # Non-worktree: walk up from CWD toward git root looking for symlinks
+        wksp_sym = _find_symlink_up(cwd_path, cwd_git_root, "wksp")
+        proj_sym = _find_symlink_up(cwd_path, cwd_git_root, "proj")
+
+        if wksp_sym:
+            resolved = _resolve_symlink_target(wksp_sym)
+            if resolved:
+                project_str = str(wksp_sym.parent.resolve())
+                workspace_str = resolved
+        elif proj_sym:
+            resolved = _resolve_symlink_target(proj_sym)
+            if resolved and Path(resolved).resolve() != cwd_path:
+                workspace_str = str(proj_sym.parent.resolve())
+                project_str = resolved
+            elif not resolved:
+                pass  # broken symlink — fall through to defaults
 
     project = Path(project_str).resolve()
     workspace = Path(workspace_str).resolve()
@@ -147,6 +193,10 @@ def resolve(cwd: str | None = None) -> Topology:
     else:
         ws_root_str = _git_root(workspace)
         workspace_root = Path(ws_root_str).resolve() if ws_root_str else workspace
+
+    # Derive git_root from the resolved project path
+    proj_git_root_str = _git_root(project)
+    git_root = Path(proj_git_root_str).resolve() if proj_git_root_str else cwd_git_root
 
     slot_dir, primary_repo = _detect_slot(project)
     if slot_dir:
@@ -159,6 +209,7 @@ def resolve(cwd: str | None = None) -> Topology:
     return Topology(
         layout=layout,
         project=project,
+        git_root=git_root,
         workspace=workspace,
         workspace_root=workspace_root,
         slot_dir=slot_dir,

@@ -163,6 +163,100 @@ class TestTopologyResolve:
         assert topo.layout == "dual"
         assert topo.workspace == workspace.resolve()
 
+    # -- git_root field and computed properties --
+
+    def test_single_repo_git_root_equals_project(self, tmp_path):
+        repo = init_repo(tmp_path / "repo")
+        topo = _resolve(str(repo))
+        assert topo.git_root == repo.resolve()
+        assert topo.git_root == topo.project
+        assert topo.is_scoped is False
+        assert topo.scope_rel == ""
+
+    def test_dual_repo_git_root_equals_project(self, tmp_path):
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+        topo = _resolve(str(project))
+        assert topo.git_root == project.resolve()
+        assert topo.git_root == topo.project
+        assert topo.is_scoped is False
+
+    def test_slot_has_git_root(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "110"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 110 — test\n\n## Repos\n- engine (primary)\n- platform\n"
+        )
+        project = init_repo(slot_dir / "engine")
+        workspace = init_repo(slot_dir / "work")
+        subdir = workspace / "engine"
+        subdir.mkdir()
+        (project / "wksp").symlink_to("../work/engine")
+        topo = _resolve(str(project))
+        assert topo.git_root == project.resolve()
+
+    # -- Subfolder scoping --
+
+    def test_wksp_at_subfolder_resolves_project_to_subfolder(self, tmp_path):
+        repo = init_repo(tmp_path / "quarkmind")
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        workspace = init_repo(tmp_path / "quarkmind-foo")
+        (app / "wksp").symlink_to(workspace)
+        topo = _resolve(str(app))
+        assert topo.project == app.resolve()
+        assert topo.git_root == repo.resolve()
+        assert topo.workspace == workspace.resolve()
+        assert topo.layout == "dual"
+        assert topo.is_scoped is True
+        assert topo.scope_rel == "apps/foo"
+
+    def test_walkup_finds_wksp_from_nested_cwd(self, tmp_path):
+        repo = init_repo(tmp_path / "quarkmind")
+        app = repo / "apps" / "foo"
+        deep = app / "src" / "main"
+        deep.mkdir(parents=True)
+        workspace = init_repo(tmp_path / "quarkmind-foo")
+        (app / "wksp").symlink_to(workspace)
+        topo = _resolve(str(deep))
+        assert topo.project == app.resolve()
+        assert topo.git_root == repo.resolve()
+        assert topo.workspace == workspace.resolve()
+
+    def test_walkup_stops_at_git_root(self, tmp_path):
+        outer = init_repo(tmp_path / "outer")
+        inner_dir = outer / "inner"
+        inner_dir.mkdir()
+        topo = _resolve(str(inner_dir))
+        assert topo.project == outer.resolve()
+        assert topo.git_root == outer.resolve()
+        assert topo.layout == "single"
+
+    def test_subfolder_wksp_takes_precedence_over_root_wksp(self, tmp_path):
+        repo = init_repo(tmp_path / "quarkmind")
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        root_workspace = init_repo(tmp_path / "root-ws")
+        app_workspace = init_repo(tmp_path / "app-ws")
+        (repo / "wksp").symlink_to(root_workspace)
+        (app / "wksp").symlink_to(app_workspace)
+        topo = _resolve(str(app))
+        assert topo.project == app.resolve()
+        assert topo.workspace == app_workspace.resolve()
+
+    def test_proj_symlink_to_subfolder_preserves_scope(self, tmp_path):
+        repo = init_repo(tmp_path / "quarkmind")
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        workspace = init_repo(tmp_path / "quarkmind-foo")
+        (workspace / "proj").symlink_to(app)
+        topo = _resolve(str(workspace))
+        assert topo.project == app.resolve()
+        assert topo.git_root == repo.resolve()
+        assert topo.workspace == workspace.resolve()
+        assert topo.is_scoped is True
+
 
 class TestFindDesignFile:
 

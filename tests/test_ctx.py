@@ -1542,3 +1542,93 @@ class TestCtxResolve:
         ctx.resolve(cwd=str(PROJECT_ROOT))
         captured = capsys.readouterr()
         assert captured.out == ""
+
+
+class TestSubfolderScope:
+    """Test subfolder-scoped workspace resolution."""
+
+    def test_git_root_emitted_for_single_repo(self, tmp_path):
+        repo = init_repo(tmp_path / "repo", claude_md=(
+            "# CLAUDE.md\n\n## Project Type\n\n**Type:** java\n"
+        ))
+        result = run_ctx(repo)
+        data = parse(result)
+        assert result.returncode == 0
+        assert data["GIT_ROOT"] == data["PROJECT"]
+
+    def test_scope_claude_md_wins_over_root(self, tmp_path):
+        repo = init_repo(tmp_path / "quarkmind", claude_md=(
+            "# CLAUDE.md\n\n## Project Type\n\n**Type:** generic\n"
+            "\n## Work Tracking\n\nIssue tracking: enabled\n"
+            "GitHub repo: Org/quarkmind\n"
+        ))
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        (app / "CLAUDE.md").write_text(
+            "# CLAUDE.md\n\n## Project Type\n\n**Type:** java\n"
+        )
+        workspace = init_repo(tmp_path / "quarkmind-foo")
+        (app / "wksp").symlink_to(workspace)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add app"],
+                       cwd=str(repo), capture_output=True)
+        result = run_ctx(app)
+        data = parse(result)
+        assert data["PROJECT_TYPE"] == "java"
+        assert data["GIT_ROOT"] == str(repo.resolve())
+        assert data["PROJECT"] == str(app.resolve())
+
+    def test_root_fills_gap_when_scope_missing_field(self, tmp_path):
+        repo = init_repo(tmp_path / "quarkmind", claude_md=(
+            "# CLAUDE.md\n\n## Project Type\n\n**Type:** generic\n"
+            "\n## Work Tracking\n\nIssue tracking: enabled\n"
+            "GitHub repo: Org/quarkmind\n"
+        ))
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        (app / "CLAUDE.md").write_text(
+            "# CLAUDE.md\n\n## Project Type\n\n**Type:** java\n"
+        )
+        workspace = init_repo(tmp_path / "quarkmind-foo")
+        (app / "wksp").symlink_to(workspace)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add app"],
+                       cwd=str(repo), capture_output=True)
+        result = run_ctx(app)
+        data = parse(result)
+        assert data["OWNER_REPO"] == "Org/quarkmind"
+        assert data["ISSUES_STATUS"] == "enabled"
+
+    def test_empty_scope_field_not_overridden_by_root(self, tmp_path):
+        repo = init_repo(tmp_path / "quarkmind", claude_md=(
+            "# CLAUDE.md\n\n## Project Type\n\n**Type:** generic\n"
+            "**Name:** quarkmind\n"
+        ))
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        (app / "CLAUDE.md").write_text(
+            "# CLAUDE.md\n\n## Project Type\n\n**Type:** java\n"
+            "**Name:** foo\n"
+        )
+        workspace = init_repo(tmp_path / "quarkmind-foo")
+        (app / "wksp").symlink_to(workspace)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "add app"],
+                       cwd=str(repo), capture_output=True)
+        result = run_ctx(app)
+        data = parse(result)
+        assert data["PROJECT_NAME"] == "foo"
+
+    def test_single_repo_regression_output_unchanged(self, tmp_path):
+        repo = init_repo(tmp_path / "repo", claude_md=(
+            "# CLAUDE.md\n\n## Project Type\n\n**Type:** java\n**Stage:** pre-release\n"
+            "\n## Work Tracking\n\nIssue tracking: enabled\n"
+            "GitHub repo: Org/repo\n"
+        ))
+        result = run_ctx(repo)
+        data = parse(result)
+        assert data["GIT_ROOT"] == data["PROJECT"]
+        assert data["PROJECT_TYPE"] == "java"
+        assert data["OWNER_REPO"] == "Org/repo"
+        assert data["ISSUES_STATUS"] == "enabled"
+        assert data["CLAUDE_OK"] == "yes"

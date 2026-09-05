@@ -95,46 +95,67 @@ def resolve(cwd=None) -> dict[str, str]:
         except ImportError:
             pass
 
-    # CLAUDE.md — ALL fields from topo.project (F2/F5 fix)
-    claude_md = topo.project / "CLAUDE.md"
-    claude_text = claude_md.read_text() if claude_md.exists() else ""
-    claude_text_clean = claude_text.replace("**", "")
+    # CLAUDE.md — scope-wins merge with root fallback
+    scope_md = topo.project / "CLAUDE.md"
+    scope_text = scope_md.read_text() if scope_md.exists() else ""
+    scope_text_clean = scope_text.replace("**", "")
 
-    m = re.search(r"GitHub repo:\s*(\S+)", claude_text_clean)
+    root_md = topo.git_root / "CLAUDE.md"
+    root_text = root_md.read_text() if (root_md.exists() and root_md.resolve() != scope_md.resolve()) else ""
+    root_text_clean = root_text.replace("**", "")
+
+    claude_text = scope_text
+    claude_text_clean = scope_text_clean
+
+    def _merge_search(pattern: str, *texts: str, flags: int = 0) -> re.Match | None:
+        for t in texts:
+            m = re.search(pattern, t, flags)
+            if m is not None:
+                return m
+        return None
+
+    m = _merge_search(r"GitHub repo:\s*(\S+)", scope_text_clean, root_text_clean)
     owner_repo = m.group(1) if m else ""
 
-    m = re.search(r"Project base branch:\s*`([^`]+)`", claude_text_clean)
+    m = _merge_search(r"Project base branch:\s*`([^`]+)`", scope_text_clean, root_text_clean)
     base_branch = m.group(1) if m else "main"
 
     state = ws_detect(topo, base_branch=base_branch)
 
-    claude_ok = "yes" if "## Project Type" in claude_text else "no"
+    claude_ok = "yes" if ("## Project Type" in scope_text or "## Project Type" in root_text) else "no"
 
     project_type = ""
     maturity_stage = "pre-release"
-    if "## Project Type" in claude_text:
-        m = re.search(r"(?:^type:\s*|^\*\*Type:\*\*\s*)(.+)", claude_text, re.MULTILINE)
-        if m:
-            project_type = re.sub(r'\s*,\s*', ',', m.group(1).strip())
-        m = re.search(r"(?:^stage:\s*|^\*\*Stage:\*\*\s*)(\S+)", claude_text, re.MULTILINE)
-        if m:
-            maturity_stage = m.group(1).lower()
+    for _pt_text in [scope_text, root_text]:
+        if not project_type and "## Project Type" in _pt_text:
+            m = re.search(r"(?:^type:\s*|^\*\*Type:\*\*\s*)(.+)", _pt_text, re.MULTILINE)
+            if m:
+                project_type = re.sub(r'\s*,\s*', ',', m.group(1).strip())
+        if maturity_stage == "pre-release":
+            m = re.search(r"(?:^stage:\s*|^\*\*Stage:\*\*\s*)(\S+)", _pt_text, re.MULTILINE)
+            if m:
+                maturity_stage = m.group(1).lower()
 
     issues_status = "absent"
-    if "Issue tracking: enabled" in claude_text_clean:
-        issues_status = "enabled"
-    elif "Issue tracking: declined" in claude_text_clean:
-        issues_status = "declined"
+    for _is_text in [scope_text_clean, root_text_clean]:
+        if issues_status == "absent":
+            if "Issue tracking: enabled" in _is_text:
+                issues_status = "enabled"
+            elif "Issue tracking: declined" in _is_text:
+                issues_status = "declined"
 
     github_project = ""
-    m = re.search(r"GitHub project:\s*(\S+)", claude_text_clean)
+    m = _merge_search(r"GitHub project:\s*(\S+)", scope_text_clean, root_text_clean)
     if m:
         github_project = m.group(1)
 
-    # Workspace setup checks — symlinks at CWD (not project)
+    # Workspace setup checks — project scope first, then CWD
     cwd_path = Path(cwd) if cwd else Path.cwd()
-    wksp_ok = (cwd_path / "wksp").is_symlink() and (cwd_path / "wksp").is_dir()
-    proj_ok = (cwd_path / "proj").is_symlink() and (cwd_path / "proj").is_dir()
+    scope_path = topo.project
+    wksp_ok = (scope_path / "wksp").is_symlink() and (scope_path / "wksp").is_dir()
+    proj_ok = (scope_path / "proj").is_symlink() and (scope_path / "proj").is_dir()
+    wksp_ok = wksp_ok or ((cwd_path / "wksp").is_symlink() and (cwd_path / "wksp").is_dir())
+    proj_ok = proj_ok or ((cwd_path / "proj").is_symlink() and (cwd_path / "proj").is_dir())
     if topo.in_worktree and topo.main_worktree_root:
         _main = topo.main_worktree_root
         wksp_ok = wksp_ok or ((_main / "wksp").is_symlink() and (_main / "wksp").is_dir())
@@ -143,7 +164,7 @@ def resolve(cwd=None) -> dict[str, str]:
     # the target is not in a git repo — the symlink is broken
     if wksp_ok and topo.layout == "single" and not (cwd_path / "proj").is_symlink():
         wksp_ok = False
-    wksp_declined = "workspace: declined" in claude_text
+    wksp_declined = "workspace: declined" in scope_text or "workspace: declined" in root_text
     workspace_ok = "yes" if (wksp_ok or proj_ok or wksp_declined) else "no"
 
     # Identity — from .plan's ## State section (via plan_manager.detect)
@@ -216,8 +237,8 @@ def resolve(cwd=None) -> dict[str, str]:
 
     # File existence — check project, workspace, AND workspace_root (F5)
     has_arc42stories = "yes" if (topo.project / "ARC42STORIES.MD").exists() else "no"
-    has_project_artifacts = "yes" if "## Project Artifacts" in claude_text else "no"
-    workspace_declined_flag = "yes" if "workspace: declined" in claude_text else "no"
+    has_project_artifacts = "yes" if ("## Project Artifacts" in scope_text or "## Project Artifacts" in root_text) else "no"
+    workspace_declined_flag = "yes" if ("workspace: declined" in scope_text or "workspace: declined" in root_text) else "no"
 
     has_platform_doc = _check_file(
         topo.project / "docs" / "PLATFORM.md",
@@ -235,7 +256,7 @@ def resolve(cwd=None) -> dict[str, str]:
     has_sources = "yes" if sources_path_obj.exists() else "no"
     sources_path = str(sources_path_obj) if sources_path_obj.exists() else ""
 
-    m = re.search(r"\*\*Blog directory:\*\*\s*`([^`]+)`", claude_text)
+    m = _merge_search(r"\*\*Blog directory:\*\*\s*`([^`]+)`", scope_text, root_text)
     blog_dir = m.group(1) if m else ""
     if blog_dir and topo.slot_dir:
         expanded = Path(blog_dir).expanduser()
@@ -252,18 +273,20 @@ def resolve(cwd=None) -> dict[str, str]:
         topo.workspace_root / "blog-routing.yaml",
     )
 
-    m = re.search(r"\*\*Name:\*\*\s*(\S+)", claude_text)
+    m = _merge_search(r"\*\*Name:\*\*\s*(\S+)", scope_text, root_text)
     project_name = m.group(1) if m else ""
 
+    _combined_text = scope_text + root_text
     has_writing_style_ref = "yes" if (
-        re.search(r"writing[\s_-]?style.*\.md", claude_text, re.IGNORECASE)
-        or "blog-technical" in claude_text.lower()
+        re.search(r"writing[\s_-]?style.*\.md", _combined_text, re.IGNORECASE)
+        or "blog-technical" in _combined_text.lower()
     ) else "no"
 
     return {
         # Topology fields
         "WORKSPACE": workspace,
         "PROJECT": project,
+        "GIT_ROOT": str(topo.git_root),
         "SINGLE_REPO": "yes" if single_repo else "no",
         "IN_WORKTREE": "yes" if topo.in_worktree else "no",
         "MAIN_WORKTREE_ROOT": str(topo.main_worktree_root) if topo.main_worktree_root else "",

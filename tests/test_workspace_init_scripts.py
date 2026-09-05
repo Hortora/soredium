@@ -545,3 +545,95 @@ class TestHookInstallErrors:
         result = run_hook("install", tmp_path / "nonexistent",
                           "hook-src=/tmp/x", "hook-name=pre-push")
         assert result.returncode == 1
+
+
+# ===========================================================================
+# workspace_create.py — subfolder detection
+# ===========================================================================
+
+class TestDetectSubfolder:
+
+    def _load(self):
+        ws_init_dir = str(Path(__file__).parent.parent / "workspace-init")
+        if ws_init_dir not in sys.path:
+            sys.path.insert(0, ws_init_dir)
+        import importlib, workspace_create
+        importlib.reload(workspace_create)
+        return workspace_create
+
+    def test_cwd_is_git_root_returns_none(self, tmp_path):
+        repo = tmp_path / "repo"
+        init_git(repo)
+        mod = self._load()
+        assert mod.detect_subfolder(repo) is None
+
+    def test_cwd_inside_repo_returns_info(self, tmp_path):
+        repo = tmp_path / "quarkmind"
+        init_git(repo)
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        mod = self._load()
+        result = mod.detect_subfolder(app)
+        assert result is not None
+        assert result["app_dir"] == app.resolve()
+        assert result["git_root"] == repo.resolve()
+        assert result["app_name"] == "foo"
+        assert result["repo_name"] == "quarkmind"
+
+    def test_not_in_git_returns_none(self, tmp_path):
+        nogit = tmp_path / "noproject"
+        nogit.mkdir()
+        mod = self._load()
+        assert mod.detect_subfolder(nogit) is None
+
+
+class TestEnsureWorkspaceSubfolder:
+
+    def _load(self):
+        ws_init_dir = str(Path(__file__).parent.parent / "workspace-init")
+        if ws_init_dir not in sys.path:
+            sys.path.insert(0, ws_init_dir)
+        import importlib, workspace_create
+        importlib.reload(workspace_create)
+        return workspace_create
+
+    def test_subfolder_workspace_creation(self, tmp_path):
+        repo = tmp_path / "quarkmind"
+        init_git(repo)
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        home = tmp_path / "home"
+        home.mkdir()
+        mod = self._load()
+        ws = mod.ensure_workspace(app, home_override=home)
+        assert ws.exists()
+        assert ws.name == "quarkmind-foo"
+        assert (ws / "proj").is_symlink()
+        assert (ws / "proj").resolve() == app.resolve()
+        assert (app / "wksp").is_symlink()
+        assert (app / "wksp").resolve() == ws.resolve()
+
+    def test_subfolder_git_info_exclude_updated(self, tmp_path):
+        repo = tmp_path / "quarkmind"
+        init_git(repo)
+        app = repo / "apps" / "foo"
+        app.mkdir(parents=True)
+        home = tmp_path / "home"
+        home.mkdir()
+        mod = self._load()
+        mod.ensure_workspace(app, home_override=home)
+        exclude = repo / ".git" / "info" / "exclude"
+        assert exclude.exists()
+        assert "apps/foo/wksp" in exclude.read_text()
+
+    def test_root_project_not_affected(self, tmp_path):
+        repo = tmp_path / "repo"
+        init_git(repo)
+        home = tmp_path / "home"
+        home.mkdir()
+        mod = self._load()
+        ws = mod.ensure_workspace(repo, home_override=home)
+        assert ws.exists()
+        exclude = repo / ".git" / "info" / "exclude"
+        if exclude.exists():
+            assert "/wksp" not in exclude.read_text() or "repo/wksp" not in exclude.read_text()

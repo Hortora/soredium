@@ -62,6 +62,30 @@ STUB_FILES: dict[str, str] = {
 }
 
 
+def detect_subfolder(cwd: Path) -> dict | None:
+    """Check if cwd is inside a git repo but not the root.
+
+    Returns None if cwd IS the git root or not in a git repo.
+    Returns dict with app_dir, git_root, app_name, repo_name if subfolder.
+    """
+    cwd_resolved = cwd.resolve()
+    result = subprocess.run(
+        ["git", "-C", str(cwd_resolved), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    git_root = Path(result.stdout.strip()).resolve()
+    if git_root == cwd_resolved:
+        return None
+    return {
+        "app_dir": cwd_resolved,
+        "git_root": git_root,
+        "app_name": cwd_resolved.name,
+        "repo_name": git_root.name,
+    }
+
+
 def resolve_workspace(project: Path) -> Path | None:
     """Derive the canonical workspace path for a project.
 
@@ -92,12 +116,16 @@ def resolve_workspace(project: Path) -> Path | None:
     return None
 
 
-def ensure_workspace(project: Path) -> Path:
+def ensure_workspace(project: Path, home_override: Path | None = None) -> Path:
     """Find or create the canonical workspace for a project.
 
     If a valid workspace exists, returns it. If not, creates one at
     ~/claude/public/<parent>/<project>/ with git init, standard dirs,
     .workspace marker, and bidirectional symlinks.
+
+    For subfolder projects (project is inside a git repo but not the
+    root), creates the workspace under <repo-name>-<app-name>/ and
+    adds the wksp symlink to .git/info/exclude.
     """
     existing = resolve_workspace(project)
     if existing:
@@ -106,9 +134,17 @@ def ensure_workspace(project: Path) -> Path:
             write_workspace_marker(existing, project)
         return existing
 
-    parent_name = project.resolve().parent.name
-    project_name = project.resolve().name
-    workspace = Path.home() / "claude" / "public" / parent_name / project_name
+    home = home_override or Path.home()
+    subfolder = detect_subfolder(project)
+
+    if subfolder:
+        parent_name = subfolder["repo_name"]
+        workspace_name = f"{subfolder['repo_name']}-{subfolder['app_name']}"
+    else:
+        parent_name = project.resolve().parent.name
+        workspace_name = project.resolve().name
+
+    workspace = home / "claude" / "public" / parent_name / workspace_name
     workspace.mkdir(parents=True, exist_ok=True)
 
     cmd_create_dirs(workspace)
@@ -133,6 +169,16 @@ def ensure_workspace(project: Path) -> Path:
         wksp_link.unlink()
     rel_to_workspace = os.path.relpath(workspace.resolve(), project.resolve())
     wksp_link.symlink_to(rel_to_workspace)
+
+    if subfolder:
+        git_root = subfolder["git_root"]
+        exclude_file = git_root / ".git" / "info" / "exclude"
+        exclude_file.parent.mkdir(parents=True, exist_ok=True)
+        rel_wksp = str(project.resolve().relative_to(git_root)) + "/wksp"
+        existing_excludes = exclude_file.read_text() if exclude_file.exists() else ""
+        if rel_wksp not in existing_excludes:
+            with open(exclude_file, "a") as f:
+                f.write(f"{rel_wksp}\n")
 
     return workspace
 
