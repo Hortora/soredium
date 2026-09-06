@@ -208,9 +208,8 @@ def verify_landed_shas(slot_dir: Path, family_root: Path) -> tuple[bool, list[st
         if not original.is_dir():
             failures.append(f"{repo_name}: original repo not found at {original}")
             continue
-        run_cmd(["git", "-C", str(original), "fetch", "origin", "main"])
         rc, _, _ = run_cmd([
-            "git", "-C", str(original), "merge-base", "--is-ancestor", sha, "origin/main",
+            "git", "-C", str(original), "merge-base", "--is-ancestor", sha, "main",
         ])
         if rc != 0:
             failures.append(f"{repo_name}: SHA {sha[:12]} not reachable from main")

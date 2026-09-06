@@ -338,6 +338,30 @@ class TestVerifyLandedShas:
         assert ok is False
         assert "unknown" in failures[0]
 
+    def test_passes_when_on_local_main_but_not_pushed(self, tmp_path):
+        """SHA on local main but NOT on origin/main should still pass."""
+        from slot_core import run_cmd
+        from slot_test_helpers import init_repo_with_remote
+        family = tmp_path / "family"
+        family.mkdir()
+        (family / "slots").mkdir()
+        original = init_repo_with_remote(family / "engine")
+        slot = family / "slots" / "1"
+        slot.mkdir()
+
+        (original / "feature.txt").write_text("feature\n")
+        run_cmd(["git", "-C", str(original), "add", "."])
+        run_cmd(["git", "-C", str(original), "commit", "-m", "feat: feature"])
+        _, sha, _ = run_cmd(["git", "-C", str(original), "rev-parse", "HEAD"])
+        sha = sha.strip()
+        # Deliberately do NOT push to origin — SHA is local-only
+
+        (slot / ".landed").write_text(
+            f"branch=issue-42-test\nrepos=engine\nlanded_shas=engine:{sha}\n"
+        )
+        ok, failures = slot_metadata.verify_landed_shas(slot, family)
+        assert ok is True, f"Should pass with local-only SHA, got failures: {failures}"
+
 
 class TestReadPromotionStamp:
     """Tests for _read_promotion_stamp helper."""
