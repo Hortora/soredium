@@ -61,6 +61,33 @@ def check_branch_stamped(project: str, branch: str) -> dict:
     return {"status": "fail", "detail": f"tip is: {msg[:60]}"}
 
 
+def _find_tree_on_ref(repo: str, tree_sha: str, ref: str, max_commits: int = 50) -> str | None:
+    """Find a commit on ref with the given tree SHA. Returns commit SHA or None."""
+    result = git(repo, "log", ref, f"--format=%H %T", f"--max-count={max_commits}")
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.strip().splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == tree_sha:
+            return parts[0]
+    return None
+
+
+def _verify_sha_on_ref(repo: str, sha: str, ref: str) -> dict:
+    """Check if sha is on ref — tries direct ancestry first, then tree-SHA fallback."""
+    direct = git(repo, "merge-base", "--is-ancestor", sha, ref)
+    if direct.returncode == 0:
+        return {"status": "pass", "detail": f"SHA {sha[:8]} on {ref}"}
+    tree_result = git(repo, "rev-parse", f"{sha}^{{tree}}")
+    if tree_result.returncode != 0:
+        return {"status": "fail", "detail": f"SHA {sha[:8]} not resolvable"}
+    tree_sha = tree_result.stdout.strip()
+    match = _find_tree_on_ref(repo, tree_sha, ref)
+    if match:
+        return {"status": "pass", "detail": f"content on {ref} via tree match ({match[:8]}, landed SHA {sha[:8]} was rebased)"}
+    return {"status": "fail", "detail": f"SHA {sha[:8]} not on {ref} (tree {tree_sha[:8]} not found)"}
+
+
 def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
     result = git(project, "log", "-1", "--format=%s", branch)
     if result.returncode != 0:
@@ -69,11 +96,7 @@ def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
     sha_match = re.search(r"landed as ([0-9a-f]+)", msg)
     if not sha_match:
         return {"status": "warn", "detail": "no landing SHA in stamp (old format)"}
-    sha = sha_match.group(1)
-    verify = git(project, "merge-base", "--is-ancestor", sha, base)
-    if verify.returncode == 0:
-        return {"status": "pass", "detail": f"SHA {sha[:8]} on {base}"}
-    return {"status": "fail", "detail": f"LANDING_SHA {sha[:8]} not on {base}"}
+    return _verify_sha_on_ref(project, sha_match.group(1), base)
 
 
 def check_main_pushed(project: str, base: str = "main") -> dict:
@@ -277,10 +300,20 @@ def check_original_sync(slot_dir: str, repo_name: str, original_path: str) -> di
     if not landed_sha:
         return {"status": "fail", "detail": f"no landed SHA for {repo_name}"}
 
-    result = git(original_path, "merge-base", "--is-ancestor", landed_sha, "main")
-    if result.returncode == 0:
+    clone_path = str(Path(slot_dir) / repo_name)
+    direct = git(original_path, "merge-base", "--is-ancestor", landed_sha, "main")
+    if direct.returncode == 0:
         return {"status": "pass", "detail": f"{repo_name} SHA {landed_sha[:8]} on main"}
-    return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not reachable from main"}
+    tree_result = git(clone_path, "rev-parse", f"{landed_sha}^{{tree}}")
+    if tree_result.returncode != 0:
+        tree_result = git(original_path, "rev-parse", f"{landed_sha}^{{tree}}")
+    if tree_result.returncode != 0:
+        return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not resolvable in clone or original"}
+    tree_sha = tree_result.stdout.strip()
+    match = _find_tree_on_ref(original_path, tree_sha, "main")
+    if match:
+        return {"status": "pass", "detail": f"{repo_name} content on main (tree match via {match[:8]}, SHA {landed_sha[:8]} was rebased)"}
+    return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not reachable from main (tree {tree_sha[:8]} not found)"}
 
 
 def check_slot_archive_status(slot_dir: str, attic_dir: str) -> dict:

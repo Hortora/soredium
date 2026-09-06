@@ -1289,6 +1289,32 @@ def _close_mechanical_error(step: StepDef, ctx: OrchestratorContext,
     return {"ACTION": "user_input", **context}
 
 
+def _final_gate(ctx: OrchestratorContext) -> dict[str, str] | None:
+    """Inescapable verify before ACTION=complete. Runs the verify script
+    mechanically regardless of .close-progress — force_done cannot bypass this."""
+    if ctx.on_main or ctx.dry_run:
+        return None
+    verify_step = next((s for s in STEPS if s.name == "verify"), None)
+    if not verify_step or not verify_step.script_fn:
+        return None
+    cmd = verify_step.script_fn(ctx)
+    if cmd is None:
+        return None
+    result = _run_script(cmd, ctx.workspace, dry_run=False, call_log=ctx.call_log)
+    if result.get("VERIFIED") == "yes":
+        return None
+    failures = []
+    for k, v in result.items():
+        if k.startswith("FAILURE_") or (isinstance(v, str) and "fail" in v.lower()):
+            failures.append(f"{k}={v}")
+    return {
+        "ACTION": "verify_recover",
+        "VERIFIED": "no",
+        "FAILURES": "; ".join(failures) if failures else "final gate verify failed",
+        "REASON": "final-gate: landing must be verified before close completes",
+    }
+
+
 def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
     return run_loop(
         STEPS, ctx,
@@ -1300,6 +1326,7 @@ def _next_action(ctx: OrchestratorContext) -> dict[str, str]:
         on_mechanical_error=_close_mechanical_error,
         user_input_steps=CLOSE_USER_INPUT_STEPS,
         complete_summary="Close complete.",
+        final_gate_fn=_final_gate,
     )
 
 

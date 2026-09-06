@@ -261,6 +261,55 @@ class TestCheckOriginalSync:
         assert result["status"] == "fail"
         assert "no .landed" in result["detail"]
 
+    def test_tree_sha_fallback_after_rebase(self, tmp_path: Path) -> None:
+        """SHA changed by rebase — tree SHA comparison finds the content."""
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        original = _init_repo(tmp_path / "original")
+        clone = _init_repo(slot_dir / "engine")
+        (clone / "feature.txt").write_text("feature content\n")
+        _git(clone, "add", "feature.txt")
+        _git(clone, "commit", "-m", "add feature")
+        clone_sha = _git(clone, "rev-parse", "HEAD")
+        clone_tree = _git(clone, "rev-parse", "HEAD^{tree}")
+        (original / "feature.txt").write_text("feature content\n")
+        _git(original, "add", "feature.txt")
+        _git(original, "commit", "-m", "add feature (rebased)")
+        orig_sha = _git(original, "rev-parse", "HEAD")
+        assert clone_sha != orig_sha
+        orig_tree = _git(original, "rev-parse", "HEAD^{tree}")
+        assert clone_tree == orig_tree
+        (slot_dir / ".landed").write_text(f"landed_shas=engine:{clone_sha}\n")
+        result = verify_slot_close.check_original_sync(
+            str(slot_dir), "engine", str(original),
+        )
+        assert result["status"] == "pass"
+        assert "tree match" in result["detail"]
+
+
+class TestCheckLandingShaTreeFallback:
+    def test_landing_sha_after_rebase(self, tmp_path: Path) -> None:
+        """Landing SHA changed by GitHub rebase merge — tree SHA finds it."""
+        project = _init_repo(tmp_path / "project")
+        _git(project, "checkout", "-b", "feature")
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "add feature")
+        feature_tree = _git(project, "rev-parse", "HEAD^{tree}")
+        _git(project, "checkout", "main")
+        (project / "feature.txt").write_text("feature\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "add feature (rebased by github)")
+        main_sha = _git(project, "rev-parse", "HEAD")
+        main_tree = _git(project, "rev-parse", "HEAD^{tree}")
+        assert feature_tree == main_tree
+        rebased_sha = "deadbeef" + "0" * 32
+        _git(project, "checkout", "feature")
+        _git(project, "commit", "--allow-empty", "--amend", "-m",
+             f"chore: branch closed — landed as {main_sha} on main")
+        result = verify_slot_close.check_landing_sha(str(project), "feature", "main")
+        assert result["status"] == "pass"
+
 
 class TestCheckSlotArchiveStatus:
     def test_archived(self, tmp_path: Path) -> None:

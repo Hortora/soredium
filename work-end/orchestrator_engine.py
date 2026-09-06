@@ -180,6 +180,7 @@ def run_loop(
     on_mechanical_error: Callable | None = None,
     user_input_steps: set[str] | None = None,
     complete_summary: str = "Complete.",
+    final_gate_fn: Callable | None = None,
 ) -> dict[str, str]:
     """Run the orchestrator loop over a step list.
 
@@ -201,6 +202,9 @@ def run_loop(
       through to the default retry/escalate logic.
     - user_input_steps: set of step names that yield via user_input
       (not regular judgment yield).
+    - final_gate_fn(ctx) -> dict|None: inescapable gate before returning
+      complete. Runs regardless of .close-progress. Return None to allow
+      completion, or a result dict to block it (e.g. verify_recover action).
     """
     if user_input_steps is None:
         user_input_steps = set()
@@ -272,6 +276,11 @@ def run_loop(
             update_close_progress(ctx.workspace, step.name, "done")
             ctx.steps_executed.append(step.name)
             continue
+
+    if final_gate_fn:
+        gate_result = final_gate_fn(ctx)
+        if gate_result is not None:
+            return gate_result
 
     return {"ACTION": "complete", "SUMMARY": complete_summary}
 
