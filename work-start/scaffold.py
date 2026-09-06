@@ -50,6 +50,9 @@ if _slot_dir not in sys.path:
 _project_dir = str(Path(__file__).resolve().parent.parent / "project")
 if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
+_soredium_root = str(Path(__file__).resolve().parent.parent)
+if _soredium_root not in sys.path:
+    sys.path.insert(0, _soredium_root)
 from plan_io import parse_covers
 
 
@@ -174,6 +177,14 @@ def main() -> int:
             _conn.close()
         except Exception:
             pass
+
+    from verification.postconditions import pre_work_start
+    vfindings = pre_work_start(workspace, branch=params["branch"])
+    errors = [f for f in vfindings if f.severity == "ERROR"]
+    if errors:
+        for f in errors:
+            print(f"PRECONDITION_FAILED={f.category} {f.message}")
+        return 1
 
     try:
         result = scaffold(

@@ -839,6 +839,7 @@ filtering or dropping commits that touch these paths.
 | `cli/` | CLI entry point (JSON Lines) |
 | `commands/` | Portable command layer (events, registry, command modules) |
 | `registry/` | Ecosystem mining project registry |
+| `verification/` | Shared verification library for lifecycle postconditions |
 
 ---
 

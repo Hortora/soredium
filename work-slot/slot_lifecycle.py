@@ -16,6 +16,9 @@ if _lib.exists():
 _project_dir = str(Path(__file__).resolve().parent.parent / "project")
 if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
+_soredium_root = str(Path(__file__).resolve().parent.parent)
+if _soredium_root not in sys.path:
+    sys.path.insert(0, _soredium_root)
 try:
     import worklog as _wl
 except ImportError:
@@ -296,6 +299,16 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             if ws_clone.is_dir() and ws_claude.exists():
                 for w in validate_claude_md_paths(ws_claude, slot_dir):
                     print(f"WARN=absolute_path_in_claude_md {w}")
+
+        from verification.postconditions import post_create_slot
+        vfindings = post_create_slot(slot_dir)
+        errors = [f for f in vfindings if f.severity == "ERROR"]
+        for f in vfindings:
+            print(f"VERIFY_{f.severity}={f.category} {f.message}")
+        if errors:
+            raise SlotCreationError(
+                f"postcondition_failed: {len(errors)} verification error(s) — "
+                + "; ".join(f.message for f in errors))
     except Exception:
         if slot_dir.exists():
             shutil.rmtree(str(slot_dir), ignore_errors=True)
