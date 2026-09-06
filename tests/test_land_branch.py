@@ -221,6 +221,74 @@ class TestCmdStamp:
         ).stdout.strip()
         assert count_after_first == count_after_second
 
+    def test_restamps_when_sha_stale(self, tmp_path, capsys):
+        project = tmp_path / "project"
+        _init_git(project)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-42-test"], capture_output=True)
+        (project / "code.txt").write_text("code")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat: code"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "rebase", "issue-42-test"], capture_output=True)
+        real_sha = subprocess.run(
+            ["git", "-C", str(project), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        # Write stale stamp
+        subprocess.run(["git", "-C", str(project), "checkout", "issue-42-test"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(project), "commit", "--allow-empty",
+             "-m", "chore: branch closed — landed as deadbeef00000000 on main"],
+            capture_output=True,
+        )
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+
+        result = cmd_stamp(str(project), {"branch": "issue-42-test", "base_branch": "main"})
+        assert result == 0
+
+        log = subprocess.run(
+            ["git", "-C", str(project), "log", "-1", "--format=%s", "issue-42-test"],
+            capture_output=True, text=True,
+        )
+        assert f"landed as {real_sha}" in log.stdout.strip()
+
+        captured = capsys.readouterr()
+        assert "RESTAMP=yes" in captured.out
+
+    def test_restamps_includes_history(self, tmp_path, capsys):
+        project = tmp_path / "project"
+        _init_git(project)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "feature"], capture_output=True)
+        (project / "code.txt").write_text("code")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat: code"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "rebase", "feature"], capture_output=True)
+
+        # Write stale stamp
+        subprocess.run(["git", "-C", str(project), "checkout", "feature"], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(project), "commit", "--allow-empty",
+             "-m", "chore: branch closed — landed as deadbeef00000000 on main"],
+            capture_output=True,
+        )
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+
+        cmd_stamp(str(project), {"branch": "feature", "base_branch": "main"})
+
+        body = subprocess.run(
+            ["git", "-C", str(project), "log", "-1", "--format=%B", "feature"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "stamp-history:" in body
+        assert "deadbeef00000000" in body
+        assert "stale_sha_not_on_base" in body
+
     def test_missing_branch_arg(self, tmp_path, capsys):
         _init_git(tmp_path)
         result = cmd_stamp(str(tmp_path), {"base_branch": "main"})

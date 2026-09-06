@@ -353,6 +353,277 @@ class TestLandBatchProgress:
 
 
 # ---------------------------------------------------------------------------
+# Stamp history helpers
+# ---------------------------------------------------------------------------
+
+
+class TestStampHistory:
+    def test_build_stamp_message_initial(self):
+        from land_flow import _build_stamp_message
+        msg = _build_stamp_message("abc123", "main", "  Refs #42", [])
+        subject, body = msg.split("\n\n", 1)
+        assert subject == "chore: branch closed — landed as abc123 on main  Refs #42"
+        assert "stamp-history:" in body
+        assert "reason=initial" in body
+        assert "sha=abc123" in body
+
+    def test_build_stamp_message_restamp(self):
+        from land_flow import _build_stamp_message
+        prev_history = [
+            {"timestamp": "2026-09-06T10:00:00Z", "sha": "old111", "reason": "initial", "prev": None},
+        ]
+        msg = _build_stamp_message("new222", "main", "", prev_history)
+        subject, body = msg.split("\n\n", 1)
+        assert "landed as new222" in subject
+        assert "sha=old111" in body
+        assert "sha=new222" in body
+        assert "reason=stale_sha_not_on_base" in body
+        assert "prev=old111" in body
+
+    def test_parse_stamp_history_empty_body(self):
+        from land_flow import _parse_stamp_history
+        result = _parse_stamp_history("")
+        assert result == []
+
+    def test_parse_stamp_history_roundtrip(self):
+        from land_flow import _build_stamp_message, _parse_stamp_history
+        msg = _build_stamp_message("abc123", "main", "", [])
+        _, body = msg.split("\n\n", 1)
+        history = _parse_stamp_history(body)
+        assert len(history) == 1
+        assert history[0]["sha"] == "abc123"
+        assert history[0]["reason"] == "initial"
+
+
+# ---------------------------------------------------------------------------
+# Stamp revalidation
+# ---------------------------------------------------------------------------
+
+
+class TestStampRevalidation:
+    def test_restamps_when_sha_stale(self, tmp_path):
+        """If branch has a stamp with a stale SHA, _stamp_repo re-stamps."""
+        from land_flow import RepoDescriptor, Transport, _stamp_repo
+
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-42-test"
+        _add_feature(repo, branch)
+
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True)
+        real_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        subprocess.run(["git", "-C", str(repo), "checkout", branch], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "--allow-empty",
+             "-m", "chore: branch closed — landed as deadbeef00000000 on main"],
+            capture_output=True,
+        )
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+
+        desc = RepoDescriptor(
+            repo_path=repo, original_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        progress = tmp_path / ".progress"
+        result = _stamp_repo(desc, branch, real_sha, progress)
+
+        assert result is True
+        log = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%s", branch],
+            capture_output=True, text=True,
+        )
+        assert f"landed as {real_sha}" in log.stdout.strip()
+
+    def test_restamps_preserves_history(self, tmp_path):
+        """Re-stamp includes history from previous stamp."""
+        from land_flow import RepoDescriptor, Transport, _stamp_repo
+
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-42-test"
+        _add_feature(repo, branch)
+
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True)
+        real_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        subprocess.run(["git", "-C", str(repo), "checkout", branch], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "--allow-empty",
+             "-m", "chore: branch closed — landed as deadbeef00000000 on main\n\nstamp-history:\n- 2026-09-01T00:00:00Z sha=deadbeef00000000 reason=initial\n"],
+            capture_output=True,
+        )
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+
+        desc = RepoDescriptor(
+            repo_path=repo, original_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        progress = tmp_path / ".progress"
+        _stamp_repo(desc, branch, real_sha, progress)
+
+        body = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%B", branch],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert "deadbeef00000000" in body
+        assert f"sha={real_sha}" in body
+        assert "stale_sha_not_on_base" in body
+
+    def test_skips_when_sha_valid(self, tmp_path):
+        """If existing stamp has a valid SHA, skip (no re-stamp)."""
+        from land_flow import RepoDescriptor, Transport, _stamp_repo
+
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-42-test"
+        _add_feature(repo, branch)
+
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True)
+        real_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        subprocess.run(["git", "-C", str(repo), "checkout", branch], capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "--allow-empty",
+             "-m", f"chore: branch closed — landed as {real_sha} on main"],
+            capture_output=True,
+        )
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+
+        desc = RepoDescriptor(
+            repo_path=repo, original_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        progress = tmp_path / ".progress"
+
+        commit_count_before = subprocess.run(
+            ["git", "-C", str(repo), "rev-list", "--count", branch],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        _stamp_repo(desc, branch, real_sha, progress)
+
+        commit_count_after = subprocess.run(
+            ["git", "-C", str(repo), "rev-list", "--count", branch],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert commit_count_before == commit_count_after
+
+    def test_full_squash_invalidation_and_recovery(self, tmp_path):
+        """End-to-end: stamp, squash main, re-stamp detects stale SHA and amends."""
+        from land_flow import RepoDescriptor, Transport, _stamp_repo
+
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-42-test"
+
+        # Create feature branch with 2 commits
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", branch], capture_output=True)
+        (repo / "a.py").write_text("# a\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat: add a"], capture_output=True)
+        (repo / "b.py").write_text("# b\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat: add b"], capture_output=True)
+
+        # Merge to main
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True)
+        sha_a = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        # Initial stamp with SHA-A
+        desc = RepoDescriptor(
+            repo_path=repo, original_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        progress = tmp_path / ".progress"
+        _stamp_repo(desc, branch, sha_a, progress)
+
+        stamp_before = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%s", branch],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert f"landed as {sha_a}" in stamp_before
+
+        # Squash main: reset back, combine into one commit, force push
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "reset", "--soft", "HEAD~2"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat: add a+b (squashed)"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main", "--force-with-lease"], capture_output=True)
+        sha_b = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert sha_a != sha_b  # Squash created a new SHA
+
+        # Re-stamp — should detect stale SHA-A, amend to SHA-B
+        progress2 = tmp_path / ".progress2"
+        _stamp_repo(desc, branch, "ignored", progress2)
+
+        stamp_after = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%s", branch],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert f"landed as {sha_b}" in stamp_after
+        assert "deadbeef" not in stamp_after
+
+        # History should show both SHAs
+        body = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%B", branch],
+            capture_output=True, text=True,
+        ).stdout
+        assert "stamp-history:" in body
+        assert sha_a in body  # original SHA in history
+        assert sha_b in body  # new SHA in history
+        assert "stale_sha_not_on_base" in body
+
+    def test_fresh_sha_capture_overrides_passed_sha(self, tmp_path):
+        """_stamp_repo captures fresh SHA from main, not the passed-in one."""
+        from land_flow import RepoDescriptor, Transport, _stamp_repo
+
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-42-test"
+        _add_feature(repo, branch)
+
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True)
+        real_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+        desc = RepoDescriptor(
+            repo_path=repo, original_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        progress = tmp_path / ".progress"
+        _stamp_repo(desc, branch, "wrong_sha_passed_in", progress)
+
+        log = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%s", branch],
+            capture_output=True, text=True,
+        )
+        assert f"landed as {real_sha}" in log.stdout.strip()
+        assert "wrong_sha_passed_in" not in log.stdout.strip()
+
+
+# ---------------------------------------------------------------------------
 # Error cases
 # ---------------------------------------------------------------------------
 

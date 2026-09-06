@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -540,24 +541,107 @@ def _merge_and_push_direct(
 
 
 # ---------------------------------------------------------------------------
+# Stamp history
+# ---------------------------------------------------------------------------
+
+
+def _build_stamp_message(
+    landed_sha: str, base_branch: str, issue_ref: str,
+    prev_history: list[dict[str, str | None]],
+    reason: str = "",
+) -> str:
+    """Build a stamp commit message with structured history in the body."""
+    subject = f"chore: branch closed — landed as {landed_sha} on {base_branch}{issue_ref}"
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not reason:
+        reason = "stale_sha_not_on_base" if prev_history else "initial"
+    prev_sha = prev_history[-1]["sha"] if prev_history else None
+    new_entry = f"- {ts} sha={landed_sha} reason={reason}"
+    if prev_sha:
+        new_entry += f" prev={prev_sha}"
+    lines = ["stamp-history:"]
+    for h in prev_history:
+        line = f"- {h['timestamp']} sha={h['sha']} reason={h['reason']}"
+        if h.get("prev"):
+            line += f" prev={h['prev']}"
+        lines.append(line)
+    lines.append(new_entry)
+    return subject + "\n\n" + "\n".join(lines) + "\n"
+
+
+def _parse_stamp_history(body: str) -> list[dict[str, str | None]]:
+    """Parse stamp-history block from a commit body."""
+    result: list[dict[str, str | None]] = []
+    in_history = False
+    for line in body.splitlines():
+        if line.strip() == "stamp-history:":
+            in_history = True
+            continue
+        if in_history and line.startswith("- "):
+            entry: dict[str, str | None] = {"timestamp": "", "sha": "", "reason": "", "prev": None}
+            parts = line[2:].split()
+            if parts:
+                entry["timestamp"] = parts[0]
+            for part in parts[1:]:
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    if k in entry:
+                        entry[k] = v
+            result.append(entry)
+        elif in_history and not line.startswith("- "):
+            break
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Stamp
 # ---------------------------------------------------------------------------
 
 def _stamp_repo(
     desc: RepoDescriptor, branch: str, landed_sha: str, progress_file: Path,
 ) -> bool:
-    """Stamp a branch as closed. Returns True on success, False on failure."""
+    """Stamp a branch as closed. Validates existing stamps. Returns True on success."""
     key = _progress_key(desc, branch)
     repo_name = desc.repo_path.name
 
-    tip = _git(desc.repo_path, "log", "-1", "--format=%s", branch)
-    if tip.returncode == 0 and tip.stdout.strip().startswith("chore: branch closed"):
-        _write_progress(progress_file, key, "stamped")
-        return True
+    fresh = _git(desc.repo_path, "rev-parse", desc.base_branch)
+    if fresh.returncode == 0 and fresh.stdout.strip():
+        landed_sha = fresh.stdout.strip()
 
+    tip = _git(desc.repo_path, "log", "-1", "--format=%s", branch)
     if tip.returncode != 0:
         print(f"STAMP_WARN={repo_name} reason=branch_tip_unreadable branch={branch}")
         return False
+
+    prev_history: list[dict[str, str | None]] = []
+    amend = False
+
+    if tip.stdout.strip().startswith("chore: branch closed"):
+        sha_match = re.search(r"landed as ([0-9a-f]+)", tip.stdout.strip())
+        if sha_match:
+            existing_sha = sha_match.group(1)
+            check = _git(desc.repo_path, "merge-base", "--is-ancestor",
+                         existing_sha, desc.base_branch)
+            if check.returncode == 0:
+                _write_progress(progress_file, key, "stamped")
+                return True
+            body = _git(desc.repo_path, "log", "-1", "--format=%b", branch)
+            prev_history = _parse_stamp_history(
+                body.stdout if body.returncode == 0 else "")
+            if not prev_history:
+                prev_history = [{"timestamp": "unknown", "sha": existing_sha, "reason": "initial", "prev": None}]
+            amend = True
+            print(f"RESTAMP={repo_name} reason=stale_sha prev={existing_sha} new={landed_sha}")
+        else:
+            _write_progress(progress_file, key, "stamped")
+            return True
+
+    issue_match = re.match(r"issue-(\d+)", branch)
+    issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""
+
+    reason = "stale_sha_not_on_base" if prev_history else "initial"
+    message = _build_stamp_message(landed_sha, desc.base_branch, issue_ref,
+                                    prev_history, reason)
 
     co = _git(desc.repo_path, "checkout", branch)
     if co.returncode != 0:
@@ -567,13 +651,11 @@ def _stamp_repo(
             print(f"STAMP_FAIL={repo_name} reason=checkout_failed branch={branch}")
             return False
 
-    issue_match = re.match(r"issue-(\d+)", branch)
-    issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""
+    if amend:
+        commit = _git(desc.repo_path, "commit", "--allow-empty", "--amend", "-m", message)
+    else:
+        commit = _git(desc.repo_path, "commit", "--allow-empty", "-m", message)
 
-    commit = _git(
-        desc.repo_path, "commit", "--allow-empty",
-        "-m", f"chore: branch closed — landed as {landed_sha} on {desc.base_branch}{issue_ref}",
-    )
     if commit.returncode != 0:
         print(f"STAMP_FAIL={repo_name} reason=commit_failed detail={commit.stderr.strip()}")
         return False

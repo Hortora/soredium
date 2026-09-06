@@ -97,7 +97,20 @@ def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
     sha_match = re.search(r"landed as ([0-9a-f]+)", msg)
     if not sha_match:
         return {"status": "warn", "detail": "no landing SHA in stamp (old format)"}
-    return _verify_sha_on_ref(project, sha_match.group(1), base)
+    sha = sha_match.group(1)
+    verify = _verify_sha_on_ref(project, sha, base)
+
+    body_result = git(project, "log", "-1", "--format=%b", branch)
+    if body_result.returncode == 0 and "stamp-history:" in body_result.stdout:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from land_flow import _parse_stamp_history
+        history = _parse_stamp_history(body_result.stdout)
+        if len(history) > 1:
+            stamps = len(history)
+            lineage = " → ".join(h["sha"][:8] for h in history)
+            verify["detail"] = (verify.get("detail", "") +
+                f" (re-stamped {stamps - 1}x, lineage: {lineage})")
+    return verify
 
 
 def check_main_pushed(project: str, base: str = "main") -> dict:

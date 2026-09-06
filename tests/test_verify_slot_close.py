@@ -110,7 +110,7 @@ class TestVerifyMissingStamp:
 
         result = _run_verify(project, workspace, branch=branch)
         assert "VERIFIED=no" in result.stdout
-        assert "UNSTAMPED" in result.stdout
+        assert "project_stamped" in result.stdout and "fail" in result.stdout
 
 
 class TestVerifyUnpushedMain:
@@ -307,6 +307,50 @@ class TestCheckLandingShaTreeFallback:
         _git(project, "checkout", "feature")
         _git(project, "commit", "--allow-empty", "--amend", "-m",
              f"chore: branch closed — landed as {main_sha} on main")
+        result = verify_slot_close.check_landing_sha(str(project), "feature", "main")
+        assert result["status"] == "pass"
+
+
+class TestCheckLandingShaHistory:
+    def test_reports_stamp_lineage(self, tmp_path: Path) -> None:
+        """When stamp has history, verify reports the lineage."""
+        project = _init_repo(tmp_path / "project")
+        _git(project, "checkout", "-b", "feature")
+        (project / "f.txt").write_text("work\n")
+        _git(project, "add", "f.txt")
+        _git(project, "commit", "-m", "feat: work")
+        _git(project, "checkout", "main")
+        _git(project, "merge", "--ff-only", "feature")
+        sha = _git(project, "rev-parse", "main")
+
+        _git(project, "checkout", "feature")
+        msg = (f"chore: branch closed — landed as {sha} on main\n\n"
+               f"stamp-history:\n"
+               f"- 2026-09-01T00:00:00Z sha=deadbeef00000000 reason=initial\n"
+               f"- 2026-09-06T00:00:00Z sha={sha} reason=stale_sha_not_on_base prev=deadbeef00000000\n")
+        _git(project, "commit", "--allow-empty", "-m", msg)
+        _git(project, "checkout", "main")
+
+        result = verify_slot_close.check_landing_sha(str(project), "feature", "main")
+        assert result["status"] == "pass"
+        assert "re-stamped" in result.get("detail", "")
+
+    def test_backward_compatible_no_history(self, tmp_path: Path) -> None:
+        """Old stamps without history still work."""
+        project = _init_repo(tmp_path / "project")
+        _git(project, "checkout", "-b", "feature")
+        (project / "f.txt").write_text("work\n")
+        _git(project, "add", "f.txt")
+        _git(project, "commit", "-m", "feat: work")
+        _git(project, "checkout", "main")
+        _git(project, "merge", "--ff-only", "feature")
+        sha = _git(project, "rev-parse", "main")
+
+        _git(project, "checkout", "feature")
+        _git(project, "commit", "--allow-empty", "-m",
+             f"chore: branch closed — landed as {sha} on main")
+        _git(project, "checkout", "main")
+
         result = verify_slot_close.check_landing_sha(str(project), "feature", "main")
         assert result["status"] == "pass"
 

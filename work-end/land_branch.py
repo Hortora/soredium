@@ -191,35 +191,76 @@ def cmd_stamp(project: str, opts: dict[str, str]) -> int:
             return 1
         print(f"REMOTE_VERIFIED={target_remote}/{base_branch}")
 
+    from land_flow import _build_stamp_message, _parse_stamp_history
+
     tip_msg = git(project, "log", "-1", "--format=%s", branch)
     already_stamped = tip_msg.returncode == 0 and tip_msg.stdout.strip().startswith("chore: branch closed")
 
+    prev_history: list[dict[str, str | None]] = []
+    amend = False
+
     if already_stamped:
-        print("STAMP=ok")
-        print("STAMP_SKIPPED=already_stamped")
-        print(f"LANDED_SHA={landed_sha}")
+        sha_match = re.search(r"landed as ([0-9a-f]+)", tip_msg.stdout.strip())
+        if sha_match:
+            existing_sha = sha_match.group(1)
+            check = git(project, "merge-base", "--is-ancestor", existing_sha, base_branch)
+            if check.returncode == 0:
+                print("STAMP=ok")
+                print("STAMP_SKIPPED=already_stamped")
+                print(f"LANDED_SHA={landed_sha}")
+                fork_remote, _ = detect_topology(project)
+                if fork_remote:
+                    push_result = git(project, "push", fork_remote, branch, "--force-with-lease", "--no-verify")
+                    if push_result.returncode != 0:
+                        print(f"STAMP_PUSH_WARNING=push failed: {push_result.stderr.strip()}", file=sys.stderr)
+                if _wl:
+                    try:
+                        _conn = _wl.connect()
+                        _wl.record_work_end(_conn, branch, project, landed_sha=landed_sha)
+                        _conn.close()
+                    except Exception:
+                        pass
+                return 0
+            body_result = git(project, "log", "-1", "--format=%b", branch)
+            prev_history = _parse_stamp_history(
+                body_result.stdout if body_result.returncode == 0 else "")
+            if not prev_history:
+                prev_history = [{"timestamp": "unknown", "sha": existing_sha, "reason": "initial", "prev": None}]
+            amend = True
+            print(f"RESTAMP=yes prev={existing_sha} new={landed_sha}")
+        else:
+            print("STAMP=ok")
+            print("STAMP_SKIPPED=already_stamped")
+            print(f"LANDED_SHA={landed_sha}")
+            return 0
+
+    result = git(project, "checkout", branch)
+    if result.returncode != 0:
+        print("ERROR=CHECKOUT_FAILED")
+        print(f"ERROR_DETAIL=cannot checkout {branch}: {result.stderr.strip()}")
+        return 1
+
+    issue_match = re.match(r"issue-(\d+)", branch)
+    issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""
+    reason = "stale_sha_not_on_base" if prev_history else "initial"
+    message = _build_stamp_message(landed_sha, base_branch, issue_ref,
+                                    prev_history, reason)
+
+    if amend:
+        result = git(project, "commit", "--allow-empty", "--amend", "-m", message)
     else:
-        result = git(project, "checkout", branch)
-        if result.returncode != 0:
-            print("ERROR=CHECKOUT_FAILED")
-            print(f"ERROR_DETAIL=cannot checkout {branch}: {result.stderr.strip()}")
-            return 1
+        result = git(project, "commit", "--allow-empty", "-m", message)
+    if result.returncode != 0:
+        print("ERROR=STAMP_FAILED")
+        print(f"ERROR_DETAIL={result.stderr.strip()}")
+        return 1
 
-        issue_match = re.match(r"issue-(\d+)", branch)
-        issue_ref = f"  Refs #{issue_match.group(1)}" if issue_match else ""
-        result = git(project, "commit", "--allow-empty",
-                     "-m", f"chore: branch closed — landed as {landed_sha} on {base_branch}{issue_ref}")
-        if result.returncode != 0:
-            print("ERROR=STAMP_FAILED")
-            print(f"ERROR_DETAIL={result.stderr.strip()}")
-            return 1
+    result = git(project, "checkout", base_branch)
+    if result.returncode != 0:
+        print(f"CHECKOUT_WARNING=could not return to {base_branch}", file=sys.stderr)
 
-        result = git(project, "checkout", base_branch)
-        if result.returncode != 0:
-            print(f"CHECKOUT_WARNING=could not return to {base_branch}", file=sys.stderr)
-
-        print("STAMP=ok")
-        print(f"LANDED_SHA={landed_sha}")
+    print("STAMP=ok")
+    print(f"LANDED_SHA={landed_sha}")
 
     fork_remote, _ = detect_topology(project)
     if fork_remote:
