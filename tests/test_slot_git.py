@@ -490,3 +490,87 @@ class TestSyncMainDoesNotMutateBranch:
         ).stdout.strip()
         assert current_branch == "feature-work", f"Branch changed to {current_branch}"
         assert current_sha == feature_sha, "HEAD SHA changed — rebase mutated the feature branch"
+
+
+# ---------------------------------------------------------------------------
+# Inherited symlink cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupInheritedSymlinks:
+    def test_removes_absolute_symlinks_outside_boundary(self, tmp_path):
+        """After cleanup, no symlink in the clone should resolve outside slot boundary."""
+        slot_dir = tmp_path / "slot"
+        clone = slot_dir / "repo"
+        clone.mkdir(parents=True)
+        (clone / ".git").mkdir()
+
+        outside_target = tmp_path / "outside" / "target"
+        outside_target.mkdir(parents=True)
+        (clone / ".claude").symlink_to(str(outside_target))
+        (clone / ".build").symlink_to(str(outside_target))
+
+        slot_git._cleanup_inherited_symlinks(clone, slot_dir)
+
+        assert not (clone / ".claude").exists()
+        assert not (clone / ".claude").is_symlink()
+        assert not (clone / ".build").exists()
+        assert not (clone / ".build").is_symlink()
+
+    def test_preserves_relative_symlinks(self, tmp_path):
+        """Relative symlinks within the clone are preserved."""
+        slot_dir = tmp_path / "slot"
+        clone = slot_dir / "repo"
+        clone.mkdir(parents=True)
+        (clone / ".git").mkdir()
+
+        target = clone / "real_dir"
+        target.mkdir()
+        (clone / "link_to_real").symlink_to("real_dir")
+
+        slot_git._cleanup_inherited_symlinks(clone, slot_dir)
+
+        assert (clone / "link_to_real").is_symlink()
+        assert os.readlink(str(clone / "link_to_real")) == "real_dir"
+
+    def test_preserves_symlinks_within_slot_boundary(self, tmp_path):
+        """Absolute symlinks resolving inside the slot boundary are preserved."""
+        slot_dir = tmp_path / "slot"
+        clone = slot_dir / "repo"
+        clone.mkdir(parents=True)
+        (clone / ".git").mkdir()
+
+        inside_target = slot_dir / "workspace"
+        inside_target.mkdir()
+        (clone / "wksp").symlink_to(str(inside_target))
+
+        slot_git._cleanup_inherited_symlinks(clone, slot_dir)
+
+        assert (clone / "wksp").is_symlink()
+
+    def test_handles_dangling_absolute_symlinks(self, tmp_path):
+        """Dangling absolute symlinks outside boundary are removed."""
+        slot_dir = tmp_path / "slot"
+        clone = slot_dir / "repo"
+        clone.mkdir(parents=True)
+        (clone / ".git").mkdir()
+
+        (clone / ".worktrees").symlink_to("/nonexistent/path/that/does/not/exist")
+
+        slot_git._cleanup_inherited_symlinks(clone, slot_dir)
+
+        assert not (clone / ".worktrees").is_symlink()
+
+    def test_skips_regular_files_and_dirs(self, tmp_path):
+        """Regular files and directories are never touched."""
+        slot_dir = tmp_path / "slot"
+        clone = slot_dir / "repo"
+        clone.mkdir(parents=True)
+        (clone / ".git").mkdir()
+        (clone / "src").mkdir()
+        (clone / "README.md").write_text("# readme\n")
+
+        slot_git._cleanup_inherited_symlinks(clone, slot_dir)
+
+        assert (clone / "src").is_dir()
+        assert (clone / "README.md").exists()

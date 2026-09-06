@@ -46,6 +46,7 @@ from slot_git import (
     configure_slot_remotes, configure_update_instead,
     install_post_commit_hook, sync_main,
     _symlink_gitignored_assets, _exclude_symlinks,
+    _cleanup_inherited_symlinks,
     _repack_broken_alternates, ensure_clone_layout,
 )
 from slot_workspace import (
@@ -170,6 +171,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             rc, _, _ = run_cmd(["git", "-C", str(clone_dest), "checkout", "-b", branch])
             if rc != 0:
                 raise SlotCreationError(f"branch_create_failed repo={repo_name}")
+            _cleanup_inherited_symlinks(clone_dest, slot_dir)
             _exclude_symlinks(clone_dest)
             _symlink_gitignored_assets(repo_path, clone_dest)
             configure_slot_remotes(clone_dest, repo_path)
@@ -206,6 +208,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
                 if rc != 0:
                     raise SlotCreationError(f"workspace_branch_failed ws={ws_name}")
+                _cleanup_inherited_symlinks(ws_slot_dir, slot_dir)
                 _exclude_symlinks(ws_slot_dir)
                 configure_slot_remotes(ws_slot_dir, ws_source)
                 configure_update_instead(ws_source)
@@ -348,6 +351,7 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
         print(f"ERROR=branch_create_failed repo={repo_name}")
         sys.exit(1)
 
+    _cleanup_inherited_symlinks(clone_dest, slot_dir)
     _exclude_symlinks(clone_dest)
     _symlink_gitignored_assets(repo_path, clone_dest)
     install_post_commit_hook(clone_dest)
@@ -387,6 +391,7 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             ])
             if rc == 0:
                 run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
+                _cleanup_inherited_symlinks(ws_slot_dir, slot_dir)
                 _exclude_symlinks(ws_slot_dir)
                 configure_slot_remotes(ws_slot_dir, ws_source)
                 configure_update_instead(ws_source)

@@ -91,6 +91,24 @@ def sync_main(repo_path: str) -> None:
         run_cmd(["git", "-C", repo_path, "fetch", "upstream"])
 
 
+def _cleanup_inherited_symlinks(clone_path: Path, slot_dir: Path) -> list[str]:
+    """Remove absolute symlinks inherited from git clone that resolve outside the slot boundary."""
+    if not clone_path.is_dir():
+        return []
+    slot_abs = str(slot_dir.resolve())
+    removed: list[str] = []
+    for entry in sorted(clone_path.iterdir()):
+        if entry.name == ".git":
+            continue
+        if not entry.is_symlink():
+            continue
+        target = str(entry.resolve()) if entry.exists() else os.readlink(str(entry))
+        if target.startswith("/") and not target.startswith(slot_abs):
+            entry.unlink()
+            removed.append(entry.name)
+    return removed
+
+
 def _exclude_symlinks(clone_path: Path) -> None:
     exclude_file = clone_path / ".git" / "info" / "exclude"
     exclude_file.parent.mkdir(parents=True, exist_ok=True)
@@ -214,6 +232,7 @@ def _migrate_worktree_to_clone(worktree_path: Path) -> bool:
             return False
 
         shutil.move(str(clone_tmp), str(worktree_path))
+        _cleanup_inherited_symlinks(worktree_path, worktree_path.parent)
         _exclude_symlinks(worktree_path)
 
     return True
