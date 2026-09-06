@@ -30,10 +30,64 @@ changes.
 - CLAUDE.md lives at repository root
 - **Never apply changes without explicit user confirmation** (a plain "YES" or equivalent)
 - **Never modify an existing Project Type section** — this is user-configured and defines repository behavior. Adding a missing section (as git-commit Step 0 does) is allowed; changing an existing one is not.
+- **Never write workspace content to a project CLAUDE.md** — see §Content Boundary below
 - Focus on **workflow and convention changes**: new tools, build commands, testing
   patterns, naming conventions, repository structure changes
 - Keep prose concise and professional. Prefer bullet points and tables
 - Do not mention AI, LLMs, or tooling attribution in the document
+
+## Content Boundary — Project vs Workspace
+
+**CRITICAL: Detect context before writing. Writing workspace content to a project
+CLAUDE.md is the single most common regression this skill causes.**
+
+### Detection (run before any edit)
+
+```bash
+# Is this a workspace repo?
+[ -f ".workspace" ] && echo "CONTEXT=workspace" || echo "CONTEXT=project"
+```
+
+A `.workspace` marker means this is a workspace repo. Its CLAUDE.md holds artifact
+locations, routing, git discipline, and session structure. Without the marker, this
+is a project repo — its CLAUDE.md holds build commands, conventions, and project type.
+
+If `proj/CLAUDE.md` is a symlink to `wksp/CLAUDE.md`, you are editing the WORKSPACE
+CLAUDE.md through the project — apply workspace rules.
+
+### Workspace-only sections (NEVER write to project CLAUDE.md)
+
+| Section | Why it's workspace-only |
+|---------|------------------------|
+| `## Artifact Locations` | Tells skills where to write files — workspace concern |
+| `## Document Locations` | Cross-repo path table — workspace concern |
+| `## Git Discipline` | Two-repo commit guidance — workspace concern |
+| `## Structure` (workspace dirs) | `specs/`, `plans/`, `blog/` layout — workspace concern |
+| `## Session Start` with `add-dir` | Opens workspace in Claude — workspace concern |
+| `# X Workspace` header | Workspace identity — never a project header |
+
+### Project-only sections (NEVER write to workspace CLAUDE.md)
+
+| Section | Why it's project-only |
+|---------|----------------------|
+| `## Project Type` | Defines repo behavior — project concern |
+| `## Development Commands` | Build/test/run — project concern |
+| `## Testing Patterns` | Framework and conventions — project concern |
+| `## Code Organization` | Package structure — project concern |
+
+### Shared sections (allowed in both, but content differs)
+
+| Section | Project version | Workspace version |
+|---------|----------------|-------------------|
+| `## Routing` | Artifact routing decisions | Same — either location is fine |
+| `## Work Tracking` | Issue tracking config | Same — either location is fine |
+| `## Project Artifacts` | Path table for project content | Not needed in workspace |
+
+### Absolute paths
+
+**Never write absolute paths** (`/Users/...`, `/home/...`) to ANY CLAUDE.md.
+Use relative paths via `proj/` and `wksp/` symlinks instead. Absolute paths
+break slot isolation — every slot clone inherits them.
 
 ## Workflow
 
@@ -317,13 +371,19 @@ End every proposal with exactly:
 When user confirms YES:
 
 1. Apply **only** the proposed changes
-2. **Validate links (if module files present):** Check that any markdown links from CLAUDE.md to module files resolve:
+2. **Content boundary check (project repos only):** If `CONTEXT=project` (from §Content Boundary detection):
+   ```bash
+   python3 -c 'from pathlib import Path; import sys; sys.path.insert(0, str(Path.home() / "claude/hortora/soredium")); from verification.slot_checks import check_workspace_content_in_project; f = check_workspace_content_in_project(Path("CLAUDE.md")); [print(f"BOUNDARY_VIOLATION={x.message}") for x in f]; sys.exit(1 if f else 0)'
+   ```
+   If violations found: **STOP**. Remove the workspace content before staging.
+   This catches the most common regression — workspace headers written to project CLAUDE.md.
+3. **Validate links (if module files present):** Check that any markdown links from CLAUDE.md to module files resolve:
    ```bash
    python3 ~/.claude/skills/update-claude-md/check_links.py CLAUDE.md
    ```
    If broken links are found, fix them before staging.
-3. **Skip `validate_document.py`** — this script is not present in all projects and is optional.
-4. **If no broken links:**
+4. **Skip `validate_document.py`** — this script is not present in all projects and is optional.
+5. **If no broken links and no boundary violations:**
    - Print brief summary: "✅ Updated sections: Build Commands, Testing"
    - Document is ready for staging
 
@@ -343,6 +403,9 @@ Avoid these mistakes when updating CLAUDE.md:
 
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
+| Writing workspace sections to project CLAUDE.md | Undoes manual separation, breaks slot isolation, erased 19 repos of fixes (#341) | Run §Content Boundary detection FIRST — never write Artifact Locations, Document Locations, Git Discipline, Structure, or `add-dir` to project CLAUDE.md |
+| Writing `# X Workspace` header to project CLAUDE.md | Project CLAUDE.md header is `# CLAUDE.md` — workspace header signals wrong context | Check `.workspace` marker before writing; project repos never get workspace headers |
+| Writing absolute paths to CLAUDE.md | Breaks slot isolation — every clone inherits them | Use `proj/` and `wksp/` symlinks for cross-repo paths |
 | Modifying Project Type section | Breaks repository behavior, user-configured | Never touch this section, skip it entirely |
 | Applying changes without confirmation | User loses control | Always wait for explicit YES |
 | Documenting architecture in CLAUDE.md | Wrong file - ARC42STORIES.MD is for architecture | Focus on workflow/conventions only |
