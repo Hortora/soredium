@@ -1632,3 +1632,52 @@ class TestSubfolderScope:
         assert data["OWNER_REPO"] == "Org/repo"
         assert data["ISSUES_STATUS"] == "enabled"
         assert data["CLAUDE_OK"] == "yes"
+
+
+# ---------------------------------------------------------------------------
+# Landed-not-archived scan
+# ---------------------------------------------------------------------------
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
+from ctx import _scan_landed_not_archived
+
+
+class TestScanLandedNotArchived:
+    def test_detects_landed_not_archived(self, tmp_path: Path) -> None:
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        (slots / "attic").mkdir()
+        slot1 = slots / "1"
+        slot1.mkdir()
+        (slot1 / ".landed").write_text("branch=issue-42\n")
+        # slot 1 is landed but not in attic
+        result = _scan_landed_not_archived(slot1)
+        assert "1" in result
+
+    def test_excludes_archived_slots(self, tmp_path: Path) -> None:
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        attic = slots / "attic"
+        attic.mkdir()
+        slot2 = slots / "2"
+        slot2.mkdir()
+        (slot2 / ".landed").write_text("branch=issue-43\n")
+        (attic / "2").mkdir()  # archived
+        result = _scan_landed_not_archived(slot2)
+        assert "2" not in result
+
+    def test_ignores_active_slots(self, tmp_path: Path) -> None:
+        slots = tmp_path / "slots"
+        slots.mkdir()
+        (slots / "attic").mkdir()
+        slot3 = slots / "3"
+        slot3.mkdir()
+        # no .landed file — active slot
+        result = _scan_landed_not_archived(slot3)
+        assert result == []
+
+    def test_returns_empty_for_none(self) -> None:
+        assert _scan_landed_not_archived(None) == []
+
+    def test_returns_empty_for_nonexistent(self, tmp_path: Path) -> None:
+        assert _scan_landed_not_archived(tmp_path / "nonexistent") == []

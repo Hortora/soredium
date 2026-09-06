@@ -44,6 +44,25 @@ def _parse_meta(meta_path: Path) -> dict[str, str]:
     return meta
 
 
+def _scan_landed_not_archived(slot_dir: Path | None) -> list[str]:
+    """Scan slot family for landed-but-not-archived slots."""
+    if not slot_dir or not slot_dir.is_dir():
+        return []
+    slots_root = slot_dir.parent
+    if not slots_root.is_dir():
+        return []
+    result: list[str] = []
+    attic = slots_root / "attic"
+    for entry in sorted(slots_root.iterdir()):
+        if not entry.is_dir() or entry.name in ("attic", "quarantine"):
+            continue
+        if (entry / ".landed").exists():
+            attic_entry = attic / entry.name
+            if not attic_entry.is_dir():
+                result.append(entry.name)
+    return result
+
+
 def _check_file(*paths: Path) -> str:
     return "yes" if any(p.exists() for p in paths) else "no"
 
@@ -293,6 +312,7 @@ def resolve(cwd=None) -> dict[str, str]:
         "IN_SLOT": "yes" if topo.layout == "slot" else "no",
         "SLOT_PATH": str(topo.slot_dir) if topo.slot_dir else "",
         "IN_ATTIC": "yes" if topo.slot_dir and "/attic/" in str(topo.slot_dir) else "no",
+        "LANDED_NOT_ARCHIVED": ",".join(_scan_landed_not_archived(topo.slot_dir)) if topo.layout == "slot" else "",
         # WorkState fields (F1/F3 — work/SKILL.md reads these)
         "ROUTE": state.route,
         "ON_MAIN": "yes" if state.on_main else "no",
