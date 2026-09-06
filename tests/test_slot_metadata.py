@@ -425,3 +425,64 @@ class TestArchiveSlotCheckboxFix:
         content = (slot_dir / ".slot").read_text()
         assert "- [x] #83" in content
         assert "- [ ] #84" in content
+
+
+class TestSlotStatus:
+    def test_write_includes_status_active(self, tmp_path):
+        slot_metadata.write_slot_md(
+            tmp_path, 10, ["engine"], "issue-10-fix", "10",
+            "Hortora/soredium", "10", "Fix it",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert "status: active" in content
+
+    def test_parse_reads_status(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 10\nslug: issue-10-fix\n\n"
+            "## Issue\nHortora/soredium#10\nCovers: 10\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Status\nstatus: paused\n\n"
+            "## Created\n2026-09-06, branch: issue-10-fix\n"
+        )
+        result = slot_metadata.parse_slot_md(tmp_path)
+        assert result["status"] == "paused"
+
+    def test_parse_defaults_to_active_when_missing(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 10\nslug: issue-10-fix\n\n"
+            "## Issue\nHortora/soredium#10\nCovers: 10\n\n"
+            "## Repos\n- engine (primary)\n\n"
+            "## Created\n2026-09-06, branch: issue-10-fix\n"
+        )
+        result = slot_metadata.parse_slot_md(tmp_path)
+        assert result["status"] == "active"
+
+    def test_set_status_updates_existing(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 10\n\n## Status\nstatus: active\n\n## Created\n2026-09-06\n"
+        )
+        assert slot_metadata.set_slot_status(tmp_path, "paused") is True
+        result = slot_metadata.parse_slot_md(tmp_path)
+        assert result["status"] == "paused"
+
+    def test_set_status_adds_when_missing(self, tmp_path):
+        (tmp_path / ".slot").write_text(
+            "# Slot 10\n\n## Issue\nOrg/repo#5\n\n## Created\n2026-09-06\n"
+        )
+        assert slot_metadata.set_slot_status(tmp_path, "paused") is True
+        content = (tmp_path / ".slot").read_text()
+        assert "status: paused" in content
+
+    def test_set_status_returns_false_when_no_slot(self, tmp_path):
+        assert slot_metadata.set_slot_status(tmp_path, "paused") is False
+
+    def test_roundtrip_pause_resume(self, tmp_path):
+        slot_metadata.write_slot_md(
+            tmp_path, 10, ["engine"], "issue-10-fix", "10",
+            "Hortora/soredium", "10", "Fix it",
+        )
+        assert slot_metadata.parse_slot_md(tmp_path)["status"] == "active"
+        slot_metadata.set_slot_status(tmp_path, "paused")
+        assert slot_metadata.parse_slot_md(tmp_path)["status"] == "paused"
+        slot_metadata.set_slot_status(tmp_path, "active")
+        assert slot_metadata.parse_slot_md(tmp_path)["status"] == "active"

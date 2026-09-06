@@ -73,6 +73,7 @@ Covers: {covers}
         content += f"- {repo}{primary}\n"
     if isolation_type:
         content += f"\n## Isolation\ntype: {isolation_type}\ninstance: {isx_instance}\ntemplate: {isx_template}\n"
+    content += f"\n## Status\nstatus: active\n"
     content += f"\n## Created\n{datetime.date.today().isoformat()}, branch: {branch}\n"
     (slot_dir / ".slot").write_text(content)
 
@@ -82,13 +83,14 @@ def parse_slot_md(slot_dir: Path) -> dict:
     if not slot_md.exists():
         return {}
     content = slot_md.read_text()
-    result: dict = {"repos": [], "context": "", "title": "", "description": "", "issue": "", "issue_repo": "", "covers": "", "is_epic": False, "isolation_type": "", "isx_instance": "", "isx_template": ""}
+    result: dict = {"repos": [], "context": "", "title": "", "description": "", "issue": "", "issue_repo": "", "covers": "", "is_epic": False, "isolation_type": "", "isx_instance": "", "isx_template": "", "status": "active"}
 
     in_issue = False
     in_what = False
     in_repos = False
     in_isolation = False
     in_description = False
+    in_status = False
     context_lines: list[str] = []
     description_lines: list[str] = []
     for line in content.splitlines():
@@ -102,22 +104,25 @@ def parse_slot_md(slot_dir: Path) -> dict:
         if line.startswith("Covers:"):
             result["covers"] = line.split(":", 1)[1].strip()
         if line.startswith("## Issue"):
-            in_issue, in_what, in_repos, in_isolation, in_description = True, False, False, False, False
+            in_issue, in_what, in_repos, in_isolation, in_description, in_status = True, False, False, False, False, False
             continue
         if line.startswith("## Description"):
-            in_issue, in_what, in_repos, in_isolation, in_description = False, False, False, False, True
+            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, False, False, True, False
             continue
         if line.startswith("## What to do"):
-            in_issue, in_what, in_repos, in_isolation, in_description = False, True, False, False, False
+            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, True, False, False, False, False
             continue
         if line.startswith("## Repos"):
-            in_issue, in_what, in_repos, in_isolation, in_description = False, False, True, False, False
+            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, True, False, False, False
             continue
         if line.startswith("## Isolation"):
-            in_issue, in_what, in_repos, in_isolation, in_description = False, False, False, True, False
+            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, False, True, False, False
+            continue
+        if line.startswith("## Status"):
+            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, False, False, False, True
             continue
         if line.startswith("## "):
-            in_issue, in_what, in_repos, in_isolation, in_description = False, False, False, False, False
+            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, False, False, False, False
             continue
         if in_issue and line.strip().startswith("Type:"):
             result["is_epic"] = line.strip().split(":", 1)[1].strip() == "epic"
@@ -142,10 +147,39 @@ def parse_slot_md(slot_dir: Path) -> dict:
                 result["isx_instance"] = stripped.split(":", 1)[1].strip()
             elif stripped.startswith("template:"):
                 result["isx_template"] = stripped.split(":", 1)[1].strip()
+        if in_status:
+            stripped = line.strip()
+            if stripped.startswith("status:"):
+                result["status"] = stripped.split(":", 1)[1].strip()
 
     result["context"] = " ".join(l for l in context_lines if l).strip()
     result["description"] = " ".join(l for l in description_lines if l).strip()
     return result
+
+
+def set_slot_status(slot_dir: Path, status: str) -> bool:
+    """Set the status field in .slot. Returns True if updated, False if .slot missing."""
+    slot_md = slot_dir / ".slot"
+    if not slot_md.exists():
+        return False
+    content = slot_md.read_text()
+    lines = content.splitlines()
+    updated = False
+    for i, line in enumerate(lines):
+        if line.strip().startswith("status:"):
+            lines[i] = f"status: {status}"
+            updated = True
+            break
+    if not updated:
+        for i, line in enumerate(lines):
+            if line.startswith("## Created"):
+                lines.insert(i, f"\n## Status\nstatus: {status}\n")
+                updated = True
+                break
+    if not updated:
+        lines.append(f"\n## Status\nstatus: {status}")
+    slot_md.write_text("\n".join(lines) + "\n")
+    return True
 
 
 def is_slot_landed(slot_dir: Path) -> bool:
