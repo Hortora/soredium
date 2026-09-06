@@ -1077,3 +1077,53 @@ class TestPreflightUntrackedFiles:
         )
         result = _preflight_two_hop(desc)
         assert result is not None and "dirty_worktree" in result
+
+
+class TestAlreadyMergedDetection:
+    """#340: land_batch skips rebase+merge when branch is already merged."""
+
+    def test_already_merged_branch_skips_to_stamp(self, tmp_path):
+        from land_flow import land_batch, RepoDescriptor, Transport
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-99-test"
+        _add_feature(repo, branch)
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", branch], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "checkout", branch], capture_output=True, check=True)
+
+        desc = RepoDescriptor(
+            repo_path=repo,
+            original_path=repo,
+            base_branch="main",
+            push_target="origin",
+            is_workspace=False,
+            transport=Transport.DIRECT,
+        )
+        progress_file = tmp_path / ".execute-progress"
+        result = land_batch([desc], branch, progress_file)
+        assert result.success is not False
+        merged_repos = [s for s in result.repos if s.merged]
+        assert len(merged_repos) == 1
+        assert merged_repos[0].stamped
+
+    def test_not_merged_branch_proceeds_normally(self, tmp_path):
+        from land_flow import land_batch, RepoDescriptor, Transport
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-99-test"
+        _add_feature(repo, branch)
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True, check=True)
+
+        desc = RepoDescriptor(
+            repo_path=repo,
+            original_path=repo,
+            base_branch="main",
+            push_target="origin",
+            is_workspace=False,
+            transport=Transport.DIRECT,
+        )
+        progress_file = tmp_path / ".execute-progress"
+        result = land_batch([desc], branch, progress_file)
+        assert result.success is not False
+        landed = [s for s in result.repos if s.merged and not s.skipped]
+        assert len(landed) == 1

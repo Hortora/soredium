@@ -961,7 +961,12 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     if args.get("conflict_resolved") == "yes":
         conflict_repo = args.get("conflict_repo", "")
-        step_key = f"rebase:{conflict_repo}" if conflict_repo else "rebase"
+        progress_snapshot = read_close_progress(workspace)
+        rebase_key = f"rebase:{conflict_repo}" if conflict_repo else "rebase"
+        if progress_snapshot.get(rebase_key) == "done":
+            step_key = f"land:{conflict_repo}" if conflict_repo else "land"
+        else:
+            step_key = rebase_key
         update_close_progress(workspace, step_key, "done")
 
     if args.get("force_done"):

@@ -1962,3 +1962,79 @@ class TestRebaseConflictNotRetryable:
             f"Call 1 had stamped entries: {has_stamped_entries}. "
             f"Final progress: {progress_final}"
         )
+
+
+class TestConflictResolvedRoutesToCorrectStep:
+    """#340: conflict_resolved=yes must route to the step that actually failed."""
+
+    def _setup_promoted(self, tmp_path):
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "trajectory", "done")
+
+    def test_conflict_resolved_routes_to_rebase_when_rebase_not_done(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        self._setup_promoted(tmp_path)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import read_close_progress
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "conflict_resolved": "yes",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("rebase") == "done"
+
+    def test_conflict_resolved_routes_to_land_when_rebase_already_done(self, tmp_path, monkeypatch):
+        """When rebase is already done, conflict must be from land's internal rebase."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        self._setup_promoted(tmp_path)
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "rebase", "done")
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "conflict_resolved": "yes",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("land") == "done"
+
+    def test_conflict_resolved_per_repo_routes_to_land_when_rebase_done(self, tmp_path, monkeypatch):
+        """Slot mode: per-repo conflict routes to land:repo when rebase:repo is done."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        self._setup_promoted(tmp_path)
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "rebase:engine", "done")
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "conflict_resolved": "yes",
+            "conflict_repo": "engine",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("land:engine") == "done"
+
+    def test_conflict_resolved_per_repo_routes_to_rebase_when_not_done(self, tmp_path, monkeypatch):
+        """Slot mode: per-repo conflict routes to rebase:repo when rebase:repo is not yet done."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {})
+        self._setup_promoted(tmp_path)
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import read_close_progress
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test", "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "conflict_resolved": "yes",
+            "conflict_repo": "engine",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("rebase:engine") == "done"
+        assert progress.get("land:engine") is None

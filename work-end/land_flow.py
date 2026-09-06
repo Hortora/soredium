@@ -735,6 +735,52 @@ def land_batch(
                 result.rescued[desc.repo_path.name] = meta["rescued"]
     print("STAGE=preflight STATUS=pass")
 
+    landed_shas: dict[str, str] = {}
+
+    # Step 1b: Already-merged detection. When the user resolves a conflict
+    # manually (merges to main, pushes), the branch HEAD is already an ancestor
+    # of main. Skip rebase+merge for these repos and go straight to stamp.
+    already_merged: list[RepoDescriptor] = []
+    for desc in list(active):
+        if desc.is_workspace:
+            continue
+        is_ancestor = _git(
+            desc.repo_path, "merge-base", "--is-ancestor", branch, desc.base_branch,
+        )
+        if is_ancestor.returncode == 0:
+            sha = _git(desc.repo_path, "rev-parse", desc.base_branch)
+            landed_sha = sha.stdout.strip() if sha.returncode == 0 else "unknown"
+            landed_shas[desc.repo_path.name] = landed_sha
+            result.repos.append(RepoStatus(
+                repo_path=desc.repo_path, merged=True, pushed=True,
+                landed_sha=landed_sha,
+            ))
+            already_merged.append(desc)
+            print(f"ALREADY_MERGED={desc.repo_path.name} sha={landed_sha[:12]}")
+    for desc in already_merged:
+        active.remove(desc)
+
+    if not active:
+        print("STAGE=rebase STATUS=skip (all repos already merged)")
+        print("STAGE=push STATUS=skip")
+        print("STAGE=verify_content STATUS=skip")
+        print("STAGE=stamp")
+        stamp_failures: list[str] = []
+        for desc in already_merged:
+            sha = landed_shas.get(desc.repo_path.name, "unknown")
+            ok = _stamp_repo(desc, branch, sha, progress_file)
+            for s in result.repos:
+                if s.repo_path == desc.repo_path and not s.skipped:
+                    s.stamped = ok
+            if not ok:
+                stamp_failures.append(desc.repo_path.name)
+        if stamp_failures:
+            result.success = False
+            print(f"STAGE=stamp STATUS=partial failed={','.join(stamp_failures)}")
+        else:
+            print("STAGE=stamp STATUS=pass")
+        return result
+
     # Step 2: Rebase (skip ALL workspace repos — workspace branches are not
     # rebased because rebase replays individual commits, and early commits
     # create lifecycle files that conflict with main's cleanup history.
@@ -793,7 +839,6 @@ def land_batch(
 
     # Step 3: Merge + Push (skip TWO_HOP workspace — slot clones are stamp only)
     print("STAGE=push")
-    landed_shas: dict[str, str] = {}
     failed_repos: list[str] = []
 
     for desc in active:
@@ -847,7 +892,7 @@ def land_batch(
     # repos that pushed successfully still need stamping)
     print("STAGE=stamp")
     stamp_failures: list[str] = []
-    for desc in active:
+    for desc in active + already_merged:
         repo_name = desc.repo_path.name
         if repo_name in failed_repos:
             print(f"STAMP_SKIP={repo_name} reason=push_failed")
