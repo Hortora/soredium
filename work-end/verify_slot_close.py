@@ -52,13 +52,14 @@ def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
 
 
 def check_branch_stamped(project: str, branch: str) -> dict:
-    result = git(project, "log", "-1", "--format=%s", branch)
+    result = git(project, "log", "-5", "--format=%s", branch)
     if result.returncode != 0:
         return {"status": "fail", "detail": f"branch {branch} not found"}
-    msg = result.stdout.strip()
-    if msg.startswith("chore: branch closed"):
-        return {"status": "pass", "detail": msg}
-    return {"status": "fail", "detail": f"tip is: {msg[:60]}"}
+    for line in result.stdout.strip().splitlines():
+        if line.startswith("chore: branch closed"):
+            return {"status": "pass", "detail": line}
+    tip = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    return {"status": "fail", "detail": f"tip is: {tip[:60]}"}
 
 
 def _find_tree_on_ref(repo: str, tree_sha: str, ref: str, max_commits: int = 50) -> str | None:
