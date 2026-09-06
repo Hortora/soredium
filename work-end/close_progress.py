@@ -65,7 +65,7 @@ STEP_TO_PHASE = {
     "cleanup_stack": "closing:stamped",
     "cleanup": "closing:stamped",
     "report_scaffold": "closing:stamped",
-    "upstream_pr": "closing:stamped",
+    "upstream_push": "closing:stamped",
     "arc42_scan": "closing:stamped",
     "session_rename": "closing:stamped",
     "garden_feedback": "closing:stamped",

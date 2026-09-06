@@ -41,7 +41,7 @@ CLOSE_VISIBLE_STEPS = [
     ("land", "Land"),
     ("close_issues", "Close issues"),
     ("verify", "Verify"),
-    ("upstream_pr", "Upstream PR"),
+    ("upstream_push", "Upstream push"),
     ("arc42_scan", "ARC42 scan"),
     ("session_rename", "Session rename"),
     ("garden_feedback", "Garden feedback"),
