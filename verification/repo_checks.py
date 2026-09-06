@@ -170,3 +170,18 @@ def check_duplicate_commits(
         else:
             seen[msg] = sha
     return findings
+
+
+def check_plan_in_project(project_path: Path) -> list[Finding]:
+    """Detect .plan in a project repo that has a workspace (wksp/ symlink)."""
+    findings: list[Finding] = []
+    plan = project_path / ".plan"
+    if not plan.exists():
+        return findings
+    wksp = project_path / "wksp"
+    if wksp.is_symlink():
+        findings.append(Finding(
+            "ERROR", "plan-in-project",
+            f".plan exists in project repo but wksp/ symlink points to a workspace — .plan should be in the workspace",
+        ))
+    return findings

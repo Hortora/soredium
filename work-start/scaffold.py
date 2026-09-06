@@ -74,6 +74,12 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
              plan_content: str = "",
              force: bool = False) -> ScaffoldResult:
     """Create workspace branch scaffold: .plan and JOURNAL.md at workspace root."""
+    wksp_link = workspace / "wksp"
+    if wksp_link.is_symlink() and not (workspace / "proj").is_symlink() and not (workspace / ".workspace").exists():
+        raise OSError(
+            f"workspace path looks like a project repo (has wksp/ symlink, "
+            f"no proj/ symlink, no .workspace marker): {workspace}")
+
     plan_path = workspace / ".plan"
     journal_path = workspace / "JOURNAL.md"
 

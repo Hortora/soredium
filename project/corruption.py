@@ -372,6 +372,24 @@ def check_slot_boundary(
     return None
 
 
+def _check_plan_in_project(
+    project: Path, workspace: Path,
+) -> Optional[Finding]:
+    """Detect .plan orphaned in project repo when workspace exists."""
+    project_plan = project / ".plan"
+    if not project_plan.exists():
+        return None
+    wksp = project / "wksp"
+    if not wksp.is_symlink():
+        return None
+    return Finding(
+        scenario="S12_PLAN_IN_PROJECT",
+        severity="warning",
+        detail=f".plan exists in project repo {project} but workspace exists at {workspace} — .plan should be in the workspace",
+        actions=["move_plan", "remove_plan", "ignore"],
+    )
+
+
 def diagnose(
     plan_path: Optional[Path],
     meta_state: str,
@@ -398,6 +416,9 @@ def diagnose(
         findings.append(s11)
 
     if plan_path is None or not plan_path.exists():
+        orphan = _check_plan_in_project(project, workspace)
+        if orphan:
+            findings.append(orphan)
         return findings
     try:
         s1 = check_missing_state(plan_path)
