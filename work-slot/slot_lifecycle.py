@@ -23,7 +23,7 @@ try:
     import worklog as _wl
 except ImportError:
     _wl = None
-from plan_io import parse_covers
+from plan_io import parse_covers, parse_covers_qualified
 
 from slot_core import (
     SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
@@ -61,22 +61,32 @@ from slot_query import find_slot_by_branch
 from slot_state import transition as _transition
 
 
-def _build_epic_plan(branch: str, issue_repo: str, cover_list: list[str],
+def _build_epic_plan(branch: str, issue_repo: str, cover_refs: list,
                      date: str) -> str | None:
-    """Build a .plan from the epic's child issue list. Fetches titles from GitHub."""
+    """Build a .plan from the epic's child issue list. Fetches titles from GitHub.
+
+    cover_refs: list of CoverRef (from parse_covers_qualified) or plain strings.
+    Each CoverRef carries its own repo; bare ints/strings fall back to issue_repo.
+    """
+    from plan_io import CoverRef
     from plan_manager import QueueItem, IssueRef, build_plan_content
     items: list[QueueItem] = []
-    for num_str in cover_list:
-        try:
-            num = int(num_str)
-        except ValueError:
-            continue
+    for ref in cover_refs:
+        if isinstance(ref, CoverRef):
+            num = ref.number
+            repo = ref.repo or issue_repo
+        else:
+            try:
+                num = int(ref)
+            except (ValueError, TypeError):
+                continue
+            repo = issue_repo
         rc, title_out, _ = run_cmd([
-            "gh", "issue", "view", str(num), "--repo", issue_repo,
+            "gh", "issue", "view", str(num), "--repo", repo,
             "--json", "title", "--jq", ".title",
         ])
         title = title_out.strip() if rc == 0 and title_out.strip() else f"Issue #{num}"
-        items.append(QueueItem(ref=IssueRef(issue_repo, num), title=title))
+        items.append(QueueItem(ref=IssueRef(repo, num), title=title))
     if not items:
         return None
     items[0].active = True
@@ -127,6 +137,35 @@ def allocate_slot_number(family_root: Path) -> int:
     finally:
         conn.close()
     return slot_num
+
+
+def _run_post_creation_checks(slot_dir: Path) -> None:
+    """Run validation on a successfully created slot. Warns on failure, never destroys."""
+    try:
+        wksp_failures = validate_slot_wksp(slot_dir)
+        for f in wksp_failures:
+            print(f"WARN=wksp_validation {f}")
+    except Exception as e:
+        print(f"WARN=wksp_validation_error {e}")
+
+    try:
+        for ws_clone in sorted(slot_dir.iterdir()):
+            ws_claude = ws_clone / "CLAUDE.md"
+            if ws_clone.is_dir() and ws_claude.exists():
+                for w in validate_claude_md_paths(ws_claude, slot_dir):
+                    print(f"WARN=absolute_path_in_claude_md {w}")
+    except Exception as e:
+        print(f"WARN=claude_md_check_error {e}")
+
+    try:
+        from verification.postconditions import post_create_slot
+        vfindings = post_create_slot(slot_dir)
+        for f in vfindings:
+            print(f"VERIFY_{f.severity}={f.category} {f.message}")
+    except ImportError:
+        print("WARN=verification_module_unavailable postcondition checks skipped")
+    except Exception as e:
+        print(f"WARN=postcondition_error {e}")
 
 
 def create_slot(family_root: Path, repos: list[str], branch: str,
@@ -249,10 +288,10 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                     f"covers={covers}",
                     "force=yes",
                 ]
-                cover_list = [str(c) for c in parse_covers(covers)]
-                if len(cover_list) > 1:
+                cover_refs = parse_covers_qualified(covers)
+                if len(cover_refs) > 1:
                     plan_content = _build_epic_plan(
-                        branch, issue_repo, cover_list,
+                        branch, issue_repo, cover_refs,
                         datetime.date.today().isoformat(),
                     )
                     if plan_content:
@@ -286,27 +325,6 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             issue_repo=issue_repo, covers=covers,
             force=True,  # initial creation, no prior state
         )
-
-        wksp_failures = validate_slot_wksp(slot_dir)
-        if wksp_failures:
-            raise SlotCreationError(
-                "wksp_validation_failed: " + "; ".join(wksp_failures))
-
-        for ws_clone in sorted(slot_dir.iterdir()):
-            ws_claude = ws_clone / "CLAUDE.md"
-            if ws_clone.is_dir() and ws_claude.exists():
-                for w in validate_claude_md_paths(ws_claude, slot_dir):
-                    print(f"WARN=absolute_path_in_claude_md {w}")
-
-        from verification.postconditions import post_create_slot
-        vfindings = post_create_slot(slot_dir)
-        errors = [f for f in vfindings if f.severity == "ERROR"]
-        for f in vfindings:
-            print(f"VERIFY_{f.severity}={f.category} {f.message}")
-        if errors:
-            raise SlotCreationError(
-                f"postcondition_failed: {len(errors)} verification error(s) — "
-                + "; ".join(f.message for f in errors))
     except Exception:
         if slot_dir.exists():
             shutil.rmtree(str(slot_dir), ignore_errors=True)
@@ -318,6 +336,8 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             except Exception:
                 pass
         raise
+
+    _run_post_creation_checks(slot_dir)
 
     return {
         "slot_number": slot_num,

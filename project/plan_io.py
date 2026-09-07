@@ -102,6 +102,39 @@ def parse_covers(covers_str: str) -> list[int]:
     return result
 
 
+@dataclass(frozen=True)
+class CoverRef:
+    number: int
+    repo: str = ""
+
+    def __int__(self) -> int:
+        return self.number
+
+    def __str__(self) -> str:
+        return f"{self.repo}#{self.number}" if self.repo else str(self.number)
+
+
+_COVER_QUALIFIED_RE = re.compile(
+    r'^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$'
+)
+
+
+def parse_covers_qualified(covers_str: str) -> list[CoverRef]:
+    """Parse covers supporting both bare numbers and owner/repo#N format."""
+    result: list[CoverRef] = []
+    for part in covers_str.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        m = _COVER_QUALIFIED_RE.match(part)
+        if m:
+            result.append(CoverRef(number=int(m.group(2)), repo=m.group(1)))
+            continue
+        if part.isdigit():
+            result.append(CoverRef(number=int(part)))
+    return result
+
+
 def has_uncompleted_items(plan_state: PlanState) -> bool:
     return any(not item.completed for item in plan_state.queue_items)
 

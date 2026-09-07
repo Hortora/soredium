@@ -2073,3 +2073,209 @@ class TestArchiveSlotSessionGuard:
         slot_lifecycle.archive_slot(tmp_path, 99, force=True)
         captured = capsys.readouterr()
         assert "WARN=active_sessions_overridden" in captured.out
+
+
+class TestPostCreationChecksSoftFail:
+    """Refs #347, #348: validation failures after slot construction must warn, not destroy."""
+
+    @patch("slot_lifecycle.run_cmd")
+    def test_validation_failure_preserves_slot(self, mock_cmd, tmp_path, capsys):
+        """When _run_post_creation_checks raises, the slot directory must survive."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+
+        mock_cmd.return_value = (0, "", "")
+
+        with patch("slot_lifecycle.resolve_workspace_source") as mock_resolve, \
+             patch("slot_lifecycle.validate_slot_wksp", side_effect=RuntimeError("boom")):
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result = slot_lifecycle.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-99-test",
+                issue="99",
+                issue_repo="casehubio/engine",
+                covers="99",
+                context="validation test",
+            )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+        assert slot_dir.is_dir(), "Slot directory was destroyed by validation failure"
+        assert (slot_dir / ".slot").exists()
+        captured = capsys.readouterr()
+        assert "WARN=wksp_validation_error" in captured.out
+
+    @patch("slot_lifecycle.run_cmd")
+    def test_missing_verification_module_warns(self, mock_cmd, tmp_path, capsys):
+        """Missing verification module prints warning, doesn't crash."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+
+        mock_cmd.return_value = (0, "", "")
+
+        orig_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "verification.postconditions":
+                raise ImportError("No module named 'verification.postconditions'")
+            return orig_import(name, *args, **kwargs)
+
+        with patch("slot_lifecycle.resolve_workspace_source") as mock_resolve, \
+             patch("builtins.__import__", side_effect=mock_import):
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result = slot_lifecycle.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-98-test",
+                issue="98",
+                issue_repo="casehubio/engine",
+                covers="98",
+                context="import test",
+            )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+        assert slot_dir.is_dir(), "Slot destroyed by missing verification module"
+        captured = capsys.readouterr()
+        assert "WARN=verification_module_unavailable" in captured.out
+
+    @patch("slot_git.run_cmd")
+    @patch("slot_lifecycle.run_cmd")
+    def test_construction_failure_still_cleans_up(self, mock_cmd, mock_git_cmd, tmp_path):
+        """Clone failures (construction phase) must still destroy the slot."""
+        family = tmp_path / "casehub"
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+
+        mock_cmd.side_effect = [
+            (1, "", "fatal: clone failed"),  # clone fails
+        ]
+        mock_git_cmd.return_value = (0, "", "")
+
+        with patch("slot_lifecycle.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            with pytest.raises(slot_core.SlotCreationError, match="clone_failed"):
+                slot_lifecycle.create_slot(
+                    family_root=family,
+                    repos=["engine"],
+                    branch="issue-97-test",
+                    issue="97",
+                    issue_repo="casehubio/engine",
+                    covers="97",
+                    context="clone fail test",
+                )
+
+        slots_dir = family / "slots"
+        slot_dirs = list(slots_dir.iterdir()) if slots_dir.exists() else []
+        for d in slot_dirs:
+            assert not d.is_dir() or d.name == "attic", \
+                f"Slot dir {d} should have been cleaned up after construction failure"
+
+
+class TestRunPostCreationChecks:
+    """Unit tests for _run_post_creation_checks in isolation."""
+
+    def test_wksp_validation_warns(self, tmp_path, capsys):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        with patch("slot_lifecycle.validate_slot_wksp", return_value=["missing .workspace marker"]):
+            slot_lifecycle._run_post_creation_checks(slot_dir)
+        captured = capsys.readouterr()
+        assert "WARN=wksp_validation missing .workspace marker" in captured.out
+
+    def test_wksp_validation_exception_caught(self, tmp_path, capsys):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        with patch("slot_lifecycle.validate_slot_wksp", side_effect=OSError("permission denied")):
+            slot_lifecycle._run_post_creation_checks(slot_dir)
+        captured = capsys.readouterr()
+        assert "WARN=wksp_validation_error" in captured.out
+
+    def test_postcondition_import_error_caught(self, tmp_path, capsys):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        with patch("slot_lifecycle.validate_slot_wksp", return_value=[]), \
+             patch("builtins.__import__", side_effect=ImportError("no verification")):
+            slot_lifecycle._run_post_creation_checks(slot_dir)
+        captured = capsys.readouterr()
+        assert "WARN=verification_module_unavailable" in captured.out
+
+
+class TestBuildEpicPlanCrossRepo:
+    """Refs #349: _build_epic_plan must use per-issue repos for cross-repo covers."""
+
+    @patch("slot_lifecycle.run_cmd")
+    def test_qualified_cover_refs_use_own_repo(self, mock_cmd):
+        from plan_io import CoverRef
+
+        mock_cmd.side_effect = [
+            (0, "Platform fix\n", ""),
+            (0, "Engine update\n", ""),
+        ]
+
+        result = slot_lifecycle._build_epic_plan(
+            branch="issue-100-epic",
+            issue_repo="casehubio/parent",
+            cover_refs=[
+                CoverRef(number=276, repo="casehubio/platform"),
+                CoverRef(number=1049, repo="casehubio/engine"),
+            ],
+            date="2026-09-07",
+        )
+
+        assert result is not None
+        gh_calls = [c.args[0] for c in mock_cmd.call_args_list]
+        assert any("casehubio/platform" in str(c) for c in gh_calls), \
+            f"Expected gh call with casehubio/platform, got {gh_calls}"
+        assert any("casehubio/engine" in str(c) for c in gh_calls), \
+            f"Expected gh call with casehubio/engine, got {gh_calls}"
+        assert not any("casehubio/parent" in str(c) for c in gh_calls), \
+            "Should NOT use parent epic's repo for cross-repo children"
+
+    @patch("slot_lifecycle.run_cmd")
+    def test_bare_cover_refs_fall_back_to_parent_repo(self, mock_cmd):
+        from plan_io import CoverRef
+
+        mock_cmd.side_effect = [
+            (0, "Fix A\n", ""),
+            (0, "Fix B\n", ""),
+        ]
+
+        result = slot_lifecycle._build_epic_plan(
+            branch="issue-200-epic",
+            issue_repo="casehubio/engine",
+            cover_refs=[
+                CoverRef(number=42),
+                CoverRef(number=43),
+            ],
+            date="2026-09-07",
+        )
+
+        assert result is not None
+        gh_calls = [c.args[0] for c in mock_cmd.call_args_list]
+        assert all("casehubio/engine" in str(c) for c in gh_calls), \
+            f"Bare refs should use parent repo, got {gh_calls}"
+
+    @patch("slot_lifecycle.run_cmd")
+    def test_legacy_string_refs_still_work(self, mock_cmd):
+        mock_cmd.side_effect = [
+            (0, "Fix A\n", ""),
+            (0, "Fix B\n", ""),
+        ]
+
+        result = slot_lifecycle._build_epic_plan(
+            branch="issue-300-epic",
+            issue_repo="casehubio/engine",
+            cover_refs=["42", "43"],
+            date="2026-09-07",
+        )
+
+        assert result is not None
+        gh_calls = [c.args[0] for c in mock_cmd.call_args_list]
+        assert all("casehubio/engine" in str(c) for c in gh_calls)

@@ -173,6 +173,80 @@ class TestParseCovers:
         assert parse_covers("42,abc,19") == [42, 19]
 
 
+class TestCoverRef:
+    def test_bare_number_str(self):
+        from plan_io import CoverRef
+        ref = CoverRef(number=42)
+        assert str(ref) == "42"
+        assert int(ref) == 42
+
+    def test_qualified_str(self):
+        from plan_io import CoverRef
+        ref = CoverRef(number=276, repo="casehubio/platform")
+        assert str(ref) == "casehubio/platform#276"
+        assert int(ref) == 276
+
+    def test_empty_repo_is_bare(self):
+        from plan_io import CoverRef
+        ref = CoverRef(number=99, repo="")
+        assert str(ref) == "99"
+
+
+class TestParseCoversQualified:
+    def test_bare_numbers(self):
+        from plan_io import parse_covers_qualified
+        result = parse_covers_qualified("42,19")
+        assert len(result) == 2
+        assert result[0].number == 42
+        assert result[0].repo == ""
+        assert result[1].number == 19
+
+    def test_qualified_refs(self):
+        from plan_io import parse_covers_qualified
+        result = parse_covers_qualified("casehubio/platform#276,casehubio/engine#1049")
+        assert len(result) == 2
+        assert result[0].number == 276
+        assert result[0].repo == "casehubio/platform"
+        assert result[1].number == 1049
+        assert result[1].repo == "casehubio/engine"
+
+    def test_mixed_bare_and_qualified(self):
+        from plan_io import parse_covers_qualified
+        result = parse_covers_qualified("42,casehubio/engine#1049,19")
+        assert len(result) == 3
+        assert result[0].number == 42
+        assert result[0].repo == ""
+        assert result[1].number == 1049
+        assert result[1].repo == "casehubio/engine"
+        assert result[2].number == 19
+
+    def test_empty_string(self):
+        from plan_io import parse_covers_qualified
+        assert parse_covers_qualified("") == []
+
+    def test_whitespace_handling(self):
+        from plan_io import parse_covers_qualified
+        result = parse_covers_qualified(" 42 , casehubio/engine#100 ")
+        assert len(result) == 2
+        assert result[0].number == 42
+        assert result[1].number == 100
+        assert result[1].repo == "casehubio/engine"
+
+    def test_unrecognised_format_skipped(self):
+        from plan_io import parse_covers_qualified
+        result = parse_covers_qualified("42,platform:276,19")
+        assert len(result) == 2
+        assert result[0].number == 42
+        assert result[1].number == 19
+
+    def test_dots_and_hyphens_in_repo(self):
+        from plan_io import parse_covers_qualified
+        result = parse_covers_qualified("my-org.io/my-repo.v2#55")
+        assert len(result) == 1
+        assert result[0].repo == "my-org.io/my-repo.v2"
+        assert result[0].number == 55
+
+
 class TestHasUncompletedItems:
     def test_has_uncompleted(self, tmp_path):
         from plan_io import read_plan, has_uncompleted_items
