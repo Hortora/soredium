@@ -427,6 +427,7 @@ python3 work-end/audit_work_end.py mode=main
 python3 scripts/reconcile_slots.py <family-root>              # audit — report divergences
 python3 scripts/reconcile_slots.py <family-root> --strategy   # + propose actions
 python3 scripts/reconcile_slots.py <family-root> --execute    # + apply approved actions
+python3 scripts/reconcile_slots.py --purge-test-data          # remove pytest pollution from DB
 
 # Run TUI tests (Textual widget + app integration)
 python3 -m pytest tests/test_tui_project_view.py tests/test_tui_home_view.py tests/test_tui_app.py tests/test_session_spi.py -v
@@ -469,6 +470,10 @@ bash scripts/garden-setup.sh
 python3 scripts/place_workspace_markers.py <family-root>         # bootstrap .workspace markers on all slots
 python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root>  # migrate old-structure slot to per-repo workspaces
 python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root> --dry-run  # preview migration
+
+# Slot state migration (backfill state: field in .slot files)
+python3 scripts/migrate_slot_state.py <family-root>           # dry-run: shows what needs changing
+python3 scripts/migrate_slot_state.py <family-root> --apply   # apply state field to .slot files
 
 # Fix absolute wksp/proj/CLAUDE.md symlinks (one-time migration)
 python3 scripts/fix_absolute_symlinks.py              # dry-run: shows what needs changing

@@ -125,6 +125,7 @@ Local work lifecycle tracking and enriched backlog for what-next recommendations
 | `scripts/enrichment.py` | Issue enrichment, GitHub cache, what-next queries (CLI) |
 | `scripts/worklog_mcp_server.py` | MCP server exposing worklog queries |
 | `scripts/query_worklog.py` | Audit tool for inspecting worklog state |
+| `scripts/migrate_slot_state.py` | Backfill `state:` field in existing .slot files |
 
 ## Developer Setup
 
