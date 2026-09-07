@@ -163,7 +163,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def connect(db_path: str | None = None) -> sqlite3.Connection:
-    path = db_path or DEFAULT_DB
+    path = db_path or os.environ.get("HORTORA_WORKLOG_DB") or DEFAULT_DB
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
