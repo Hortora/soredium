@@ -58,6 +58,7 @@ from slot_workspace import (
     validate_claude_md_paths,
 )
 from slot_query import find_slot_by_branch
+from slot_state import transition as _transition
 
 
 def _build_epic_plan(branch: str, issue_repo: str, cover_list: list[str],
@@ -276,17 +277,15 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         if isx:
             _wire_isx_remotes(slot_dir, repos, instance_name)
 
-        conn = _wl.connect()
-        try:
-            repo_paths = [str(family_root / r) for r in repos]
-            _wl.confirm_slot_create(
-                conn, slot_num, str(family_root),
-                repos=repo_paths, branch=branch,
-                issue_number=int(issue) if issue else 0,
-                issue_repo=issue_repo, covers=covers,
-            )
-        finally:
-            conn.close()
+        repo_paths = [str(family_root / r) for r in repos]
+        _transition(
+            slot_dir, "active",
+            family_root=family_root, slot_number=slot_num,
+            repos=repo_paths, branch=branch,
+            issue_number=int(issue) if issue else 0,
+            issue_repo=issue_repo, covers=covers,
+            force=True,  # initial creation, no prior state
+        )
 
         wksp_failures = validate_slot_wksp(slot_dir)
         if wksp_failures:
@@ -585,16 +584,11 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         print("ERROR=no_repos_landed")
         return 1
 
-    if _wl:
-        try:
-            _conn = _wl.connect()
-            _wl.record_slot_merge(
-                _conn, slot_num, str(family_root),
-                landed_shas=landed_shas,
-            )
-            _conn.close()
-        except Exception:
-            pass
+    _transition(
+        slot_dir, "landed",
+        family_root=family_root, slot_number=slot_num,
+        landed_shas=landed_shas,
+    )
 
     if _slot_is_epic:
         epic_num = int(slot_info.get("issue", "0"))
@@ -736,22 +730,15 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     if swept:
         print(f"CLAUDE_PROJECTS_SWEPT={swept}")
 
-    if _wl:
-        try:
-            _conn = _wl.connect()
-            _wl.record_slot_archiving(
-                _conn, slot_num, str(family_root),
-                pid=os.getppid(),
-                archived_from=str(slot_dir),
-                archived_to=str(dest),
-                resolution=resolution,
-            )
-            _conn.close()
-        except Exception:
-            pass
+    _transition(
+        dest, "archived",
+        family_root=family_root, slot_number=slot_num,
+        resolution=resolution,
+        archived_from=str(slot_dir),
+        archived_to=str(dest),
+    )
 
-    print(f"ARCHIVING={slot_num}")
-    print(f"PID={os.getppid()}")
+    print(f"ARCHIVED={slot_num}")
 
 
 def restore_slot(family_root: Path, slot_num: int) -> None:
@@ -779,16 +766,11 @@ def restore_slot(family_root: Path, slot_num: int) -> None:
     if copied:
         print(f"CLAUDE_PROJECTS_COPIED={copied}")
     ensure_clone_layout(dest)
-    if _wl:
-        try:
-            _conn = _wl.connect()
-            _wl.record_slot_create(
-                _conn, slot_num, str(family_root),
-                branch="restored", repos="", issue=0,
-            )
-            _conn.close()
-        except Exception:
-            pass
+    _transition(
+        dest, "active",
+        family_root=family_root, slot_number=slot_num,
+        force=True,  # restoring from archived
+    )
     print(f"RESTORED={slot_num}")
 
 
@@ -837,21 +819,14 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
             print(f"CWD_RELOCATED={dest}")
     if swept:
         print(f"CLAUDE_PROJECTS_SWEPT={swept}")
-    if _wl:
-        try:
-            _conn = _wl.connect()
-            _wl.record_slot_archiving(
-                _conn, slot_num, str(family_root),
-                pid=os.getppid(),
-                archived_from=str(slot_dir),
-                archived_to=str(dest),
-                resolution=resolution,
-            )
-            _conn.close()
-        except Exception:
-            pass
-    print(f"ARCHIVING={slot_num}")
-    print(f"PID={os.getppid()}")
+    _transition(
+        dest, "archived",
+        family_root=family_root, slot_number=slot_num,
+        resolution=resolution,
+        archived_from=str(slot_dir),
+        archived_to=str(dest),
+    )
+    print(f"ARCHIVED={slot_num}")
 
 
 def migrate_remotes(family_root: Path) -> int:
