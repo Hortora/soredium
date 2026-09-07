@@ -448,13 +448,10 @@ class TestSymlinkGitignoredAssets:
 
 
 
-class TestSyncMainDoesNotMutateBranch:
-    def test_sync_main_preserves_feature_branch_when_origin_advanced(self, tmp_path):
-        """sync_main must not rebase the source repo when it is on a feature branch."""
-        repo = init_repo_with_remote(tmp_path / "repo")
+class TestSyncMain:
+    def _advance_origin(self, tmp_path, repo):
+        """Push a new commit to origin/main from a second clone."""
         bare = tmp_path / ".repo-bare.git"
-
-        # Create a second clone, push a new commit to origin/main
         other = tmp_path / "other"
         subprocess.run(["git", "clone", str(bare), str(other)], capture_output=True, check=True)
         subprocess.run(["git", "-C", str(other), "config", "user.name", "Test"], capture_output=True)
@@ -465,8 +462,16 @@ class TestSyncMainDoesNotMutateBranch:
                        capture_output=True, check=True)
         subprocess.run(["git", "-C", str(other), "push", "origin", "main"],
                        capture_output=True, check=True)
+        return subprocess.run(
+            ["git", "-C", str(other), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
 
-        # Switch source repo to a feature branch with its own commit
+    def test_preserves_feature_branch_but_updates_main(self, tmp_path):
+        """sync_main keeps feature branch intact but fast-forwards local main."""
+        repo = init_repo_with_remote(tmp_path / "repo")
+        origin_sha = self._advance_origin(tmp_path, repo)
+
         subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feature-work"],
                        capture_output=True, check=True)
         (repo / "feature.txt").write_text("work in progress")
@@ -490,6 +495,37 @@ class TestSyncMainDoesNotMutateBranch:
         ).stdout.strip()
         assert current_branch == "feature-work", f"Branch changed to {current_branch}"
         assert current_sha == feature_sha, "HEAD SHA changed — rebase mutated the feature branch"
+
+        main_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert main_sha == origin_sha, f"Local main not fast-forwarded: {main_sha} != {origin_sha}"
+
+    def test_fast_forwards_main_when_on_main(self, tmp_path):
+        """sync_main fast-forwards when already on main."""
+        repo = init_repo_with_remote(tmp_path / "repo")
+        origin_sha = self._advance_origin(tmp_path, repo)
+
+        slot_git.sync_main(str(repo))
+
+        main_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert main_sha == origin_sha, f"Local main not fast-forwarded: {main_sha} != {origin_sha}"
+
+    def test_stale_main_without_remote(self, tmp_path):
+        """sync_main warns but doesn't fail when no remote exists."""
+        repo = tmp_path / "no-remote"
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=str(repo), capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t"], capture_output=True)
+        (repo / "README.md").write_text("init\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "init"], capture_output=True, check=True)
+        slot_git.sync_main(str(repo))
 
 
 # ---------------------------------------------------------------------------

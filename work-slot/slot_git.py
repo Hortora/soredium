@@ -76,11 +76,11 @@ def install_post_commit_hook(clone_path: Path) -> None:
 
 
 def sync_main(repo_path: str) -> None:
-    """Fetch remote-tracking refs so git clone --shared sees latest main.
+    """Fetch and fast-forward local main so git clone --shared --branch main
+    starts from the latest remote state.
 
-    Does NOT rebase or modify the local branch — the source repo may be
-    on a feature branch. git clone --shared --branch main reads from
-    origin/main (remote-tracking ref), not the local main branch.
+    git clone --branch main reads the LOCAL main ref, not origin/main.
+    Without fast-forwarding, clones inherit stale or unpushed state.
     """
     rc, _, _ = run_cmd(["git", "-C", repo_path, "fetch", "origin"])
     if rc != 0:
@@ -89,6 +89,20 @@ def sync_main(repo_path: str) -> None:
     rc, _, _ = run_cmd(["git", "-C", repo_path, "remote", "get-url", "upstream"])
     if rc == 0:
         run_cmd(["git", "-C", repo_path, "fetch", "upstream"])
+
+    rc, current, _ = run_cmd(["git", "-C", repo_path, "branch", "--show-current"])
+    if rc != 0:
+        return
+    current = current.strip()
+
+    if current == "main":
+        rc, _, _ = run_cmd(["git", "-C", repo_path, "merge", "--ff-only", "origin/main"])
+        if rc != 0:
+            print(f"WARN=main_ff_failed repo={repo_path}")
+    else:
+        rc, _, _ = run_cmd(["git", "-C", repo_path, "fetch", ".", "origin/main:main"])
+        if rc != 0:
+            print(f"WARN=main_update_failed repo={repo_path}")
 
 
 def _cleanup_inherited_symlinks(clone_path: Path, slot_dir: Path) -> list[str]:
