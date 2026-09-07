@@ -138,11 +138,48 @@ def validate_claude_md_paths(claude_path: Path, slot_dir: Path) -> list[str]:
     slot_str = str(slot_dir.resolve())
     for i, line in enumerate(content.splitlines(), 1):
         if home in line and slot_str not in line:
-            if "add-dir" in line.lower() or "project repo" in line.lower() or "git -C" in line:
-                warnings.append(
-                    f"{claude_path.name}:{i}: absolute path escapes slot — {line.strip()}"
-                )
+            warnings.append(
+                f"{claude_path.name}:{i}: absolute path escapes slot — {line.strip()}"
+            )
     return warnings
+
+
+def sanitize_slot_claude_md(slot_dir: Path, path_map: dict[str, str]) -> list[str]:
+    """Rewrite absolute paths in all CLAUDE.md files within a slot.
+
+    path_map: {original_absolute_path: slot_absolute_path}
+    Replaces longest matches first to avoid partial substitution.
+    Returns list of files that were modified.
+    """
+    sorted_keys = sorted(path_map.keys(), key=len, reverse=True)
+    modified: list[str] = []
+
+    for claude_md in sorted(slot_dir.rglob("CLAUDE.md")):
+        if ".git" in claude_md.parts:
+            continue
+        if claude_md.is_symlink():
+            target = claude_md.resolve()
+            if not target.exists():
+                continue
+            if not str(target).startswith(str(slot_dir)):
+                continue
+            claude_md = target
+
+        try:
+            content = claude_md.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        new_content = content
+        for orig in sorted_keys:
+            if orig in new_content:
+                new_content = new_content.replace(orig, path_map[orig])
+
+        if new_content != content:
+            claude_md.write_text(new_content)
+            modified.append(str(claude_md.relative_to(slot_dir)))
+
+    return modified
 
 
 def replicate_claude_md(repo_path: Path, ws_subdir: Path, repo_worktree: Path) -> None:

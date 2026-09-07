@@ -55,7 +55,7 @@ from slot_git import (
 from slot_workspace import (
     validate_slot_wksp, resolve_workspace_source, discover_workspace,
     _unignore_subdir, repoint_wksp, create_proj_symlink, replicate_claude_md,
-    validate_claude_md_paths,
+    validate_claude_md_paths, sanitize_slot_claude_md,
 )
 from slot_query import find_slot_by_branch
 from slot_state import transition as _transition
@@ -196,6 +196,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         slot_dir.mkdir()
         m2_dir = slot_dir / ".m2"
         m2_dir.mkdir()
+        path_map: dict[str, str] = {}
 
         for repo_name in repos:
             repo_path = family_root / repo_name
@@ -219,6 +220,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             configure_slot_remotes(clone_dest, repo_path)
             configure_update_instead(repo_path)
             install_post_commit_hook(clone_dest)
+            path_map[str(repo_path.resolve())] = str(clone_dest)
 
             gi_changed = setup_slot_repo(clone_dest, m2_dir)
             if gi_changed:
@@ -256,16 +258,22 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 configure_update_instead(ws_source)
                 install_post_commit_hook(ws_slot_dir)
                 (ws_slot_dir / ".workspace").touch()
+                path_map[str(ws_source.resolve())] = str(ws_slot_dir)
 
                 repoint_wksp(clone_dest, ws_slot_dir)
                 create_proj_symlink(ws_slot_dir, clone_dest)
                 replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
 
-                path_warnings = validate_claude_md_paths(
-                    ws_slot_dir / "CLAUDE.md", slot_dir,
-                )
-                for w in path_warnings:
-                    print(f"WARN=absolute_path_in_claude_md repo={repo_name} {w}")
+        sanitized = sanitize_slot_claude_md(slot_dir, path_map)
+        for s in sanitized:
+            print(f"SANITIZED_CLAUDE_MD={s}")
+        if sanitized:
+            for sub in sorted(slot_dir.iterdir()):
+                if sub.is_dir() and (sub / ".git").is_dir() and (sub / "CLAUDE.md").exists():
+                    rc_check, _, _ = run_cmd(["git", "-C", str(sub), "diff", "--quiet", "CLAUDE.md"])
+                    if rc_check != 0:
+                        run_cmd(["git", "-C", str(sub), "add", "CLAUDE.md"])
+                        run_cmd(["git", "-C", str(sub), "commit", "-m", "chore: sanitize CLAUDE.md paths for slot isolation"])
 
         primary_repo = repos[0]
         primary_wksp = slot_dir / primary_repo / "wksp"
@@ -443,14 +451,25 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             create_proj_symlink(ws_subdir, clone_dest)
             replicate_claude_md(repo_path, ws_subdir, clone_dest)
 
-            path_warnings = validate_claude_md_paths(
-                ws_subdir / "CLAUDE.md", slot_dir,
-            )
-            for w in path_warnings:
-                print(f"WARN=absolute_path_in_claude_md repo={repo_name} {w}")
-
     configure_slot_remotes(clone_dest, repo_path)
     configure_update_instead(repo_path)
+
+    add_path_map: dict[str, str] = {str(repo_path.resolve()): str(clone_dest)}
+    if ws_info:
+        ws_source, ws_name = ws_info
+        ws_slot_dir = slot_dir / ws_name
+        if ws_slot_dir.is_dir():
+            add_path_map[str(ws_source.resolve())] = str(ws_slot_dir)
+    sanitized = sanitize_slot_claude_md(slot_dir, add_path_map)
+    for s in sanitized:
+        print(f"SANITIZED_CLAUDE_MD={s}")
+    if sanitized:
+        for sub in [clone_dest] + ([ws_slot_dir] if ws_info and ws_slot_dir.is_dir() else []):
+            if (sub / ".git").is_dir() and (sub / "CLAUDE.md").exists():
+                rc_check, _, _ = run_cmd(["git", "-C", str(sub), "diff", "--quiet", "CLAUDE.md"])
+                if rc_check != 0:
+                    run_cmd(["git", "-C", str(sub), "add", "CLAUDE.md"])
+                    run_cmd(["git", "-C", str(sub), "commit", "-m", "chore: sanitize CLAUDE.md paths for slot isolation"])
 
     _update_slot_repos(slot_dir, repo_name, add=True)
 

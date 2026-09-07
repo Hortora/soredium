@@ -433,3 +433,152 @@ class TestValidateSlotWksp:
         failures = slot_workspace.validate_slot_wksp(slot_dir, repo_names=["engine"])
         assert failures == []
 
+
+class TestSanitizeSlotClaudeMd:
+    """Refs #350: sanitize_slot_claude_md must rewrite absolute paths in CLAUDE.md files."""
+
+    def test_rewrites_project_repo_paths(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        clone = slot_dir / "blocks"
+        clone.mkdir(parents=True)
+        (clone / ".git").mkdir()
+        (clone / "CLAUDE.md").write_text(
+            '**Project repo:** /Users/me/claude/casehub/blocks\n'
+            'Run `add-dir /Users/me/claude/casehub/blocks` before any other work.\n'
+        )
+        path_map = {"/Users/me/claude/casehub/blocks": str(clone)}
+        modified = slot_workspace.sanitize_slot_claude_md(slot_dir, path_map)
+        assert len(modified) == 1
+        content = (clone / "CLAUDE.md").read_text()
+        assert "/Users/me/claude/casehub/blocks" not in content
+        assert str(clone) in content
+
+    def test_rewrites_workspace_paths(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        ws_clone = slot_dir / "wsp-casehub-blocks"
+        ws_clone.mkdir(parents=True)
+        (ws_clone / ".git").mkdir()
+        (ws_clone / "CLAUDE.md").write_text(
+            '**Workspace:** /Users/me/claude/public/casehub/blocks\n'
+            'git -C /Users/me/claude/public/casehub/blocks status\n'
+        )
+        path_map = {"/Users/me/claude/public/casehub/blocks": str(ws_clone)}
+        modified = slot_workspace.sanitize_slot_claude_md(slot_dir, path_map)
+        assert len(modified) == 1
+        content = (ws_clone / "CLAUDE.md").read_text()
+        assert "/Users/me/claude/public/casehub/blocks" not in content
+        assert str(ws_clone) in content
+
+    def test_longest_match_first(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        clone = slot_dir / "blocks"
+        clone.mkdir(parents=True)
+        (clone / ".git").mkdir()
+        (clone / "CLAUDE.md").write_text(
+            'path: /Users/me/claude/casehub/blocks/src\n'
+            'root: /Users/me/claude/casehub\n'
+        )
+        path_map = {
+            "/Users/me/claude/casehub/blocks": str(clone),
+            "/Users/me/claude/casehub": str(slot_dir.parent),
+        }
+        slot_workspace.sanitize_slot_claude_md(slot_dir, path_map)
+        content = (clone / "CLAUDE.md").read_text()
+        assert str(clone) + "/src" in content
+        assert "/Users/me/claude/casehub/blocks" not in content
+
+    def test_no_change_returns_empty(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        clone = slot_dir / "blocks"
+        clone.mkdir(parents=True)
+        (clone / ".git").mkdir()
+        (clone / "CLAUDE.md").write_text("# Clean CLAUDE.md\nNo absolute paths here.\n")
+        path_map = {"/Users/me/claude/casehub/blocks": str(clone)}
+        modified = slot_workspace.sanitize_slot_claude_md(slot_dir, path_map)
+        assert modified == []
+
+    def test_skips_git_dirs(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        clone = slot_dir / "blocks"
+        git_dir = clone / ".git" / "hooks"
+        git_dir.mkdir(parents=True)
+        (git_dir / "CLAUDE.md").write_text("/Users/me/claude/casehub/blocks\n")
+        (clone / "CLAUDE.md").write_text("clean\n")
+        path_map = {"/Users/me/claude/casehub/blocks": str(clone)}
+        modified = slot_workspace.sanitize_slot_claude_md(slot_dir, path_map)
+        assert modified == []
+        assert "/Users/me/claude/casehub/blocks" in (git_dir / "CLAUDE.md").read_text()
+
+    def test_multiple_repos_sanitized(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        for name in ("blocks", "engine"):
+            clone = slot_dir / name
+            clone.mkdir(parents=True)
+            (clone / ".git").mkdir()
+            (clone / "CLAUDE.md").write_text(
+                f'**Project repo:** /Users/me/claude/casehub/{name}\n'
+            )
+        path_map = {
+            "/Users/me/claude/casehub/blocks": str(slot_dir / "blocks"),
+            "/Users/me/claude/casehub/engine": str(slot_dir / "engine"),
+        }
+        modified = slot_workspace.sanitize_slot_claude_md(slot_dir, path_map)
+        assert len(modified) == 2
+
+    def test_symlinked_claude_md_follows_target(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "1"
+        proj = slot_dir / "blocks"
+        wksp = slot_dir / "wsp-blocks"
+        proj.mkdir(parents=True)
+        wksp.mkdir(parents=True)
+        (proj / ".git").mkdir()
+        (wksp / ".git").mkdir()
+        (proj / "CLAUDE.md").write_text(
+            '**Project repo:** /Users/me/claude/casehub/blocks\n'
+        )
+        (wksp / "CLAUDE.md").symlink_to(proj / "CLAUDE.md")
+        path_map = {"/Users/me/claude/casehub/blocks": str(proj)}
+        modified = slot_workspace.sanitize_slot_claude_md(slot_dir, path_map)
+        assert len(modified) == 1
+        content = (proj / "CLAUDE.md").read_text()
+        assert "/Users/me/claude/casehub/blocks" not in content
+
+
+class TestValidateClaudeMdPathsBroadDetection:
+    """Refs #350: validate_claude_md_paths should catch ALL absolute path escapes."""
+
+    def test_catches_physical_path(self, tmp_path):
+        home = str(Path.home())
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        claude = slot_dir / "CLAUDE.md"
+        claude.write_text(f'**Physical path:** {home}/claude/casehub/blocks/CLAUDE.md\n')
+        warnings = slot_workspace.validate_claude_md_paths(claude, slot_dir)
+        assert len(warnings) == 1
+
+    def test_catches_symlinked_at(self, tmp_path):
+        home = str(Path.home())
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        claude = slot_dir / "CLAUDE.md"
+        claude.write_text(f'**Symlinked at:** {home}/claude/public/casehub/blocks/CLAUDE.md\n')
+        warnings = slot_workspace.validate_claude_md_paths(claude, slot_dir)
+        assert len(warnings) == 1
+
+    def test_catches_ide_open_workspace(self, tmp_path):
+        home = str(Path.home())
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        claude = slot_dir / "CLAUDE.md"
+        claude.write_text(f'ide_open_workspace(path="{home}/claude/casehub")\n')
+        warnings = slot_workspace.validate_claude_md_paths(claude, slot_dir)
+        assert len(warnings) == 1
+
+    def test_slot_internal_paths_ok(self, tmp_path):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        claude = slot_dir / "CLAUDE.md"
+        claude.write_text(f'**Project repo:** {slot_dir}/blocks\n')
+        warnings = slot_workspace.validate_claude_md_paths(claude, slot_dir)
+        assert warnings == []
+
