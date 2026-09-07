@@ -183,20 +183,28 @@ def _escape_slot_cwd(slot_dir: Path, escape_to: Path) -> tuple[bool, Path | None
 
 
 def _has_unmerged_content(slot_dir: Path) -> list[str]:
-    """Return list of repo names with unmerged branch content vs main."""
+    """Return list of repo names with unmerged branch content vs main.
+
+    Iterates ALL local branches, not just the current one — a repo that
+    has been checked out to main may still have feature branches with
+    unmerged work.
+    """
     unmerged = []
     for repo_dir in sorted(slot_dir.iterdir()):
         if not repo_dir.is_dir() or not (repo_dir / ".git").exists():
             continue
         rc, stdout, _ = run_cmd(
-            ["git", "branch", "--show-current"], cwd=str(repo_dir))
+            ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+            cwd=str(repo_dir))
         if rc != 0:
             continue
-        branch = stdout.strip()
-        if not branch or branch == "main":
-            continue
-        rc, stdout, _ = run_cmd(
-            ["git", "diff", "--stat", f"main...{branch}"], cwd=str(repo_dir))
-        if rc == 0 and stdout.strip():
-            unmerged.append(repo_dir.name)
+        for branch in stdout.strip().splitlines():
+            branch = branch.strip()
+            if not branch or branch == "main":
+                continue
+            rc2, diff_out, _ = run_cmd(
+                ["git", "diff", "--stat", f"main...{branch}"], cwd=str(repo_dir))
+            if rc2 == 0 and diff_out.strip():
+                unmerged.append(f"{repo_dir.name}:{branch}")
+                break
     return unmerged

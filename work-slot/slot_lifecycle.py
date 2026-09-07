@@ -658,6 +658,27 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     return 0
 
 
+def _has_active_plan(slot_dir: Path) -> str | None:
+    """Check if any repo in the slot has an active .plan. Returns the path or None."""
+    for sub in sorted(slot_dir.iterdir()):
+        if not sub.is_dir():
+            continue
+        plan_file = sub / ".plan"
+        if not plan_file.exists():
+            continue
+        try:
+            content = plan_file.read_text()
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("state:"):
+                    state = stripped.split(":", 1)[1].strip()
+                    if state in ("active", "scaffolded", "transitioning"):
+                        return str(plan_file)
+        except OSError:
+            continue
+    return None
+
+
 def archive_slot(family_root: Path, slot_num: int, force: bool = False,
                   resolution: str | None = None) -> None:
     slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
@@ -665,6 +686,12 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
     ensure_clone_layout(slot_dir)
+    active_plan = _has_active_plan(slot_dir)
+    if active_plan and not force:
+        print(f"ERROR=active_plan slot={slot_num}")
+        print(f"ERROR_DETAIL=active .plan at {active_plan} — work is in progress")
+        print("HINT=complete or pause the work first, or pass --force to override")
+        sys.exit(1)
     unmerged = _has_unmerged_content(slot_dir)
     if unmerged:
         print(f"ERROR=unmerged_content slot={slot_num}")

@@ -79,7 +79,21 @@ def create_branches_typed(project: str, workspace: str, branch: str,
         run_git(project, "branch", "-D", branch)
         return CreateResult(branch, False, False, f"workspace_branch_failed:{err}")
 
+    _clear_stale_landed(Path(project).parent)
     return CreateResult(branch, True, True)
+
+
+def _clear_stale_landed(slot_dir: Path) -> None:
+    """Remove .landed marker from a slot when new work starts.
+
+    A .landed marker from previous work (e.g., issue-411) must not persist
+    when a new branch is created (e.g., issue-413) — it would cause the
+    slot to be eligible for archival despite active work.
+    """
+    landed = slot_dir / ".landed"
+    if landed.exists():
+        landed.unlink()
+        print(f"CLEARED_STALE_LANDED={slot_dir.name}")
 
 
 # ---------------------------------------------------------------------------
