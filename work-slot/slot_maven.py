@@ -3,8 +3,6 @@
 import shutil
 from pathlib import Path
 
-from slot_core import _REGENERABLE_DIRS
-
 
 def _write_slot_settings(slot_dir: Path) -> Path:
     """Generate a slot-specific settings.xml that adds the global ~/.m2/repository

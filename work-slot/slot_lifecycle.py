@@ -48,7 +48,7 @@ from slot_claude import (
 from slot_git import (
     configure_slot_remotes, configure_update_instead,
     install_post_commit_hook, sync_main,
-    _symlink_gitignored_assets, _exclude_symlinks,
+    _exclude_symlinks,
     _cleanup_inherited_symlinks,
     _repack_broken_alternates, ensure_clone_layout,
 )
@@ -176,7 +176,6 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
                 raise SlotCreationError(f"branch_create_failed repo={repo_name}")
             _cleanup_inherited_symlinks(clone_dest, slot_dir)
             _exclude_symlinks(clone_dest)
-            _symlink_gitignored_assets(repo_path, clone_dest)
             configure_slot_remotes(clone_dest, repo_path)
             configure_update_instead(repo_path)
             install_post_commit_hook(clone_dest)
@@ -366,7 +365,6 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
 
     _cleanup_inherited_symlinks(clone_dest, slot_dir)
     _exclude_symlinks(clone_dest)
-    _symlink_gitignored_assets(repo_path, clone_dest)
     install_post_commit_hook(clone_dest)
     gi_changed = setup_slot_repo(clone_dest, m2_dir)
     if gi_changed:

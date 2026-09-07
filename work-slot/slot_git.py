@@ -12,7 +12,7 @@ from pathlib import Path
 
 from slot_core import (
     run_cmd, is_worktree, resolve_original_repo,
-    _REGENERABLE_DIRS, _IDE_ARTIFACTS, get_all_slot_repos,
+    _IDE_ARTIFACTS, get_all_slot_repos,
     _cleanup_remnant_dir, SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
 )
 
@@ -138,24 +138,6 @@ def _exclude_symlinks(clone_path: Path) -> None:
             for entry in sorted(entries):
                 f.write(f"{entry}\n")
 
-
-def _symlink_gitignored_assets(source_repo: Path, clone_dest: Path) -> list[str]:
-    """Symlink gitignored asset directories from source into clone.
-    Skips regenerable directories (node_modules, build output, IDE artifacts)."""
-    linked: list[str] = []
-    for entry in sorted(source_repo.iterdir()):
-        if entry.name == ".git" or not entry.is_dir():
-            continue
-        if entry.name in _REGENERABLE_DIRS:
-            continue
-        clone_entry = clone_dest / entry.name
-        if clone_entry.exists() or clone_entry.is_symlink():
-            continue
-        rc, _, _ = run_cmd(["git", "-C", str(source_repo), "check-ignore", "-q", entry.name])
-        if rc == 0:
-            clone_entry.symlink_to(str(entry.resolve()))
-            linked.append(entry.name)
-    return linked
 
 
 def _repack_broken_alternates(slot_dir: Path, family_root: Path) -> int:
