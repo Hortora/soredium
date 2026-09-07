@@ -18,6 +18,7 @@ Usage:
     python3 scripts/reconcile_slots.py <family-root> --execute    # audit + strategy + execute
     python3 scripts/reconcile_slots.py <family-root> --check-github          # detect + classify
     python3 scripts/reconcile_slots.py <family-root> --check-github --execute  # detect + archive
+    python3 scripts/reconcile_slots.py --purge-test-data          # remove pytest pollution from DB
 """
 
 import json
@@ -48,6 +49,17 @@ try:
 except ImportError:
     relocate_claude_projects = None
     remove_claude_projects = None
+
+try:
+    from slot_metadata import parse_slot_md
+except ImportError:
+    parse_slot_md = None
+
+try:
+    from slot_state import current_state as _current_slot_state, set_slot_state
+except ImportError:
+    _current_slot_state = None
+    set_slot_state = None
 
 SLOT_DIR_NAME = "slots"
 LEGACY_SLOT_DIR_NAME = "worktrees"
@@ -81,6 +93,47 @@ def _states_compatible(db_state: str, disk_state: str) -> bool:
     return False
 
 
+def _read_slot_state(slot_dir: Path) -> str | None:
+    """Read the state: field from a .slot file. Returns None if absent."""
+    slot_file = slot_dir / ".slot"
+    if not slot_file.exists():
+        return None
+    for line in slot_file.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("state:") or stripped.startswith("status:"):
+            return stripped.split(":", 1)[1].strip()
+    return None
+
+
+def _check_plan_complete(slot_dir: Path) -> bool:
+    """Check if a .plan exists in the slot and all issues are done."""
+    for sub in slot_dir.iterdir():
+        if not sub.is_dir():
+            continue
+        plan = sub / ".plan"
+        if not plan.exists():
+            continue
+        content = plan.read_text()
+        in_queue = False
+        has_items = False
+        all_done = True
+        for line in content.splitlines():
+            if line.startswith("## Queue"):
+                in_queue = True
+                continue
+            if in_queue and line.startswith("## "):
+                break
+            if in_queue and line.strip().startswith("- "):
+                has_items = True
+                if "← active" in line:
+                    all_done = False
+                elif line.strip().startswith("- [ ]"):
+                    all_done = False
+        if has_items and all_done:
+            return True
+    return False
+
+
 def _scan_disk(family_root: Path) -> dict[int, dict]:
     results: dict[int, dict] = {}
     for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
@@ -99,6 +152,8 @@ def _scan_disk(family_root: Path) -> dict[int, dict]:
                 "has_slot_file": (d / ".slot").exists(),
                 "has_landed": (d / ".landed").exists(),
                 "has_phase_a": (d / ".phase-a-complete").exists(),
+                "slot_state": _read_slot_state(d),
+                "plan_complete": _check_plan_complete(d),
                 "contents": _list_dir_contents(d),
             }
         attic = base / "attic"
@@ -115,6 +170,8 @@ def _scan_disk(family_root: Path) -> dict[int, dict]:
                     "has_slot_file": (d / ".slot").exists(),
                     "has_landed": (d / ".landed").exists(),
                     "has_phase_a": (d / ".phase-a-complete").exists(),
+                    "slot_state": _read_slot_state(d),
+                    "plan_complete": False,
                     "contents": _list_dir_contents(d),
                 }
     return results
@@ -201,6 +258,70 @@ def audit(family_root: Path) -> list[dict]:
                     "detail": f"DB={db_entry['state']}, disk={disk_state}",
                 })
 
+            # .slot file has no state: field (needs migration)
+            slot_state = d.get("slot_state")
+            if d["has_slot_file"] and slot_state is None:
+                divergences.append({
+                    "slot": num,
+                    "class": "missing-state-field",
+                    "disk_path": d["path"],
+                    "db_state": db_entry["state"],
+                    "disk_state": disk_state,
+                    "detail": f".slot has no state: field, DB={db_entry['state']}, disk={disk_state}",
+                })
+
+            # .slot state disagrees with DB state
+            if slot_state is not None and db_entry:
+                db_mapped = db_entry["state"]
+                if db_mapped == "archiving":
+                    db_mapped = "archived"
+                if slot_state != db_mapped and db_mapped not in ("pending", "failed", "purged"):
+                    divergences.append({
+                        "slot": num,
+                        "class": "slot-file-mismatch",
+                        "disk_path": d["path"],
+                        "slot_state": slot_state,
+                        "db_state": db_entry["state"],
+                        "detail": f".slot says '{slot_state}', DB says '{db_entry['state']}'",
+                    })
+
+            # Plan complete but not landed — corruption
+            if d.get("plan_complete") and not d.get("has_landed") and d["location"] == "active":
+                divergences.append({
+                    "slot": num,
+                    "class": "plan-complete-not-landed",
+                    "disk_path": d["path"],
+                    "db_state": db_entry["state"] if db_entry else None,
+                    "detail": "all .plan issues done but no .landed marker — work-end never ran",
+                })
+
+    # Work item orphans: active work items whose slot is archived/landed
+    if _wl:
+        conn = _wl.connect()
+        try:
+            normalized = _wl._norm(str(family_root))
+            orphans = conn.execute(
+                "SELECT wi.id, wi.branch, wi.state, wi.slot_id, s.slot_number, s.state as slot_state "
+                "FROM work_items wi "
+                "JOIN slots s ON wi.slot_id = s.id "
+                "WHERE wi.state IN ('active', 'paused') "
+                "AND s.state IN ('archived', 'landed', 'purged') "
+                "AND (s.family_root = ? OR s.family_root = ?)",
+                (normalized, str(family_root)),
+            ).fetchall()
+            for o in orphans:
+                divergences.append({
+                    "slot": o["slot_number"],
+                    "class": "work-item-orphan",
+                    "work_item_id": o["id"],
+                    "wi_state": o["state"],
+                    "wi_branch": o["branch"],
+                    "slot_db_state": o["slot_state"],
+                    "detail": f"work item '{o['branch']}' is {o['state']} but slot is {o['slot_state']}",
+                })
+        finally:
+            conn.close()
+
     return divergences
 
 
@@ -250,6 +371,43 @@ def strategy(divergences: list[dict]) -> list[dict]:
                 "new_state": d["disk_state"],
                 "old_state": d["db_state"],
                 "detail": f"update DB from {d['db_state']} to {d['disk_state']}",
+                "risk": "low",
+            })
+        elif cls == "missing-state-field":
+            correct = d.get("disk_state", d.get("db_state", "active"))
+            actions.append({
+                "slot": d["slot"],
+                "action": "backfill_state_field",
+                "disk_path": d["disk_path"],
+                "new_state": correct,
+                "detail": f"write state: {correct} to .slot file",
+                "risk": "low",
+            })
+        elif cls == "slot-file-mismatch":
+            actions.append({
+                "slot": d["slot"],
+                "action": "update_db_to_slot",
+                "disk_path": d.get("disk_path", ""),
+                "new_state": d["slot_state"],
+                "old_state": d["db_state"],
+                "detail": f"update DB from '{d['db_state']}' to '{d['slot_state']}' (.slot is authoritative)",
+                "risk": "low",
+            })
+        elif cls == "plan-complete-not-landed":
+            actions.append({
+                "slot": d["slot"],
+                "action": "flag_stale",
+                "disk_path": d.get("disk_path", ""),
+                "detail": "mark as stale — all plan issues done but work-end never ran",
+                "risk": "medium",
+            })
+        elif cls == "work-item-orphan":
+            actions.append({
+                "slot": d["slot"],
+                "action": "end_orphan_work_item",
+                "work_item_id": d["work_item_id"],
+                "wi_branch": d.get("wi_branch", ""),
+                "detail": f"end orphaned work item '{d.get('wi_branch', '')}' (slot is {d.get('slot_db_state', '')})",
                 "risk": "low",
             })
     return actions
@@ -324,6 +482,77 @@ def execute(actions: list[dict], family_root: Path) -> list[dict]:
                             "UPDATE slots SET state=? WHERE slot_number=? AND family_root=?",
                             (a["new_state"], a["slot"], normalized),
                         )
+                    conn.commit()
+                    conn.close()
+                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+
+            elif a["action"] == "backfill_state_field":
+                slot_path = Path(a["disk_path"])
+                slot_file = slot_path / ".slot"
+                if slot_file.exists():
+                    content = slot_file.read_text()
+                    lines = content.splitlines()
+                    inserted = False
+                    for i, line in enumerate(lines):
+                        if line.startswith("## State") or line.startswith("## Status"):
+                            lines.insert(i + 1, f"state: {a['new_state']}")
+                            inserted = True
+                            break
+                    if not inserted:
+                        for i, line in enumerate(lines):
+                            if line.startswith("## Created"):
+                                lines.insert(i, f"\n## State\nstate: {a['new_state']}")
+                                inserted = True
+                                break
+                    if not inserted:
+                        lines.append(f"\n## State\nstate: {a['new_state']}")
+                    slot_file.write_text("\n".join(lines) + "\n")
+                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+
+            elif a["action"] == "update_db_to_slot":
+                if _wl:
+                    conn = _wl.connect()
+                    normalized = _wl._norm(str(family_root))
+                    new_state = a["new_state"]
+                    if new_state == "archived":
+                        conn.execute(
+                            "UPDATE slots SET state='archived', archived_at=? "
+                            "WHERE slot_number=? AND family_root=?",
+                            (_wl._now(), a["slot"], normalized),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE slots SET state=? WHERE slot_number=? AND family_root=?",
+                            (new_state, a["slot"], normalized),
+                        )
+                    conn.commit()
+                    conn.close()
+                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+
+            elif a["action"] == "flag_stale":
+                slot_path = Path(a["disk_path"])
+                slot_file = slot_path / ".slot"
+                if slot_file.exists():
+                    if set_slot_state:
+                        set_slot_state(slot_path, "stale")
+                if _wl:
+                    conn = _wl.connect()
+                    normalized = _wl._norm(str(family_root))
+                    conn.execute(
+                        "UPDATE slots SET state='stale' WHERE slot_number=? AND family_root=?",
+                        (a["slot"], normalized),
+                    )
+                    conn.commit()
+                    conn.close()
+                results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
+
+            elif a["action"] == "end_orphan_work_item":
+                if _wl:
+                    conn = _wl.connect()
+                    conn.execute(
+                        "UPDATE work_items SET state='ended', ended_at=? WHERE id=?",
+                        (_wl._now(), a["work_item_id"]),
+                    )
                     conn.commit()
                     conn.close()
                 results.append({"slot": a["slot"], "action": a["action"], "status": "done"})
@@ -496,10 +725,68 @@ def execute_github_actions(findings: list[dict], family_root: Path) -> list[dict
     return results
 
 
+def purge_test_data() -> int:
+    """Remove all test-pollution entries from the worklog DB."""
+    if not _wl:
+        print("ERROR: worklog module not available")
+        return 1
+    conn = _wl.connect()
+    test_patterns = ["%pytest%", "%/tmp/%", "%/private/tmp/%", "%/private/var/folders/%"]
+    total_slots = 0
+    total_wi = 0
+    total_repos = 0
+    for pattern in test_patterns:
+        rows = conn.execute(
+            "SELECT id FROM slots WHERE family_root LIKE ?", (pattern,)
+        ).fetchall()
+        slot_ids = [r["id"] for r in rows]
+        if slot_ids:
+            placeholders = ",".join("?" * len(slot_ids))
+            wi_rows = conn.execute(
+                f"SELECT id FROM work_items WHERE slot_id IN ({placeholders})",
+                slot_ids,
+            ).fetchall()
+            wi_ids = [r["id"] for r in wi_rows]
+            if wi_ids:
+                wi_ph = ",".join("?" * len(wi_ids))
+                conn.execute(f"DELETE FROM work_item_issues WHERE work_item_id IN ({wi_ph})", wi_ids)
+                conn.execute(f"DELETE FROM events WHERE work_item_id IN ({wi_ph})", wi_ids)
+                conn.execute(f"DELETE FROM work_items WHERE id IN ({wi_ph})", wi_ids)
+                total_wi += len(wi_ids)
+            conn.execute(f"DELETE FROM events WHERE slot_id IN ({placeholders})", slot_ids)
+            conn.execute(f"DELETE FROM slots WHERE id IN ({placeholders})", slot_ids)
+            total_slots += len(slot_ids)
+        repo_rows = conn.execute(
+            "SELECT id FROM repos WHERE path LIKE ?", (pattern,)
+        ).fetchall()
+        repo_ids = [r["id"] for r in repo_rows]
+        if repo_ids:
+            rp = ",".join("?" * len(repo_ids))
+            wi_from_repos = conn.execute(
+                f"SELECT id FROM work_items WHERE repo_id IN ({rp})", repo_ids
+            ).fetchall()
+            rw_ids = [r["id"] for r in wi_from_repos]
+            if rw_ids:
+                rw_ph = ",".join("?" * len(rw_ids))
+                conn.execute(f"DELETE FROM work_item_issues WHERE work_item_id IN ({rw_ph})", rw_ids)
+                conn.execute(f"DELETE FROM events WHERE work_item_id IN ({rw_ph})", rw_ids)
+                conn.execute(f"DELETE FROM work_items WHERE id IN ({rw_ph})", rw_ids)
+                total_wi += len(rw_ids)
+            conn.execute(f"DELETE FROM repos WHERE id IN ({rp})", repo_ids)
+            total_repos += len(repo_ids)
+    conn.commit()
+    conn.close()
+    print(f"PURGED: {total_slots} slots, {total_wi} work items, {total_repos} repos")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
         return 1
+
+    if sys.argv[1] == "--purge-test-data":
+        return purge_test_data()
 
     family_root = Path(sys.argv[1])
     if not family_root.is_dir():
