@@ -35,7 +35,10 @@ the source of truth for what was retrieved — not conversation context.
 
    **Your job is to be skeptical about unflagged entries.** Mechanically
    flagged entries (version mismatch, stale) are already surfaced. You add
-   judgment: were the unflagged entries genuinely used this session?
+   judgment: were the unflagged entries genuinely useful this session?
+   Did any entry contain advice that turned out to be incorrect, misleading,
+   or no longer accurate? Those should be downgraded to NOT_RELEVANT or
+   OUTDATED (with stack) — this is how bad entries get flagged for revision.
 
 4. After user responds, group by outcome and call gardenFeedback:
    ```
