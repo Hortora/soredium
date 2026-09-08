@@ -79,21 +79,98 @@ def create_branches_typed(project: str, workspace: str, branch: str,
         run_git(project, "branch", "-D", branch)
         return CreateResult(branch, False, False, f"workspace_branch_failed:{err}")
 
-    _clear_stale_landed(Path(project).parent)
+    _slot_reentry_cleanup(Path(project).parent)
     return CreateResult(branch, True, True)
 
 
-def _clear_stale_landed(slot_dir: Path) -> None:
-    """Remove .landed marker from a slot when new work starts.
+_SLOT_ROOT_MARKERS = [".landed", ".phase-a-complete", ".execute-progress"]
 
-    A .landed marker from previous work (e.g., issue-411) must not persist
-    when a new branch is created (e.g., issue-413) — it would cause the
-    slot to be eligible for archival despite active work.
+_WORKSPACE_MARKERS = [
+    ".plan", ".close-progress", ".close-report.json",
+    ".close-log.jsonl", ".wrap-log.jsonl",
+    ".land-ledger.jsonl", ".artifacts-promoted",
+]
+
+
+def _slot_reentry_cleanup(slot_dir: Path) -> None:
+    """Orient, validate, and self-heal a slot that had previous work.
+
+    Three phases:
+    1. Orient — detect previous lifecycle state and print summary
+    2. Validate — check for stuck/conflicting state
+    3. Self-heal — clear all stale markers so new work starts clean
     """
-    landed = slot_dir / ".landed"
-    if landed.exists():
-        landed.unlink()
-        print(f"CLEARED_STALE_LANDED={slot_dir.name}")
+    if not slot_dir.is_dir() or "/slots/" not in str(slot_dir):
+        return
+
+    # --- Phase 1: Orient ---
+    prev_markers: list[str] = []
+    for m in _SLOT_ROOT_MARKERS:
+        if (slot_dir / m).exists():
+            prev_markers.append(m)
+
+    for sub in sorted(slot_dir.iterdir()):
+        if not sub.is_dir() or sub.name.startswith("."):
+            continue
+        for m in _WORKSPACE_MARKERS:
+            if (sub / m).exists():
+                prev_markers.append(f"{sub.name}/{m}")
+            if (sub / "design" / m).exists():
+                prev_markers.append(f"{sub.name}/design/{m}")
+
+    if not prev_markers:
+        return
+
+    prev_state = "unknown"
+    if any(m == ".landed" for m in prev_markers):
+        prev_state = "landed"
+    elif any(m == ".phase-a-complete" for m in prev_markers):
+        prev_state = "partial-close"
+    elif any(".close-progress" in m for m in prev_markers):
+        prev_state = "interrupted-close"
+    elif any(".plan" in m for m in prev_markers):
+        prev_state = "stale-scaffold"
+
+    print(f"SLOT_REENTRY=yes PREV_STATE={prev_state} MARKERS={len(prev_markers)}")
+
+    # --- Phase 2: Validate ---
+    for sub in sorted(slot_dir.iterdir()):
+        if not sub.is_dir() or sub.name.startswith("."):
+            continue
+        plan = sub / ".plan"
+        if plan.exists():
+            try:
+                for line in plan.read_text().splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("state:"):
+                        state = stripped.split(":", 1)[1].strip()
+                        if state.startswith("closing:"):
+                            print(f"WARN=stuck_close_state plan={sub.name}/.plan state={state}")
+            except OSError:
+                pass
+
+    for sub in sorted(slot_dir.iterdir()):
+        if not sub.is_dir() or not (sub / ".git").is_dir():
+            continue
+        ok, branch = run_git(str(sub), "branch", "--show-current")
+        if ok and branch.strip() == "main":
+            print(f"WARN=repo_on_main repo={sub.name}")
+
+    # --- Phase 3: Self-heal ---
+    for m in _SLOT_ROOT_MARKERS:
+        marker = slot_dir / m
+        if marker.exists():
+            marker.unlink()
+            print(f"CLEARED_STALE={m}")
+
+    for sub in sorted(slot_dir.iterdir()):
+        if not sub.is_dir() or sub.name.startswith("."):
+            continue
+        for m in _WORKSPACE_MARKERS:
+            for loc in [sub / m, sub / "design" / m]:
+                if loc.exists():
+                    loc.unlink()
+                    print(f"CLEARED_STALE={sub.name}/{loc.relative_to(sub)}")
 
 
 # ---------------------------------------------------------------------------

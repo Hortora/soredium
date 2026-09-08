@@ -593,3 +593,133 @@ class TestSyncMainReconciliation:
         )
         lines = [l for l in log.stdout.strip().splitlines() if l.strip()]
         assert len(lines) == 1, f"Expected 1 commit, got {len(lines)}: {log.stdout}"
+
+
+# ---------------------------------------------------------------------------
+# Slot re-entry cleanup (Refs #351)
+# ---------------------------------------------------------------------------
+
+import branch_create
+
+
+def _make_slot(tmp_path, name="1"):
+    """Create a minimal slot directory structure under .../slots/<name>."""
+    slot_dir = tmp_path / "family" / "slots" / name
+    slot_dir.mkdir(parents=True)
+    return slot_dir
+
+
+class TestSlotReentryCleanup:
+    """Refs #351: _slot_reentry_cleanup must orient, validate, and self-heal."""
+
+    def test_clears_landed_marker(self, tmp_path, capsys):
+        slot_dir = _make_slot(tmp_path)
+        (slot_dir / ".landed").write_text("landed_shas=abc:123\n")
+        branch_create._slot_reentry_cleanup(slot_dir)
+        assert not (slot_dir / ".landed").exists()
+        captured = capsys.readouterr()
+        assert "CLEARED_STALE=.landed" in captured.out
+        assert "SLOT_REENTRY=yes" in captured.out
+        assert "PREV_STATE=landed" in captured.out
+
+    def test_clears_phase_a_complete(self, tmp_path, capsys):
+        slot_dir = _make_slot(tmp_path)
+        (slot_dir / ".phase-a-complete").write_text("repo=blocks sha=abc\n")
+        branch_create._slot_reentry_cleanup(slot_dir)
+        assert not (slot_dir / ".phase-a-complete").exists()
+        captured = capsys.readouterr()
+        assert "CLEARED_STALE=.phase-a-complete" in captured.out
+        assert "PREV_STATE=partial-close" in captured.out
+
+    def test_clears_workspace_markers(self, tmp_path, capsys):
+        slot_dir = _make_slot(tmp_path)
+        wksp = slot_dir / "wsp-casehub-blocks"
+        wksp.mkdir()
+        (wksp / ".close-progress").write_text("step=promote\n")
+        (wksp / ".artifacts-promoted").write_text("done\n")
+        (wksp / ".plan").write_text("# Plan\n## State\nstate: closing:promoted\n")
+        branch_create._slot_reentry_cleanup(slot_dir)
+        assert not (wksp / ".close-progress").exists()
+        assert not (wksp / ".artifacts-promoted").exists()
+        assert not (wksp / ".plan").exists()
+        captured = capsys.readouterr()
+        assert "CLEARED_STALE=" in captured.out
+
+    def test_clears_design_subdir_markers(self, tmp_path, capsys):
+        slot_dir = _make_slot(tmp_path)
+        wksp = slot_dir / "wsp-casehub-blocks"
+        design = wksp / "design"
+        design.mkdir(parents=True)
+        (design / ".artifacts-promoted").write_text("done\n")
+        branch_create._slot_reentry_cleanup(slot_dir)
+        assert not (design / ".artifacts-promoted").exists()
+        captured = capsys.readouterr()
+        assert "CLEARED_STALE=" in captured.out
+
+    def test_no_markers_is_noop(self, tmp_path, capsys):
+        slot_dir = _make_slot(tmp_path)
+        branch_create._slot_reentry_cleanup(slot_dir)
+        captured = capsys.readouterr()
+        assert "SLOT_REENTRY" not in captured.out
+
+    def test_non_slot_dir_is_noop(self, tmp_path, capsys):
+        regular_dir = tmp_path / "not-a-slot"
+        regular_dir.mkdir()
+        (regular_dir / ".landed").write_text("test\n")
+        branch_create._slot_reentry_cleanup(regular_dir)
+        assert (regular_dir / ".landed").exists()
+        captured = capsys.readouterr()
+        assert "SLOT_REENTRY" not in captured.out
+
+    def test_warns_on_stuck_close_state(self, tmp_path, capsys):
+        slot_dir = _make_slot(tmp_path)
+        wksp = slot_dir / "wsp-work"
+        wksp.mkdir()
+        (wksp / ".plan").write_text("# Plan\n\n## State\nstate: closing:promoted\n\n## Queue\n")
+        branch_create._slot_reentry_cleanup(slot_dir)
+        captured = capsys.readouterr()
+        assert "WARN=stuck_close_state" in captured.out
+        assert "closing:promoted" in captured.out
+
+    def test_warns_on_repo_on_main(self, tmp_path, capsys):
+        slot_dir = _make_slot(tmp_path)
+        repo = slot_dir / "engine"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True, capture_output=True)
+        (repo / "f").write_text("x")
+        subprocess.run(["git", "add", "f"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+        (slot_dir / ".landed").write_text("marker\n")
+        branch_create._slot_reentry_cleanup(slot_dir)
+        captured = capsys.readouterr()
+        assert "WARN=repo_on_main repo=engine" in captured.out
+
+    def test_full_scenario_landed_plus_stale_scaffold(self, tmp_path, capsys):
+        """Simulates slot 177: landed from issue-411, new work starts for issue-413."""
+        slot_dir = _make_slot(tmp_path)
+        (slot_dir / ".landed").write_text("landed_shas=blocks:abc123\n")
+        (slot_dir / ".phase-a-complete").write_text("repo=blocks sha=abc\n")
+        wksp = slot_dir / "wsp-casehub-blocks"
+        wksp.mkdir()
+        (wksp / ".plan").write_text("# Plan\n\n## State\nstate: drained\n")
+        (wksp / ".close-progress").write_text("done\n")
+        (wksp / ".close-report.json").write_text("{}\n")
+        (wksp / ".land-ledger.jsonl").write_text("{}\n")
+        (wksp / ".artifacts-promoted").write_text("done\n")
+
+        branch_create._slot_reentry_cleanup(slot_dir)
+
+        assert not (slot_dir / ".landed").exists()
+        assert not (slot_dir / ".phase-a-complete").exists()
+        assert not (wksp / ".plan").exists()
+        assert not (wksp / ".close-progress").exists()
+        assert not (wksp / ".close-report.json").exists()
+        assert not (wksp / ".land-ledger.jsonl").exists()
+        assert not (wksp / ".artifacts-promoted").exists()
+
+        captured = capsys.readouterr()
+        assert "SLOT_REENTRY=yes PREV_STATE=landed" in captured.out
+        assert captured.out.count("CLEARED_STALE=") == 7
