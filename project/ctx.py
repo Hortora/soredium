@@ -26,7 +26,7 @@ if str(_slot_dir) not in sys.path:
 from topology import resolve as topo_resolve, find_design_file, _run
 from work_state import detect as ws_detect
 from corruption import diagnose as _diagnose
-from plan_io import parse_covers
+from plan_io import parse_covers_qualified
 
 
 def _parse_meta(meta_path: Path) -> dict[str, str]:
@@ -206,7 +206,8 @@ def resolve(cwd=None) -> dict[str, str]:
     branch_name = plan_state.get("branch", "")
     project_sha = plan_state.get("project-sha", "")
     covers = plan_state.get("covers", "")
-    issue_n = str(parse_covers(covers)[0]) if covers else ""
+    refs = parse_covers_qualified(covers) if covers else []
+    issue_n = str(refs[0].number) if refs else ""
     issue_repo = plan_state.get("issue-repo", owner_repo)
     design_repo_key = plan_state.get("design-repo", "")
     flyway_next_v = plan_state.get("flyway-next-v", "")
