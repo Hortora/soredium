@@ -1065,6 +1065,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         expected_state=meta_state,
         slot_repos=slot_repos,
     )
+    _hydrate_landed_shas(ctx)
 
     result = _next_action(ctx)
     if ctx.expected_state and ctx.expected_state != meta_state:
@@ -1154,10 +1155,27 @@ def _close_execute_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[s
     return _run_script(cmd, ctx.workspace, dry_run=ctx.dry_run, call_log=ctx.call_log)
 
 
+def _persist_landed_shas(ctx: OrchestratorContext) -> None:
+    """Write landed_shas to .close-progress so they survive re-invocation."""
+    for repo, sha in ctx.landed_shas.items():
+        if sha:
+            update_close_progress(ctx.workspace, f"_landed_sha:{repo}", sha)
+
+
+def _hydrate_landed_shas(ctx: OrchestratorContext) -> None:
+    """Restore landed_shas from _landed_sha:* entries in progress."""
+    prefix = "_landed_sha:"
+    for key, value in ctx.progress.items():
+        if key.startswith(prefix) and value:
+            repo = key[len(prefix):]
+            ctx.landed_shas[repo] = value
+
+
 def _close_on_step_done(step: StepDef, ctx: OrchestratorContext, result: dict[str, str]) -> None:
     """Track landed SHAs after land step completes."""
     if step.name == "land":
         ctx.landed_shas = _parse_landed_shas(result, ctx)
+        _persist_landed_shas(ctx)
 
 
 def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str] | None:
@@ -1201,7 +1219,10 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
         else:
             ctx.last_output = result or {}
             if step.name == "land":
-                ctx.landed_shas[repo] = (result or {}).get("LANDED_SHA", "")
+                sha = (result or {}).get("LANDED_SHA", "")
+                ctx.landed_shas[repo] = sha
+                if sha:
+                    update_close_progress(ctx.workspace, f"_landed_sha:{repo}", sha)
             update_close_progress(ctx.workspace, step_key, "done")
             ctx.steps_executed.append(step_key)
 

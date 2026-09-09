@@ -2038,3 +2038,84 @@ class TestConflictResolvedRoutesToCorrectStep:
         progress = read_close_progress(tmp_path)
         assert progress.get("rebase:engine") == "done"
         assert progress.get("land:engine") is None
+
+
+class TestLandedShasPersistence:
+    """Refs #352: landed_shas must survive orchestrator re-invocation."""
+
+    def test_landed_sha_persisted_to_close_progress(self, tmp_path):
+        """After land:{repo} succeeds, the SHA must be in .close-progress."""
+        from work_end_orchestrator import OrchestratorContext
+        from close_progress import update_close_progress, read_close_progress
+
+        update_close_progress(tmp_path, "land:engine", "done")
+        update_close_progress(tmp_path, "_landed_sha:engine", "abc123def")
+
+        progress = read_close_progress(tmp_path)
+        assert progress.get("_landed_sha:engine") == "abc123def"
+
+    def test_landed_shas_restored_on_context_init(self, tmp_path):
+        """When OrchestratorContext is created with progress containing
+        _landed_sha:* entries, ctx.landed_shas must be populated."""
+        from work_end_orchestrator import OrchestratorContext, _hydrate_landed_shas
+        from close_progress import update_close_progress, read_close_progress
+
+        update_close_progress(tmp_path, "_branch", "issue-99-test")
+        update_close_progress(tmp_path, "land:engine", "done")
+        update_close_progress(tmp_path, "_landed_sha:engine", "abc123def")
+        update_close_progress(tmp_path, "land:blocks", "done")
+        update_close_progress(tmp_path, "_landed_sha:blocks", "789xyz")
+
+        progress = read_close_progress(tmp_path)
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="issue-99-test", base_branch="main",
+            meta_state="closing:promoted", on_main=False,
+            in_slot=False, covers="99", issue_repo="Org/repo",
+            progress=progress,
+        )
+        _hydrate_landed_shas(ctx)
+
+        assert ctx.landed_shas == {"engine": "abc123def", "blocks": "789xyz"}
+
+    def test_write_landed_uses_restored_shas(self, tmp_path):
+        """_write_landed_script must produce correct content from restored SHAs."""
+        from work_end_orchestrator import OrchestratorContext, _write_landed_script
+
+        slot_dir = tmp_path / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="issue-99-test", base_branch="main",
+            meta_state="closing:promoted", on_main=False,
+            in_slot=True, covers="99", issue_repo="Org/repo",
+            progress={}, slot_path=slot_dir,
+        )
+        ctx.landed_shas = {"engine": "abc123", "blocks": "def456"}
+
+        _write_landed_script(ctx)
+
+        landed = (slot_dir / ".landed").read_text()
+        assert "engine:abc123" in landed
+        assert "blocks:def456" in landed
+
+    def test_empty_landed_shas_without_persistence(self, tmp_path):
+        """Without the fix, re-invocation produces empty landed_shas."""
+        from work_end_orchestrator import OrchestratorContext, _hydrate_landed_shas
+        from close_progress import update_close_progress, read_close_progress
+
+        update_close_progress(tmp_path, "_branch", "issue-99-test")
+        update_close_progress(tmp_path, "land:engine", "done")
+
+        progress = read_close_progress(tmp_path)
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="issue-99-test", base_branch="main",
+            meta_state="closing:promoted", on_main=False,
+            in_slot=False, covers="99", issue_repo="Org/repo",
+            progress=progress,
+        )
+        _hydrate_landed_shas(ctx)
+
+        assert ctx.landed_shas == {}
