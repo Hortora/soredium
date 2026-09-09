@@ -2119,3 +2119,53 @@ class TestLandedShasPersistence:
         _hydrate_landed_shas(ctx)
 
         assert ctx.landed_shas == {}
+
+
+class TestWriteMarkerStep:
+    """Refs #353: write_marker must be registered as a StepDef between squash and land."""
+
+    def test_write_marker_step_exists_in_steps(self):
+        from work_end_orchestrator import STEPS
+        names = [s.name for s in STEPS]
+        assert "write_marker" in names, "write_marker step not registered in STEPS"
+
+    def test_write_marker_after_squash_before_land(self):
+        from work_end_orchestrator import STEPS
+        names = [s.name for s in STEPS]
+        squash_idx = names.index("report_squash")
+        land_idx = names.index("land")
+        marker_idx = names.index("write_marker")
+        assert squash_idx < marker_idx < land_idx, \
+            f"write_marker at {marker_idx} must be between report_squash ({squash_idx}) and land ({land_idx})"
+
+    def test_write_marker_skipped_when_not_slot(self):
+        from work_end_orchestrator import STEPS
+        step = next(s for s in STEPS if s.name == "write_marker")
+        assert step.skip_fn is not None, "write_marker must have a skip_fn"
+        from work_end_orchestrator import OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=Path("/tmp/ws"), project=Path("/tmp/proj"),
+            branch="test", base_branch="main",
+            meta_state="closing:promoted", on_main=False,
+            in_slot=False, covers="99", issue_repo="Org/repo",
+            progress={},
+        )
+        assert step.skip_fn(ctx) is True, "write_marker must skip when not in slot"
+
+    def test_write_marker_runs_in_slot(self):
+        from work_end_orchestrator import STEPS
+        step = next(s for s in STEPS if s.name == "write_marker")
+        from work_end_orchestrator import OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=Path("/tmp/ws"), project=Path("/tmp/proj"),
+            branch="test", base_branch="main",
+            meta_state="closing:promoted", on_main=False,
+            in_slot=True, covers="99", issue_repo="Org/repo",
+            progress={}, slot_path=Path("/tmp/slot"),
+        )
+        assert step.skip_fn(ctx) is False, "write_marker must run in slot mode"
+
+    def test_write_marker_in_close_progress_phase_map(self):
+        from close_progress import STEP_TO_PHASE
+        assert "write_marker" in STEP_TO_PHASE, "write_marker missing from STEP_TO_PHASE"
+        assert STEP_TO_PHASE["write_marker"] == "closing:promoted"
