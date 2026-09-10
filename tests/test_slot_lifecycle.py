@@ -2339,3 +2339,54 @@ class TestStripInheritedLifecycle:
         slot_lifecycle._strip_inherited_lifecycle(ws)
         assert (ws / "README.md").exists()
         assert (ws / "README.md").read_text() == "# Readme\n"
+
+    def test_scaffold_plan_survives_strip(self, tmp_path):
+        """Simulates the full sequence: stale .plan stripped, then scaffold writes fresh .plan."""
+        ws = tmp_path / "wsp"
+        ws.mkdir()
+        (ws / ".git").mkdir()
+        (ws / ".plan").write_text("# Work Plan — old-issue\n\n## State\nstate: drained\n")
+        (ws / "HANDOFF.md").write_text("# Old handoff\n")
+
+        stripped = slot_lifecycle._strip_inherited_lifecycle(ws)
+        assert ".plan" in stripped
+        assert not (ws / ".plan").exists()
+
+        fresh_plan = "# Work Plan — issue-304\n\n## State\nbranch: issue-304-new\nstate: active\ncovers: 304\n\n## Queue\n- [ ] org/repo#304 — New work\n"
+        (ws / ".plan").write_text(fresh_plan)
+
+        assert (ws / ".plan").exists()
+        content = (ws / ".plan").read_text()
+        assert "issue-304-new" in content
+        assert "old-issue" not in content
+
+    @patch("slot_lifecycle.run_cmd")
+    def test_create_slot_strips_before_scaffold(self, mock_cmd, tmp_path):
+        """In create_slot, _strip_inherited_lifecycle must run before scaffold.py."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (ws_engine / ".plan").write_text("stale plan from prior work\n")
+        subprocess.run(["git", "-C", str(ws_engine), "add", ".plan"], capture_output=True)
+        subprocess.run(["git", "-C", str(ws_engine), "commit", "-m", "stale plan"], capture_output=True)
+        (engine / "wksp").symlink_to(ws_engine)
+
+        mock_cmd.return_value = (0, "", "")
+
+        with patch("slot_lifecycle.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result = slot_lifecycle.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-304-new",
+                issue="304",
+                issue_repo="casehubio/engine",
+                covers="304",
+                context="Fresh work",
+            )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+        ws_clone = slot_dir / "wsp-casehub-engine"
+        assert not (ws_clone / ".plan").exists() or "stale" not in (ws_clone / ".plan").read_text(), \
+            "Stale .plan from main survived into slot workspace clone"
