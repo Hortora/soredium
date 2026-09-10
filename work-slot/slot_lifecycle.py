@@ -94,7 +94,36 @@ def _build_epic_plan(branch: str, issue_repo: str, cover_refs: list,
 
 
 
+_LIFECYCLE_FILES = frozenset({".plan", ".meta", "JOURNAL.md"})
+_LIFECYCLE_PREFIXES = ("HANDOFF",)
 
+
+def _strip_inherited_lifecycle(ws_dir: Path) -> list[str]:
+    """Remove lifecycle files inherited from main after workspace clone.
+
+    Workspace clones from main may carry .plan, HANDOFF.md, .meta, and
+    JOURNAL.md from prior work. Strip them so the slot session starts clean
+    and scaffold.py writes fresh lifecycle files for the slot's issue.
+    """
+    stripped: list[str] = []
+    for name in sorted(_LIFECYCLE_FILES):
+        f = ws_dir / name
+        if f.exists() and not f.is_dir():
+            f.unlink()
+            stripped.append(name)
+    for f in sorted(ws_dir.iterdir()):
+        if (f.is_file()
+                and f.suffix == ".md"
+                and any(f.name.startswith(p) for p in _LIFECYCLE_PREFIXES)):
+            f.unlink()
+            stripped.append(f.name)
+    if stripped:
+        run_cmd(["git", "-C", str(ws_dir), "add", "-A"])
+        run_cmd(["git", "-C", str(ws_dir), "commit", "-m",
+                 "chore: strip inherited lifecycle files from main"])
+        for name in stripped:
+            print(f"STRIPPED_LIFECYCLE={name}")
+    return stripped
 
 
 _LIFECYCLE_FILES = frozenset({".plan", ".meta", "JOURNAL.md"})
