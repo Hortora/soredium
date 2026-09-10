@@ -362,6 +362,26 @@ should write to any cloned repo — that is the point of slots.
 4. Runs work-end — detects slot mode, runs the full close sequence
    (review, promote, squash, push, merge to original, stamp, archive)
 
+### Known limitations
+
+**IntelliJ rename blocked by wksp symlink.** `ide_refactor_rename` on
+types referenced in workspace markdown files (specs, plans, blog posts)
+fails with "read-only files or unresolved conflicts" when the `wksp`
+symlink is present. **Workaround:** remove the `wksp` symlink before
+the rename, ensure Maven is linked (`ide_open_project` with
+`autoLink: true`), perform the rename, then restore the symlink:
+
+```bash
+rm <repo>/wksp                    # remove symlink
+# ide_open_project with autoLink: true
+# ide_refactor_rename ...
+ln -s ../wsp-<family>-<repo> <repo>/wksp   # restore
+```
+
+The root cause is IntelliJ attempting to process text occurrences in
+non-Java files accessible via the symlink. When Maven is not linked,
+the rename also fails silently — always verify Maven is linked first.
+
 ### What it doesn't do
 
 - Does not run work-start — the human runs `work` in the new session (scaffold.py writes `state: scaffolded`, auto-resolved on first `work` invocation)
