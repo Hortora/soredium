@@ -1,88 +1,75 @@
-"""CLI entry point: python -m cli <command> [args...]
+"""JSON Lines CLI wrapper for soredium commands.
 
-Executes lifecycle commands and emits results as JSON Lines to stdout.
-Each line is a JSON object with a "type" field identifying the event class.
+Bridges Python command modules to Java subprocess callers.
+Each command event is serialised as a JSON Lines record to stdout.
+
+Usage: python3 -m cli <command> [json-kwargs]
 """
-from __future__ import annotations
-
 import json
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, fields
+from pathlib import Path
 
-COMMANDS = {
-    "brief", "continue", "start", "next", "end", "pause", "resume",
-    "quick-fix", "what-next", "status", "abort",
-}
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "work-slot"))
 
-
-def emit(event) -> None:
-    d = asdict(event)
-    d["type"] = type(event).__name__
-    print(json.dumps(d), flush=True)
+from commands import events
 
 
-def _parse_args(cmd: str, args: list[str]) -> dict:
-    kwargs: dict = {}
-    if cmd == "start":
-        kwargs["issues"] = [int(a.lstrip("#")) for a in args if a.lstrip("#").isdigit()]
-    elif cmd == "quick-fix":
-        filtered = [a for a in args if a != "--yes"]
-        kwargs["message"] = " ".join(filtered)
-    elif cmd == "resume" and args:
-        kwargs["branch"] = args[0]
-    return kwargs
+def _serialise_event(event) -> str:
+    type_name = type(event).__name__
+    data = {}
+    for field in fields(event):
+        val = getattr(event, field.name)
+        if hasattr(val, "__dataclass_fields__"):
+            val = asdict(val)
+        elif isinstance(val, list) and val and hasattr(val[0], "__dataclass_fields__"):
+            val = [asdict(v) for v in val]
+        data[field.name] = val
+    return json.dumps({"type": type_name, "data": data})
 
 
-def _interactive_decide(prompt: str) -> bool:
-    print(prompt, file=sys.stderr, end=" [y/N] ")
-    return input().strip().lower() in ("y", "yes")
-
-
-def main() -> int:
+def main():
     if len(sys.argv) < 2:
-        print("Usage: soredium <command> [args...]", file=sys.stderr)
-        print(f"Commands: {', '.join(sorted(COMMANDS))}", file=sys.stderr)
-        return 2
+        print(json.dumps({"type": "CommandFailed", "data": {
+            "command": "", "step": None,
+            "error": "Usage: python3 -m cli <command> [json-kwargs]",
+            "detail": "", "recoverable": False
+        }}))
+        sys.exit(1)
 
-    if sys.argv[1] in ("-h", "--help"):
-        print("Usage: soredium <command> [args...]")
-        print(f"Commands: {', '.join(sorted(COMMANDS))}")
-        return 0
-
-    cmd = sys.argv[1]
-    if cmd not in COMMANDS:
-        print(f"Unknown command: {cmd}", file=sys.stderr)
-        return 2
-
-    import importlib
-    cmd_name = cmd.replace("-", "_")
-    try:
-        mod = importlib.import_module(f"commands.{cmd_name}")
-    except ImportError:
-        print(f"Command module not found: commands.{cmd_name}", file=sys.stderr)
-        return 2
-
-    yes_mode = "--yes" in sys.argv or not sys.stdin.isatty()
-    decide_fn = None if yes_mode else _interactive_decide
+    command = sys.argv[1]
+    kwargs = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
 
     try:
-        kwargs = _parse_args(cmd, sys.argv[2:])
-        sig = mod.execute.__code__.co_varnames[:mod.execute.__code__.co_argcount]
-        if "decide_fn" in sig:
-            kwargs["decide_fn"] = decide_fn
+        import importlib
+        mod = importlib.import_module(f"commands.{command}")
         result = mod.execute(**kwargs)
 
+        exit_code = 0
         if isinstance(result, list):
             for event in result:
-                emit(event)
+                print(_serialise_event(event), flush=True)
+                if isinstance(event, events.CommandFailed) and not event.recoverable:
+                    exit_code = 1
         else:
-            emit(result)
-        return 0
+            print(_serialise_event(result), flush=True)
+
+        sys.exit(exit_code)
+    except ModuleNotFoundError:
+        print(json.dumps({"type": "CommandFailed", "data": {
+            "command": command, "step": None,
+            "error": f"Unknown command: {command}",
+            "detail": "", "recoverable": False
+        }}))
+        sys.exit(1)
     except Exception as e:
-        from commands.events import CommandFailed
-        emit(CommandFailed(cmd, None, "exception", str(e), False))
-        return 1
+        print(json.dumps({"type": "CommandFailed", "data": {
+            "command": command, "step": None,
+            "error": str(e), "detail": "", "recoverable": False
+        }}))
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
