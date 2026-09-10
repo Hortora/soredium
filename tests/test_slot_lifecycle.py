@@ -2279,3 +2279,63 @@ class TestBuildEpicPlanCrossRepo:
         assert result is not None
         gh_calls = [c.args[0] for c in mock_cmd.call_args_list]
         assert all("casehubio/engine" in str(c) for c in gh_calls)
+
+
+class TestStripInheritedLifecycle:
+    """Refs #356: workspace clones must not inherit lifecycle files from main."""
+
+    def test_strips_plan_file(self, tmp_path):
+        ws = tmp_path / "wsp"
+        ws.mkdir()
+        (ws / ".git").mkdir()
+        (ws / ".plan").write_text("# Plan\n## State\nstate: active\n")
+        stripped = slot_lifecycle._strip_inherited_lifecycle(ws)
+        assert ".plan" in stripped
+        assert not (ws / ".plan").exists()
+
+    def test_strips_journal(self, tmp_path):
+        ws = tmp_path / "wsp"
+        ws.mkdir()
+        (ws / ".git").mkdir()
+        (ws / "JOURNAL.md").write_text("# Journal\n")
+        stripped = slot_lifecycle._strip_inherited_lifecycle(ws)
+        assert "JOURNAL.md" in stripped
+        assert not (ws / "JOURNAL.md").exists()
+
+    def test_strips_meta(self, tmp_path):
+        ws = tmp_path / "wsp"
+        ws.mkdir()
+        (ws / ".git").mkdir()
+        (ws / ".meta").write_text("meta content\n")
+        stripped = slot_lifecycle._strip_inherited_lifecycle(ws)
+        assert ".meta" in stripped
+
+    def test_strips_handoff_variants(self, tmp_path):
+        ws = tmp_path / "wsp"
+        ws.mkdir()
+        (ws / ".git").mkdir()
+        (ws / "HANDOFF.md").write_text("# Handoff\n")
+        (ws / "HANDOFF-2026-09-07.md").write_text("# Old handoff\n")
+        stripped = slot_lifecycle._strip_inherited_lifecycle(ws)
+        assert "HANDOFF.md" in stripped
+        assert "HANDOFF-2026-09-07.md" in stripped
+        assert not (ws / "HANDOFF.md").exists()
+        assert not (ws / "HANDOFF-2026-09-07.md").exists()
+
+    def test_no_lifecycle_files_returns_empty(self, tmp_path):
+        ws = tmp_path / "wsp"
+        ws.mkdir()
+        (ws / ".git").mkdir()
+        (ws / "README.md").write_text("# Readme\n")
+        stripped = slot_lifecycle._strip_inherited_lifecycle(ws)
+        assert stripped == []
+
+    def test_preserves_non_lifecycle_files(self, tmp_path):
+        ws = tmp_path / "wsp"
+        ws.mkdir()
+        (ws / ".git").mkdir()
+        (ws / "README.md").write_text("# Readme\n")
+        (ws / ".plan").write_text("stale\n")
+        slot_lifecycle._strip_inherited_lifecycle(ws)
+        assert (ws / "README.md").exists()
+        assert (ws / "README.md").read_text() == "# Readme\n"
