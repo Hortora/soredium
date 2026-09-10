@@ -222,3 +222,81 @@ class TestCleanupSlotPlan:
         result = cleanup_scaffold(str(ws), {})
         assert result == 0
         assert (slot_dir / ".plan").exists(), "slot .plan should NOT be touched without slot_path"
+
+
+PLAN_WITH_REMAINING = """\
+# Work Plan — issue-87-test
+
+## State
+branch: issue-87-test
+state: closing:stamped
+date: 2026-09-10
+issue-repo: casehubio/casehub-ops
+covers: 87,88
+
+## Queue
+- [x] casehubio/casehub-ops#87 — YAML plugin architecture
+- [ ] casehubio/casehub-ops#88 — Follow-up cleanup ← active
+"""
+
+PLAN_ALL_DONE = """\
+# Work Plan — issue-87-test
+
+## State
+branch: issue-87-test
+state: closing:stamped
+date: 2026-09-10
+issue-repo: casehubio/casehub-ops
+covers: 87
+
+## Queue
+- [x] casehubio/casehub-ops#87 — YAML plugin architecture
+"""
+
+
+class TestCleanupScaffoldPlanGuard:
+    """Refs #358: .plan with remaining items must survive cleanup."""
+
+    def test_preserves_plan_with_remaining_items(self, tmp_path):
+        ws = init_repo(tmp_path / "workspace")
+        (ws / ".plan").write_text(PLAN_WITH_REMAINING)
+        (ws / "JOURNAL.md").write_text("# Journal\n")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True)
+
+        result = cleanup_scaffold(str(ws), {})
+        assert result == 0
+        assert (ws / ".plan").exists(), ".plan with remaining items was deleted"
+        assert not (ws / "JOURNAL.md").exists(), "Other lifecycle files should still be cleaned"
+
+    def test_deletes_plan_when_all_done(self, tmp_path):
+        ws = init_repo(tmp_path / "workspace")
+        (ws / ".plan").write_text(PLAN_ALL_DONE)
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True)
+
+        result = cleanup_scaffold(str(ws), {})
+        assert result == 0
+        assert not (ws / ".plan").exists(), ".plan with all items done should be deleted"
+
+    def test_preserved_plan_state_reset(self, tmp_path):
+        ws = init_repo(tmp_path / "workspace")
+        (ws / ".plan").write_text(PLAN_WITH_REMAINING)
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True)
+
+        cleanup_scaffold(str(ws), {})
+        content = (ws / ".plan").read_text()
+        assert "closing:" not in content, ".plan state should be reset from closing:* for next session"
+
+    def test_no_plan_still_cleans_other_files(self, tmp_path):
+        ws = init_repo(tmp_path / "workspace")
+        (ws / "JOURNAL.md").write_text("# Journal\n")
+        (ws / ".close-progress").write_text("done\n")
+        subprocess.run(["git", "-C", str(ws), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True)
+
+        result = cleanup_scaffold(str(ws), {})
+        assert result == 0
+        assert not (ws / "JOURNAL.md").exists()
+        assert not (ws / ".close-progress").exists()

@@ -42,6 +42,37 @@ def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:
     )
 
 
+def _plan_has_remaining(plan_path: Path) -> bool:
+    """Check if a .plan has uncompleted queue items."""
+    if not plan_path.exists():
+        return False
+    try:
+        _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+        if _project_dir not in sys.path:
+            sys.path.insert(0, _project_dir)
+        from plan_io import read_plan, has_uncompleted_items
+        state = read_plan(plan_path)
+        if state is None:
+            return False
+        return has_uncompleted_items(state)
+    except Exception:
+        return False
+
+
+def _reset_plan_state(plan_path: Path) -> None:
+    """Reset .plan state from closing:* to active for next session."""
+    if not plan_path.exists():
+        return
+    content = plan_path.read_text()
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("state:") and "closing:" in stripped:
+            lines[i] = "state: active"
+            break
+    plan_path.write_text("\n".join(lines) + "\n")
+
+
 def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
     single_repo = params.get("single-repo", "no")
 
@@ -51,11 +82,19 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
         print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
         return 1
 
+    plan_path = ws / ".plan"
+    preserve_plan = _plan_has_remaining(plan_path)
+    if preserve_plan:
+        _reset_plan_state(plan_path)
+        print(f"PLAN_PRESERVED=yes")
+
     files_to_remove = []
-    scaffold_names = [".plan", "JOURNAL.md", ".execute-progress",
+    scaffold_names = ["JOURNAL.md", ".execute-progress",
                       ".land-ledger.jsonl", ".artifacts-promoted",
                       ".close-progress", ".close-report.json",
                       ".close-log.jsonl", ".wrap-log.jsonl"]
+    if not preserve_plan:
+        scaffold_names.insert(0, ".plan")
     for name in scaffold_names:
         if (ws / name).exists():
             files_to_remove.append(name)
