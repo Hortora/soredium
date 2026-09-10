@@ -1658,3 +1658,80 @@ class TestGetCompletedEpicParents:
         plan.write_text(SINGLE_ISSUE_PLAN)
         result = plan_manager.get_completed_epic_parents(plan)
         assert result == []
+
+
+SAMPLE_SLOT = """\
+# Slot 185
+slug: issue-304-neocortex-garden-platform
+title: Neocortex garden platform
+
+## Issue
+casehubio/neocortex#304
+Covers: 304
+
+## What to do
+Build the garden platform integration
+
+## Repos
+- neocortex (primary)
+- engine
+
+## State
+state: active
+
+## Created
+2026-09-08, branch: issue-304-neocortex-garden-platform
+"""
+
+
+class TestSlotFormatGuard:
+    """Refs #355: plan_manager must refuse to operate on .slot files."""
+
+    def test_set_state_rejects_slot_file(self, tmp_path):
+        slot = tmp_path / ".slot"
+        slot.write_text(SAMPLE_SLOT)
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-slot" / "plan_manager.py"),
+             "set-state", str(slot), "key=branch", "value=new-branch"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0
+        assert "ERROR" in result.stdout or "ERROR" in result.stderr
+
+    def test_set_state_preserves_slot_content(self, tmp_path):
+        slot = tmp_path / ".slot"
+        slot.write_text(SAMPLE_SLOT)
+        import subprocess
+        subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-slot" / "plan_manager.py"),
+             "set-state", str(slot), "key=branch", "value=new-branch"],
+            capture_output=True, text=True,
+        )
+        content = slot.read_text()
+        assert "## Repos" in content, ".slot format was destroyed by set-state"
+        assert "neocortex (primary)" in content
+        assert "slug:" in content
+
+    def test_advance_rejects_slot_file(self, tmp_path):
+        slot = tmp_path / ".slot"
+        slot.write_text(SAMPLE_SLOT)
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-slot" / "plan_manager.py"),
+             "advance", str(slot)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode != 0
+
+    def test_set_state_works_on_plan_file(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-slot" / "plan_manager.py"),
+             "set-state", str(plan), "key=state", "value=closing:review"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "SET=state=closing:review" in result.stdout

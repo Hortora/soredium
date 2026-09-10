@@ -1111,6 +1111,15 @@ def _resolve_ref(ref_str: str, tree: PlanTree) -> IssueRef:
     raise ValueError(f"Cannot resolve '{ref_str}' — use owner/repo#N format")
 
 
+def _is_slot_file(path: Path) -> bool:
+    """Detect .slot format by checking for slot-specific markers."""
+    try:
+        head = path.read_text()[:200]
+    except (OSError, UnicodeDecodeError):
+        return False
+    return head.startswith("# Slot ") or "\nslug:" in head or "slug:" == head[:5]
+
+
 def main() -> int:
     if len(_sys.argv) < 3:
         print("Usage: plan_manager.py <command> <plan_path> [key=value ...]",
@@ -1120,6 +1129,13 @@ def main() -> int:
     command = _sys.argv[1]
     plan_path = Path(_sys.argv[2])
     opts = _parse_cli_args(_sys.argv[3:])
+
+    if command not in ("detect",) and plan_path.exists() and _is_slot_file(plan_path):
+        print(f"ERROR=slot_file_rejected", file=_sys.stderr)
+        print(f"ERROR_DETAIL='{plan_path.name}' is a .slot file, not a .plan. "
+              f"Use slot_metadata.set_slot_state() or slot_state.transition() instead.",
+              file=_sys.stderr)
+        return 1
 
     if command == "defer":
         title = opts.get("title", "")
