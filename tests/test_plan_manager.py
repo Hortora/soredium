@@ -1735,3 +1735,102 @@ class TestSlotFormatGuard:
         )
         assert result.returncode == 0
         assert "SET=state=closing:review" in result.stdout
+
+
+PLAN_WITH_EPIC = """\
+# Work Plan — issue-469-test
+
+## State
+branch: issue-469-test
+state: active
+
+## Queue
+- [ ] test/repo#469 — Big feature (epic) ← active
+  - [ ] test/repo#470 — Subtask 1
+  - [ ] test/repo#471 — Subtask 2
+"""
+
+PLAN_WITH_CHECKED_ITEM = """\
+# Work Plan — issue-42-test
+
+## State
+branch: issue-42-test
+state: active
+
+## Queue
+- [x] test/repo#42 — Done task
+- [ ] test/repo#43 — Active task ← active
+"""
+
+
+class TestEpicGuard:
+    """Refs #359: epics must not be queued as regular work items."""
+
+    def test_append_rejects_epic_flagged_item(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        from plan_manager import append_to_queue, QueueItem, IssueRef
+        items = [QueueItem(ref=IssueRef("test/repo", 469), title="Big feature", is_epic=True)]
+        added = append_to_queue(plan, items)
+        assert len(added) == 0
+
+    def test_append_allows_non_epic(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        from plan_manager import append_to_queue, QueueItem, IssueRef
+        items = [QueueItem(ref=IssueRef("test/repo", 99), title="Regular issue")]
+        added = append_to_queue(plan, items)
+        assert len(added) == 1
+
+    def test_append_mixed_epic_and_regular(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        from plan_manager import append_to_queue, QueueItem, IssueRef
+        items = [
+            QueueItem(ref=IssueRef("test/repo", 469), title="Epic", is_epic=True),
+            QueueItem(ref=IssueRef("test/repo", 99), title="Regular"),
+        ]
+        added = append_to_queue(plan, items)
+        assert len(added) == 1
+        assert added[0].ref.number == 99
+
+
+class TestUncheckCommand:
+    """Refs #360: uncheck command marks queue items as incomplete."""
+
+    def test_uncheck_marks_item_incomplete(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_CHECKED_ITEM)
+        from plan_manager import uncheck_item, IssueRef
+        result = uncheck_item(plan, IssueRef("test/repo", 42))
+        assert result is True
+        content = plan.read_text()
+        assert "- [ ] test/repo#42" in content
+
+    def test_uncheck_nonexistent_item_returns_false(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_CHECKED_ITEM)
+        from plan_manager import uncheck_item, IssueRef
+        result = uncheck_item(plan, IssueRef("test/repo", 999))
+        assert result is False
+
+    def test_uncheck_already_unchecked_returns_false(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_CHECKED_ITEM)
+        from plan_manager import uncheck_item, IssueRef
+        result = uncheck_item(plan, IssueRef("test/repo", 43))
+        assert result is False
+
+    def test_uncheck_cli(self, tmp_path):
+        plan = tmp_path / ".plan"
+        plan.write_text(PLAN_WITH_CHECKED_ITEM)
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-slot" / "plan_manager.py"),
+             "uncheck", str(plan), "issues=test/repo#42"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "UNCHECKED=test/repo#42" in result.stdout
+        content = plan.read_text()
+        assert "- [ ] test/repo#42" in content

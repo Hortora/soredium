@@ -629,6 +629,26 @@ def mark_completed(plan_path: Path, ref: IssueRef) -> bool:
     return changed
 
 
+def _uncheck_item(items: list[QueueItem], ref: IssueRef) -> bool:
+    for item in items:
+        if item.ref == ref and item.completed:
+            item.completed = False
+            return True
+        if item.children:
+            if _uncheck_item(item.children, ref):
+                return True
+    return False
+
+
+def uncheck_item(plan_path: Path, ref: IssueRef) -> bool:
+    """Mark a completed issue as incomplete [ ] in the plan."""
+    tree = parse_plan(plan_path)
+    changed = _uncheck_item(tree.queue, ref)
+    if changed:
+        rewrite_plan(plan_path, tree)
+    return changed
+
+
 def inject_tasks(plan_path: Path, tasks: list[dict]) -> None:
     """Add task breakdown to the active issue in the plan.
 
@@ -798,7 +818,11 @@ def append_to_queue(plan_path: Path, new_items: list[QueueItem],
                     position: int | None = None) -> list[QueueItem]:
     tree = parse_plan(plan_path)
     existing_refs = _collect_refs(tree.queue)
-    deduped = [item for item in new_items if item.ref not in existing_refs]
+    for item in new_items:
+        if item.is_epic:
+            print(f"SKIPPED_EPIC={item.ref}")
+    deduped = [item for item in new_items
+               if item.ref not in existing_refs and not item.is_epic]
     skipped = len(new_items) - len(deduped)
     if skipped > 0:
         for item in new_items:
@@ -1328,6 +1352,24 @@ def main() -> int:
         print(f"EPIC_COMPLETE={result.epic_complete}")
         print(f"SAFE_EXIT={result.safe_exit}")
         print(f"HAS_DEFERRED={result.has_deferred}")
+        return 0
+
+    elif command == "uncheck":
+        issues_str = opts.get("issues", "")
+        if not issues_str:
+            print("ERROR=issues is required (format: owner/repo#N)", file=_sys.stderr)
+            return 1
+        for ref_str in issues_str.split(","):
+            ref_str = ref_str.strip()
+            m = re.match(r'^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$', ref_str)
+            if not m:
+                print(f"ERROR=invalid ref '{ref_str}' — use owner/repo#N", file=_sys.stderr)
+                return 1
+            ref = IssueRef(m.group(1), int(m.group(2)))
+            if uncheck_item(plan_path, ref):
+                print(f"UNCHECKED={ref}")
+            else:
+                print(f"SKIP={ref} (not found or already unchecked)")
         return 0
 
     else:
