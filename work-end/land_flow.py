@@ -687,6 +687,7 @@ def land_batch(
     descriptors: list[RepoDescriptor],
     branch: str,
     progress_file: Path,
+    skip_stamp: set[str] | None = None,
 ) -> LandResult:
     """Execute the shared land flow for a batch of repos.
 
@@ -767,13 +768,17 @@ def land_batch(
         print("STAGE=stamp")
         stamp_failures: list[str] = []
         for desc in already_merged:
-            sha = landed_shas.get(desc.repo_path.name, "unknown")
+            repo_name = desc.repo_path.name
+            if skip_stamp and repo_name in skip_stamp:
+                print(f"STAMP_SKIP={repo_name} reason=queue_remaining")
+                continue
+            sha = landed_shas.get(repo_name, "unknown")
             ok = _stamp_repo(desc, branch, sha, progress_file)
             for s in result.repos:
                 if s.repo_path == desc.repo_path and not s.skipped:
                     s.stamped = ok
             if not ok:
-                stamp_failures.append(desc.repo_path.name)
+                stamp_failures.append(repo_name)
         if stamp_failures:
             result.success = False
             print(f"STAGE=stamp STATUS=partial failed={','.join(stamp_failures)}")
@@ -888,14 +893,16 @@ def land_batch(
         return result
     print("STAGE=verify_content STATUS=pass")
 
-    # Step 4: Stamp all feature branches (even if some repos failed push —
-    # repos that pushed successfully still need stamping)
+    # Step 4: Stamp feature branches — skip repos with remaining queue items
     print("STAGE=stamp")
     stamp_failures: list[str] = []
     for desc in active + already_merged:
         repo_name = desc.repo_path.name
         if repo_name in failed_repos:
             print(f"STAMP_SKIP={repo_name} reason=push_failed")
+            continue
+        if skip_stamp and repo_name in skip_stamp:
+            print(f"STAMP_SKIP={repo_name} reason=queue_remaining")
             continue
         sha = landed_shas.get(repo_name, "")
         if desc.is_workspace and not sha:

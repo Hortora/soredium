@@ -1127,3 +1127,62 @@ class TestAlreadyMergedDetection:
         assert result.success is not False
         landed = [s for s in result.repos if s.merged and not s.skipped]
         assert len(landed) == 1
+
+
+class TestLandBatchSkipStamp:
+    """Refs #354: repos with remaining queue items must not be stamped."""
+
+    def test_skip_stamp_excludes_named_repos(self, tmp_path):
+        from land_flow import RepoDescriptor, Transport, land_batch
+        proj_orig = _init_repo(tmp_path / "proj-orig")
+        other_orig = _init_repo(tmp_path / "other-orig")
+        branch = "issue-469-test"
+        proj_clone = _make_slot_clone(proj_orig, tmp_path / "proj-clone", branch)
+        other_clone = _make_slot_clone(other_orig, tmp_path / "other-clone", branch)
+
+        descs = [
+            RepoDescriptor(
+                repo_path=proj_clone, original_path=proj_orig, push_target="local",
+                base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
+            ),
+            RepoDescriptor(
+                repo_path=other_clone, original_path=other_orig, push_target="local",
+                base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
+            ),
+        ]
+        result = land_batch(descs, branch, tmp_path / ".progress",
+                            skip_stamp={"other-clone"})
+
+        proj_status = next(s for s in result.repos if s.repo_path == proj_clone)
+        other_status = next(s for s in result.repos if s.repo_path == other_clone)
+        assert proj_status.stamped, "proj-clone should be stamped"
+        assert not other_status.stamped, "other-clone should NOT be stamped (in skip_stamp)"
+
+    def test_skip_stamp_empty_stamps_all(self, tmp_path):
+        from land_flow import RepoDescriptor, Transport, land_batch
+        orig = _init_repo(tmp_path / "orig")
+        branch = "issue-42-test"
+        clone = _make_slot_clone(orig, tmp_path / "clone", branch)
+
+        desc = RepoDescriptor(
+            repo_path=clone, original_path=orig, push_target="local",
+            base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
+        )
+        result = land_batch([desc], branch, tmp_path / ".progress",
+                            skip_stamp=set())
+
+        assert result.repos[0].stamped, "Empty skip_stamp should stamp all repos"
+
+    def test_skip_stamp_none_stamps_all(self, tmp_path):
+        from land_flow import RepoDescriptor, Transport, land_batch
+        orig = _init_repo(tmp_path / "orig")
+        branch = "issue-42-test"
+        clone = _make_slot_clone(orig, tmp_path / "clone", branch)
+
+        desc = RepoDescriptor(
+            repo_path=clone, original_path=orig, push_target="local",
+            base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
+        )
+        result = land_batch([desc], branch, tmp_path / ".progress")
+
+        assert result.repos[0].stamped, "No skip_stamp arg should stamp all repos"
