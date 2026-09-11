@@ -183,49 +183,6 @@ class TestConfigureUpdateInstead:
 
 
 
-class TestEnsureCloneLayout:
-    def test_migrates_worktree_to_clone(self, tmp_path):
-        family, originals, slot, branch = _create_worktree_test_repos(tmp_path, ["engine"])
-        assert slot_core.is_worktree(slot / "engine")
-        count = slot_git.ensure_clone_layout(slot)
-        assert count >= 1
-        assert not slot_core.is_worktree(slot / "engine")
-        assert (slot / "engine" / ".git").is_dir()
-        assert (slot / "engine" / "feature.py").exists()
-
-    def test_noop_on_clones(self, tmp_path):
-        family, originals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
-        count = slot_git.ensure_clone_layout(slot)
-        assert count == 0
-
-    def test_migrated_slot_can_merge(self, tmp_path):
-        family, originals, slot, branch = _create_worktree_test_repos(tmp_path, ["engine"])
-        slot_git.ensure_clone_layout(slot)
-        import slot_lifecycle
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-        assert (originals["engine"] / "feature.py").exists()
-
-
-
-class TestMigrateWorktreeIdeCleanup:
-    def test_migration_succeeds_despite_ide_artifacts(self, tmp_path):
-        """After git worktree remove leaves .idea behind, migration should clean it and succeed."""
-        family, originals, slot, branch = _create_worktree_test_repos(tmp_path, ["engine"])
-        wt_path = slot / "engine"
-        assert slot_core.is_worktree(wt_path)
-
-        (wt_path / ".idea").mkdir()
-        (wt_path / ".idea" / "workspace.xml").write_text("<xml/>")
-
-        result = slot_git._migrate_worktree_to_clone(wt_path)
-        assert result is True
-        assert not slot_core.is_worktree(wt_path)
-        assert (wt_path / ".git").is_dir()
-        assert (wt_path / "feature.py").exists()
-
-
-
 class TestRepackBrokenAlternates:
     """_repack_broken_alternates severs git alternates referencing a slot before archiving."""
 

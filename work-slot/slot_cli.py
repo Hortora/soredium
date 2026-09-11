@@ -14,7 +14,6 @@ from slot_lifecycle import (
 )
 from slot_query import list_slots, scan_ready, check_cross_deps
 from slot_isx import sync_isx
-from slot_git import ensure_clone_layout
 from slot_claude import sweep_orphaned_claude_projects
 
 
@@ -149,12 +148,8 @@ def main() -> None:
         if slot_num == 0:
             print("ERROR=missing_slot_number")
             sys.exit(1)
-        slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
-        if not slot_dir.exists():
-            print(f"ERROR=slot_not_found slot={slot_num}")
-            sys.exit(1)
-        count = ensure_clone_layout(slot_dir)
-        print(f"MIGRATED_COUNT={count}")
+        print("MIGRATED_COUNT=0")
+        print("WARN=worktree migration removed (#257) — all slots use clone layout")
 
     elif subcommand == "check-cross-deps":
         family_root = Path(args.get("target", "."))

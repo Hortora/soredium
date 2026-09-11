@@ -65,20 +65,12 @@ class TestIsSlotPath:
 
 
 class TestIsProjectRepo:
-    def test_excludes_workspace_dirs(self):
-        assert slot_core.is_project_repo("work") is False
-        assert slot_core.is_project_repo("work-casehub") is False
-        assert slot_core.is_project_repo("work-casehub-ras") is False
-
-    def test_includes_real_repos(self):
+    def test_includes_all_repo_names(self):
         assert slot_core.is_project_repo("engine") is True
         assert slot_core.is_project_repo("blocks") is True
-
-    def test_includes_worker_named_repos(self):
-        """Repos named 'worker', 'workflow' etc must not be excluded."""
+        assert slot_core.is_project_repo("work") is True
+        assert slot_core.is_project_repo("work-casehub") is True
         assert slot_core.is_project_repo("worker") is True
-        assert slot_core.is_project_repo("workflow") is True
-        assert slot_core.is_project_repo("workbench") is True
 
     def test_excludes_infrastructure_dirs(self):
         assert slot_core.is_project_repo(".m2") is False
@@ -92,58 +84,34 @@ class TestIsWorkspaceClone:
         (ws / ".workspace").write_text("project: /path/to/project\n")
         assert slot_core.is_workspace_clone(ws) is True
 
-    def test_detects_proj_symlink(self, tmp_path):
-        ws = tmp_path / "custom-ws-name"
-        ws.mkdir()
-        (ws / "proj").symlink_to("/path/to/project")
-        assert slot_core.is_workspace_clone(ws) is True
-
-    def test_detects_work_prefix_name(self, tmp_path):
-        ws = tmp_path / "work-casehub"
-        ws.mkdir()
-        assert slot_core.is_workspace_clone(ws) is True
-
-    def test_detects_work_name(self, tmp_path):
-        ws = tmp_path / "work"
-        ws.mkdir()
-        assert slot_core.is_workspace_clone(ws) is True
-
-    def test_project_repo_not_workspace(self, tmp_path):
+    def test_no_marker_not_workspace(self, tmp_path):
         repo = tmp_path / "engine"
         repo.mkdir()
         assert slot_core.is_workspace_clone(repo) is False
 
-    def test_worker_named_repo_not_workspace(self, tmp_path):
-        repo = tmp_path / "worker"
-        repo.mkdir()
-        assert slot_core.is_workspace_clone(repo) is False
+    def test_proj_symlink_without_marker_not_workspace(self, tmp_path):
+        """proj symlink alone no longer triggers detection (#257 sunset)."""
+        ws = tmp_path / "custom-ws"
+        ws.mkdir()
+        (ws / "proj").symlink_to("/path/to/project")
+        assert slot_core.is_workspace_clone(ws) is False
+
+    def test_work_prefix_without_marker_not_workspace(self, tmp_path):
+        """work-* naming no longer triggers detection (#257 sunset)."""
+        ws = tmp_path / "work-casehub"
+        ws.mkdir()
+        assert slot_core.is_workspace_clone(ws) is False
 
     def test_nonexistent_path(self, tmp_path):
         assert slot_core.is_workspace_clone(tmp_path / "nope") is False
 
-    def test_workspace_marker_overrides_project_name(self, tmp_path):
-        """A repo named like a project but with .workspace is still a workspace."""
+    def test_marker_overrides_any_name(self, tmp_path):
         ws = tmp_path / "engine"
         ws.mkdir()
         (ws / ".workspace").write_text("project: /path/to/engine\n")
         assert slot_core.is_workspace_clone(ws) is True
 
-    def test_proj_symlink_overrides_project_name(self, tmp_path):
-        """A repo with a proj symlink is a workspace even with a project-like name."""
-        ws = tmp_path / "platform"
-        ws.mkdir()
-        (ws / "proj").symlink_to("/path/to/platform")
-        assert slot_core.is_workspace_clone(ws) is True
-
-    def test_wsp_prefix_without_marker_is_project(self, tmp_path):
-        """wsp-casehub-connectors without .workspace marker is a project repo
-        (name alone is not a detection signal)."""
-        repo = tmp_path / "wsp-casehub-connectors"
-        repo.mkdir()
-        assert slot_core.is_workspace_clone(repo) is False
-
-    def test_wsp_prefix_with_marker_is_workspace(self, tmp_path):
-        """wsp-casehub-connectors with .workspace marker is detected."""
+    def test_wsp_prefix_with_marker(self, tmp_path):
         ws = tmp_path / "wsp-casehub-connectors"
         ws.mkdir()
         (ws / ".workspace").touch()
@@ -151,14 +119,15 @@ class TestIsWorkspaceClone:
 
 
 class TestGetSlotReposFiltersWorkspaces:
-    def test_excludes_workspace_by_name(self, tmp_path):
+    def test_name_alone_no_longer_excludes(self, tmp_path):
+        """work-* naming without .workspace marker is no longer detected (#257 sunset)."""
         slot = tmp_path / "slot"
         slot.mkdir()
         init_repo(slot / "engine")
         init_repo(slot / "work-casehub")
         repos = slot_core.get_slot_repos(slot)
         assert "engine" in repos
-        assert "work-casehub" not in repos
+        assert "work-casehub" in repos
 
     def test_excludes_workspace_by_marker(self, tmp_path):
         slot = tmp_path / "slot"
@@ -170,7 +139,8 @@ class TestGetSlotReposFiltersWorkspaces:
         assert "engine" in repos
         assert "custom-ws" not in repos
 
-    def test_excludes_workspace_by_proj_symlink(self, tmp_path):
+    def test_proj_symlink_without_marker_included(self, tmp_path):
+        """proj symlink alone no longer excludes (#257 sunset)."""
         slot = tmp_path / "slot"
         slot.mkdir()
         init_repo(slot / "engine")
@@ -178,7 +148,7 @@ class TestGetSlotReposFiltersWorkspaces:
         (ws / "proj").symlink_to(str(slot / "engine"))
         repos = slot_core.get_slot_repos(slot)
         assert "engine" in repos
-        assert "my-workspace" not in repos
+        assert "my-workspace" in repos
 
     def test_excludes_wsp_prefix_workspace_by_marker(self, tmp_path):
         """New naming: wsp-casehub-connectors with .workspace marker is excluded."""
@@ -205,23 +175,25 @@ class TestGetSlotReposFiltersWorkspaces:
         slot = tmp_path / "slot"
         slot.mkdir()
         init_repo(slot / "engine")
-        init_repo(slot / "work-casehub")
+        ws = init_repo(slot / "wsp-casehub-engine")
+        (ws / ".workspace").touch()
         all_repos = slot_core.get_all_slot_repos(slot)
         assert "engine" in all_repos
-        assert "work-casehub" in all_repos
+        assert "wsp-casehub-engine" in all_repos
 
 
 class TestGetAllSlotRepos:
     def test_includes_workspace_dirs(self, tmp_path):
         slot = tmp_path / "slot1"
         slot.mkdir()
-        for name in ["engine", "pages", "work-casehub"]:
+        for name in ["engine", "pages", "wsp-casehub-engine"]:
             d = slot / name
             d.mkdir()
             (d / ".git").mkdir()
+        (slot / "wsp-casehub-engine" / ".workspace").touch()
         (slot / ".m2").mkdir()
         result = slot_core.get_all_slot_repos(slot)
-        assert result == ["engine", "pages", "work-casehub"]
+        assert result == ["engine", "pages", "wsp-casehub-engine"]
 
     def test_excludes_m2_and_attic(self, tmp_path):
         slot = tmp_path / "slot1"
@@ -245,10 +217,11 @@ class TestGetAllSlotRepos:
     def test_get_slot_repos_still_excludes_workspace(self, tmp_path):
         slot = tmp_path / "slot1"
         slot.mkdir()
-        for name in ["engine", "work-casehub"]:
+        for name in ["engine", "wsp-casehub-engine"]:
             d = slot / name
             d.mkdir()
             (d / ".git").mkdir()
+        (slot / "wsp-casehub-engine" / ".workspace").touch()
         result = slot_core.get_slot_repos(slot)
         assert result == ["engine"]
 
@@ -378,7 +351,7 @@ class TestHasUnmergedContent:
 
         result = slot_core._has_unmerged_content(slot)
 
-        assert result == ["engine"]
+        assert result == ["engine:feat-1"]
 
     def test_returns_empty_when_on_main(self, tmp_path):
         slots = tmp_path / "slots"
@@ -424,7 +397,7 @@ class TestHasUnmergedContent:
 
         result = slot_core._has_unmerged_content(slot)
 
-        assert sorted(result) == ["engine", "worker"]
+        assert sorted(result) == ["engine:feat-1", "worker:feat-1"]
 
     def test_skips_non_git_directories(self, tmp_path):
         slots = tmp_path / "slots"

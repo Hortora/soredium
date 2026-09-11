@@ -50,7 +50,7 @@ from slot_git import (
     install_post_commit_hook, sync_main,
     _exclude_symlinks,
     _cleanup_inherited_symlinks,
-    _repack_broken_alternates, ensure_clone_layout,
+    _repack_broken_alternates,
 )
 from slot_workspace import (
     validate_slot_wksp, resolve_workspace_source, discover_workspace,
@@ -611,7 +611,7 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         return 1
-    ensure_clone_layout(slot_dir)
+
     if not (slot_dir / ".phase-a-complete").exists():
         print(f"ERROR=not_ready slot={slot_num}")
         return 1
@@ -747,7 +747,7 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
-    ensure_clone_layout(slot_dir)
+
     active_plan = _has_active_plan(slot_dir)
     if active_plan and not force:
         print(f"ERROR=active_plan slot={slot_num}")

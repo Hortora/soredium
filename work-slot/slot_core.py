@@ -74,24 +74,14 @@ def is_slot_path(path: str) -> bool:
 def is_project_repo(name: str) -> bool:
     if name in (".m2", "attic"):
         return False
-    if name == "work" or name.startswith("work-"):
-        return False
     return True
 
 
 def is_workspace_clone(repo_path: Path) -> bool:
-    """Detect whether a repo clone is a workspace (not a project repo).
-
-    Primary: .workspace marker file (#239, #255).
-    Transition fallback (remove after #255 Phase 3): proj symlink, work-* naming.
-    """
+    """Detect whether a repo clone is a workspace. Marker-only (#255 sunset complete)."""
     if not repo_path.is_dir():
         return False
-    if (repo_path / ".workspace").exists():
-        return True
-    if (repo_path / "proj").is_symlink():
-        return True
-    return not is_project_repo(repo_path.name)
+    return (repo_path / ".workspace").exists()
 
 
 def is_worktree(repo_path: Path) -> bool:

@@ -1,17 +1,16 @@
 """Git clone infrastructure for slot management.
 
-Clone creation, remote configuration, hooks, alternates, worktree migration.
+Clone creation, remote configuration, hooks, alternates.
 """
 
 import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from slot_core import (
-    run_cmd, is_worktree, resolve_original_repo,
+    run_cmd, resolve_original_repo,
     _IDE_ARTIFACTS, get_all_slot_repos,
     _cleanup_remnant_dir, SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
 )
@@ -174,72 +173,3 @@ def _repack_broken_alternates(slot_dir: Path, family_root: Path) -> int:
     return repacked
 
 
-def _migrate_worktree_to_clone(worktree_path: Path) -> bool:
-    """Migrate a single worktree to a git clone --shared. Returns True on success."""
-    branch_rc, branch_out, _ = run_cmd(
-        ["git", "-C", str(worktree_path), "branch", "--show-current"]
-    )
-    branch = branch_out.strip() if branch_rc == 0 else ""
-    if not branch:
-        return False
-
-    original = resolve_original_repo(worktree_path)
-    if original == worktree_path:
-        return False
-
-    status_rc, status_out, _ = run_cmd(
-        ["git", "-C", str(worktree_path), "status", "--short"]
-    )
-    if status_rc == 0 and status_out.strip():
-        run_cmd(["git", "-C", str(worktree_path), "add", "-A"])
-        run_cmd(["git", "-C", str(worktree_path), "commit", "-m", "WIP: pre-migration"])
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        clone_tmp = Path(tmpdir) / worktree_path.name
-        rc, _, stderr = run_cmd([
-            "git", "clone", "--shared", str(original), str(clone_tmp),
-        ])
-        if rc != 0:
-            print(f"WARN=migration_clone_failed path={worktree_path} stderr={stderr.strip()}")
-            return False
-
-        rc, _, _ = run_cmd(["git", "-C", str(clone_tmp), "checkout", branch])
-        if rc != 0:
-            rc, _, _ = run_cmd(["git", "-C", str(clone_tmp), "checkout", "-b", branch, f"origin/{branch}"])
-            if rc != 0:
-                print(f"WARN=migration_branch_failed path={worktree_path} branch={branch}")
-                return False
-
-        orig_rc, orig_tree, _ = run_cmd(
-            ["git", "-C", str(worktree_path), "rev-parse", "HEAD^{tree}"]
-        )
-        clone_rc, clone_tree, _ = run_cmd(
-            ["git", "-C", str(clone_tmp), "rev-parse", "HEAD^{tree}"]
-        )
-        if orig_rc != 0 or clone_rc != 0 or orig_tree.strip() != clone_tree.strip():
-            print(f"WARN=migration_tree_mismatch path={worktree_path}")
-            return False
-
-        rc, _, stderr = run_cmd(["git", "-C", str(original), "worktree", "remove", "--force", str(worktree_path)])
-        if worktree_path.exists():
-            _cleanup_remnant_dir(worktree_path)
-        if rc != 0 and worktree_path.exists():
-            print(f"WARN=migration_worktree_remove_failed path={worktree_path} stderr={stderr.strip()}")
-            return False
-
-        shutil.move(str(clone_tmp), str(worktree_path))
-        _cleanup_inherited_symlinks(worktree_path, worktree_path.parent)
-        _exclude_symlinks(worktree_path)
-
-    return True
-
-
-def ensure_clone_layout(slot_dir: Path) -> int:
-    """Migrate any worktree repos in a slot to git clone --shared. Returns count migrated."""
-    migrated = 0
-    for sub in slot_dir.iterdir():
-        if sub.is_dir() and (sub / ".git").exists() and is_worktree(sub):
-            if _migrate_worktree_to_clone(sub):
-                migrated += 1
-                print(f"MIGRATED={sub.name}")
-    return migrated
