@@ -748,6 +748,18 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
 
+    from slot_claude import find_active_sessions, check_occupant_pid
+    alive, occupant_pid = check_occupant_pid(slot_dir)
+    if alive:
+        if not force:
+            print(f"OCCUPANT_PID={occupant_pid}")
+            print(f"ERROR=occupant_pid_alive slot={slot_num}")
+            print(f"ERROR_DETAIL=session PID {occupant_pid} is still running in this slot")
+            print("HINT=the occupying session may have run /clear — PID is alive but lsof missed it")
+            sys.exit(1)
+        else:
+            print(f"WARN=occupant_pid_overridden slot={slot_num} pid={occupant_pid}")
+
     active_plan = _has_active_plan(slot_dir)
     if active_plan and not force:
         print(f"ERROR=active_plan slot={slot_num}")
@@ -773,7 +785,6 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
                 print(f"ERROR_DETAIL={f}")
             print("HINT=pass --force to override, or investigate the failed merge")
             sys.exit(1)
-    from slot_claude import find_active_sessions
     active = find_active_sessions(slot_dir)
     if active:
         if not force:

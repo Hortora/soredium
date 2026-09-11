@@ -137,7 +137,7 @@ def _parse_slot_repos(slot_path: Path) -> list[str]:
 
 
 PER_REPO_SWEEP_STEPS = {"protocol", "update_claude_md", "impl_doc_sync", "doc_freshness_gate"}
-PER_REPO_EXECUTE_STEPS = {"promote", "rebase", "land"}
+PER_REPO_EXECUTE_STEPS = {"rebase", "land"}
 
 
 def _resolve_repo_workspace(ctx, repo_name: str) -> Path | None:
@@ -272,8 +272,11 @@ def _report_init_script(ctx):
 
 
 def _promote_script(ctx):
-    ws = ctx.current_repo_workspace or ctx.workspace
     proj = ctx.current_repo_project or ctx.project
+    if ctx.in_slot and ctx.slot_path and not ctx.current_repo_workspace:
+        ws = _resolve_repo_workspace(ctx, proj.name) or ctx.workspace
+    else:
+        ws = ctx.current_repo_workspace or ctx.workspace
     return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
             "promote", f"workspace={ws}",
             f"project={proj}", f"branch={ctx.branch}"]

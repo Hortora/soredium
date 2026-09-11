@@ -1,5 +1,6 @@
 """Tests for work-slot/slot_claude.py"""
 
+import os
 import sys
 from pathlib import Path
 
@@ -35,6 +36,59 @@ class TestClaudeProjectMatching:
         assert slot_claude._claude_project_matches(
             "-path-worktrees-2-engine", "-path-worktrees-1"
         ) is False
+
+
+class TestOccupantPid:
+    """#362: PID-based occupancy stamp for slot session guard."""
+
+    def test_write_occupant_pid(self, tmp_path):
+        """write_occupant_pid stamps .occupant-pid with the current process."""
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        slot_claude.write_occupant_pid(slot_dir)
+        pid_file = slot_dir / ".occupant-pid"
+        assert pid_file.exists()
+        assert int(pid_file.read_text().strip()) == os.getpid()
+
+    def test_clear_occupant_pid(self, tmp_path):
+        """clear_occupant_pid removes .occupant-pid."""
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".occupant-pid").write_text(str(os.getpid()))
+        slot_claude.clear_occupant_pid(slot_dir)
+        assert not (slot_dir / ".occupant-pid").exists()
+
+    def test_clear_occupant_pid_missing_file(self, tmp_path):
+        """clear_occupant_pid is a no-op when no .occupant-pid exists."""
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        slot_claude.clear_occupant_pid(slot_dir)
+
+    def test_check_occupant_pid_alive(self, tmp_path):
+        """check_occupant_pid returns (True, pid) when the PID is alive."""
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".occupant-pid").write_text(str(os.getpid()))
+        alive, pid = slot_claude.check_occupant_pid(slot_dir)
+        assert alive is True
+        assert pid == os.getpid()
+
+    def test_check_occupant_pid_dead(self, tmp_path):
+        """check_occupant_pid returns (False, pid) when the PID is dead."""
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".occupant-pid").write_text("99999999")
+        alive, pid = slot_claude.check_occupant_pid(slot_dir)
+        assert alive is False
+        assert pid == 99999999
+
+    def test_check_occupant_pid_missing(self, tmp_path):
+        """check_occupant_pid returns (False, None) when no file exists."""
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        alive, pid = slot_claude.check_occupant_pid(slot_dir)
+        assert alive is False
+        assert pid is None
 
 
 class TestRelocateClaudeProjectsRelativePath:

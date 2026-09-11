@@ -781,6 +781,62 @@ class TestArchiveSlot:
         captured = capsys.readouterr()
         assert "ERROR=slot_not_found" in captured.out
 
+    def test_blocks_when_occupant_pid_alive(self, tmp_path, capsys):
+        """#362: archive must fail when .occupant-pid contains a live PID."""
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("## Repos\n- engine (primary)\n")
+        (slot_dir / ".occupant-pid").write_text(str(os.getpid()))
+        repo = slot_dir / "engine"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+
+        with pytest.raises(SystemExit):
+            slot_lifecycle.archive_slot(family, 1)
+        captured = capsys.readouterr()
+        assert "ERROR=occupant_pid_alive" in captured.out
+        assert str(os.getpid()) in captured.out
+
+    def test_dead_occupant_pid_falls_through(self, tmp_path, capsys):
+        """#362: dead .occupant-pid does not block — falls through to next check."""
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("## Repos\n- engine (primary)\n")
+        (slot_dir / ".occupant-pid").write_text("99999999")
+        repo = slot_dir / "engine"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+
+        with pytest.raises(SystemExit):
+            slot_lifecycle.archive_slot(family, 1)
+        captured = capsys.readouterr()
+        assert "ERROR=occupant_pid_alive" not in captured.out
+
+    def test_force_overrides_occupant_pid(self, tmp_path, monkeypatch, capsys):
+        """#362: --force bypasses the occupant PID guard with a warning."""
+        family = tmp_path / "family"
+        slot_dir = family / "slots" / "1"
+        slot_dir.mkdir(parents=True)
+        (family / "slots" / "attic").mkdir(parents=True)
+        (slot_dir / ".slot").write_text("## Repos\n- engine (primary)\n\n## State\nstate: landed\n")
+        (slot_dir / ".occupant-pid").write_text(str(os.getpid()))
+        repo = slot_dir / "engine"
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init"], capture_output=True)
+        (repo / "f.txt").write_text("x")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "init"], capture_output=True)
+
+        fake_home = tmp_path / "home"
+        (fake_home / ".claude" / "projects").mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        slot_lifecycle.archive_slot(family, 1, force=True)
+        captured = capsys.readouterr()
+        assert "WARN=occupant_pid_overridden" in captured.out
+        assert not slot_dir.exists()
 
 
 class TestResolveOriginalRepoClone:

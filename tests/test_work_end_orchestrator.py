@@ -1496,24 +1496,27 @@ class TestPhaseSkipSlotMode:
         return slot_path
 
     def test_phase_skip_does_not_write_single_key_for_per_repo_steps(self, tmp_path):
-        """Bug: _phase_skip writes promote=done which bypasses per-repo fan-out."""
+        """_phase_skip writes composite keys for per-repo steps (rebase, land)."""
         from work_end_orchestrator import _phase_skip
         repos = ["engine", "blocks", "qhorus"]
         progress = _phase_skip({}, "closing:promoted", tmp_path,
                                slot_repos=repos)
-        assert progress.get("promote") != "done", (
-            "promote=done as single key bypasses per-repo fan-out in slot mode"
+        assert progress.get("rebase") != "done", (
+            "rebase=done as single key bypasses per-repo fan-out in slot mode"
         )
 
     def test_phase_skip_writes_composite_keys_in_slot_mode(self, tmp_path):
         """Per-repo steps get composite keys so per_repo_done() works."""
         from work_end_orchestrator import _phase_skip
         repos = ["engine", "blocks"]
-        progress = _phase_skip({}, "closing:promoted", tmp_path,
+        progress = _phase_skip({}, "closing:stamped", tmp_path,
                                slot_repos=repos)
         for repo in repos:
-            assert progress.get(f"promote:{repo}") == "done", (
-                f"promote:{repo} should be marked done by _phase_skip in slot mode"
+            assert progress.get(f"rebase:{repo}") == "done", (
+                f"rebase:{repo} should be marked done by _phase_skip in slot mode"
+            )
+            assert progress.get(f"land:{repo}") == "done", (
+                f"land:{repo} should be marked done by _phase_skip in slot mode"
             )
 
     def test_phase_skip_non_slot_unchanged(self, tmp_path):
@@ -1523,12 +1526,15 @@ class TestPhaseSkipSlotMode:
         assert progress.get("promote") == "done"
 
     def test_non_per_repo_steps_still_get_single_key_in_slot(self, tmp_path):
-        """report_promote is not per-repo — still gets a single key."""
+        """promote and report_promote are not per-repo — still get single keys."""
         from work_end_orchestrator import _phase_skip
         repos = ["engine", "blocks"]
         progress = _phase_skip({}, "closing:promoted", tmp_path,
                                slot_repos=repos)
         assert progress.get("report_promote") == "done"
+        assert progress.get("promote") == "done", (
+            "promote is not per-repo (#361) — should get single key in slot mode"
+        )
 
 
 class TestPerRepoEscalation:
@@ -1690,23 +1696,27 @@ class TestDefenseInDepthPerRepo:
         return slot_path
 
     def test_single_key_does_not_bypass_per_repo(self, tmp_path, monkeypatch):
-        """Even if promote=done exists, per_repo_mechanical still runs."""
-        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {"PROMOTED": "yes"})
+        """Even if rebase=done exists, per_repo_mechanical still runs per-repo."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda *a, **kw: {"REBASED": "yes"})
         slot_path = self._make_slot(tmp_path, ["engine", "blocks"])
         from work_end_orchestrator import run_orchestrator
         from close_progress import update_close_progress, read_close_progress
         update_close_progress(tmp_path, "promote", "done")
+        update_close_progress(tmp_path, "report_promote", "done")
+        update_close_progress(tmp_path, "promote_pass", "done")
+        update_close_progress(tmp_path, "trajectory", "done")
+        update_close_progress(tmp_path, "rebase", "done")
         result = run_orchestrator({
             "workspace": str(tmp_path),
             "project": str(slot_path / "engine"),
             "branch": "issue-99-test", "base_branch": "main",
-            "meta_state": "closing:verified",
+            "meta_state": "closing:promoted",
             "in_slot": "yes",
             "slot_path": str(slot_path),
         })
         progress = read_close_progress(tmp_path)
-        assert progress.get("promote:blocks") == "done" or progress.get("promote:engine") == "done", (
-            "Per-repo promote was bypassed by single-key promote=done"
+        assert progress.get("rebase:blocks") == "done" or progress.get("rebase:engine") == "done", (
+            "Per-repo rebase was bypassed by single-key rebase=done"
         )
 
 
@@ -2169,3 +2179,106 @@ class TestWriteMarkerStep:
         from close_progress import STEP_TO_PHASE
         assert "write_marker" in STEP_TO_PHASE, "write_marker missing from STEP_TO_PHASE"
         assert STEP_TO_PHASE["write_marker"] == "closing:promoted"
+
+
+class TestPromoteScopeFilter:
+    """#361: promote must target only the issue-owning repo, not all slot repos."""
+
+    def _make_slot(self, tmp_path, repos, primary=None):
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        lines = ["## Repos"]
+        for repo in repos:
+            repo_dir = slot_path / repo
+            repo_dir.mkdir()
+            (repo_dir / ".git").mkdir()
+            tag = " (primary)" if repo == primary else ""
+            lines.append(f"- {repo}{tag}")
+        (slot_path / ".slot").write_text("\n".join(lines) + "\n")
+        return slot_path
+
+    def test_promote_not_in_per_repo_execute_steps(self):
+        """promote must not fan out per-repo — it targets only the issue-owning repo."""
+        from work_end_orchestrator import PER_REPO_EXECUTE_STEPS
+        assert "promote" not in PER_REPO_EXECUTE_STEPS, (
+            "promote in PER_REPO_EXECUTE_STEPS causes broadcast to all slot repos"
+        )
+
+    def test_slot_promote_targets_issue_owning_repo(self, tmp_path, monkeypatch):
+        """In slot mode, promote calls close_artifacts with issue-owning repo's project path."""
+        slot_path = self._make_slot(tmp_path, ["neocortex", "engine", "soredium"],
+                                    primary="neocortex")
+        calls = []
+        def capture(cmd, workspace, **kw):
+            calls.append(cmd)
+            return {"WORKSPACE_PROMOTED": "0", "PROJECT_PROMOTED": "1"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "sweep_selected", "")
+        from work_end_orchestrator import STEPS
+        for step in STEPS:
+            if step.name == "promote":
+                break
+            if step.step_type in ("judgment", "mechanical"):
+                update_close_progress(tmp_path, step.name, "done")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "neocortex"),
+            "branch": "issue-305-test", "base_branch": "main",
+            "meta_state": "closing:verified",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+            "issue_repo": "casehubio/neocortex",
+            "covers": "305",
+        })
+        promote_calls = [c for c in calls
+                         if any("promote" in str(a) for a in c)
+                         and any("work_end_execute" in str(a) for a in c)]
+        assert len(promote_calls) == 1, (
+            f"Expected exactly 1 promote call, got {len(promote_calls)}: {promote_calls}"
+        )
+        proj_arg = next(a for a in promote_calls[0] if "project=" in str(a))
+        assert "neocortex" in str(proj_arg), (
+            f"promote should target neocortex (issue-owning repo), got: {proj_arg}"
+        )
+        assert "engine" not in str(proj_arg), (
+            f"promote must NOT target engine: {proj_arg}"
+        )
+
+    def test_slot_promote_does_not_create_per_repo_progress_keys(self, tmp_path, monkeypatch):
+        """promote should use a single progress key, not promote:repo composite keys."""
+        slot_path = self._make_slot(tmp_path, ["neocortex", "engine"], primary="neocortex")
+        monkeypatch.setattr("work_end_orchestrator._run_script",
+                            lambda *a, **kw: {"WORKSPACE_PROMOTED": "0", "PROJECT_PROMOTED": "1"})
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "sweep_selected", "")
+        from work_end_orchestrator import STEPS
+        for step in STEPS:
+            if step.name == "promote":
+                break
+            if step.step_type in ("judgment", "mechanical"):
+                update_close_progress(tmp_path, step.name, "done")
+
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "neocortex"),
+            "branch": "issue-305-test", "base_branch": "main",
+            "meta_state": "closing:verified",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+            "issue_repo": "casehubio/neocortex",
+            "covers": "305",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("promote") == "done", "promote should complete as single key"
+        assert "promote:engine" not in progress, (
+            "promote:engine composite key should not exist — promote is not per-repo"
+        )
+        assert "promote:neocortex" not in progress, (
+            "promote:neocortex composite key should not exist — promote is not per-repo"
+        )

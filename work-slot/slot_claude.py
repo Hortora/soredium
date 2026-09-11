@@ -17,6 +17,36 @@ except ImportError:
     _wl = None
 
 
+def write_occupant_pid(slot_dir: Path) -> None:
+    """Stamp .occupant-pid with the current process PID."""
+    (slot_dir / ".occupant-pid").write_text(str(os.getpid()))
+
+
+def clear_occupant_pid(slot_dir: Path) -> None:
+    """Remove .occupant-pid stamp."""
+    pid_file = slot_dir / ".occupant-pid"
+    pid_file.unlink(missing_ok=True)
+
+
+def check_occupant_pid(slot_dir: Path) -> tuple[bool, int | None]:
+    """Check if the occupant PID is still alive.
+
+    Returns (alive, pid). If no .occupant-pid file, returns (False, None).
+    """
+    pid_file = slot_dir / ".occupant-pid"
+    if not pid_file.exists():
+        return False, None
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (ValueError, OSError):
+        return False, None
+    try:
+        os.kill(pid, 0)
+        return True, pid
+    except OSError:
+        return False, pid
+
+
 def _claude_project_matches(proj_name: str, slot_path_encoded: str) -> bool:
     """Check if a Claude project directory name matches a slot path.
     Uses boundary-aware matching to prevent /worktrees/1 matching /worktrees/10."""
