@@ -355,6 +355,50 @@ class TestCheckLandingShaHistory:
         assert result["status"] == "pass"
 
 
+class TestDiffFallbackAfterSquashRebase:
+    """diff-based fallback when tree search window is exhausted."""
+
+    def test_diff_fallback_when_tree_search_exhausted(self, tmp_path: Path) -> None:
+        """When tree SHA is beyond max_commits, diff catches identical content."""
+        project = _init_repo(tmp_path / "project")
+        _git(project, "checkout", "-b", "feature")
+        (project / "a.txt").write_text("a\n")
+        _git(project, "add", "a.txt")
+        _git(project, "commit", "-m", "add a")
+        feature_sha = _git(project, "rev-parse", "HEAD")
+
+        _git(project, "checkout", "main")
+        (project / "a.txt").write_text("a\n")
+        _git(project, "add", "a.txt")
+        _git(project, "commit", "-m", "add a (rebased)")
+
+        for i in range(3):
+            _git(project, "commit", "--allow-empty", "-m", f"padding {i}")
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        import verify_slot_close
+        from importlib import reload
+        reload(verify_slot_close)
+
+        orig_fn = verify_slot_close._find_tree_on_ref
+        verify_slot_close._find_tree_on_ref = lambda repo, tree, ref, max_commits=500: None
+
+        try:
+            result = verify_slot_close._verify_sha_on_ref(str(project), feature_sha, "main")
+            assert result["status"] == "pass"
+            assert "diff match" in result["detail"]
+        finally:
+            verify_slot_close._find_tree_on_ref = orig_fn
+
+    def test_max_commits_increased_to_500(self) -> None:
+        """max_commits default should be 500, not 50."""
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        import verify_slot_close
+        import inspect
+        sig = inspect.signature(verify_slot_close._find_tree_on_ref)
+        assert sig.parameters["max_commits"].default == 500
+
+
 class TestCheckSlotArchiveStatus:
     def test_archived(self, tmp_path: Path) -> None:
         attic_dir = tmp_path / "slots" / "attic" / "1"

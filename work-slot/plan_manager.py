@@ -101,11 +101,11 @@ class AdvanceResult:
 
 
 _ITEM_RE = re.compile(
-    r'^(\s*)- \[([ x])\] (?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)\s*—\s*(.+?)(?:\s*\(epic\))?(?:\s*←\s*active)?$'
+    r'^(\s*)- \[([ x])\] (?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)\s*—\s*(.+?)(?:\s*\(epic\))?(?:\s*(?:←|<-)\s*active)?$'
 )
 _EPIC_MARKER_RE = re.compile(r'\(epic\)')
-_ACTIVE_MARKER_RE = re.compile(r'←\s*active')
-_BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*←\s*current)?$')
+_ACTIVE_MARKER_RE = re.compile(r'(?:←|<-)\s*active')
+_BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*(?:←|<-)\s*current)?$')
 _DEFERRED_RE = re.compile(
     r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]+)\](?:\s+—\s+(.+))?$'
 )
@@ -814,8 +814,23 @@ def remove_from_queue(plan_path: Path, refs: list[IssueRef]) -> list[IssueRef]:
     return removed
 
 
+def _check_issue_state(repo: str, number: int) -> str | None:
+    """Check GitHub issue state. Returns 'OPEN', 'CLOSED', or None if unreachable."""
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "view", str(number), "--repo", repo, "--json", "state", "--jq", ".state"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        return None
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+
 def append_to_queue(plan_path: Path, new_items: list[QueueItem],
-                    position: int | None = None) -> list[QueueItem]:
+                    position: int | None = None,
+                    skip_state_check: bool = False) -> list[QueueItem]:
     tree = parse_plan(plan_path)
     existing_refs = _collect_refs(tree.queue)
     for item in new_items:
@@ -830,6 +845,20 @@ def append_to_queue(plan_path: Path, new_items: list[QueueItem],
                 print(f"SKIPPED_DUP={item.ref}")
     if not deduped:
         return []
+    if not skip_state_check:
+        accepted = []
+        for item in deduped:
+            state = _check_issue_state(item.ref.repo, item.ref.number)
+            if state == "CLOSED":
+                print(f"REJECTED_CLOSED={item.ref}")
+            elif state is None:
+                print(f"WARN=github_unreachable ref={item.ref}")
+                accepted.append(item)
+            else:
+                accepted.append(item)
+        deduped = accepted
+        if not deduped:
+            return []
     if position is not None:
         for i, item in enumerate(reversed(deduped)):
             tree.queue.insert(position, item)
@@ -1286,7 +1315,8 @@ def main() -> int:
                 _conn.close()
             except Exception:
                 pass
-        added = append_to_queue(plan_path, items, position=position)
+        skip_state = opts.get("skip-state-check") == "yes"
+        added = append_to_queue(plan_path, items, position=position, skip_state_check=skip_state)
         for item in added:
             print(f"APPENDED={item.ref} — {item.title}")
         print(f"APPENDED_COUNT={len(added)}")

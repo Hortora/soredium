@@ -61,6 +61,19 @@ from slot_query import find_slot_by_branch
 from slot_state import transition as _transition
 
 
+def _validate_covers_state(issue_repo: str, covers: str) -> None:
+    """Warn (don't block) if any covered issue is closed on GitHub."""
+    from plan_manager import _check_issue_state
+    refs = parse_covers_qualified(covers)
+    for ref in refs:
+        repo = ref.repo or issue_repo
+        state = _check_issue_state(repo, ref.number)
+        if state == "CLOSED":
+            print(f"WARN=covers_closed_issue ref={repo}#{ref.number}")
+        elif state is None:
+            print(f"WARN=github_unreachable ref={repo}#{ref.number}")
+
+
 def _build_epic_plan(branch: str, issue_repo: str, cover_refs: list,
                      date: str) -> str | None:
     """Build a .plan from the epic's child issue list. Fetches titles from GitHub.
@@ -408,6 +421,9 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         raise
 
     _run_post_creation_checks(slot_dir)
+
+    if covers:
+        _validate_covers_state(issue_repo, covers)
 
     return {
         "slot_number": slot_num,

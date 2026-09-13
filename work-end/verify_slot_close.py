@@ -62,7 +62,7 @@ def check_branch_stamped(project: str, branch: str) -> dict:
     return {"status": "fail", "detail": f"tip is: {tip[:60]}"}
 
 
-def _find_tree_on_ref(repo: str, tree_sha: str, ref: str, max_commits: int = 50) -> str | None:
+def _find_tree_on_ref(repo: str, tree_sha: str, ref: str, max_commits: int = 500) -> str | None:
     """Find a commit on ref with the given tree SHA. Returns commit SHA or None."""
     result = git(repo, "log", ref, f"--format=%H %T", f"--max-count={max_commits}")
     if result.returncode != 0:
@@ -86,6 +86,9 @@ def _verify_sha_on_ref(repo: str, sha: str, ref: str) -> dict:
     match = _find_tree_on_ref(repo, tree_sha, ref)
     if match:
         return {"status": "pass", "detail": f"content on {ref} via tree match ({match[:8]}, landed SHA {sha[:8]} was rebased)"}
+    diff_result = git(repo, "diff", "--stat", sha, ref)
+    if diff_result.returncode == 0 and not diff_result.stdout.strip():
+        return {"status": "pass", "detail": f"content on {ref} via diff match (landed SHA {sha[:8]} was squash-rebased)"}
     return {"status": "fail", "detail": f"SHA {sha[:8]} not on {ref} (tree {tree_sha[:8]} not found)"}
 
 
@@ -327,6 +330,10 @@ def check_original_sync(slot_dir: str, repo_name: str, original_path: str) -> di
     match = _find_tree_on_ref(original_path, tree_sha, "main")
     if match:
         return {"status": "pass", "detail": f"{repo_name} content on main (tree match via {match[:8]}, SHA {landed_sha[:8]} was rebased)"}
+    if git(original_path, "rev-parse", landed_sha).returncode == 0:
+        diff_result = git(original_path, "diff", "--stat", landed_sha, "main")
+        if diff_result.returncode == 0 and not diff_result.stdout.strip():
+            return {"status": "pass", "detail": f"{repo_name} content on main (diff match, SHA {landed_sha[:8]} was squash-rebased)"}
     return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not reachable from main (tree {tree_sha[:8]} not found)"}
 
 

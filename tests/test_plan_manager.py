@@ -373,6 +373,51 @@ class TestAppendToQueue:
         assert len(tree.queue) == 3
 
 
+class TestAppendRejectsClosedIssues:
+    """#363: append_to_queue must validate GitHub issue state."""
+
+    def _make_plan(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(SINGLE_ISSUE_PLAN)
+        return plan_file
+
+    def test_rejects_closed_issue(self, tmp_path, monkeypatch):
+        """append must reject issues that are CLOSED on GitHub."""
+        plan_file = self._make_plan(tmp_path)
+        monkeypatch.setattr("plan_manager._check_issue_state", lambda repo, num: "CLOSED")
+        items = [plan_manager.QueueItem(ref=IssueRef("test/repo", 99), title="closed issue")]
+        result = plan_manager.append_to_queue(plan_file, items)
+        assert len(result) == 0
+        tree = plan_manager.parse_plan(plan_file)
+        assert len(tree.queue) == 1
+
+    def test_allows_open_issue(self, tmp_path, monkeypatch):
+        """append must accept issues that are OPEN on GitHub."""
+        plan_file = self._make_plan(tmp_path)
+        monkeypatch.setattr("plan_manager._check_issue_state", lambda repo, num: "OPEN")
+        items = [plan_manager.QueueItem(ref=IssueRef("test/repo", 99), title="open issue")]
+        result = plan_manager.append_to_queue(plan_file, items)
+        assert len(result) == 1
+
+    def test_skip_state_check_allows_closed(self, tmp_path, monkeypatch):
+        """skip_state_check=True bypasses the closed-issue guard."""
+        plan_file = self._make_plan(tmp_path)
+        monkeypatch.setattr("plan_manager._check_issue_state", lambda repo, num: "CLOSED")
+        items = [plan_manager.QueueItem(ref=IssueRef("test/repo", 99), title="closed issue")]
+        result = plan_manager.append_to_queue(plan_file, items, skip_state_check=True)
+        assert len(result) == 1
+
+    def test_github_unreachable_warns_but_allows(self, tmp_path, monkeypatch, capsys):
+        """If gh CLI fails, warn but allow — don't block offline work."""
+        plan_file = self._make_plan(tmp_path)
+        monkeypatch.setattr("plan_manager._check_issue_state", lambda repo, num: None)
+        items = [plan_manager.QueueItem(ref=IssueRef("test/repo", 99), title="unknown state")]
+        result = plan_manager.append_to_queue(plan_file, items)
+        assert len(result) == 1
+        captured = capsys.readouterr()
+        assert "WARN=" in captured.out
+
+
 class TestAdvance:
     def _setup(self, tmp_path, plan_content, covers="42"):
         design = tmp_path / "design"

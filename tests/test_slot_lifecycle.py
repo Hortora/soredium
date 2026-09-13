@@ -1775,6 +1775,36 @@ class TestCreateSlotDuplicateGuard:
 
 
 
+class TestCreateSlotClosedCovers:
+    """#363: create_slot should warn when covers includes closed issues."""
+
+    @patch("slot_lifecycle.run_cmd")
+    def test_warns_on_closed_covers(self, mock_cmd, tmp_path, monkeypatch, capsys):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+
+        mock_cmd.return_value = (0, "", "")
+        monkeypatch.setattr("plan_manager._check_issue_state", lambda repo, num: "CLOSED")
+
+        with patch("slot_lifecycle.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result = slot_lifecycle.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-99-test",
+                issue="99",
+                issue_repo="casehubio/engine",
+                covers="99,100",
+                context="Test closed covers",
+            )
+        captured = capsys.readouterr()
+        assert "WARN=" in captured.out and "closed" in captured.out.lower()
+        assert result["slot_number"] == 1
+
+
 class TestCreateSlotRollback:
     def _setup_db(self, tmp_path, monkeypatch):
         scripts_dir = Path(__file__).parent.parent / "scripts"

@@ -61,6 +61,7 @@ STEP_TO_PHASE = {
     "report_verify": "closing:stamped",
     "archive_slot": "closing:stamped",
     "report_archive": "closing:stamped",
+    "elevate_plan": "closing:stamped",
     "checkout_main": "closing:stamped",
     "cleanup_stack": "closing:stamped",
     "cleanup": "closing:stamped",

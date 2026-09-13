@@ -420,6 +420,59 @@ def _report_archive_script(ctx):
             "step=archive", f"slot={ctx.slot_num or ''}", f"dest=attic/{ctx.slot_num or ''}"]
 
 
+def _elevate_plan_script(ctx):
+    if not ctx.in_slot or not ctx.slot_path:
+        return None
+    return None
+
+
+def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
+    """Elevate .plan to slot root before checkout_main switches branches.
+
+    Must run while workspace is still on the feature branch so .plan is visible.
+    Also writes the occupant PID (#366) since the session is still alive.
+    """
+    import shutil
+    ws_plan = ctx.workspace / ".plan"
+    slot_plan = ctx.slot_path / ".plan"
+
+    if ctx.slot_path:
+        from slot_claude import write_occupant_pid
+        if not ctx.dry_run:
+            write_occupant_pid(ctx.slot_path)
+        elif ctx.call_log is not None:
+            ctx.call_log.append(["(internal)", "write_occupant_pid", str(ctx.slot_path)])
+
+    if not ws_plan.exists():
+        return {"ELEVATED": "no", "REASON": "no_plan"}
+
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    try:
+        from plan_io import read_plan, has_uncompleted_items
+        state = read_plan(ws_plan)
+        if state is None or not has_uncompleted_items(state):
+            if slot_plan.exists() and not ctx.dry_run:
+                slot_plan.unlink()
+            return {"ELEVATED": "no", "REASON": "queue_drained"}
+    except Exception:
+        return {"ELEVATED": "no", "REASON": "parse_error"}
+
+    if not ctx.dry_run:
+        content = ws_plan.read_text()
+        lines = content.splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("state:") and "closing:" in stripped:
+                lines[i] = "state: active"
+        slot_plan.write_text("\n".join(lines) + "\n")
+    elif ctx.call_log is not None:
+        ctx.call_log.append(["(internal)", "elevate_plan", str(slot_plan)])
+
+    return {"ELEVATED": "yes", "SLOT_PLAN": str(slot_plan)}
+
+
 def _checkout_main_script(ctx):
     return [sys.executable, str(CLEANUP_SCRIPT),
             "checkout-main", str(ctx.project), str(ctx.workspace)]
@@ -883,6 +936,9 @@ STEPS: list[StepDef] = [
     StepDef("report_archive", "closing:stamped", "mechanical",
             skip_fn=_skip_not_slot,
             script_fn=_report_archive_script),
+    StepDef("elevate_plan", "closing:stamped", "mechanical",
+            skip_fn=_skip_not_slot,
+            script_fn=_elevate_plan_script),
     StepDef("checkout_main", "closing:stamped", "mechanical",
             skip_fn=_skip_on_main,
             script_fn=_checkout_main_script),
@@ -1151,6 +1207,8 @@ def _close_execute_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[s
 
     cmd = step.script_fn(ctx)
     if cmd is None:
+        if step.name == "elevate_plan" and ctx.in_slot:
+            return _elevate_plan_inline(ctx)
         if step.name == "land" and ctx.on_main:
             return _push_main_mode(ctx)
         if step.name == "verify" and ctx.on_main:

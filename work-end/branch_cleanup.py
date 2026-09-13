@@ -124,9 +124,11 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
 
     slot_path = params.get("slot_path", "")
     if slot_path:
-        slot_plan = Path(slot_path) / ".plan"
-        if slot_plan.exists():
-            slot_plan.unlink()
+        _slot_dir = str(Path(__file__).resolve().parent.parent / "work-slot")
+        if _slot_dir not in sys.path:
+            sys.path.insert(0, _slot_dir)
+        from slot_claude import clear_occupant_pid
+        clear_occupant_pid(Path(slot_path))
 
     try:
         git("commit", "-m", "chore(work-end): cleanup branch scaffold", cwd=workspace)

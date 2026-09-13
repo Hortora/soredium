@@ -676,6 +676,178 @@ class TestCleanupScaffold:
         assert out["ERROR"] == "workspace_not_found"
 
 
+class TestCleanupScaffoldSlotPlan:
+    """#364: .plan elevation to slot root when queue has remaining items."""
+
+    PLAN_WITH_REMAINING = (
+        "# Work Plan — issue-74-design\n\n"
+        "## Queue\n"
+        "- [x] org/repoA#74 — design\n"
+        "- [ ] org/repoB#234 — implementation ← active\n\n"
+        "## State\n"
+        "branch: issue-74-design\n"
+        "state: closing:stamped\n"
+        "issue-repo: org/repoA\n"
+        "covers: 74,234\n\n"
+        "## Session State\n"
+        "Current: org/repoB#234 — implementation\n"
+        "Started: 2026-09-01\n"
+    )
+
+    PLAN_DRAINED = (
+        "# Work Plan — issue-74-design\n\n"
+        "## Queue\n"
+        "- [x] org/repoA#74 — design\n"
+        "- [x] org/repoB#234 — implementation\n\n"
+        "## State\n"
+        "branch: issue-74-design\n"
+        "state: closing:stamped\n"
+        "issue-repo: org/repoA\n"
+        "covers: 74,234\n\n"
+        "## Session State\n"
+        "Current: org/repoB#234 — implementation\n"
+        "Started: 2026-09-01\n"
+    )
+
+    def test_elevates_plan_to_slot_root(self, tmp_path):
+        """elevate_plan step copies .plan to slot root before checkout_main."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / ".plan").write_text(self.PLAN_WITH_REMAINING)
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from work_end_orchestrator import _elevate_plan_inline, OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=ws, project=tmp_path / "proj",
+            branch="test", base_branch="main",
+            meta_state="closing:stamped", on_main=False,
+            in_slot=True, covers="74,234", issue_repo="org/repoA",
+            progress={}, slot_path=slot_dir,
+        )
+        result = _elevate_plan_inline(ctx)
+        assert result.get("ELEVATED") == "yes"
+        assert (slot_dir / ".plan").exists()
+
+    def test_elevated_plan_has_active_state(self, tmp_path):
+        """Slot root .plan state is reset from closing:* to active."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / ".plan").write_text(self.PLAN_WITH_REMAINING)
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from work_end_orchestrator import _elevate_plan_inline, OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=ws, project=tmp_path / "proj",
+            branch="test", base_branch="main",
+            meta_state="closing:stamped", on_main=False,
+            in_slot=True, covers="74,234", issue_repo="org/repoA",
+            progress={}, slot_path=slot_dir,
+        )
+        _elevate_plan_inline(ctx)
+        content = (slot_dir / ".plan").read_text()
+        assert "state: active" in content
+        assert "closing:" not in content
+
+    def test_cleanup_preserves_slot_plan_elevated_by_prior_step(self, tmp_path):
+        """Slot root .plan (elevated by elevate_plan) survives cleanup_scaffold."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        init_git(ws)
+        (ws / "JOURNAL.md").write_text("# Journal\n")
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True, check=True)
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".plan").write_text(self.PLAN_WITH_REMAINING)
+
+        run_cleanup("cleanup-scaffold", str(ws), slot_path=str(slot_dir))
+        assert (slot_dir / ".plan").exists()
+
+    def test_cleanup_clears_occupant_pid(self, tmp_path):
+        """cleanup_scaffold clears .occupant-pid from slot root."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        init_git(ws)
+        (ws / "JOURNAL.md").write_text("# Journal\n")
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True, check=True)
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".occupant-pid").write_text(str(os.getpid()))
+
+        run_cleanup("cleanup-scaffold", str(ws), slot_path=str(slot_dir))
+        assert not (slot_dir / ".occupant-pid").exists()
+
+    def test_elevate_plan_drains_when_queue_empty(self, tmp_path):
+        """elevate_plan deletes slot root .plan when queue is fully drained."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / ".plan").write_text(self.PLAN_DRAINED)
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".plan").write_text(self.PLAN_DRAINED)
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from work_end_orchestrator import _elevate_plan_inline, OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=ws, project=tmp_path / "proj",
+            branch="test", base_branch="main",
+            meta_state="closing:stamped", on_main=False,
+            in_slot=True, covers="74,234", issue_repo="org/repoA",
+            progress={}, slot_path=slot_dir,
+        )
+        result = _elevate_plan_inline(ctx)
+        assert result.get("ELEVATED") == "no"
+        assert result.get("REASON") == "queue_drained"
+        assert not (slot_dir / ".plan").exists()
+
+    def test_elevate_plan_writes_occupant_pid(self, tmp_path):
+        """elevate_plan writes .occupant-pid to slot root."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / ".plan").write_text(self.PLAN_WITH_REMAINING)
+
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from work_end_orchestrator import _elevate_plan_inline, OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=ws, project=tmp_path / "proj",
+            branch="test", base_branch="main",
+            meta_state="closing:stamped", on_main=False,
+            in_slot=True, covers="74,234", issue_repo="org/repoA",
+            progress={}, slot_path=slot_dir,
+        )
+        _elevate_plan_inline(ctx)
+        assert (slot_dir / ".occupant-pid").exists()
+        pid = int((slot_dir / ".occupant-pid").read_text().strip())
+        assert pid == os.getpid()
+
+    def test_no_slot_path_unchanged(self, tmp_path):
+        """Without slot_path, behavior is unchanged (non-slot workflow)."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        init_git(ws)
+        (ws / ".plan").write_text(self.PLAN_WITH_REMAINING)
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "scaffold"], capture_output=True, check=True)
+
+        result = run_cleanup("cleanup-scaffold", str(ws))
+        out = parse(result)
+        assert out.get("PLAN_PRESERVED") == "yes"
+        assert "PLAN_ELEVATED" not in out
+
+
 # ===========================================================================
 # branch_cleanup.py — cleanup-stack
 # ===========================================================================
