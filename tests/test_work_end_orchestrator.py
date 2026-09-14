@@ -10,7 +10,6 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
 
 
 class TestRunScript:

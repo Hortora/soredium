@@ -441,6 +441,9 @@ def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
     slot_plan = ctx.slot_path / ".plan"
 
     if ctx.slot_path:
+        _slot_dir = str(Path(__file__).resolve().parent.parent / "work-slot")
+        if _slot_dir not in sys.path:
+            sys.path.insert(0, _slot_dir)
         from slot_claude import write_occupant_pid
         if not ctx.dry_run:
             write_occupant_pid(ctx.slot_path)
