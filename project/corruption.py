@@ -275,10 +275,6 @@ def check_queue_consistency(plan_path: Path, owner_repo: str) -> Optional[Findin
 
             if not item.completed and gh_state == "CLOSED":
                 inconsistencies.append(f"#{item.number} unchecked but CLOSED")
-            elif item.completed and gh_state == "OPEN":
-                if item.number in covers_nums:
-                    continue
-                inconsistencies.append(f"#{item.number} checked but OPEN")
         except subprocess.TimeoutExpired:
             return None
 

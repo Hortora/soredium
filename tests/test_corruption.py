@@ -441,7 +441,9 @@ class TestS8QueueConsistency:
         assert result is not None, "Cross-repo unchecked+CLOSED items must be detected"
         assert "#231 unchecked but CLOSED" in result.detail
 
-    def test_non_covers_checked_but_open_still_flagged(self, tmp_path, monkeypatch):
+    def test_checked_but_open_is_not_flagged(self, tmp_path, monkeypatch):
+        """Checked in .plan + OPEN on GitHub is normal — work next checks off,
+        work end closes. Not corruption."""
         from corruption import check_queue_consistency
         plan = tmp_path / ".plan"
         lines = [
@@ -467,9 +469,9 @@ class TestS8QueueConsistency:
 
         monkeypatch.setattr("corruption.subprocess.run", mock_run)
         result = check_queue_consistency(plan, owner_repo="Hortora/soredium")
-        assert result is not None
-        assert "#409 checked but OPEN" in result.detail
-        assert "#408" not in result.detail
+        assert result is None, (
+            "checked+OPEN is normal (work next checks off, work end closes) — not corruption"
+        )
 
 
 class TestS9OrphanedWksp:
