@@ -10,6 +10,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
 
 
 class TestRunScript:
@@ -1538,7 +1539,7 @@ class TestPhaseSkipSlotMode:
 
 
 class TestPerRepoEscalation:
-    """Per-repo step_failed escalation must reach the caller, not be swallowed."""
+    """Per-repo retryable failures auto-skip after MAX retries."""
 
     def _make_slot(self, tmp_path, repos):
         slot_path = tmp_path / "slot"
@@ -1549,14 +1550,14 @@ class TestPerRepoEscalation:
             (repo_dir / ".git").mkdir()
         return slot_path
 
-    def test_per_repo_step_failed_returns_user_input(self, tmp_path, monkeypatch):
-        """Bug: run_loop checks 'ERROR in handled' — misses user_input escalation."""
+    def test_per_repo_step_auto_skips_after_max_retries(self, tmp_path, monkeypatch):
+        """Per-repo retryable failures auto-skip, not escalate to user_input."""
         def fail_always(cmd, ws, **kw):
             return {"ERROR": "push_failed"}
         monkeypatch.setattr("work_end_orchestrator._run_script", fail_always)
         slot_path = self._make_slot(tmp_path, ["engine", "blocks"])
         from work_end_orchestrator import run_orchestrator
-        from close_progress import update_close_progress
+        from close_progress import update_close_progress, read_close_progress
         update_close_progress(tmp_path, "trajectory", "done")
         update_close_progress(tmp_path, "rebase:blocks", "done")
         update_close_progress(tmp_path, "rebase:engine_mechanical_attempt", "2")
@@ -1568,11 +1569,11 @@ class TestPerRepoEscalation:
             "in_slot": "yes",
             "slot_path": str(slot_path),
         })
-        assert result["ACTION"] == "user_input", (
-            f"Expected user_input escalation, got ACTION={result.get('ACTION')}"
-        )
-        assert result.get("CONTEXT") == "step_failed"
-        assert "engine" in result.get("STEP", "")
+        progress = read_close_progress(tmp_path)
+        assert progress.get("rebase:engine") == "skipped_error", \
+            f"Expected skipped_error, got: {progress.get('rebase:engine')}"
+        assert not (result.get("ACTION") == "user_input" and result.get("CONTEXT") == "step_failed"), \
+            "Should auto-skip, not escalate to user_input"
 
 
 class TestPerRepoTryAllThenReport:
@@ -2418,3 +2419,101 @@ class TestMechanicalAutoSkip:
         })
         assert result["ACTION"] == "user_input"
         assert result["CONTEXT"] == "step_failed"
+
+
+class TestPerRepoMechanicalAutoSkip:
+    """Per-repo mechanical steps auto-skip individual repos after MAX retries."""
+
+    def _mark_through_promoted(self, tmp_path):
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                     "branch_audit_coherence", "branch_audit_structure",
+                     "branch_audit_robustness", "loose_ends", "forcing_function",
+                     "sweep_config", "forage", "protocol", "update_claude_md",
+                     "impl_doc_sync", "doc_freshness_gate", "adr", "write_content",
+                     "review_pass", "promote", "report_promote", "promote_pass",
+                     "trajectory", "report_rebase", "squash", "report_squash",
+                     "write_marker"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+    def test_per_repo_auto_skip_on_max_retries(self, tmp_path, monkeypatch):
+        self._mark_through_promoted(tmp_path)
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "land:engine_mechanical_attempt", "2")
+        update_close_progress(tmp_path, "land:work", "done")
+        update_close_progress(tmp_path, "rebase:engine", "done")
+        update_close_progress(tmp_path, "rebase:work", "done")
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        for repo in ["engine", "work"]:
+            repo_dir = slot_path / repo
+            repo_dir.mkdir()
+            (repo_dir / ".git").mkdir()
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- engine (primary)\n- work\n## Status\nstatus: active\n"
+        )
+
+        def failing_land(cmd, ws, **kw):
+            cmd_str = str(cmd)
+            if "land" in cmd_str and "engine" in cmd_str and "report" not in cmd_str:
+                return {"ERROR": "push_failed", "ERROR_DETAIL": "test"}
+            return {"LANDED_SHA": "abc123", "LANDED": "yes"}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", failing_land)
+
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "engine"),
+            "branch": "issue-368-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+
+        progress = read_close_progress(tmp_path)
+        assert progress.get("land:engine") == "skipped_error", \
+            f"Expected skipped_error, got: {progress.get('land:engine')}"
+
+    def test_per_repo_retries_before_max(self, tmp_path, monkeypatch):
+        self._mark_through_promoted(tmp_path)
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "land:engine_mechanical_attempt", "1")
+        update_close_progress(tmp_path, "land:work", "done")
+        update_close_progress(tmp_path, "rebase:engine", "done")
+        update_close_progress(tmp_path, "rebase:work", "done")
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        for repo in ["engine", "work"]:
+            repo_dir = slot_path / repo
+            repo_dir.mkdir()
+            (repo_dir / ".git").mkdir()
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- engine (primary)\n- work\n## Status\nstatus: active\n"
+        )
+
+        def failing_land(cmd, ws, **kw):
+            cmd_str = str(cmd)
+            if "land" in cmd_str and "engine" in cmd_str and "report" not in cmd_str:
+                return {"ERROR": "push_failed"}
+            return {"LANDED_SHA": "abc123", "LANDED": "yes"}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", failing_land)
+
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "engine"),
+            "branch": "issue-368-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+
+        assert result.get("ACTION") == "error"
+        assert result.get("RETRY") == "2"

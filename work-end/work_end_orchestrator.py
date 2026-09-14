@@ -70,6 +70,7 @@ SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "impl_doc_sync", "doc_f
 WORK_END_DIR = Path(__file__).parent
 
 MAX_JUDGMENT_RETRIES = 3
+MAX_MECHANICAL_RETRIES = 3
 
 ABORTABLE_STATES = {"closing:review", "closing:verified"}
 
@@ -1309,8 +1310,12 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
 
     if retryable_failure:
         step_key, attempt, result = retryable_failure
-        from orchestrator_engine import _make_error_result
-        return _make_error_result(step_key, attempt, result)
+        if attempt >= MAX_MECHANICAL_RETRIES:
+            update_close_progress(ctx.workspace, step_key, "skipped_error")
+            ctx.steps_executed.append(f"{step_key}:SKIPPED_ERROR")
+        else:
+            from orchestrator_engine import _make_error_result
+            return _make_error_result(step_key, attempt, result)
 
     return {}
 
