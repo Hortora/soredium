@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from close_progress import update_close_progress
-from shared_steps import StepDef, MAX_JUDGMENT_RETRIES
+from shared_steps import StepDef, MAX_JUDGMENT_RETRIES, MAX_MECHANICAL_RETRIES
 
 
 def run_script(cmd: list[str], workspace: Path,
@@ -240,6 +240,10 @@ def run_loop(
                         return override
                 attempt += 1
                 update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                if attempt >= MAX_MECHANICAL_RETRIES:
+                    update_close_progress(ctx.workspace, step.name, "skipped_error")
+                    ctx.steps_executed.append(f"{step.name}:SKIPPED_ERROR")
+                    continue
                 ctx.steps_executed.append(f"{step.name}:ERROR:{attempt}")
                 return _make_error_result(step.name, attempt, result)
 

@@ -1090,12 +1090,12 @@ class TestMechanicalRetry:
         assert result["ACTION"] == "error"
         assert result.get("RETRY") == "1"
 
-    def test_third_error_escalates_to_user_input(self, tmp_path, monkeypatch):
+    def test_third_error_auto_skips_mechanical_step(self, tmp_path, monkeypatch):
         def fail_always(cmd, ws, **kw):
             return {"ERROR": "push_failed"}
         monkeypatch.setattr("work_end_orchestrator._run_script", fail_always)
         from work_end_orchestrator import run_orchestrator
-        from close_progress import update_close_progress
+        from close_progress import update_close_progress, read_close_progress
         update_close_progress(tmp_path, "report_init", "done")
         update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
@@ -1108,9 +1108,9 @@ class TestMechanicalRetry:
             "branch": "test", "base_branch": "main",
             "meta_state": "closing:verified",
         })
-        assert result["ACTION"] == "user_input"
-        assert result["CONTEXT"] == "step_failed"
-        assert result["STEP"] == "promote"
+        progress = read_close_progress(tmp_path)
+        assert progress.get("promote") == "skipped_error"
+        assert not (result.get("ACTION") == "user_input" and result.get("CONTEXT") == "step_failed")
 
 
 class TestEvidenceChecks:
@@ -2337,3 +2337,84 @@ class TestSkippedErrorRecognition:
             slot_repos=["engine", "work"],
         )
         assert ctx.per_repo_done("land") is False
+
+
+class TestMechanicalAutoSkip:
+    """Mechanical steps auto-skip after MAX retries (spec D10)."""
+
+    def _mark_through_review(self, tmp_path):
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                     "branch_audit_coherence", "branch_audit_structure",
+                     "branch_audit_robustness", "loose_ends", "forcing_function",
+                     "sweep_config", "forage", "protocol", "update_claude_md",
+                     "impl_doc_sync", "doc_freshness_gate", "adr", "write_content",
+                     "review_pass"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+    def test_mechanical_step_auto_skips_after_max_retries(self, tmp_path, monkeypatch):
+        """After MAX_MECHANICAL_RETRIES, step is marked skipped_error, loop continues."""
+        self._mark_through_review(tmp_path)
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "promote_mechanical_attempt", "2")
+
+        def failing_script(cmd, ws, **kw):
+            if "promote" in str(cmd) and "report" not in str(cmd):
+                return {"ERROR": "worktree_failed", "ERROR_DETAIL": "test failure"}
+            return {}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", failing_script)
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-368-test",
+            "base_branch": "main",
+            "meta_state": "closing:verified",
+        })
+        assert not (result.get("ACTION") == "user_input" and result.get("CONTEXT") == "step_failed"), \
+            f"Should auto-skip, not dead-end. Got: {result}"
+        progress = read_close_progress(tmp_path)
+        assert progress.get("promote") == "skipped_error"
+
+    def test_mechanical_retries_before_max(self, tmp_path, monkeypatch):
+        """Before MAX, mechanical step returns error for retry."""
+        self._mark_through_review(tmp_path)
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "promote_mechanical_attempt", "1")
+
+        def failing_script(cmd, ws, **kw):
+            if "promote" in str(cmd) and "report" not in str(cmd):
+                return {"ERROR": "worktree_failed"}
+            return {}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", failing_script)
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-368-test",
+            "base_branch": "main",
+            "meta_state": "closing:verified",
+        })
+        assert result.get("ACTION") == "error"
+        assert result.get("RETRY") == "2"
+
+    def test_judgment_step_still_escalates_to_user(self, tmp_path, monkeypatch):
+        """Judgment steps still yield step_failed — auto-skip is mechanical only."""
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+        update_close_progress(tmp_path, "code_review_attempt", "3")
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-368-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+        assert result["ACTION"] == "user_input"
+        assert result["CONTEXT"] == "step_failed"
