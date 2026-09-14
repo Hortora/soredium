@@ -2478,6 +2478,19 @@ class TestPerRepoMechanicalAutoSkip:
         assert progress.get("land:engine") == "skipped_error", \
             f"Expected skipped_error, got: {progress.get('land:engine')}"
 
+    def test_skipped_error_shows_in_progress_summary(self):
+        from progress_summary import format_summary
+        progress = {
+            "code_review": "done",
+            "code_review_produced": "0",
+            "promote": "skipped_error",
+            "promote_mechanical_attempt": "3",
+            "land": "done",
+        }
+        summary = format_summary(progress, "close")
+        assert "error-skipped" in summary
+        assert "3 retries" in summary
+
     def test_per_repo_retries_before_max(self, tmp_path, monkeypatch):
         self._mark_through_promoted(tmp_path)
         from close_progress import update_close_progress

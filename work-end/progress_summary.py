@@ -277,6 +277,9 @@ def _build_rows(progress: dict[str, str], visible: list[tuple[str, str]],
         elif status == "skipped":
             status_text = "skipped"
             detail = _sweep_detail(step_name, progress, sweep_key, sweep_steps) or ""
+        elif status == "skipped_error":
+            status_text = "error-skipped"
+            detail = _retry_detail(step_name, progress) or "mechanical failure"
         else:
             status_text = "pending"
             detail = ""
