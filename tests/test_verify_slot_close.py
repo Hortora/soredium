@@ -487,3 +487,123 @@ class TestVerifySlotModeCLI:
         result = _run_verify(project, workspace, slot_dir=str(slot_dir))
         assert result.returncode == 0
         assert "landed_marker" in result.stdout
+
+
+class TestParseCoverRepos:
+    """Extract repo names from the Covers: line in .slot."""
+
+    def test_parses_covers_line(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import _parse_covers_repos
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text(
+            "# Slot 181\n"
+            "slug: test-slot\n\n"
+            "## Issue\n"
+            "casehubio/parent#469\n"
+            "Covers: platform:276,engine:1049,work:394\n\n"
+            "## Repos\n"
+            "- platform (primary)\n"
+            "- engine\n"
+            "- work\n"
+            "- aml\n"
+            "- clinical\n"
+        )
+        result = _parse_covers_repos(str(slot_dir))
+        assert result == {"platform", "engine", "work"}
+
+    def test_missing_covers_returns_empty(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import _parse_covers_repos
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("# Slot\n## Repos\n- engine\n")
+        result = _parse_covers_repos(str(slot_dir))
+        assert result == set()
+
+    def test_no_slot_file_returns_empty(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import _parse_covers_repos
+        result = _parse_covers_repos(str(tmp_path / "nonexistent"))
+        assert result == set()
+
+
+class TestResolveOriginalReposScoped:
+    """_resolve_original_repos filters by covers_repos when provided."""
+
+    def _make_slot_with_repos(self, tmp_path, repos):
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir(exist_ok=True)
+        for name in repos:
+            repo = slot_dir / name
+            repo.mkdir(exist_ok=True)
+            subprocess.run(["git", "init", str(repo)], capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "t@t.com"],
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.name", "T"],
+                capture_output=True,
+            )
+            orig = tmp_path / "original" / name
+            orig.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "remote", "add", "local", str(orig)],
+                capture_output=True,
+            )
+        return slot_dir
+
+    def test_scoped_to_covers(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import _resolve_original_repos
+        slot_dir = self._make_slot_with_repos(tmp_path, ["engine", "work", "aml"])
+        result = _resolve_original_repos(str(slot_dir), covers_repos={"engine", "work"})
+        assert "engine" in result
+        assert "work" in result
+        assert "aml" not in result
+
+    def test_no_covers_returns_all(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import _resolve_original_repos
+        slot_dir = self._make_slot_with_repos(tmp_path, ["engine", "work", "aml"])
+        result = _resolve_original_repos(str(slot_dir))
+        assert "engine" in result
+        assert "work" in result
+        assert "aml" in result
+
+
+class TestLandedCompletenessScoped:
+    """check_landed_completeness scoped to covers_repos."""
+
+    def test_scoped_completeness_passes(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_landed_completeness
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- engine\n- work\n- aml\n")
+        (slot_dir / ".landed").write_text("landed_shas=engine:abc,work:def\n")
+        result = check_landed_completeness(str(slot_dir), covers_repos={"engine", "work"})
+        assert result["status"] == "pass"
+
+    def test_unscoped_fails_when_repos_missing(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_landed_completeness
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- engine\n- work\n- aml\n")
+        (slot_dir / ".landed").write_text("landed_shas=engine:abc,work:def\n")
+        result = check_landed_completeness(str(slot_dir))
+        assert result["status"] == "fail"
+        assert "aml" in result["detail"]
+
+    def test_fallback_when_no_covers(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_landed_completeness
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- engine\n- work\n")
+        (slot_dir / ".landed").write_text("landed_shas=engine:abc,work:def\n")
+        result = check_landed_completeness(str(slot_dir))
+        assert result["status"] == "pass"

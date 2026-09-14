@@ -203,6 +203,22 @@ def _parse_landed_repos(slot_dir: str) -> set[str]:
     return repos
 
 
+def _parse_covers_repos(slot_dir: str) -> set[str]:
+    """Extract repo names from the Covers: line in .slot."""
+    slot_file = Path(slot_dir) / ".slot"
+    if not slot_file.exists():
+        return set()
+    for line in slot_file.read_text().splitlines():
+        if line.startswith("Covers:"):
+            parts = line.split(":", 1)[1].strip()
+            return {
+                entry.split(":")[0].strip()
+                for entry in parts.split(",")
+                if ":" in entry
+            }
+    return set()
+
+
 def _parse_landed_issues(slot_dir: str) -> set[int]:
     """Parse .landed ledger for completed issue numbers."""
     landed = Path(slot_dir) / ".landed"
@@ -283,9 +299,12 @@ def check_landed_shas_populated(slot_dir: str) -> dict:
     return {"status": "pass"}
 
 
-def check_landed_completeness(slot_dir: str) -> dict:
-    """Verify all repos in .slot have SHAs in .landed."""
-    slot_repos = _parse_slot_repos(slot_dir)
+def check_landed_completeness(
+    slot_dir: str,
+    covers_repos: set[str] | None = None,
+) -> dict:
+    """Verify covered repos have SHAs in .landed."""
+    slot_repos = covers_repos if covers_repos else _parse_slot_repos(slot_dir)
     if not slot_repos:
         return {"status": "pass", "detail": "no repos in .slot"}
     landed_repos = _parse_landed_repos(slot_dir)
@@ -378,13 +397,18 @@ def check_slot_marker(slot_dir: str, marker: str) -> dict:
     return {"status": "fail", "detail": f"{marker} missing"}
 
 
-def _resolve_original_repos(slot_dir: str) -> dict[str, str]:
+def _resolve_original_repos(
+    slot_dir: str,
+    covers_repos: set[str] | None = None,
+) -> dict[str, str]:
     result = {}
     slot_path = Path(slot_dir)
     for sub in sorted(slot_path.iterdir()):
         if not sub.is_dir() or not (sub / ".git").exists():
             continue
         if sub.name in (".m2", "attic"):
+            continue
+        if covers_repos and sub.name not in covers_repos:
             continue
         local_url = git(str(sub), "remote", "get-url", "local")
         if local_url.returncode == 0 and local_url.stdout.strip():
@@ -400,6 +424,7 @@ def verify(
     issue_repo: str = "",
     slot_dir: str = "", original_repos: dict[str, str] | None = None,
     on_main: bool = False,
+    covers_repos: set[str] | None = None,
 ) -> bool:
     checks: list[tuple[str, dict]] = []
 
@@ -428,7 +453,8 @@ def verify(
     if slot_dir:
         checks.append(("landed_marker", check_landed_marker(slot_dir)))
         checks.append(("landed_shas_populated", check_landed_shas_populated(slot_dir)))
-        checks.append(("landed_completeness", check_landed_completeness(slot_dir)))
+        checks.append(("landed_completeness",
+                        check_landed_completeness(slot_dir, covers_repos=covers_repos)))
         checks.append(("phase_a_marker", check_slot_marker(slot_dir, ".phase-a-complete")))
         if original_repos:
             for repo_name, orig_path in original_repos.items():
@@ -500,13 +526,15 @@ def main() -> int:
 
     slot_dir = opts.get("slot_dir", "")
     original_repos = None
+    covers_repos = None
     if slot_dir:
-        original_repos = _resolve_original_repos(slot_dir)
+        covers_repos = _parse_covers_repos(slot_dir)
+        original_repos = _resolve_original_repos(slot_dir, covers_repos=covers_repos)
 
     verify(project, branch, workspace, base, covers,
            issue_repo=issue_repo,
            slot_dir=slot_dir, original_repos=original_repos,
-           on_main=on_main)
+           on_main=on_main, covers_repos=covers_repos)
     return 0
 
 
