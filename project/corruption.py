@@ -447,9 +447,8 @@ def diagnose(
         if s3:
             findings.append(s3)
 
-        s8 = check_queue_consistency(plan_path, owner_repo)
-        if s8:
-            findings.append(s8)
+        # S8 removed: .plan checkbox state and GitHub issue state have different
+        # lifecycles. work_health.py handles sync at session entry — not corruption.
     except Exception:
         pass
 
