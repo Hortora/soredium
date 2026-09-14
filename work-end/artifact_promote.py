@@ -33,7 +33,7 @@ from pathlib import Path
 _project_dir = str(Path(__file__).resolve().parent.parent / "project")
 if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
-from common import parse_args
+from common import parse_args, detect_topology
 from plan_io import parse_covers
 
 
@@ -52,21 +52,30 @@ def _has_remote(cwd: str) -> bool:
         return False
 
 
+def _resolve_push_remote(cwd: str) -> str:
+    """Return the push target: upstream (blessed) if present, else origin."""
+    _, blessed = detect_topology(cwd)
+    return blessed if blessed else "origin"
+
+
 def _push_or_report(cwd: str) -> None:
     if not _has_remote(cwd):
         print("PUSHED=skipped")
         return
+    remote = _resolve_push_remote(cwd)
     try:
-        git("push", "--no-verify", cwd=cwd)
+        git("push", "--no-verify", remote, "main", cwd=cwd)
         print("PUSHED=yes")
+        print(f"PUSH_REMOTE={remote}")
     except subprocess.CalledProcessError:
         try:
             branch = subprocess.run(
                 ["git", "-C", cwd, "branch", "--show-current"],
                 capture_output=True, text=True,
             ).stdout.strip()
-            git("push", "--no-verify", "-u", "origin", branch, cwd=cwd)
+            git("push", "--no-verify", "-u", remote, branch, cwd=cwd)
             print("PUSHED=yes")
+            print(f"PUSH_REMOTE={remote}")
         except subprocess.CalledProcessError as e2:
             print("PUSHED=failed")
             print(f"PUSH_ERROR={e2.stderr.strip()}")
@@ -307,65 +316,78 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
         print("ARCHIVED=0")
         return 0
 
-    wt = ws / ".promote-tmp"
-    try:
-        git("worktree", "add", str(wt), "main", cwd=workspace)
-    except subprocess.CalledProcessError as e:
-        print("ERROR=worktree_failed")
-        print(f"ERROR_DETAIL=Failed to create worktree for main: {e.stderr.strip()}")
-        return 1
+    current_branch = subprocess.run(
+        ["git", "-C", workspace, "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    on_main = current_branch == "main"
 
-    try:
+    if on_main:
+        target = ws
+    else:
+        wt = ws / ".promote-tmp"
         try:
-            git("pull", "--rebase", "origin", "main", cwd=str(wt))
-        except subprocess.CalledProcessError:
-            pass
+            git("worktree", "add", str(wt), "main", cwd=workspace)
+        except subprocess.CalledProcessError as e:
+            print("ERROR=worktree_failed")
+            print(f"ERROR_DETAIL=Failed to create worktree for main: {e.stderr.strip()}")
+            return 1
+        target = wt
 
-        wt_plans = wt / "plans"
-        wt_plans.mkdir(parents=True, exist_ok=True)
+    try:
+        if not on_main:
+            try:
+                git("pull", "--rebase", "origin", "main", cwd=str(target))
+            except subprocess.CalledProcessError:
+                pass
+
+        target_plans = target / "plans"
+        target_plans.mkdir(parents=True, exist_ok=True)
 
         skipped: list[str] = []
-        for pf in plan_files:
-            src = pf if source_dir else (ws / pf.relative_to(scan_root))
-            dst = wt_plans / pf.name
-            try:
-                shutil.copy2(str(src), str(dst))
-            except Exception as e:
-                skipped.append(pf.name)
-                print(f"SKIP_DETAIL={pf.name}: {e}", file=sys.stderr)
+        if not on_main:
+            for pf in plan_files:
+                src = pf if source_dir else (ws / pf.relative_to(scan_root))
+                dst = target_plans / pf.name
+                try:
+                    shutil.copy2(str(src), str(dst))
+                except Exception as e:
+                    skipped.append(pf.name)
+                    print(f"SKIP_DETAIL={pf.name}: {e}", file=sys.stderr)
 
-        attic_dir = wt_plans / "attic" / branch
+        attic_dir = target_plans / "attic" / branch
         attic_dir.mkdir(parents=True, exist_ok=True)
         archived = 0
         for pf in plan_files:
             if pf.name in skipped:
                 continue
-            src = wt_plans / pf.name
+            src = target_plans / pf.name if not on_main else pf
             if src.exists():
                 shutil.move(str(src), str(attic_dir / pf.name))
                 archived += 1
 
         if archived > 0:
             try:
-                git("add", "-A", "plans/", cwd=str(wt))
-                git("commit", "-m", f"docs(work-end): archive plans from {branch}", cwd=str(wt))
+                git("add", "-A", "plans/", cwd=str(target))
+                git("commit", "-m", f"docs(work-end): archive plans from {branch}", cwd=str(target))
             except subprocess.CalledProcessError as e:
                 if "nothing to commit" not in (e.stdout + e.stderr):
                     print("ERROR=commit_failed")
                     print(f"ERROR_DETAIL={e.stderr.strip()}")
                     return 1
 
-            _push_or_report(str(wt))
+            _push_or_report(str(target))
     finally:
-        try:
-            git("worktree", "remove", str(wt), "--force", cwd=workspace)
-        except subprocess.CalledProcessError:
-            if wt.exists():
-                shutil.rmtree(wt, ignore_errors=True)
-                try:
-                    git("worktree", "prune", cwd=workspace)
-                except subprocess.CalledProcessError:
-                    pass
+        if not on_main:
+            try:
+                git("worktree", "remove", str(wt), "--force", cwd=workspace)
+            except subprocess.CalledProcessError:
+                if wt.exists():
+                    shutil.rmtree(wt, ignore_errors=True)
+                    try:
+                        git("worktree", "prune", cwd=workspace)
+                    except subprocess.CalledProcessError:
+                        pass
 
     print(f"ARCHIVED={archived}")
     if skipped:

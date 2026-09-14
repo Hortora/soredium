@@ -1182,3 +1182,57 @@ class TestToProjectSingleRepo:
         assert result.returncode == 0
         out = parse(result)
         assert out["PROMOTED"] == "1"
+
+
+class TestArchivePlansOnMain:
+    """#476: archive-plans must work when workspace is already on main."""
+
+    def test_archive_plans_on_main_skips_worktree(self, tmp_path):
+        """When workspace is on main, archive directly — no worktree needed."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        init_git(ws)
+        plans = ws / "plans"
+        plans.mkdir()
+        (plans / "completed.md").write_text("# Done\n")
+        subprocess.run(["git", "-C", str(ws), "add", "-A"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "add plan"], capture_output=True, check=True)
+
+        result = run_promote("archive-plans", str(ws), branch="main")
+        assert result.returncode == 0
+        out = parse(result)
+        assert out.get("ARCHIVED") == "1"
+        assert (ws / "plans" / "attic" / "main" / "completed.md").exists()
+        assert not (plans / "completed.md").exists()
+
+
+class TestPushUsesUpstream:
+    """#477: push should use upstream (blessed) when origin is a fork."""
+
+    def test_push_targets_upstream_when_present(self, tmp_path):
+        """_resolve_push_remote returns upstream when it exists."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        init_git(repo)
+        subprocess.run(["git", "-C", str(repo), "remote", "add", "upstream", "https://github.com/org/repo.git"],
+                        capture_output=True, check=True)
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        import artifact_promote
+        from importlib import reload
+        reload(artifact_promote)
+        target = artifact_promote._resolve_push_remote(str(repo))
+        assert target == "upstream"
+
+    def test_push_targets_origin_when_no_upstream(self, tmp_path):
+        """_resolve_push_remote falls back to origin when no upstream."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        init_git(repo)
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        import artifact_promote
+        from importlib import reload
+        reload(artifact_promote)
+        target = artifact_promote._resolve_push_remote(str(repo))
+        assert target == "origin"
