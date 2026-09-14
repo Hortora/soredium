@@ -2491,6 +2491,83 @@ class TestPerRepoMechanicalAutoSkip:
         assert "error-skipped" in summary
         assert "3 retries" in summary
 
+    def test_promote_auto_skip_unblocks_landing(self, tmp_path, monkeypatch):
+        """End-to-end: promote skipped_error → land is reachable."""
+        from close_progress import update_close_progress, read_close_progress
+
+        # Set up: all review done, promote already auto-skipped, ready for land
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                     "branch_audit_coherence", "branch_audit_structure",
+                     "branch_audit_robustness", "loose_ends", "forcing_function",
+                     "sweep_config", "forage", "protocol", "update_claude_md",
+                     "impl_doc_sync", "doc_freshness_gate", "adr", "write_content",
+                     "review_pass", "promote", "report_promote", "promote_pass",
+                     "trajectory"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        # Mark promote as skipped_error (the state we want to prove is unblocking)
+        update_close_progress(tmp_path, "promote", "skipped_error")
+
+        landed = {"called": False}
+        def mock_push_main(ctx):
+            landed["called"] = True
+            return {"PUSHED": "yes", "LANDED_SHA": "abc123"}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        monkeypatch.setattr("work_end_orchestrator._push_main_mode", mock_push_main)
+        monkeypatch.setattr("work_end_orchestrator._verify_main_mode", lambda ctx: {"VERIFIED": "yes"})
+        monkeypatch.setattr("work_end_orchestrator._cleanup_main_mode", lambda ctx: {"CLEANED": "yes"})
+        from work_end_orchestrator import run_orchestrator
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-368-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "on_main": "yes",
+        })
+
+        assert landed["called"], \
+            f"Land should run when promote=skipped_error. Got: {result}"
+
+    def test_promote_auto_skips_on_failure(self, tmp_path, monkeypatch):
+        """Promote failures auto-skip after MAX retries, don't create dead end."""
+        from close_progress import update_close_progress, read_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                     "branch_audit_coherence", "branch_audit_structure",
+                     "branch_audit_robustness", "loose_ends", "forcing_function",
+                     "sweep_config", "forage", "protocol", "update_claude_md",
+                     "impl_doc_sync", "doc_freshness_gate", "adr", "write_content",
+                     "review_pass"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "promote_mechanical_attempt", "2")
+
+        def failing_promote(cmd, ws, **kw):
+            cmd_str = str(cmd)
+            if "promote" in cmd_str and "report" not in cmd_str:
+                return {"ERROR": "worktree_failed"}
+            return {}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", failing_promote)
+        from work_end_orchestrator import run_orchestrator
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-368-test",
+            "base_branch": "main",
+            "meta_state": "closing:verified",
+            "on_main": "yes",
+        })
+
+        progress = read_close_progress(tmp_path)
+        assert progress.get("promote") == "skipped_error", \
+            f"Expected skipped_error, got: {progress.get('promote')}"
+        assert not (result.get("ACTION") == "user_input" and result.get("CONTEXT") == "step_failed"), \
+            f"Should auto-skip, not dead-end. Got: {result}"
+
     def test_per_repo_retries_before_max(self, tmp_path, monkeypatch):
         self._mark_through_promoted(tmp_path)
         from close_progress import update_close_progress
