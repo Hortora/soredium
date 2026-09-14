@@ -48,7 +48,7 @@ class OrchestratorContextBase:
     steps_executed: list[str] = field(default_factory=list)
 
     def done(self, step: str) -> bool:
-        return self.progress.get(step) in ("done", "skipped")
+        return self.progress.get(step) in ("done", "skipped", "skipped_error")
 
 
 SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "impl_doc_sync", "adr", "write_content"]
@@ -56,6 +56,7 @@ SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "impl_doc_sync", "adr",
 WRAP_SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "write_content"]
 
 MAX_JUDGMENT_RETRIES = 3
+MAX_MECHANICAL_RETRIES = 3
 
 JUDGMENT_STEPS_SET = {"review", "code_review",
                       "branch_audit_conformance", "branch_audit_coherence",

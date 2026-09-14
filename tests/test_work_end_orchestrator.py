@@ -2282,3 +2282,58 @@ class TestPromoteScopeFilter:
         assert "promote:neocortex" not in progress, (
             "promote:neocortex composite key should not exist — promote is not per-repo"
         )
+
+
+class TestSkippedErrorRecognition:
+    """skipped_error is a terminal state like done and skipped."""
+
+    def test_done_recognizes_skipped_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:review",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress={"promote": "skipped_error"},
+        )
+        assert ctx.done("promote") is True
+
+    def test_done_does_not_recognize_random_values(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:review",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress={"promote": "pending"},
+        )
+        assert ctx.done("promote") is False
+
+    def test_per_repo_done_with_mixed_skipped_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:promoted",
+            on_main=False, in_slot=True, covers="", issue_repo="",
+            progress={
+                "land:engine": "done",
+                "land:work": "skipped_error",
+            },
+            slot_repos=["engine", "work"],
+        )
+        assert ctx.per_repo_done("land") is True
+
+    def test_per_repo_done_not_done_when_still_pending(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import OrchestratorContext
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:promoted",
+            on_main=False, in_slot=True, covers="", issue_repo="",
+            progress={
+                "land:engine": "done",
+            },
+            slot_repos=["engine", "work"],
+        )
+        assert ctx.per_repo_done("land") is False

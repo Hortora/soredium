@@ -180,12 +180,15 @@ class OrchestratorContext:
     current_repo_workspace: Path | None = None
 
     def done(self, step: str) -> bool:
-        return self.progress.get(step) in ("done", "skipped")
+        return self.progress.get(step) in ("done", "skipped", "skipped_error")
 
     def per_repo_done(self, step: str) -> bool:
         if not self.in_slot or not self.slot_repos:
             return self.done(step)
-        return all(self.progress.get(f"{step}:{repo}") in ("done", "skipped") for repo in self.slot_repos)
+        return all(
+            self.progress.get(f"{step}:{repo}") in ("done", "skipped", "skipped_error")
+            for repo in self.slot_repos
+        )
 
     def next_repo_for(self, step: str) -> str | None:
         if not self.in_slot or not self.slot_repos:
