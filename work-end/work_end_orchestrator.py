@@ -1266,10 +1266,21 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
 
     for repo in ctx.slot_repos:
         step_key = f"{step.name}:{repo}"
-        if ctx.progress.get(step_key) in ("done", "skipped"):
+        if ctx.progress.get(step_key) in ("done", "skipped", "skipped_error"):
             continue
 
-        ctx.current_repo_project = ctx.slot_path / repo if ctx.slot_path else None
+        repo_path = ctx.slot_path / repo if ctx.slot_path else None
+        if step.name == "rebase" and repo_path and repo_path.is_dir():
+            ancestor_check = subprocess.run(
+                ["git", "-C", str(repo_path), "merge-base", "--is-ancestor", "HEAD", "main"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if ancestor_check.returncode == 0:
+                update_close_progress(ctx.workspace, step_key, "done")
+                ctx.steps_executed.append(f"{step_key}:already_on_main")
+                continue
+
+        ctx.current_repo_project = repo_path
         ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo)
         result = _close_execute_mechanical(step, ctx)
         ctx.current_repo_project = None
@@ -1309,6 +1320,7 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
             context[f"DETAIL_{repo}"] = result.get("ERROR_DETAIL", "")
             if result.get("CONFLICT_COUNT"):
                 context[f"CONFLICTS_{repo}"] = result.get("CONFLICT_COUNT", "")
+            context[f"FORCE_DONE_HINT_{repo}"] = f"force_done={step.name}:{repo}"
         return context
 
     if retryable_failure:
@@ -1361,6 +1373,7 @@ def _close_mechanical_error(step: StepDef, ctx: OrchestratorContext,
     if error not in NON_RETRYABLE_ERRORS:
         return None
     context = {"CONTEXT": f"{error.lower()}", "STEP": step.name}
+    context["FORCE_DONE_HINT"] = f"force_done={step.name}"
     context.update(result)
     return {"ACTION": "user_input", **context}
 

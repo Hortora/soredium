@@ -2606,3 +2606,99 @@ class TestPerRepoMechanicalAutoSkip:
 
         assert result.get("ACTION") == "error"
         assert result.get("RETRY") == "2"
+
+
+class TestRebaseSkipWhenOnMain:
+    """Rebase is skipped when branch content is already on main."""
+
+    def _mark_through_promoted(self, tmp_path):
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                     "branch_audit_coherence", "branch_audit_structure",
+                     "branch_audit_robustness", "loose_ends", "forcing_function",
+                     "sweep_config", "forage", "protocol", "update_claude_md",
+                     "impl_doc_sync", "doc_freshness_gate", "adr", "write_content",
+                     "review_pass", "promote", "report_promote", "promote_pass",
+                     "trajectory", "report_rebase", "squash", "report_squash",
+                     "write_marker"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+    def _make_repo_on_main(self, path):
+        """Create a git repo where HEAD is ancestor of main."""
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "T"], capture_output=True)
+        (path / "README.md").write_text("init\n")
+        subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-m", "init"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "-b", "feature"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "main"], capture_output=True)
+
+    def test_rebase_skipped_when_already_on_main(self, tmp_path, monkeypatch):
+        self._mark_through_promoted(tmp_path)
+        from close_progress import read_close_progress
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        for repo in ["ledger", "connectors"]:
+            self._make_repo_on_main(slot_path / repo)
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- ledger (primary)\n- connectors\n## Status\nstatus: active\n"
+        )
+
+        calls = []
+        def capture(cmd, ws, **kw):
+            calls.append(str(cmd))
+            return {}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "ledger"),
+            "branch": "issue-370-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+
+        progress = read_close_progress(tmp_path)
+        assert progress.get("rebase:ledger") == "done"
+        assert progress.get("rebase:connectors") == "done"
+        rebase_calls = [c for c in calls if "'rebase'" in c and "work_end_execute" in c]
+        assert len(rebase_calls) == 0, f"No rebase scripts should run: {rebase_calls}"
+
+
+class TestClassifiedErrorForceDoneHint:
+    """Classified errors include force_done hint."""
+
+    def test_rebase_conflict_includes_force_done_hint(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import _close_mechanical_error, StepDef, OrchestratorContext
+        step = StepDef("rebase", "closing:promoted", "mechanical")
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:promoted",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress={},
+        )
+        result = _close_mechanical_error(step, ctx, {"ERROR": "REBASE_CONFLICT"})
+        assert result is not None
+        assert "FORCE_DONE_HINT" in result
+        assert result["FORCE_DONE_HINT"] == "force_done=rebase"
+
+    def test_non_retryable_error_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import _close_mechanical_error, StepDef, OrchestratorContext
+        step = StepDef("promote", "closing:verified", "mechanical")
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:verified",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress={},
+        )
+        result = _close_mechanical_error(step, ctx, {"ERROR": "push_failed"})
+        assert result is None
