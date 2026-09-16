@@ -420,7 +420,7 @@ def _resolve_original_repos(
     for sub in sorted(slot_path.iterdir()):
         if not sub.is_dir() or not (sub / ".git").exists():
             continue
-        if sub.name in (".m2", "attic"):
+        if sub.name in (".m2", "attic") or sub.name.startswith("wsp-"):
             continue
         if covers_repos and sub.name not in covers_repos:
             continue
