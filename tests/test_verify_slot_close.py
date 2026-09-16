@@ -607,3 +607,71 @@ class TestLandedCompletenessScoped:
         (slot_dir / ".landed").write_text("landed_shas=engine:abc,work:def\n")
         result = check_landed_completeness(str(slot_dir))
         assert result["status"] == "pass"
+
+
+class TestCeremonyCommitFilter:
+    """Lifecycle ceremony commits are filtered from workspace_merged check."""
+
+    def test_lifecycle_state_commit_filtered(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_branch_merged
+
+        branch = "issue-371-test"
+        project = _init_repo(tmp_path / "project")
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("work\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: add feature")
+        _git(project, "checkout", "main")
+        _git(project, "merge", "--ff-only", branch)
+        _git(project, "checkout", branch)
+        _git(project, "commit", "--allow-empty",
+             "-m", "chore: commit lifecycle state before branch switch")
+        _git(project, "commit", "--allow-empty",
+             "-m", "chore: branch closed — landed as abc123 on main")
+        _git(project, "checkout", "main")
+
+        result = check_branch_merged(str(project), branch)
+        assert result["status"] == "pass"
+
+    def test_strip_lifecycle_commit_filtered(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_branch_merged
+
+        branch = "issue-371-test"
+        project = _init_repo(tmp_path / "project")
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("work\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: add feature")
+        _git(project, "checkout", "main")
+        _git(project, "merge", "--ff-only", branch)
+        _git(project, "checkout", branch)
+        _git(project, "commit", "--allow-empty",
+             "-m", "chore: strip lifecycle files before close")
+        _git(project, "commit", "--allow-empty",
+             "-m", "chore: branch closed — landed as abc123 on main")
+        _git(project, "checkout", "main")
+
+        result = check_branch_merged(str(project), branch)
+        assert result["status"] == "pass"
+
+    def test_real_unmerged_commit_still_fails(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_branch_merged
+
+        branch = "issue-371-test"
+        project = _init_repo(tmp_path / "project")
+        _git(project, "checkout", "-b", branch)
+        (project / "feature.txt").write_text("work\n")
+        _git(project, "add", "feature.txt")
+        _git(project, "commit", "-m", "feat: add feature")
+        _git(project, "checkout", "main")
+        _git(project, "checkout", branch)
+        _git(project, "commit", "--allow-empty",
+             "-m", "feat: extra unmerged work")
+        _git(project, "checkout", "main")
+
+        result = check_branch_merged(str(project), branch)
+        assert result["status"] == "fail"
+        assert "UNMERGED" in result["detail"]

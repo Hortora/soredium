@@ -38,13 +38,27 @@ def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+CEREMONY_PREFIXES = (
+    "chore: branch closed",
+    "chore: commit lifecycle state",
+    "chore: strip lifecycle files",
+    "chore: commit pending workspace state",
+    "chore(work-end): cleanup branch scaffold",
+    "chore: cleanup branch scaffold",
+)
+
+
+def _is_ceremony_commit(subject: str) -> bool:
+    return any(subject.startswith(p) for p in CEREMONY_PREFIXES)
+
+
 def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
     result = git(project, "log", "--oneline", f"{base}..{branch}")
     if result.returncode != 0:
         return {"status": "fail", "detail": f"branch {branch} not found"}
     unmerged = [
         line for line in result.stdout.strip().splitlines()
-        if line and not line.split(" ", 1)[-1].startswith("chore: branch closed")
+        if line and not _is_ceremony_commit(line.split(" ", 1)[-1])
     ]
     if unmerged:
         return {"status": "fail", "detail": f"UNMERGED: {len(unmerged)} commits not on {base}"}
