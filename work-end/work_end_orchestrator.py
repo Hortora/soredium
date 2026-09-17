@@ -254,6 +254,32 @@ def _is_sweep_deselected(step_name: str):
     return check
 
 
+def _or_skip(*fns):
+    """Skip if ANY predicate returns True."""
+    def combined(ctx):
+        return any(fn(ctx) for fn in fns)
+    return combined
+
+
+def _skip_cycle_mode(ctx) -> bool:
+    """Skip terminal steps when .plan has remaining items (cycle mode)."""
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    try:
+        from plan_io import read_plan, has_uncompleted_items
+        ws_plan = Path(ctx.workspace) / ".plan"
+        state = read_plan(ws_plan)
+        return state is not None and has_uncompleted_items(state)
+    except Exception:
+        return False
+
+
+def _skip_not_cycle_mode(ctx) -> bool:
+    """Skip cycle step when in terminal mode."""
+    return not _skip_cycle_mode(ctx)
+
+
 # --- Script paths ---
 
 SLOT_MANAGER = Path(__file__).parent.parent / "work-slot" / "slot_manager.py"

@@ -10,6 +10,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
 
 class TestRunScript:
@@ -2702,3 +2703,72 @@ class TestClassifiedErrorForceDoneHint:
         )
         result = _close_mechanical_error(step, ctx, {"ERROR": "push_failed"})
         assert result is None
+
+
+class TestOrSkip:
+    """Tests for _or_skip combiner."""
+
+    def test_any_true_returns_true(self):
+        from work_end_orchestrator import _or_skip
+        always_true = lambda ctx: True
+        always_false = lambda ctx: False
+        combined = _or_skip(always_false, always_true)
+        assert combined(None) is True
+
+    def test_all_false_returns_false(self):
+        from work_end_orchestrator import _or_skip
+        always_false = lambda ctx: False
+        combined = _or_skip(always_false, always_false)
+        assert combined(None) is False
+
+    def test_single_predicate(self):
+        from work_end_orchestrator import _or_skip
+        always_true = lambda ctx: True
+        combined = _or_skip(always_true)
+        assert combined(None) is True
+
+
+class TestSkipCycleMode:
+    """Tests for _skip_cycle_mode and _skip_not_cycle_mode."""
+
+    def _make_ctx(self, tmp_path, plan_content=None):
+        ctx = MagicMock()
+        ctx.workspace = str(tmp_path)
+        if plan_content is not None:
+            (tmp_path / ".plan").write_text(plan_content)
+        return ctx
+
+    def test_skip_cycle_mode_with_uncompleted_items(self, tmp_path):
+        from work_end_orchestrator import _skip_cycle_mode
+        plan = (
+            "## State\nbranch: test\nstate: active\n"
+            "issue-repo: Org/repo\ncovers: 1\n\n"
+            "## Queue\n- [ ] org/repo#1 — Item1 ← active\n- [ ] org/repo#2 — Item2\n"
+        )
+        ctx = self._make_ctx(tmp_path, plan)
+        assert _skip_cycle_mode(ctx) is True
+
+    def test_skip_cycle_mode_with_all_completed(self, tmp_path):
+        from work_end_orchestrator import _skip_cycle_mode
+        plan = (
+            "## State\nbranch: test\nstate: active\n"
+            "issue-repo: Org/repo\ncovers: 1\n\n"
+            "## Queue\n- [x] org/repo#1 — Done\n"
+        )
+        ctx = self._make_ctx(tmp_path, plan)
+        assert _skip_cycle_mode(ctx) is False
+
+    def test_skip_cycle_mode_with_no_plan(self, tmp_path):
+        from work_end_orchestrator import _skip_cycle_mode
+        ctx = self._make_ctx(tmp_path, plan_content=None)
+        assert _skip_cycle_mode(ctx) is False
+
+    def test_skip_not_cycle_mode_inverse(self, tmp_path):
+        from work_end_orchestrator import _skip_not_cycle_mode
+        plan = (
+            "## State\nbranch: test\nstate: active\n"
+            "issue-repo: Org/repo\ncovers: 1\n\n"
+            "## Queue\n- [ ] org/repo#1 — Item1 ← active\n- [ ] org/repo#2 — Item2\n"
+        )
+        ctx = self._make_ctx(tmp_path, plan)
+        assert _skip_not_cycle_mode(ctx) is False
