@@ -2772,3 +2772,40 @@ class TestSkipCycleMode:
         )
         ctx = self._make_ctx(tmp_path, plan)
         assert _skip_not_cycle_mode(ctx) is False
+
+
+class TestCyclePassStep:
+    """Tests for the cycle_pass step in STEPS list."""
+
+    def test_cycle_pass_exists_in_steps(self):
+        from work_end_orchestrator import STEPS
+        names = [s.name for s in STEPS]
+        assert "cycle_pass" in names
+
+    def test_cycle_pass_before_stamp_pass(self):
+        from work_end_orchestrator import STEPS
+        names = [s.name for s in STEPS]
+        cycle_idx = names.index("cycle_pass")
+        stamp_idx = names.index("stamp_pass")
+        assert cycle_idx < stamp_idx
+
+    def test_cycle_pass_properties(self):
+        from work_end_orchestrator import STEPS
+        step = next(s for s in STEPS if s.name == "cycle_pass")
+        assert step.phase == "closing:merged"
+        assert step.step_type == "lifecycle"
+        assert step.from_state == "closing:merged"
+        assert step.to_state == "active"
+        assert step.event == "issue_cycle"
+
+    def test_terminal_steps_have_cycle_skip(self):
+        from work_end_orchestrator import STEPS
+        terminal_steps = {"write_marker", "stamp_pass", "write_landed",
+                          "archive_slot", "report_archive", "checkout_main",
+                          "cleanup_stack", "cleanup", "cleanup_pass",
+                          "cleanup_main"}
+        for step in STEPS:
+            if step.name in terminal_steps:
+                assert step.skip_fn is not None, (
+                    f"Step {step.name} must have a skip_fn for cycle mode"
+                )
