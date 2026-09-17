@@ -119,6 +119,18 @@ class TestTransitionValidation:
         with pytest.raises(ValueError, match="Unknown state"):
             transition(slot_dir, "nonexistent")
 
+    def test_valid_landed_to_active(self, tmp_path):
+        slot_dir = _make_slot(tmp_path, state="landed")
+        old = transition(slot_dir, "active")
+        assert old == "landed"
+        assert current_state(slot_dir) == "active"
+
+    def test_landed_to_archived_still_valid(self, tmp_path):
+        slot_dir = _make_slot(tmp_path, state="landed")
+        old = transition(slot_dir, "archived")
+        assert old == "landed"
+        assert current_state(slot_dir) == "archived"
+
 
 class TestTransitionTable:
 

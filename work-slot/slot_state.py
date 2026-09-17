@@ -48,7 +48,7 @@ VALID_TRANSITIONS: dict[str, frozenset[str]] = {
     "active":    frozenset({"paused", "ready", "stale"}),
     "paused":    frozenset({"active", "stale", "abandoned"}),
     "ready":     frozenset({"landed", "stale"}),
-    "landed":    frozenset({"archived"}),
+    "landed":    frozenset({"archived", "active"}),
     "stale":     frozenset({"active", "archived", "abandoned"}),
     "abandoned": frozenset({"archived"}),
     "archived":  frozenset(),
