@@ -33,20 +33,20 @@ def _add_feature(repo: Path, branch: str, filename: str = "feature.py") -> None:
     subprocess.run(["git", "-C", str(repo), "commit", "-m", f"feat: add {filename}"], capture_output=True, check=True)
 
 
-def _make_slot_clone(original: Path, clone_path: Path, branch: str) -> Path:
-    """Create a slot-style clone with local remote pointing at original."""
+def _make_slot_clone(canonical: Path, clone_path: Path, branch: str) -> Path:
+    """Create a slot-style clone with local remote pointing at canonical."""
     subprocess.run(
-        ["git", "-C", str(original), "config", "receive.denyCurrentBranch", "updateInstead"],
+        ["git", "-C", str(canonical), "config", "receive.denyCurrentBranch", "updateInstead"],
         capture_output=True,
     )
     subprocess.run(
-        ["git", "clone", "--shared", str(original), str(clone_path)],
+        ["git", "clone", "--shared", str(canonical), str(clone_path)],
         capture_output=True, check=True,
     )
     subprocess.run(["git", "-C", str(clone_path), "config", "user.name", "Test"], capture_output=True)
     subprocess.run(["git", "-C", str(clone_path), "config", "user.email", "test@test.com"], capture_output=True)
     subprocess.run(["git", "-C", str(clone_path), "remote", "rename", "origin", "local"], capture_output=True, check=True)
-    bare = original.parent / f".{original.name}-bare.git"
+    bare = canonical.parent / f".{canonical.name}-bare.git"
     subprocess.run(["git", "-C", str(clone_path), "remote", "add", "origin", str(bare)], capture_output=True)
     subprocess.run(["git", "-C", str(clone_path), "fetch", "origin"], capture_output=True)
     subprocess.run(["git", "-C", str(clone_path), "checkout", "-b", branch], capture_output=True, check=True)
@@ -73,13 +73,13 @@ class TestRepoDescriptor:
         from land_flow import RepoDescriptor, Transport
         d = RepoDescriptor(
             repo_path=Path("/tmp/repo"),
-            original_path=Path("/tmp/repo"),
+            canonical_path=Path("/tmp/repo"),
             push_target="origin",
             base_branch="main",
             is_workspace=False,
             transport=Transport.DIRECT,
         )
-        assert d.repo_path == d.original_path
+        assert d.repo_path == d.canonical_path
         assert d.transport == Transport.DIRECT
         assert not d.is_workspace
 
@@ -87,24 +87,24 @@ class TestRepoDescriptor:
         from land_flow import RepoDescriptor, Transport
         d = RepoDescriptor(
             repo_path=Path("/tmp/clone"),
-            original_path=Path("/tmp/original"),
+            canonical_path=Path("/tmp/canonical"),
             push_target="local",
             base_branch="main",
             is_workspace=False,
             transport=Transport.TWO_HOP,
         )
-        assert d.repo_path != d.original_path
+        assert d.repo_path != d.canonical_path
         assert d.transport == Transport.TWO_HOP
 
     def test_project_sorts_before_workspace(self):
         from land_flow import RepoDescriptor, Transport
         ws = RepoDescriptor(
-            repo_path=Path("/tmp/ws"), original_path=Path("/tmp/ws"),
+            repo_path=Path("/tmp/ws"), canonical_path=Path("/tmp/ws"),
             push_target="origin", base_branch="main",
             is_workspace=True, transport=Transport.DIRECT,
         )
         proj = RepoDescriptor(
-            repo_path=Path("/tmp/proj"), original_path=Path("/tmp/proj"),
+            repo_path=Path("/tmp/proj"), canonical_path=Path("/tmp/proj"),
             push_target="origin", base_branch="main",
             is_workspace=False, transport=Transport.DIRECT,
         )
@@ -126,7 +126,7 @@ class TestLandBatchDirectSingleRepo:
         _add_feature(repo, branch)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         result = land_batch([desc], branch, tmp_path / ".progress")
@@ -149,7 +149,7 @@ class TestLandBatchDirectSingleRepo:
         _add_feature(repo, branch)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         land_batch([desc], branch, tmp_path / ".progress")
@@ -168,7 +168,7 @@ class TestLandBatchDirectSingleRepo:
         _add_feature(repo, branch)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         result = land_batch([desc], branch, tmp_path / ".progress")
@@ -193,11 +193,11 @@ class TestLandBatchDirectProjectAndWorkspace:
 
         descs = [
             RepoDescriptor(
-                repo_path=proj, original_path=proj, push_target="origin",
+                repo_path=proj, canonical_path=proj, push_target="origin",
                 base_branch="main", is_workspace=False, transport=Transport.DIRECT,
             ),
             RepoDescriptor(
-                repo_path=ws, original_path=ws, push_target="origin",
+                repo_path=ws, canonical_path=ws, push_target="origin",
                 base_branch="main", is_workspace=True, transport=Transport.DIRECT,
             ),
         ]
@@ -218,11 +218,11 @@ class TestLandBatchDirectProjectAndWorkspace:
 
         descs = [
             RepoDescriptor(
-                repo_path=ws, original_path=ws, push_target="origin",
+                repo_path=ws, canonical_path=ws, push_target="origin",
                 base_branch="main", is_workspace=True, transport=Transport.DIRECT,
             ),
             RepoDescriptor(
-                repo_path=proj, original_path=proj, push_target="origin",
+                repo_path=proj, canonical_path=proj, push_target="origin",
                 base_branch="main", is_workspace=False, transport=Transport.DIRECT,
             ),
         ]
@@ -240,14 +240,14 @@ class TestLandBatchDirectProjectAndWorkspace:
 
 
 class TestLandBatchTwoHop:
-    def test_merges_and_pushes_via_original(self, tmp_path):
+    def test_merges_and_pushes_via_canonical(self, tmp_path):
         from land_flow import RepoDescriptor, Transport, land_batch
-        original = _init_repo(tmp_path / "original")
+        canonical = _init_repo(tmp_path / "canonical")
         branch = "issue-42-test"
-        clone = _make_slot_clone(original, tmp_path / "clone", branch)
+        clone = _make_slot_clone(canonical, tmp_path / "clone", branch)
 
         desc = RepoDescriptor(
-            repo_path=clone, original_path=original, push_target="local",
+            repo_path=clone, canonical_path=canonical, push_target="local",
             base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
         )
         result = land_batch([desc], branch, tmp_path / ".progress")
@@ -259,9 +259,9 @@ class TestLandBatchTwoHop:
         assert s.pushed
         assert s.stamped
         assert s.landed_sha
-        # Feature should be on original's main
-        subprocess.run(["git", "-C", str(original), "checkout", "main"], capture_output=True)
-        assert (original / "feature.py").exists()
+        # Feature should be on canonical's main
+        subprocess.run(["git", "-C", str(canonical), "checkout", "main"], capture_output=True)
+        assert (canonical / "feature.py").exists()
 
     def test_stamps_all_repos_including_workspace(self, tmp_path):
         from land_flow import RepoDescriptor, Transport, land_batch
@@ -273,11 +273,11 @@ class TestLandBatchTwoHop:
 
         descs = [
             RepoDescriptor(
-                repo_path=proj_clone, original_path=proj_orig, push_target="local",
+                repo_path=proj_clone, canonical_path=proj_orig, push_target="local",
                 base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
             ),
             RepoDescriptor(
-                repo_path=ws_clone, original_path=ws_orig, push_target="local",
+                repo_path=ws_clone, canonical_path=ws_orig, push_target="local",
                 base_branch="main", is_workspace=True, transport=Transport.TWO_HOP,
             ),
         ]
@@ -286,22 +286,22 @@ class TestLandBatchTwoHop:
         assert result.success
         assert all(s.stamped for s in result.repos)
         subprocess.run(["git", "-C", str(proj_orig), "checkout", "main"], capture_output=True)
-        assert (proj_orig / "feature.py").exists(), "Project original must have feature"
+        assert (proj_orig / "feature.py").exists(), "Project canonical must have feature"
 
     def test_pushed_to_bare_remote(self, tmp_path):
         """Two-hop push lands on the bare remote (GitHub equivalent)."""
         from land_flow import RepoDescriptor, Transport, land_batch
-        original = _init_repo(tmp_path / "original")
+        canonical = _init_repo(tmp_path / "canonical")
         branch = "issue-42-test"
-        clone = _make_slot_clone(original, tmp_path / "clone", branch)
+        clone = _make_slot_clone(canonical, tmp_path / "clone", branch)
 
         desc = RepoDescriptor(
-            repo_path=clone, original_path=original, push_target="local",
+            repo_path=clone, canonical_path=canonical, push_target="local",
             base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
         )
         result = land_batch([desc], branch, tmp_path / ".progress")
 
-        bare = tmp_path / ".original-bare.git"
+        bare = tmp_path / ".canonical-bare.git"
         sha = subprocess.run(
             ["git", "-C", str(bare), "rev-parse", "main"],
             capture_output=True, text=True,
@@ -322,7 +322,7 @@ class TestLandBatchProgress:
         _add_feature(repo, branch)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         progress = tmp_path / ".progress"
@@ -339,7 +339,7 @@ class TestLandBatchProgress:
         _add_feature(repo, branch)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         progress = tmp_path / ".progress"
@@ -426,7 +426,7 @@ class TestStampRevalidation:
         subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         progress = tmp_path / ".progress"
@@ -464,7 +464,7 @@ class TestStampRevalidation:
         subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         progress = tmp_path / ".progress"
@@ -503,7 +503,7 @@ class TestStampRevalidation:
         subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         progress = tmp_path / ".progress"
@@ -548,7 +548,7 @@ class TestStampRevalidation:
 
         # Initial stamp with SHA-A
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         progress = tmp_path / ".progress"
@@ -609,7 +609,7 @@ class TestStampRevalidation:
         ).stdout.strip()
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         progress = tmp_path / ".progress"
@@ -678,12 +678,12 @@ class TestBuildSlotBatch:
         batch = build_slot_batch(slot_dir)
         assert all(d.push_target == "local" for d in batch)
 
-    def test_original_path_resolves(self, tmp_path):
+    def test_canonical_path_resolves(self, tmp_path):
         from land_flow import build_slot_batch
         slot_dir, proj_orig, ws_orig = self._make_slot_with_workspace(tmp_path)
         batch = build_slot_batch(slot_dir)
         proj_desc = [d for d in batch if not d.is_workspace][0]
-        assert proj_desc.original_path.resolve() == proj_orig.resolve()
+        assert proj_desc.canonical_path.resolve() == proj_orig.resolve()
 
 
 class TestBuildBranchBatch:
@@ -725,13 +725,13 @@ class TestBuildBranchBatch:
         batch = build_branch_batch(proj, ws, branch)
         assert len(batch) == 1
 
-    def test_repo_and_original_same_for_direct(self, tmp_path):
+    def test_repo_and_canonical_same_for_direct(self, tmp_path):
         from land_flow import build_branch_batch
         proj = _init_repo(tmp_path / "project")
         branch = "issue-42-test"
         _add_feature(proj, branch)
         batch = build_branch_batch(proj, None, branch)
-        assert batch[0].repo_path == batch[0].original_path
+        assert batch[0].repo_path == batch[0].canonical_path
 
 
 class TestLandBatchErrors:
@@ -750,7 +750,7 @@ class TestLandBatchErrors:
         _add_feature(repo, branch)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         result = land_batch([desc], branch, tmp_path / ".progress")
@@ -775,7 +775,7 @@ class TestLandBatchErrors:
         subprocess.run(["git", "-C", str(conflict_repo), "push", "origin", "main"], capture_output=True)
 
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         result = land_batch([desc], branch, tmp_path / ".progress")
@@ -849,9 +849,9 @@ class TestDirectWorkspaceMergeAndCleanup:
         branch = "issue-326-test"
 
         descs = [
-            RepoDescriptor(repo_path=proj, original_path=proj, base_branch="main",
+            RepoDescriptor(repo_path=proj, canonical_path=proj, base_branch="main",
                            push_target="origin", is_workspace=False, transport=Transport.DIRECT),
-            RepoDescriptor(repo_path=ws, original_path=ws, base_branch="main",
+            RepoDescriptor(repo_path=ws, canonical_path=ws, base_branch="main",
                            push_target="origin", is_workspace=True, transport=Transport.DIRECT),
         ]
         result = land_batch(descs, branch, tmp_path / ".progress")
@@ -867,9 +867,9 @@ class TestDirectWorkspaceMergeAndCleanup:
         branch = "issue-326-test"
 
         descs = [
-            RepoDescriptor(repo_path=proj, original_path=proj, base_branch="main",
+            RepoDescriptor(repo_path=proj, canonical_path=proj, base_branch="main",
                            push_target="origin", is_workspace=False, transport=Transport.DIRECT),
-            RepoDescriptor(repo_path=ws, original_path=ws, base_branch="main",
+            RepoDescriptor(repo_path=ws, canonical_path=ws, base_branch="main",
                            push_target="origin", is_workspace=True, transport=Transport.DIRECT),
         ]
         result = land_batch(descs, branch, tmp_path / ".progress")
@@ -887,9 +887,9 @@ class TestDirectWorkspaceMergeAndCleanup:
         branch = "issue-326-test"
 
         descs = [
-            RepoDescriptor(repo_path=proj, original_path=proj, base_branch="main",
+            RepoDescriptor(repo_path=proj, canonical_path=proj, base_branch="main",
                            push_target="origin", is_workspace=False, transport=Transport.DIRECT),
-            RepoDescriptor(repo_path=ws, original_path=ws, base_branch="main",
+            RepoDescriptor(repo_path=ws, canonical_path=ws, base_branch="main",
                            push_target="origin", is_workspace=True, transport=Transport.DIRECT),
         ]
         result = land_batch(descs, branch, tmp_path / ".progress")
@@ -906,9 +906,9 @@ class TestDirectWorkspaceMergeAndCleanup:
         branch = "issue-326-test"
 
         descs = [
-            RepoDescriptor(repo_path=proj, original_path=proj, base_branch="main",
+            RepoDescriptor(repo_path=proj, canonical_path=proj, base_branch="main",
                            push_target="origin", is_workspace=False, transport=Transport.DIRECT),
-            RepoDescriptor(repo_path=ws, original_path=ws, base_branch="main",
+            RepoDescriptor(repo_path=ws, canonical_path=ws, base_branch="main",
                            push_target="origin", is_workspace=True, transport=Transport.DIRECT),
         ]
         result = land_batch(descs, branch, tmp_path / ".progress")
@@ -932,9 +932,9 @@ class TestTwoHopWorkspaceStampOnly:
         ws_clone = _make_slot_clone(ws_orig, tmp_path / "ws-clone", branch)
 
         descs = [
-            RepoDescriptor(repo_path=proj_clone, original_path=proj_orig, push_target="local",
+            RepoDescriptor(repo_path=proj_clone, canonical_path=proj_orig, push_target="local",
                            base_branch="main", is_workspace=False, transport=Transport.TWO_HOP),
-            RepoDescriptor(repo_path=ws_clone, original_path=ws_orig, push_target="local",
+            RepoDescriptor(repo_path=ws_clone, canonical_path=ws_orig, push_target="local",
                            base_branch="main", is_workspace=True, transport=Transport.TWO_HOP),
         ]
         result = land_batch(descs, branch, tmp_path / ".progress")
@@ -943,7 +943,7 @@ class TestTwoHopWorkspaceStampOnly:
 
         log = subprocess.run(["git", "-C", str(ws_orig), "log", "--oneline", "main"],
                              capture_output=True, text=True).stdout.strip()
-        assert "slot feature" not in log, "Slot workspace should NOT be merged to original"
+        assert "slot feature" not in log, "Slot workspace should NOT be merged to canonical"
 
 
 # ---------------------------------------------------------------------------
@@ -960,7 +960,7 @@ class TestVerifyContentLanded:
         subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
         subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", "feat-1"], capture_output=True)
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         result = _verify_content_landed(desc, "feat-1")
@@ -973,7 +973,7 @@ class TestVerifyContentLanded:
         _add_feature(repo, "feat-1", "feature.py")
         subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         result = _verify_content_landed(desc, "feat-1")
@@ -990,7 +990,7 @@ class TestVerifyContentLanded:
         subprocess.run(["git", "-C", str(repo), "commit", "-m", "docs"], capture_output=True)
         subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
         desc = RepoDescriptor(
-            repo_path=repo, original_path=repo, push_target="origin",
+            repo_path=repo, canonical_path=repo, push_target="origin",
             base_branch="main", is_workspace=False, transport=Transport.DIRECT,
         )
         result = _verify_content_landed(desc, "docs-only")
@@ -1042,13 +1042,13 @@ class TestRebaseFailureWorklog:
 class TestPreflightUntrackedFiles:
     def test_untracked_files_do_not_block_landing(self, tmp_path):
         """Untracked files (?? prefix) should not cause dirty_worktree error."""
-        original = _init_repo(tmp_path / "original")
-        (original / "untracked.png").write_text("screenshot")
+        canonical = _init_repo(tmp_path / "canonical")
+        (canonical / "untracked.png").write_text("screenshot")
 
         from land_flow import _preflight_two_hop, RepoDescriptor, Transport
         desc = RepoDescriptor(
             repo_path=tmp_path / "clone",
-            original_path=original,
+            canonical_path=canonical,
             push_target="origin",
             base_branch="main",
             is_workspace=False,
@@ -1061,15 +1061,15 @@ class TestPreflightUntrackedFiles:
 
     def test_staged_changes_still_block(self, tmp_path):
         """Staged but uncommitted changes should still block."""
-        original = _init_repo(tmp_path / "original")
-        (original / "dirty.txt").write_text("modified")
-        subprocess.run(["git", "-C", str(original), "add", "dirty.txt"],
+        canonical = _init_repo(tmp_path / "canonical")
+        (canonical / "dirty.txt").write_text("modified")
+        subprocess.run(["git", "-C", str(canonical), "add", "dirty.txt"],
                        capture_output=True)
 
         from land_flow import _preflight_two_hop, RepoDescriptor, Transport
         desc = RepoDescriptor(
             repo_path=tmp_path / "clone",
-            original_path=original,
+            canonical_path=canonical,
             push_target="origin",
             base_branch="main",
             is_workspace=False,
@@ -1094,7 +1094,7 @@ class TestAlreadyMergedDetection:
 
         desc = RepoDescriptor(
             repo_path=repo,
-            original_path=repo,
+            canonical_path=repo,
             base_branch="main",
             push_target="origin",
             is_workspace=False,
@@ -1116,7 +1116,7 @@ class TestAlreadyMergedDetection:
 
         desc = RepoDescriptor(
             repo_path=repo,
-            original_path=repo,
+            canonical_path=repo,
             base_branch="main",
             push_target="origin",
             is_workspace=False,
@@ -1142,11 +1142,11 @@ class TestLandBatchSkipStamp:
 
         descs = [
             RepoDescriptor(
-                repo_path=proj_clone, original_path=proj_orig, push_target="local",
+                repo_path=proj_clone, canonical_path=proj_orig, push_target="local",
                 base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
             ),
             RepoDescriptor(
-                repo_path=other_clone, original_path=other_orig, push_target="local",
+                repo_path=other_clone, canonical_path=other_orig, push_target="local",
                 base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
             ),
         ]
@@ -1165,7 +1165,7 @@ class TestLandBatchSkipStamp:
         clone = _make_slot_clone(orig, tmp_path / "clone", branch)
 
         desc = RepoDescriptor(
-            repo_path=clone, original_path=orig, push_target="local",
+            repo_path=clone, canonical_path=orig, push_target="local",
             base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
         )
         result = land_batch([desc], branch, tmp_path / ".progress",
@@ -1180,7 +1180,7 @@ class TestLandBatchSkipStamp:
         clone = _make_slot_clone(orig, tmp_path / "clone", branch)
 
         desc = RepoDescriptor(
-            repo_path=clone, original_path=orig, push_target="local",
+            repo_path=clone, canonical_path=orig, push_target="local",
             base_branch="main", is_workspace=False, transport=Transport.TWO_HOP,
         )
         result = land_batch([desc], branch, tmp_path / ".progress")

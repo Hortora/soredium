@@ -3,7 +3,7 @@
 Audit all archived slots for unmerged branches in non-primary repos.
 
 Scans .slot files to find multi-repo slots, then checks each repo's
-original clone to verify the slot branch was merged to main and stamped.
+canonical clone to verify the slot branch was merged to main and stamped.
 
 Accounts for stamp commits: a stamped branch with 1 unmerged commit where
 that commit IS the stamp is expected behaviour — the stamp never goes to

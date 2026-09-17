@@ -223,31 +223,31 @@ class TestCheckLandedShasPopulated:
         assert result["status"] == "pass"
 
 
-class TestCheckOriginalSync:
-    def test_original_in_sync(self, tmp_path: Path) -> None:
+class TestCheckCanonicalSync:
+    def test_canonical_in_sync(self, tmp_path: Path) -> None:
         slot_dir = tmp_path / "slot"
         slot_dir.mkdir()
-        original = _init_repo(tmp_path / "original")
+        canonical = _init_repo(tmp_path / "canonical")
         clone = _init_repo(slot_dir / "engine")
-        orig_sha = _git(original, "rev-parse", "HEAD")
+        orig_sha = _git(canonical, "rev-parse", "HEAD")
         (slot_dir / ".landed").write_text(f"landed_shas=engine:{orig_sha}\n")
-        result = verify_slot_close.check_original_sync(
-            str(slot_dir), "engine", str(original),
+        result = verify_slot_close.check_canonical_sync(
+            str(slot_dir), "engine", str(canonical),
         )
         assert result["status"] == "pass"
 
-    def test_original_behind(self, tmp_path: Path) -> None:
+    def test_canonical_behind(self, tmp_path: Path) -> None:
         slot_dir = tmp_path / "slot"
         slot_dir.mkdir()
-        original = _init_repo(tmp_path / "original")
+        canonical = _init_repo(tmp_path / "canonical")
         clone = _init_repo(slot_dir / "engine")
         (clone / "extra.txt").write_text("new\n")
         _git(clone, "add", "extra.txt")
         _git(clone, "commit", "-m", "extra")
         clone_sha = _git(clone, "rev-parse", "HEAD")
         (slot_dir / ".landed").write_text(f"landed_shas=engine:{clone_sha}\n")
-        result = verify_slot_close.check_original_sync(
-            str(slot_dir), "engine", str(original),
+        result = verify_slot_close.check_canonical_sync(
+            str(slot_dir), "engine", str(canonical),
         )
         assert result["status"] == "fail"
         assert "not reachable" in result["detail"]
@@ -255,8 +255,8 @@ class TestCheckOriginalSync:
     def test_no_landed_marker(self, tmp_path: Path) -> None:
         slot_dir = tmp_path / "slot"
         slot_dir.mkdir()
-        result = verify_slot_close.check_original_sync(
-            str(slot_dir), "engine", str(tmp_path / "original"),
+        result = verify_slot_close.check_canonical_sync(
+            str(slot_dir), "engine", str(tmp_path / "canonical"),
         )
         assert result["status"] == "fail"
         assert "no .landed" in result["detail"]
@@ -265,23 +265,23 @@ class TestCheckOriginalSync:
         """SHA changed by rebase — tree SHA comparison finds the content."""
         slot_dir = tmp_path / "slot"
         slot_dir.mkdir()
-        original = _init_repo(tmp_path / "original")
+        canonical = _init_repo(tmp_path / "canonical")
         clone = _init_repo(slot_dir / "engine")
         (clone / "feature.txt").write_text("feature content\n")
         _git(clone, "add", "feature.txt")
         _git(clone, "commit", "-m", "add feature")
         clone_sha = _git(clone, "rev-parse", "HEAD")
         clone_tree = _git(clone, "rev-parse", "HEAD^{tree}")
-        (original / "feature.txt").write_text("feature content\n")
-        _git(original, "add", "feature.txt")
-        _git(original, "commit", "-m", "add feature (rebased)")
-        orig_sha = _git(original, "rev-parse", "HEAD")
+        (canonical / "feature.txt").write_text("feature content\n")
+        _git(canonical, "add", "feature.txt")
+        _git(canonical, "commit", "-m", "add feature (rebased)")
+        orig_sha = _git(canonical, "rev-parse", "HEAD")
         assert clone_sha != orig_sha
-        orig_tree = _git(original, "rev-parse", "HEAD^{tree}")
+        orig_tree = _git(canonical, "rev-parse", "HEAD^{tree}")
         assert clone_tree == orig_tree
         (slot_dir / ".landed").write_text(f"landed_shas=engine:{clone_sha}\n")
-        result = verify_slot_close.check_original_sync(
-            str(slot_dir), "engine", str(original),
+        result = verify_slot_close.check_canonical_sync(
+            str(slot_dir), "engine", str(canonical),
         )
         assert result["status"] == "pass"
         assert "tree match" in result["detail"]
@@ -529,8 +529,8 @@ class TestParseCoverRepos:
         assert result == set()
 
 
-class TestResolveOriginalReposScoped:
-    """_resolve_original_repos filters by covers_repos when provided."""
+class TestResolveCanonicalReposScoped:
+    """_resolve_canonical_repos filters by covers_repos when provided."""
 
     def _make_slot_with_repos(self, tmp_path, repos):
         slot_dir = tmp_path / "slot"
@@ -547,7 +547,7 @@ class TestResolveOriginalReposScoped:
                 ["git", "-C", str(repo), "config", "user.name", "T"],
                 capture_output=True,
             )
-            orig = tmp_path / "original" / name
+            orig = tmp_path / "canonical" / name
             orig.mkdir(parents=True, exist_ok=True)
             subprocess.run(
                 ["git", "-C", str(repo), "remote", "add", "local", str(orig)],
@@ -557,18 +557,18 @@ class TestResolveOriginalReposScoped:
 
     def test_scoped_to_covers(self, tmp_path):
         sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-        from verify_slot_close import _resolve_original_repos
+        from verify_slot_close import _resolve_canonical_repos
         slot_dir = self._make_slot_with_repos(tmp_path, ["engine", "work", "aml"])
-        result = _resolve_original_repos(str(slot_dir), covers_repos={"engine", "work"})
+        result = _resolve_canonical_repos(str(slot_dir), covers_repos={"engine", "work"})
         assert "engine" in result
         assert "work" in result
         assert "aml" not in result
 
     def test_no_covers_returns_all(self, tmp_path):
         sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-        from verify_slot_close import _resolve_original_repos
+        from verify_slot_close import _resolve_canonical_repos
         slot_dir = self._make_slot_with_repos(tmp_path, ["engine", "work", "aml"])
-        result = _resolve_original_repos(str(slot_dir))
+        result = _resolve_canonical_repos(str(slot_dir))
         assert "engine" in result
         assert "work" in result
         assert "aml" in result

@@ -89,7 +89,7 @@ def is_worktree(repo_path: Path) -> bool:
     return git_path.is_file()
 
 
-def resolve_original_repo(repo_path: Path) -> Path:
+def resolve_canonical_repo(repo_path: Path) -> Path:
     if is_worktree(repo_path):
         rc, common_dir, _ = run_cmd(
             ["git", "-C", str(repo_path), "rev-parse", "--git-common-dir"]

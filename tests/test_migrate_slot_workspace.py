@@ -28,7 +28,7 @@ def _make_old_structure_slot(tmp_path, slot_num=1, repos=None, branch="issue-99-
     family = tmp_path / "casehub"
     family.mkdir(exist_ok=True)
 
-    # Create original project repos and workspace repos
+    # Create canonical project repos and workspace repos
     for repo_name in repos:
         init_repo(family / repo_name)
         ws_repo = init_repo(tmp_path / "public" / "casehub" / repo_name)

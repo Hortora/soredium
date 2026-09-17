@@ -42,7 +42,7 @@ Ask the user for:
 - **Repos:** which repos in the family to **write to** (e.g., "engine", "engine and iot").
   Only clone repos that will receive commits. Repos needed for reading
   (checking an API, referencing code) are already available at their
-  original local path — don't clone them into the slot.
+  canonical local path — don't clone them into the slot.
 - **`--isx`:** create with ISX container isolation. If specified, run
   `isx templates list`, present available templates for selection.
   Optional instance name override (defaults to branch name, truncated
@@ -332,7 +332,7 @@ nothing and enable branch hygiene scans, blog recovery, and stamp verification.
   workspace clone. Skills follow `wksp` and see the same structure as
   outside a slot.
 - **Isolated .m2.** Every slot gets its own Maven local repo via
-  `.mvn/maven.config`. No cross-contamination with the originals.
+  `.mvn/maven.config`. No cross-contamination with the canonical repos.
 - **Symlinks re-pointed.** `wksp`/`proj` symlinks point to sibling
   workspace clones. ctx.py follows them transparently.
 - **Scaffold pre-created.** `.plan` and `JOURNAL.md` exist in the slot.
@@ -360,7 +360,7 @@ should write to any cloned repo — that is the point of slots.
    surfaces all repos and workspace paths from `.slot`
 3. Does the work (implementation, tests, etc.) across any repo in the slot
 4. Runs work-end — detects slot mode, runs the full close sequence
-   (review, promote, squash, push, merge to original, stamp, archive)
+   (review, promote, squash, push, merge to canonical, stamp, archive)
 
 ### Known limitations
 
@@ -406,7 +406,7 @@ the rename also fails silently — always verify Maven is linked first.
   On resume for ISX slots, offers `isx shell` for container access
   (same offering as creation Step 8).
 - `work-end` — runs the full close sequence inside the slot (review,
-  promote, squash, push, merge to original, stamp, archive). One command,
+  promote, squash, push, merge to canonical, stamp, archive). One command,
   no separate merge step.
 - `handover` — HANDOFF.md for session handoffs. For slots with a `.plan`,
   handover auto-includes a Queue Progress section.

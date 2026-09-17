@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from slot_core import (
-    run_cmd, resolve_original_repo,
+    run_cmd, resolve_canonical_repo,
     _IDE_ARTIFACTS, get_all_slot_repos,
     _cleanup_remnant_dir, SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
 )
@@ -24,19 +24,19 @@ except ImportError:
     _detect_topology = None
 
 
-def configure_slot_remotes(clone_path: Path, original_path: Path) -> dict[str, str]:
+def configure_slot_remotes(clone_path: Path, canonical_path: Path) -> dict[str, str]:
     """Reconfigure clone remotes: local=clone-source, origin=fork, upstream=blessed."""
     if _detect_topology is None:
-        return {"origin": "", "upstream": "", "local": str(original_path)}
+        return {"origin": "", "upstream": "", "local": str(canonical_path)}
 
-    fork_remote, blessed_remote = _detect_topology(str(original_path))
+    fork_remote, blessed_remote = _detect_topology(str(canonical_path))
     if not fork_remote:
-        return {"origin": "", "upstream": "", "local": str(original_path)}
+        return {"origin": "", "upstream": "", "local": str(canonical_path)}
 
     rc, fork_url, _ = run_cmd(
-        ["git", "-C", str(original_path), "remote", "get-url", fork_remote])
+        ["git", "-C", str(canonical_path), "remote", "get-url", fork_remote])
     if rc != 0:
-        return {"origin": "", "upstream": "", "local": str(original_path)}
+        return {"origin": "", "upstream": "", "local": str(canonical_path)}
     fork_url = fork_url.strip()
 
     run_cmd(["git", "-C", str(clone_path), "remote", "rename", "origin", "local"])
@@ -48,18 +48,18 @@ def configure_slot_remotes(clone_path: Path, original_path: Path) -> dict[str, s
     upstream_url = ""
     if blessed_remote:
         rc, blessed_url, _ = run_cmd(
-            ["git", "-C", str(original_path), "remote", "get-url", blessed_remote])
+            ["git", "-C", str(canonical_path), "remote", "get-url", blessed_remote])
         if rc == 0:
             upstream_url = blessed_url.strip()
             run_cmd(["git", "-C", str(clone_path), "remote", "add",
                      "upstream", upstream_url])
 
-    return {"origin": fork_url, "upstream": upstream_url, "local": str(original_path)}
+    return {"origin": fork_url, "upstream": upstream_url, "local": str(canonical_path)}
 
 
-def configure_update_instead(original_path: Path) -> None:
-    """Set receive.denyCurrentBranch=updateInstead on original repo."""
-    run_cmd(["git", "-C", str(original_path), "config",
+def configure_update_instead(canonical_path: Path) -> None:
+    """Set receive.denyCurrentBranch=updateInstead on canonical repo."""
+    run_cmd(["git", "-C", str(canonical_path), "config",
              "receive.denyCurrentBranch", "updateInstead"])
 
 

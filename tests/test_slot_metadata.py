@@ -22,10 +22,10 @@ def _create_merge_test_repos(tmp_path, repo_names):
     slots_dir = family / "slots"
     slots_dir.mkdir()
 
-    originals = {}
+    canonicals = {}
     for name in repo_names:
-        originals[name] = init_repo_with_remote(family / name)
-        slot_git.configure_update_instead(originals[name])
+        canonicals[name] = init_repo_with_remote(family / name)
+        slot_git.configure_update_instead(canonicals[name])
 
     slot = slots_dir / "1"
     slot.mkdir()
@@ -36,7 +36,7 @@ def _create_merge_test_repos(tmp_path, repo_names):
         bare_path = family / f".{name}-bare.git"
         subprocess.run([
             "git", "clone", "--shared", "--branch", "main",
-            str(originals[name]), str(clone_dest),
+            str(canonicals[name]), str(clone_dest),
         ], capture_output=True, check=True)
         subprocess.run(["git", "-C", str(clone_dest), "config", "user.name", "Test"], capture_output=True)
         subprocess.run(["git", "-C", str(clone_dest), "config", "user.email", "test@test.com"], capture_output=True)
@@ -56,7 +56,7 @@ def _create_merge_test_repos(tmp_path, repo_names):
         f"## What to do\nTest\n\n## Repos\n" +
         "\n".join(f"- {n}" for n in repo_names) + "\n"
     )
-    return family, originals, slot, branch
+    return family, canonicals, slot, branch
 
 
 class TestWriteSlotMd:

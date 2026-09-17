@@ -60,13 +60,13 @@ def _record_progress(slot_dir: Path, repo_name: str) -> None:
         f.write(f"{repo_name}=complete\n")
 
 
-def _resolve_original_workspace(repo_name: str, family_root: Path) -> tuple[Path, str] | None:
-    """Find the original workspace repo for a project by following the
-    original project's wksp symlink (not the slot clone's)."""
-    original_project = family_root / repo_name
-    if not original_project.is_dir():
+def _resolve_canonical_workspace(repo_name: str, family_root: Path) -> tuple[Path, str] | None:
+    """Find the canonical workspace repo for a project by following the
+    canonical project's wksp symlink (not the slot clone's)."""
+    canonical_project = family_root / repo_name
+    if not canonical_project.is_dir():
         return None
-    return resolve_workspace_source(original_project)
+    return resolve_workspace_source(canonical_project)
 
 
 def _replay_branch_commits(family_ws_clone: Path, subdir_name: str,
@@ -120,7 +120,7 @@ def migrate_slot(slot_dir: Path, family_root: Path,
         return result
 
     for repo_name in pending:
-        ws_info = _resolve_original_workspace(repo_name, family_root)
+        ws_info = _resolve_canonical_workspace(repo_name, family_root)
         if not ws_info:
             result["errors"].append(f"{repo_name}: no workspace found")
             continue

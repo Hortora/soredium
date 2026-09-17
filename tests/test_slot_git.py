@@ -25,16 +25,16 @@ def _create_worktree_test_repos(tmp_path, repo_names):
     family.mkdir()
     slots_dir = family / "slots"
     slots_dir.mkdir()
-    originals = {}
+    canonicals = {}
     for name in repo_names:
-        originals[name] = init_repo_with_remote(family / name)
-        slot_git.configure_update_instead(originals[name])
+        canonicals[name] = init_repo_with_remote(family / name)
+        slot_git.configure_update_instead(canonicals[name])
     slot = slots_dir / "1"
     slot.mkdir()
     branch = "issue-42-test"
     for name in repo_names:
         subprocess.run([
-            "git", "-C", str(originals[name]),
+            "git", "-C", str(canonicals[name]),
             "worktree", "add", str(slot / name), "-b", branch,
         ], capture_output=True, check=True)
         (slot / name / "feature.py").write_text(f"# {name} feature\n")
@@ -48,7 +48,7 @@ def _create_worktree_test_repos(tmp_path, repo_names):
         f"## What to do\nTest\n\n## Repos\n" +
         "\n".join(f"- {n}" for n in repo_names) + "\n"
     )
-    return family, originals, slot, branch
+    return family, canonicals, slot, branch
 
 
 def _create_clone_test_repos(tmp_path, repo_names):
@@ -57,10 +57,10 @@ def _create_clone_test_repos(tmp_path, repo_names):
     family.mkdir()
     slots_dir = family / "slots"
     slots_dir.mkdir()
-    originals = {}
+    canonicals = {}
     for name in repo_names:
-        originals[name] = init_repo_with_remote(family / name)
-        slot_git.configure_update_instead(originals[name])
+        canonicals[name] = init_repo_with_remote(family / name)
+        slot_git.configure_update_instead(canonicals[name])
     slot = slots_dir / "1"
     slot.mkdir()
     branch = "issue-42-test"
@@ -68,7 +68,7 @@ def _create_clone_test_repos(tmp_path, repo_names):
         clone_dest = slot / name
         subprocess.run([
             "git", "clone", "--shared", "--branch", "main",
-            str(originals[name]), str(clone_dest),
+            str(canonicals[name]), str(clone_dest),
         ], capture_output=True, check=True)
         subprocess.run(["git", "-C", str(clone_dest), "config", "user.name", "Test"], capture_output=True)
         subprocess.run(["git", "-C", str(clone_dest), "config", "user.email", "test@test.com"], capture_output=True)
@@ -88,7 +88,7 @@ def _create_clone_test_repos(tmp_path, repo_names):
         f"## What to do\nTest\n\n## Repos\n" +
         "\n".join(f"- {n}" for n in repo_names) + "\n"
     )
-    return family, originals, slot, branch
+    return family, canonicals, slot, branch
 
 
 class TestExcludeSymlinks:
@@ -112,18 +112,18 @@ class TestExcludeSymlinks:
 
 class TestConfigureSlotRemotes:
     def test_direct_model_renames_origin_adds_github(self, tmp_path):
-        original = init_repo(tmp_path / "original")
-        subprocess.run(["git", "-C", str(original), "remote", "add", "origin",
+        canonical = init_repo(tmp_path / "canonical")
+        subprocess.run(["git", "-C", str(canonical), "remote", "add", "origin",
                         "https://github.com/user/repo.git"], capture_output=True)
         clone = tmp_path / "clone"
-        subprocess.run(["git", "clone", str(original), str(clone)], capture_output=True)
+        subprocess.run(["git", "clone", str(canonical), str(clone)], capture_output=True)
 
-        result = slot_git.configure_slot_remotes(clone, original)
+        result = slot_git.configure_slot_remotes(clone, canonical)
 
         rc, local_url, _ = slot_core.run_cmd(
             ["git", "-C", str(clone), "remote", "get-url", "local"])
         assert rc == 0
-        assert str(original) in local_url.strip()
+        assert str(canonical) in local_url.strip()
 
         rc, origin_url, _ = slot_core.run_cmd(
             ["git", "-C", str(clone), "remote", "get-url", "origin"])
@@ -133,15 +133,15 @@ class TestConfigureSlotRemotes:
         assert result["upstream"] == ""
 
     def test_fork_model_adds_upstream(self, tmp_path):
-        original = init_repo(tmp_path / "original")
-        subprocess.run(["git", "-C", str(original), "remote", "add", "origin",
+        canonical = init_repo(tmp_path / "canonical")
+        subprocess.run(["git", "-C", str(canonical), "remote", "add", "origin",
                         "https://github.com/mdproctor/repo.git"], capture_output=True)
-        subprocess.run(["git", "-C", str(original), "remote", "add", "upstream",
+        subprocess.run(["git", "-C", str(canonical), "remote", "add", "upstream",
                         "https://github.com/casehubio/repo.git"], capture_output=True)
         clone = tmp_path / "clone"
-        subprocess.run(["git", "clone", str(original), str(clone)], capture_output=True)
+        subprocess.run(["git", "clone", str(canonical), str(clone)], capture_output=True)
 
-        result = slot_git.configure_slot_remotes(clone, original)
+        result = slot_git.configure_slot_remotes(clone, canonical)
 
         rc, origin_url, _ = slot_core.run_cmd(
             ["git", "-C", str(clone), "remote", "get-url", "origin"])
@@ -154,31 +154,31 @@ class TestConfigureSlotRemotes:
 
         assert result["upstream"] == "https://github.com/casehubio/repo.git"
 
-    def test_no_remotes_on_original_skips(self, tmp_path):
-        original = init_repo(tmp_path / "original")
+    def test_no_remotes_on_canonical_skips(self, tmp_path):
+        canonical = init_repo(tmp_path / "canonical")
         clone = tmp_path / "clone"
-        subprocess.run(["git", "clone", str(original), str(clone)], capture_output=True)
+        subprocess.run(["git", "clone", str(canonical), str(clone)], capture_output=True)
 
-        result = slot_git.configure_slot_remotes(clone, original)
+        result = slot_git.configure_slot_remotes(clone, canonical)
         assert result["origin"] == ""
 
 
 
 class TestConfigureUpdateInstead:
-    def test_sets_config_on_original(self, tmp_path):
-        original = init_repo(tmp_path / "original")
-        slot_git.configure_update_instead(original)
+    def test_sets_config_on_canonical(self, tmp_path):
+        canonical = init_repo(tmp_path / "canonical")
+        slot_git.configure_update_instead(canonical)
         rc, value, _ = slot_core.run_cmd(
-            ["git", "-C", str(original), "config", "receive.denyCurrentBranch"])
+            ["git", "-C", str(canonical), "config", "receive.denyCurrentBranch"])
         assert rc == 0
         assert value.strip() == "updateInstead"
 
     def test_idempotent(self, tmp_path):
-        original = init_repo(tmp_path / "original")
-        slot_git.configure_update_instead(original)
-        slot_git.configure_update_instead(original)
+        canonical = init_repo(tmp_path / "canonical")
+        slot_git.configure_update_instead(canonical)
+        slot_git.configure_update_instead(canonical)
         rc, value, _ = slot_core.run_cmd(
-            ["git", "-C", str(original), "config", "receive.denyCurrentBranch"])
+            ["git", "-C", str(canonical), "config", "receive.denyCurrentBranch"])
         assert value.strip() == "updateInstead"
 
 

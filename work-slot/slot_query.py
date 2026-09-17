@@ -10,7 +10,7 @@ from pathlib import Path
 from slot_core import (
     run_cmd, _resolve_slots_dir, _resolve_slot_dir_for_number,
     get_slot_repos, get_all_slot_repos, is_project_repo,
-    resolve_original_repo,
+    resolve_canonical_repo,
     SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
 )
 from slot_metadata import parse_slot_md
@@ -307,14 +307,14 @@ def check_cross_deps(family_root: Path, slot_num: int) -> int:
     issues = []
     for consumer, providers in dep_graph.items():
         for provider in providers:
-            original = resolve_original_repo(slot_dir / provider)
-            rc, branch_out, _ = run_cmd(["git", "-C", str(original), "branch", "--show-current"])
+            canonical = resolve_canonical_repo(slot_dir / provider)
+            rc, branch_out, _ = run_cmd(["git", "-C", str(canonical), "branch", "--show-current"])
             current = branch_out.strip() if rc == 0 else "unknown"
             slot_repo = slot_dir / provider
             rc, slot_branch, _ = run_cmd(["git", "-C", str(slot_repo), "branch", "--show-current"])
             slot_br = slot_branch.strip() if rc == 0 else "unknown"
             if current == "main":
-                rc, _, _ = run_cmd(["git", "-C", str(original), "log", f"--grep={slot_br}", "--oneline", "-1"])
+                rc, _, _ = run_cmd(["git", "-C", str(canonical), "log", f"--grep={slot_br}", "--oneline", "-1"])
                 print(f"DEP={consumer} → {provider} STATUS=on-main")
             else:
                 issues.append((consumer, provider, slot_br))

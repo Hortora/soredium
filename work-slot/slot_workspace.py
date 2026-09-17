@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from slot_core import (
-    run_cmd, is_workspace_clone, get_slot_repos, resolve_original_repo,
+    run_cmd, is_workspace_clone, get_slot_repos, resolve_canonical_repo,
     SlotCreationError,
 )
 
@@ -19,9 +19,9 @@ def validate_slot_wksp(slot_dir: Path, repo_names: list[str] | None = None) -> l
         clone = slot_dir / repo_name
         if not clone.is_dir() or not (clone / ".git").exists():
             continue
-        original = resolve_original_repo(clone)
-        original_wksp = original / "wksp"
-        if not original_wksp.is_symlink():
+        canonical = resolve_canonical_repo(clone)
+        canonical_wksp = canonical / "wksp"
+        if not canonical_wksp.is_symlink():
             continue
         clone_wksp = clone / "wksp"
         if not clone_wksp.is_symlink():
@@ -109,9 +109,9 @@ def repoint_wksp(repo_worktree: Path, ws_subdir: Path) -> None:
     repo_str = str(repo_worktree)
     if "/slots/" not in repo_str and "/worktrees/" not in repo_str:
         raise SlotCreationError(
-            f"repoint_wksp_on_original repo={repo_worktree}: "
+            f"repoint_wksp_on_canonical repo={repo_worktree}: "
             f"Refusing to modify wksp symlink in a non-slot directory. "
-            f"This would corrupt the original repo's workspace link.")
+            f"This would corrupt the canonical repo's workspace link.")
     wksp = repo_worktree / "wksp"
     if wksp.is_symlink() or wksp.exists():
         wksp.unlink()
@@ -147,7 +147,7 @@ def validate_claude_md_paths(claude_path: Path, slot_dir: Path) -> list[str]:
 def sanitize_slot_claude_md(slot_dir: Path, path_map: dict[str, str]) -> list[str]:
     """Rewrite absolute paths in all CLAUDE.md files within a slot.
 
-    path_map: {original_absolute_path: slot_absolute_path}
+    path_map: {canonical_absolute_path: slot_absolute_path}
     Replaces longest matches first to avoid partial substitution.
     Returns list of files that were modified.
     """

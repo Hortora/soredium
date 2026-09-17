@@ -3,7 +3,7 @@
 Recover unpromoted artifacts from attic slot branches to workspace main.
 
 For each attic slot, reads the branch name from .slot, then checks the
-original workspace repo for artifacts on that branch that aren't on main.
+canonical workspace repo for artifacts on that branch that aren't on main.
 
 Usage:
     python3 recover_attic_artifacts.py <family-root> <workspace-repo> [--apply]

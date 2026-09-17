@@ -29,7 +29,7 @@ from slot_core import (
     SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
     SlotCreationError, run_cmd,
     _resolve_slot_dir_for_number, _get_family_repo_names,
-    resolve_original_repo, _get_clone_origin,
+    resolve_canonical_repo, _get_clone_origin,
     get_slot_repos, get_all_slot_repos,
     _cleanup_remnant_dir, _escape_slot_cwd, _has_unmerged_content,
 )
@@ -1000,11 +1000,11 @@ def migrate_remotes(family_root: Path) -> int:
                     ["git", "-C", str(clone), "remote", "get-url", "local"])
                 if rc == 0:
                     continue
-                original = resolve_original_repo(clone)
-                result = configure_slot_remotes(clone, original)
+                canonical = resolve_canonical_repo(clone)
+                result = configure_slot_remotes(clone, canonical)
                 if result["origin"]:
                     migrated += 1
-                configure_update_instead(original)
+                configure_update_instead(canonical)
     print(f"MIGRATED={migrated}")
     return migrated
 

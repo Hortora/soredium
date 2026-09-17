@@ -55,27 +55,27 @@ def parse_slot(slot_dir):
     return info
 
 def check_branch_exists(repo_name, branch, family_root):
-    original = family_root / repo_name
-    if not original.exists():
+    canonical = family_root / repo_name
+    if not canonical.exists():
         for candidate in [family_root.parent / repo_name, family_root / repo_name]:
             if candidate.exists():
-                original = candidate
+                canonical = candidate
                 break
 
     results = {"repo": repo_name}
 
-    if not original.exists():
+    if not canonical.exists():
         results["local"] = "repo_not_found"
         results["remote"] = "repo_not_found"
         return results
 
-    rc, out, _ = run("git", "-C", str(original), "ls-remote", "--heads", "origin", branch)
+    rc, out, _ = run("git", "-C", str(canonical), "ls-remote", "--heads", "origin", branch)
     results["remote"] = "exists" if out.strip() else "not_found"
 
-    rc, out, _ = run("git", "-C", str(original), "rev-parse", "--verify", f"refs/heads/{branch}")
+    rc, out, _ = run("git", "-C", str(canonical), "rev-parse", "--verify", f"refs/heads/{branch}")
     results["local"] = "exists" if rc == 0 else "not_found"
 
-    rc, out, _ = run("git", "-C", str(original), "log", "--oneline", "-1", branch)
+    rc, out, _ = run("git", "-C", str(canonical), "log", "--oneline", "-1", branch)
     if rc == 0:
         results["branch_tip"] = out.strip()
 

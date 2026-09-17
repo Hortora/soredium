@@ -331,7 +331,7 @@ def check_landed_completeness(
     return {"status": "pass", "detail": f"{len(landed_repos)}/{len(slot_repos)} repos landed"}
 
 
-def check_original_sync(slot_dir: str, repo_name: str, original_path: str) -> dict:
+def check_canonical_sync(slot_dir: str, repo_name: str, canonical_path: str) -> dict:
     landed = Path(slot_dir) / ".landed"
     if not landed.exists():
         return {"status": "fail", "detail": "no .landed marker"}
@@ -351,20 +351,20 @@ def check_original_sync(slot_dir: str, repo_name: str, original_path: str) -> di
         return {"status": "fail", "detail": f"no landed SHA for {repo_name}"}
 
     clone_path = str(Path(slot_dir) / repo_name)
-    direct = git(original_path, "merge-base", "--is-ancestor", landed_sha, "main")
+    direct = git(canonical_path, "merge-base", "--is-ancestor", landed_sha, "main")
     if direct.returncode == 0:
         return {"status": "pass", "detail": f"{repo_name} SHA {landed_sha[:8]} on main"}
     tree_result = git(clone_path, "rev-parse", f"{landed_sha}^{{tree}}")
     if tree_result.returncode != 0:
-        tree_result = git(original_path, "rev-parse", f"{landed_sha}^{{tree}}")
+        tree_result = git(canonical_path, "rev-parse", f"{landed_sha}^{{tree}}")
     if tree_result.returncode != 0:
-        return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not resolvable in clone or original"}
+        return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not resolvable in clone or canonical"}
     tree_sha = tree_result.stdout.strip()
-    match = _find_tree_on_ref(original_path, tree_sha, "main")
+    match = _find_tree_on_ref(canonical_path, tree_sha, "main")
     if match:
         return {"status": "pass", "detail": f"{repo_name} content on main (tree match via {match[:8]}, SHA {landed_sha[:8]} was rebased)"}
-    if git(original_path, "rev-parse", landed_sha).returncode == 0:
-        diff_result = git(original_path, "diff", "--stat", landed_sha, "main")
+    if git(canonical_path, "rev-parse", landed_sha).returncode == 0:
+        diff_result = git(canonical_path, "diff", "--stat", landed_sha, "main")
         if diff_result.returncode == 0 and not diff_result.stdout.strip():
             return {"status": "pass", "detail": f"{repo_name} content on main (diff match, SHA {landed_sha[:8]} was squash-rebased)"}
     return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not reachable from main (tree {tree_sha[:8]} not found)"}
@@ -411,7 +411,7 @@ def check_slot_marker(slot_dir: str, marker: str) -> dict:
     return {"status": "fail", "detail": f"{marker} missing"}
 
 
-def _resolve_original_repos(
+def _resolve_canonical_repos(
     slot_dir: str,
     covers_repos: set[str] | None = None,
 ) -> dict[str, str]:
@@ -436,7 +436,7 @@ def verify(
     project: str, branch: str, workspace: str,
     base: str = "main", covers: list[int] | None = None,
     issue_repo: str = "",
-    slot_dir: str = "", original_repos: dict[str, str] | None = None,
+    slot_dir: str = "", canonical_repos: dict[str, str] | None = None,
     on_main: bool = False,
     covers_repos: set[str] | None = None,
 ) -> bool:
@@ -470,14 +470,14 @@ def verify(
         checks.append(("landed_completeness",
                         check_landed_completeness(slot_dir, covers_repos=covers_repos)))
         checks.append(("phase_a_marker", check_slot_marker(slot_dir, ".phase-a-complete")))
-        if original_repos:
-            for repo_name, orig_path in original_repos.items():
+        if canonical_repos:
+            for repo_name, orig_path in canonical_repos.items():
                 checks.append((
-                    f"original_sync_{repo_name}",
-                    check_original_sync(slot_dir, repo_name, orig_path),
+                    f"canonical_sync_{repo_name}",
+                    check_canonical_sync(slot_dir, repo_name, orig_path),
                 ))
                 checks.append((
-                    f"original_pushed_{repo_name}",
+                    f"canonical_pushed_{repo_name}",
                     check_main_pushed(str(orig_path), base),
                 ))
         slot_num = Path(slot_dir).name
@@ -539,15 +539,15 @@ def main() -> int:
     issue_repo = opts.get("issue_repo", "")
 
     slot_dir = opts.get("slot_dir", "")
-    original_repos = None
+    canonical_repos = None
     covers_repos = None
     if slot_dir:
         covers_repos = _parse_covers_repos(slot_dir)
-        original_repos = _resolve_original_repos(slot_dir, covers_repos=covers_repos)
+        canonical_repos = _resolve_canonical_repos(slot_dir, covers_repos=covers_repos)
 
     verify(project, branch, workspace, base, covers,
            issue_repo=issue_repo,
-           slot_dir=slot_dir, original_repos=original_repos,
+           slot_dir=slot_dir, canonical_repos=canonical_repos,
            on_main=on_main, covers_repos=covers_repos)
     return 0
 

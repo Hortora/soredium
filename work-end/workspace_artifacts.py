@@ -3,7 +3,7 @@
 Central artifact path resolver for soredium workspaces.
 
 Given a workspace root Path, returns all promotable artifacts grouped
-by category. Works identically for original workspaces, per-repo
+by category. Works identically for canonical workspaces, per-repo
 subdirectories of multi-repo workspaces, and worktree slots — the
 wksp symlink already resolves to the correct root before this module
 is called.

@@ -2,7 +2,7 @@
 """Shared land flow for work-end convergence.
 
 Provides a parameterized flow for landing branches in both slot mode
-(two-hop: clone -> original -> remote) and branch mode (direct push).
+(two-hop: clone -> canonical -> remote) and branch mode (direct push).
 The flow is topology-agnostic; adapters construct RepoDescriptor batches
 that the flow processes uniformly.
 """
@@ -62,7 +62,7 @@ class Transport(Enum):
 @dataclass
 class RepoDescriptor:
     repo_path: Path
-    original_path: Path
+    canonical_path: Path
     push_target: str
     base_branch: str
     is_workspace: bool
@@ -158,8 +158,8 @@ def _progress_key(desc: RepoDescriptor, branch: str) -> str:
 # Adapter helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_original(repo_path: Path) -> Path:
-    """Resolve the original repo for a slot clone via remotes."""
+def _resolve_canonical(repo_path: Path) -> Path:
+    """Resolve the canonical repo for a slot clone via remotes."""
     for remote in ("local", "origin"):
         result = _git(repo_path, "remote", "get-url", remote)
         if result.returncode == 0 and result.stdout.strip():
@@ -170,7 +170,7 @@ def _resolve_original(repo_path: Path) -> Path:
 
 
 def _resolve_local_push_remote(repo_path: Path) -> str:
-    """Determine which remote points at the original (local first)."""
+    """Determine which remote points at the canonical repo (local first)."""
     result = _git(repo_path, "remote", "get-url", "local")
     if result.returncode == 0:
         return "local"
@@ -227,12 +227,12 @@ def build_slot_batch(
                 continue
 
         is_ws = (entry / ".workspace").exists()
-        original = _resolve_original(entry)
+        canonical = _resolve_canonical(entry)
         push_target = _resolve_local_push_remote(entry)
 
         descriptors.append(RepoDescriptor(
             repo_path=entry,
-            original_path=original,
+            canonical_path=canonical,
             push_target=push_target,
             base_branch=base_branch,
             is_workspace=is_ws,
@@ -247,7 +247,7 @@ def _is_slot_clone(repo_path: Path) -> bool:
     return r.returncode == 0
 
 
-def _resolve_original_from_local(repo_path: Path) -> Path:
+def _resolve_canonical_from_local(repo_path: Path) -> Path:
     r = _git(repo_path, "remote", "get-url", "local")
     if r.returncode == 0:
         return Path(r.stdout.strip())
@@ -262,12 +262,12 @@ def build_branch_batch(
 ) -> list[RepoDescriptor]:
     """Build RepoDescriptor batch for branch mode. Auto-detects slot clones."""
     if _is_slot_clone(project_path):
-        original = _resolve_original_from_local(project_path)
+        canonical = _resolve_canonical_from_local(project_path)
         push_target = _resolve_local_push_remote(project_path)
         descs = [
             RepoDescriptor(
                 repo_path=project_path,
-                original_path=original,
+                canonical_path=canonical,
                 push_target=push_target,
                 base_branch=base_branch,
                 is_workspace=False,
@@ -280,7 +280,7 @@ def build_branch_batch(
         descs = [
             RepoDescriptor(
                 repo_path=project_path,
-                original_path=project_path,
+                canonical_path=project_path,
                 push_target=push_target,
                 base_branch=base_branch,
                 is_workspace=False,
@@ -295,7 +295,7 @@ def build_branch_batch(
         if result.returncode == 0 and result.stdout.strip():
             descs.append(RepoDescriptor(
                 repo_path=workspace_path,
-                original_path=workspace_path,
+                canonical_path=workspace_path,
                 push_target=ws_push_target,
                 base_branch=base_branch,
                 is_workspace=True,
@@ -310,50 +310,50 @@ def build_branch_batch(
 # ---------------------------------------------------------------------------
 
 def _preflight_two_hop(desc: RepoDescriptor) -> str | None:
-    """Sync original repo's main with remote. Returns error string or None."""
-    original = desc.original_path
-    if not original.is_dir():
-        return f"original_not_found path={original}"
+    """Sync canonical repo's main with remote. Returns error string or None."""
+    canonical = desc.canonical_path
+    if not canonical.is_dir():
+        return f"canonical_not_found path={canonical}"
 
-    status = _git(original, "status", "--porcelain")
+    status = _git(canonical, "status", "--porcelain")
     if status.returncode == 0 and status.stdout.strip():
         unmerged = {"UU", "AA", "DD", "AU", "UA", "DU", "UD"}
         lines = status.stdout.strip().splitlines()
         has_unmerged = any(line[:2] in unmerged for line in lines)
         if has_unmerged:
-            return f"unmerged_conflict path={original}"
+            return f"unmerged_conflict path={canonical}"
         has_tracked_changes = any(not line.startswith("??") for line in lines)
         if has_tracked_changes:
-            cur = _git(original, "branch", "--show-current")
+            cur = _git(canonical, "branch", "--show-current")
             if cur.returncode == 0 and cur.stdout.strip() == "main":
-                return f"dirty_worktree path={original}"
+                return f"dirty_worktree path={canonical}"
 
-    has_origin = _git(original, "remote", "get-url", "origin")
+    has_origin = _git(canonical, "remote", "get-url", "origin")
     if has_origin.returncode != 0:
         return None
 
-    _git(original, "fetch", "origin", "main")
-    behind_r = _git(original, "rev-list", "main..origin/main", "--count")
+    _git(canonical, "fetch", "origin", "main")
+    behind_r = _git(canonical, "rev-list", "main..origin/main", "--count")
     behind = int(behind_r.stdout.strip()) if behind_r.returncode == 0 and behind_r.stdout.strip() else 0
-    ahead_r = _git(original, "rev-list", "origin/main..main", "--count")
+    ahead_r = _git(canonical, "rev-list", "origin/main..main", "--count")
     ahead = int(ahead_r.stdout.strip()) if ahead_r.returncode == 0 and ahead_r.stdout.strip() else 0
 
     if behind > 0 and ahead > 0:
-        return f"diverged_main path={original} ahead={ahead} behind={behind}"
+        return f"diverged_main path={canonical} ahead={ahead} behind={behind}"
 
     if ahead > 0:
-        push = _git(original, "push", "origin", "main", "--no-verify")
+        push = _git(canonical, "push", "origin", "main", "--no-verify")
         if push.returncode != 0:
-            return f"cannot_push_original path={original}"
+            return f"cannot_push_canonical path={canonical}"
         print(f"SYNC=pushed repo={desc.repo_path.name} commits={ahead}")
 
     if behind > 0:
-        cur = _git(original, "branch", "--show-current")
+        cur = _git(canonical, "branch", "--show-current")
         cur_branch = cur.stdout.strip() if cur.returncode == 0 else ""
         if cur_branch == "main":
-            _git(original, "rebase", "origin/main")
+            _git(canonical, "rebase", "origin/main")
         else:
-            _git(original, "fetch", "origin", "main:main")
+            _git(canonical, "fetch", "origin", "main:main")
         print(f"SYNC=pulled repo={desc.repo_path.name} commits={behind}")
 
     return None
@@ -446,14 +446,14 @@ def _merge_and_push_two_hop(
         status.error = "local_push_failed"
         return status
 
-    orig_sha = _git(desc.original_path, "rev-parse", desc.base_branch)
+    orig_sha = _git(desc.canonical_path, "rev-parse", desc.base_branch)
     if orig_sha.returncode != 0 or orig_sha.stdout.strip() != landed_sha:
         status.error = "local_verify_failed"
         return status
 
-    has_origin = _git(desc.original_path, "remote", "get-url", "origin")
+    has_origin = _git(desc.canonical_path, "remote", "get-url", "origin")
     if has_origin.returncode == 0:
-        remote_push = _git(desc.original_path, "push", "origin", desc.base_branch, "--no-verify")
+        remote_push = _git(desc.canonical_path, "push", "origin", desc.base_branch, "--no-verify")
         if remote_push.returncode != 0:
             # Local push succeeded — work is landed.  GitHub push failed
             # (network, permissions, etc.) — treat as warning, not blocker.
@@ -461,7 +461,7 @@ def _merge_and_push_two_hop(
             status.pushed = True
             _write_progress(progress_file, key, "pushed")
             return status
-        ls = _git(desc.original_path, "ls-remote", "origin", desc.base_branch)
+        ls = _git(desc.canonical_path, "ls-remote", "origin", desc.base_branch)
         if ls.returncode == 0 and ls.stdout.strip():
             remote_sha = ls.stdout.split()[0]
             if remote_sha != landed_sha:

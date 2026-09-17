@@ -211,12 +211,12 @@ def verify_landed_shas(slot_dir: Path, family_root: Path) -> tuple[bool, list[st
         if sha == "unknown":
             failures.append(f"{repo_name}: SHA is 'unknown'")
             continue
-        original = family_root / repo_name
-        if not original.is_dir():
-            failures.append(f"{repo_name}: original repo not found at {original}")
+        canonical = family_root / repo_name
+        if not canonical.is_dir():
+            failures.append(f"{repo_name}: canonical repo not found at {canonical}")
             continue
         rc, _, _ = run_cmd([
-            "git", "-C", str(original), "merge-base", "--is-ancestor", sha, "main",
+            "git", "-C", str(canonical), "merge-base", "--is-ancestor", sha, "main",
         ])
         if rc != 0:
             failures.append(f"{repo_name}: SHA {sha[:12]} not reachable from main")

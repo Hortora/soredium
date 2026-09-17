@@ -99,11 +99,11 @@ def verify_stamp_sha(repo_path: Path, branch: str) -> list[Finding]:
 
 
 def verify_landed_content(
-    clone_path: Path, original_path: Path, branch: str,
+    clone_path: Path, canonical_path: Path, branch: str,
 ) -> list[Finding]:
-    """Verify branch content actually landed on the original repo's main."""
+    """Verify branch content actually landed on the canonical repo's main."""
     findings: list[Finding] = []
-    if not original_path.exists() or not is_git_repo(original_path):
+    if not canonical_path.exists() or not is_git_repo(canonical_path):
         return findings
 
     r_sha = git(clone_path, "rev-parse", branch)
@@ -111,16 +111,16 @@ def verify_landed_content(
         return findings
     branch_sha = r_sha.stdout.strip()
 
-    git(original_path, "fetch", str(clone_path), branch_sha, "--quiet")
+    git(canonical_path, "fetch", str(clone_path), branch_sha, "--quiet")
     r_diff = git(
-        original_path, "diff", f"main..{branch_sha}",
+        canonical_path, "diff", f"main..{branch_sha}",
         "--", "*.java", "*.ts", "*.py",
     )
     if r_diff.returncode == 0 and r_diff.stdout.strip():
         diff_lines = len(r_diff.stdout.strip().splitlines())
         findings.append(Finding(
             "ERROR", "landed-content-not-merged",
-            f"branch has {diff_lines} lines of unmerged source vs original main",
+            f"branch has {diff_lines} lines of unmerged source vs canonical main",
         ))
     return findings
 

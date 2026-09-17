@@ -362,11 +362,11 @@ class TestValidateSlotWksp:
         """All repo clones have working wksp/ symlinks."""
         family = tmp_path / "casehub"
         family.mkdir()
-        original = init_repo(family / "engine")
+        canonical = init_repo(family / "engine")
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
         (ws_dir / "engine").mkdir()
-        (original / "wksp").symlink_to(ws_dir / "engine")
+        (canonical / "wksp").symlink_to(ws_dir / "engine")
 
         slot_dir = tmp_path / "slots" / "1"
         slot_dir.mkdir(parents=True)
@@ -382,8 +382,8 @@ class TestValidateSlotWksp:
         """wksp/ points to a non-existent directory."""
         family = tmp_path / "casehub"
         family.mkdir()
-        original = init_repo(family / "engine")
-        (original / "wksp").symlink_to("/nonexistent/path")
+        canonical = init_repo(family / "engine")
+        (canonical / "wksp").symlink_to("/nonexistent/path")
 
         slot_dir = tmp_path / "slots" / "1"
         slot_dir.mkdir(parents=True)
@@ -395,26 +395,26 @@ class TestValidateSlotWksp:
         assert "engine" in failures[0]
 
     def test_fails_when_symlink_missing(self, tmp_path):
-        """Original has wksp/ but clone doesn't."""
+        """Canonical has wksp/ but clone doesn't."""
         family = tmp_path / "casehub"
         family.mkdir()
-        original = init_repo(family / "engine")
+        canonical = init_repo(family / "engine")
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
-        (original / "wksp").symlink_to(ws_dir)
+        (canonical / "wksp").symlink_to(ws_dir)
 
         slot_dir = tmp_path / "slots" / "1"
         slot_dir.mkdir(parents=True)
         clone = init_repo(slot_dir / "engine")
 
-        subprocess.run(["git", "-C", str(clone), "remote", "add", "local", str(original)], capture_output=True)
+        subprocess.run(["git", "-C", str(clone), "remote", "add", "local", str(canonical)], capture_output=True)
 
         failures = slot_workspace.validate_slot_wksp(slot_dir)
         assert len(failures) == 1
         assert "missing" in failures[0].lower()
 
-    def test_passes_when_original_has_no_wksp(self, tmp_path):
-        """Original repo has no wksp/ — nothing to validate."""
+    def test_passes_when_canonical_has_no_wksp(self, tmp_path):
+        """Canonical repo has no wksp/ — nothing to validate."""
         slot_dir = tmp_path / "slots" / "1"
         slot_dir.mkdir(parents=True)
         init_repo(slot_dir / "engine")
