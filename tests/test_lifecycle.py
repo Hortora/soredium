@@ -1375,3 +1375,21 @@ class TestEvidenceGating:
                        if ev.endswith("_pass") or ev == "cleanup_main"}
         for event in pass_events:
             assert event in EVIDENCE_GATES, f"{event} should be gated"
+
+
+class TestIssueCycleTransition:
+    """Tests for the issue_cycle lifecycle event."""
+
+    def test_issue_cycle_from_closing_merged(self, tmp_path):
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:merged", branch="issue-1-test")
+        result = transition(meta, "issue_cycle")
+        assert result.new_state == "active"
+        assert "advance_issue" in result.effects
+        assert "clear_closing_markers" in result.effects
+
+    def test_issue_cycle_from_wrong_state_fails(self, tmp_path):
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-1-test")
+        with pytest.raises(InvalidTransition):
+            transition(meta, "issue_cycle")

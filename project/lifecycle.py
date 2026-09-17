@@ -123,6 +123,7 @@ TRANSITION_TABLE: dict[tuple[str, str], tuple[str, list[str], list[str]]] = {
     ('closing:promoted', 'push_pass'):       ('closing:pushed',    [],                                                                 []),
     ('closing:pushed', 'merge_pass'):        ('closing:merged',    ['verify_content_landed'],                                          []),
     ('closing:merged', 'stamp_pass'):        ('closing:stamped',   ['write_stamp'],                                                    []),
+    ('closing:merged', 'issue_cycle'):       ('active',            ['advance_issue', 'clear_closing_markers'],                          []),
     ('closing:stamped', 'cleanup_pass'):     ('idle',              ['write_plan_closed'],                                               ['return_to_main', 'write_handoff']),
     ('closing:stamped', 'cleanup_main'):    ('drained',           ['write_plan_drained'],                                              ['write_handoff']),
     ('drained', 'work_find'):               ('transitioning',     ['queue_populated'],                                                  []),
