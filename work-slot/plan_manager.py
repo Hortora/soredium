@@ -830,7 +830,17 @@ def _check_issue_state(repo: str, number: int) -> str | None:
 
 def append_to_queue(plan_path: Path, new_items: list[QueueItem],
                     position: int | None = None,
-                    skip_state_check: bool = False) -> list[QueueItem]:
+                    skip_state_check: bool = False,
+                    slot_path: Path | None = None) -> list[QueueItem]:
+    if slot_path is not None:
+        landed = slot_path / ".landed"
+        if landed.exists():
+            landed.unlink()
+            slot_file = slot_path / ".slot"
+            if slot_file.exists():
+                content = slot_file.read_text()
+                if "state: landed" in content:
+                    slot_file.write_text(content.replace("state: landed", "state: active"))
     tree = parse_plan(plan_path)
     existing_refs = _collect_refs(tree.queue)
     for item in new_items:

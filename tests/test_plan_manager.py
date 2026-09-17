@@ -1879,3 +1879,58 @@ class TestUncheckCommand:
         assert "UNCHECKED=test/repo#42" in result.stdout
         content = plan.read_text()
         assert "- [ ] test/repo#42" in content
+
+
+class TestAppendClearsLanded:
+    """Tests for retroactive .landed cleanup in append_to_queue."""
+
+    def test_append_clears_landed_file(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(SINGLE_ISSUE_PLAN)
+        slot_dir = tmp_path / "slot-1"
+        slot_dir.mkdir()
+        (slot_dir / ".landed").write_text("landed_shas=abc\n")
+        (slot_dir / ".slot").write_text("state: landed\n")
+        plan_manager.append_to_queue(
+            plan_file,
+            [plan_manager.QueueItem(ref=IssueRef("test/repo", 99), title="New")],
+            slot_path=slot_dir,
+        )
+        assert not (slot_dir / ".landed").exists()
+
+    def test_append_transitions_slot_state(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(SINGLE_ISSUE_PLAN)
+        slot_dir = tmp_path / "slot-1"
+        slot_dir.mkdir()
+        (slot_dir / ".landed").write_text("landed_shas=abc\n")
+        (slot_dir / ".slot").write_text("state: landed\n")
+        plan_manager.append_to_queue(
+            plan_file,
+            [plan_manager.QueueItem(ref=IssueRef("test/repo", 99), title="New")],
+            slot_path=slot_dir,
+        )
+        content = (slot_dir / ".slot").read_text()
+        assert "state: active" in content
+
+    def test_append_no_slot_path_no_crash(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(SINGLE_ISSUE_PLAN)
+        result = plan_manager.append_to_queue(
+            plan_file,
+            [plan_manager.QueueItem(ref=IssueRef("test/repo", 99), title="New")],
+        )
+        assert len(result) == 1
+
+    def test_append_slot_path_no_landed_no_crash(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(SINGLE_ISSUE_PLAN)
+        slot_dir = tmp_path / "slot-1"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("state: active\n")
+        result = plan_manager.append_to_queue(
+            plan_file,
+            [plan_manager.QueueItem(ref=IssueRef("test/repo", 99), title="New")],
+            slot_path=slot_dir,
+        )
+        assert len(result) == 1
