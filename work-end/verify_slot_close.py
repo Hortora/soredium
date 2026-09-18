@@ -179,7 +179,7 @@ def check_no_open_findings(workspace: str) -> dict:
 
 
 def check_artifacts_promoted(workspace: str, on_main: bool = False) -> dict:
-    """Verify artifact promotion happened (stamp exists)."""
+    """Verify artifact promotion happened (stamp exists or was cleaned up after close)."""
     if on_main:
         return {"status": "pass", "detail": "on-main mode — no branch promotion"}
     ws = Path(workspace)
@@ -189,6 +189,13 @@ def check_artifacts_promoted(workspace: str, on_main: bool = False) -> dict:
     ]:
         if candidate.exists():
             return {"status": "pass", "detail": str(candidate.relative_to(ws))}
+    result = subprocess.run(
+        ["git", "-C", str(ws), "log", "--oneline", "--all", "-1",
+         "--grep=workspace and project promotion stamp"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return {"status": "pass", "detail": "stamp committed then cleaned up by scaffold cleanup"}
     return {"status": "warn", "detail": "no .artifacts-promoted stamp found"}
 
 
