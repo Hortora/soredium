@@ -1396,7 +1396,7 @@ def _parse_landed_shas(result: dict[str, str], ctx: OrchestratorContext) -> dict
 
 CLOSE_USER_INPUT_STEPS = {"arc42_scan", "session_rename", "garden_feedback", "notes"}
 
-NON_RETRYABLE_ERRORS = {"REBASE_CONFLICT"}
+NON_RETRYABLE_ERRORS = {"REBASE_CONFLICT", "DIRTY_WORKTREE"}
 
 
 def _close_mechanical_error(step: StepDef, ctx: OrchestratorContext,
