@@ -62,6 +62,12 @@ def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
     ]
     if unmerged:
         return {"status": "fail", "detail": f"UNMERGED: {len(unmerged)} commits not on {base}"}
+    branch_tree = git(project, "rev-parse", f"{branch}~1^{{tree}}")
+    main_tree = git(project, "rev-parse", f"{base}^{{tree}}")
+    if branch_tree.returncode != 0 or main_tree.returncode != 0:
+        return {"status": "fail", "detail": "cannot resolve tree SHAs for content verification"}
+    if branch_tree.stdout.strip() != main_tree.stdout.strip():
+        return {"status": "fail", "detail": f"branch content not on {base} (tree mismatch)"}
     return {"status": "pass"}
 
 
