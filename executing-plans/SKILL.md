@@ -93,9 +93,12 @@ Read the output — it reports `BATCH_DONE`, `ALL_DONE`, and
 **At the end of each batch** (`BATCH_DONE=True`):
 - Commit all batch work if not already committed
 - Report: "Batch complete ({batch name}). {REMAINING_BATCHES} batches remaining."
-- If more batches remain, offer:
+- If more batches remain, **recommend** one of continue or wrap with
+  reasoning (never present bare options). Consider: session length, whether
+  the next batch is related to what was just completed, batch scale, and
+  whether enough context remains for productive work.
   ```
-  Batch complete. Options:
+  Batch complete. [Recommendation + reasoning]. Options:
     1. Continue — proceed to next batch
     2. Wrap — commit, write handover, end session (safe to resume later)
   ```

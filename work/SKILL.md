@@ -283,9 +283,10 @@ When `HAS_HANDOFF=yes` (subsequent session):
 5. **Load design specs (mandatory):** Run work-start Step 3c — scan workspace
    and project for specs, read them all
 6. **Done-detection auto-suggest (D3):** If `ACTIVE_ISSUE` is empty after
-   health sync (issue was marked complete), suggest next action:
-   - If remaining items in queue: "Current issue complete. `next` (N remaining) or `end`?"
-   - If queue is empty: "Current issue complete. `end` to close the branch?"
+   health sync (issue was marked complete), suggest next action with a
+   **recommendation** (see §Decision-Point Recommendations below):
+   - If remaining items in queue: recommend `next` or `wrap` with reasoning
+   - If queue is empty: recommend `end` to close the branch
 7. Summarise what the last session accomplished and continue working.
    Do NOT invoke work-start — the branch and scaffold already exist.
 
@@ -309,12 +310,29 @@ check queue state before suggesting next action:
 2. Read `HAS_PLAN` and `ACTIVE_ISSUE`
 3. If `HAS_PLAN=yes`:
    - If `ACTIVE_ISSUE` is non-empty → more work remains.
-     Suggest `next` to advance, NOT `work end`.
+     Recommend `next` or `wrap` with reasoning (see §Decision-Point
+     Recommendations below). Never suggest `work end` when items remain.
    - If `ACTIVE_ISSUE` is empty → queue is exhausted.
-     Suggest `work end`.
-4. If `HAS_PLAN=no` → suggest `work end`.
+     Recommend `work end`.
+4. If `HAS_PLAN=no` → recommend `work end`.
 
 **Never suggest work-end when the queue has remaining issues.**
+
+**Decision-Point Recommendations:** Every time you present "continue vs
+wrap" or "next vs end" options, you MUST recommend one with reasoning.
+Never present bare options. Factors to weigh:
+
+| Factor | Favours continue/next | Favours wrap |
+|--------|----------------------|--------------|
+| Next issue is in the same repo | yes | — |
+| Next issue is a topic change (different repo, different domain) | — | yes |
+| Session has been long (3+ issues completed) | — | yes |
+| Next issue is XS/S scale | yes | — |
+| Next issue is L/XL or High complexity | — | yes |
+| Current session built up relevant context for the next issue | yes | — |
+
+Example: "Next is work#405 (M scale, different repo). That's a topic change
+that benefits from a fresh session. I'd recommend wrapping here."
 
 **On switch (option 2):**
 Route to **work-pause** (saves current branch), then **work-resume**
