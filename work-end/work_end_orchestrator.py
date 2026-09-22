@@ -1312,6 +1312,28 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
                 ctx.steps_executed.append(f"{step_key}:already_on_main")
                 continue
 
+        if step.name == "land" and repo_path and repo_path.is_dir():
+            has_branch = subprocess.run(
+                ["git", "-C", str(repo_path), "branch", "--list", ctx.branch],
+                capture_output=True, text=True, timeout=10,
+            )
+            if has_branch.returncode == 0 and not has_branch.stdout.strip():
+                update_close_progress(ctx.workspace, step_key, "done")
+                ctx.steps_executed.append(f"{step_key}:no_branch")
+                continue
+            if has_branch.returncode == 0 and has_branch.stdout.strip():
+                commit_count = subprocess.run(
+                    ["git", "-C", str(repo_path), "rev-list", "--count",
+                     f"{ctx.base_branch}..{ctx.branch}"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if commit_count.returncode == 0 and commit_count.stdout.strip():
+                    count = int(commit_count.stdout.strip())
+                    if count == 0:
+                        update_close_progress(ctx.workspace, step_key, "done")
+                        ctx.steps_executed.append(f"{step_key}:no_commits")
+                        continue
+
         ctx.current_repo_project = repo_path
         ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo)
         result = _close_execute_mechanical(step, ctx)

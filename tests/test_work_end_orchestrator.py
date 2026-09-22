@@ -2809,3 +2809,156 @@ class TestCyclePassStep:
                 assert step.skip_fn is not None, (
                     f"Step {step.name} must have a skip_fn for cycle mode"
                 )
+
+
+class TestLandSkipWhenNoBranchCommits:
+    """Land is skipped for repos with no branch or no commits on the branch (#377)."""
+
+    def _mark_through_promoted(self, tmp_path):
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                     "branch_audit_coherence", "branch_audit_structure",
+                     "branch_audit_robustness", "loose_ends", "forcing_function",
+                     "sweep_config", "forage", "protocol", "update_claude_md",
+                     "impl_doc_sync", "doc_freshness_gate", "adr", "write_content",
+                     "review_pass", "promote", "report_promote", "promote_pass",
+                     "trajectory", "report_rebase", "squash", "report_squash",
+                     "write_marker"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+    def _make_repo_on_main(self, path):
+        """Create a git repo on main with no feature branch."""
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "T"], capture_output=True)
+        (path / "README.md").write_text("init\n")
+        subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-m", "init"], capture_output=True)
+
+    def _make_repo_with_empty_branch(self, path, branch):
+        """Create a git repo with a branch that has zero commits ahead of main."""
+        self._make_repo_on_main(path)
+        subprocess.run(["git", "-C", str(path), "branch", branch], capture_output=True)
+
+    def _make_repo_with_commits(self, path, branch):
+        """Create a git repo with a branch that has commits."""
+        self._make_repo_on_main(path)
+        subprocess.run(["git", "-C", str(path), "checkout", "-b", branch], capture_output=True)
+        (path / "feature.txt").write_text("work\n")
+        subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-m", "feature work"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "main"], capture_output=True)
+
+    def test_land_skipped_when_no_branch(self, tmp_path, monkeypatch):
+        """Land is skipped for repos that don't have the feature branch."""
+        self._mark_through_promoted(tmp_path)
+        for repo in ["ledger", "connectors"]:
+            from close_progress import update_close_progress
+            update_close_progress(tmp_path, f"rebase:{repo}", "done")
+        from close_progress import read_close_progress
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        self._make_repo_with_commits(slot_path / "ledger", "issue-377-test")
+        self._make_repo_on_main(slot_path / "connectors")
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- ledger (primary)\n- connectors\n## Status\nstatus: active\n"
+        )
+
+        calls = []
+        def capture(cmd, ws, **kw):
+            calls.append(cmd)
+            return {"LANDED": "yes", "LANDED_SHA": "abc123"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "ledger"),
+            "branch": "issue-377-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+
+        progress = read_close_progress(tmp_path)
+        assert progress.get("land:connectors") == "done"
+        land_calls = [c for c in calls if any("land" in str(a) for a in c) and any("work_end_execute" in str(a) for a in c)]
+        land_connectors = [c for c in land_calls if any("connectors" in str(a) for a in c)]
+        assert len(land_connectors) == 0, f"No land script should run for connectors: {land_connectors}"
+
+    def test_land_skipped_when_zero_commits(self, tmp_path, monkeypatch):
+        """Land is skipped for repos where the branch has zero commits ahead of main."""
+        self._mark_through_promoted(tmp_path)
+        for repo in ["ledger", "connectors"]:
+            from close_progress import update_close_progress
+            update_close_progress(tmp_path, f"rebase:{repo}", "done")
+        from close_progress import read_close_progress
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        self._make_repo_with_commits(slot_path / "ledger", "issue-377-test")
+        self._make_repo_with_empty_branch(slot_path / "connectors", "issue-377-test")
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- ledger (primary)\n- connectors\n## Status\nstatus: active\n"
+        )
+
+        calls = []
+        def capture(cmd, ws, **kw):
+            calls.append(cmd)
+            return {"LANDED": "yes", "LANDED_SHA": "abc123"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "ledger"),
+            "branch": "issue-377-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+
+        progress = read_close_progress(tmp_path)
+        assert progress.get("land:connectors") == "done"
+        land_calls = [c for c in calls if any("land" in str(a) for a in c) and any("work_end_execute" in str(a) for a in c)]
+        land_connectors = [c for c in land_calls if any("connectors" in str(a) for a in c)]
+        assert len(land_connectors) == 0, f"No land script should run for connectors: {land_connectors}"
+
+    def test_land_runs_for_repo_with_commits(self, tmp_path, monkeypatch):
+        """Land DOES run for repos that have commits on the branch."""
+        self._mark_through_promoted(tmp_path)
+        for repo in ["ledger"]:
+            from close_progress import update_close_progress
+            update_close_progress(tmp_path, f"rebase:{repo}", "done")
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        self._make_repo_with_commits(slot_path / "ledger", "issue-377-test")
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- ledger (primary)\n## Status\nstatus: active\n"
+        )
+
+        calls = []
+        def capture(cmd, ws, **kw):
+            calls.append(cmd)
+            return {"LANDED": "yes", "LANDED_SHA": "abc123"}
+        monkeypatch.setattr("work_end_orchestrator._run_script", capture)
+
+        from work_end_orchestrator import run_orchestrator
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "ledger"),
+            "branch": "issue-377-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+
+        land_calls = [c for c in calls if any("land" in str(a) for a in c) and any("work_end_execute" in str(a) for a in c)]
+        assert len(land_calls) >= 1, f"Land should run for ledger: {calls}"
