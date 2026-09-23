@@ -266,19 +266,32 @@ python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_contin
 Validates branch is `active`, emits worklog event. No state change (self-transition).
 
 When `HAS_HANDOFF=yes` (subsequent session):
-1. Read `$HANDOFF_PATH` — summarise last session's narrative
-2. Run health check:
+
+**.plan is the authority on remaining work — not the handoff.** The
+handoff is context from a prior session. The `.plan` is the live queue.
+When they disagree, trust the `.plan`.
+
+1. **Check .plan FIRST** (before reading the handoff):
+   If `HAS_PLAN=yes`: read `.plan` at `$PLAN_PATH` for queue progress and
+   active issue. Display prominently:
+   ```
+   ━━━ Queue state ━━━
+   Position: $PLAN_POSITION
+   Active issue: #$ACTIVE_ISSUE — <title>
+   ━━━━━━━━━━━━━━━━━━━
+   ```
+   Set active issue for commit linkage (`Refs #$ACTIVE_ISSUE`).
+   If `ACTIVE_ISSUE` is non-empty, state: "Work remains on this branch."
+2. Read `$HANDOFF_PATH` — summarise last session's narrative.
+   **If the handoff does not mention the active issue from step 1**,
+   flag the divergence:
+   > ⚠️ Handoff is stale — does not reflect active issue #$ACTIVE_ISSUE.
+   > The .plan queue is the source of truth.
+3. Run health check:
    ```bash
    python3 ~/.claude/skills/project/work_health.py --scope entry --project $PROJECT --workspace $WORKSPACE --owner-repo $OWNER_REPO
    ```
    Syncs `.plan` with GitHub, validates workspace state.
-3. If `HAS_PLAN=yes`: read `.plan` at `$PLAN_PATH` for queue progress and
-   active issue. Display:
-   ```
-   Queue — Position $PLAN_POSITION
-   Active issue: #$ACTIVE_ISSUE
-   ```
-   Set active issue for commit linkage (`Refs #$ACTIVE_ISSUE`).
 4. If `IN_SLOT=yes` and `HAS_PLAN=no`: read .slot for issue context
 5. **Load design specs (mandatory):** Run work-start Step 3c — scan workspace
    and project for specs, read them all
