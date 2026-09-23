@@ -320,10 +320,28 @@ check queue state before suggesting next action:
 
 **Decision-Point Recommendations:** Every time you present "continue vs
 wrap" or "next vs end" options, you MUST recommend one with reasoning.
-Never present bare options. Factors to weigh:
+Never present bare options.
+
+**Always lead with a session summary.** The user loses track of how much
+work they've done. Before presenting options, state:
+- How many issues/tasks were completed this session
+- What they were (one-line each)
+- Approximate context budget remaining (from `<total_tokens>` in system reminders)
+
+**Context budget guidance:**
+- **>10M tokens remaining:** context is fresh — continue if the task fits
+- **5–10M tokens remaining:** moderate use — XS/S tasks fit comfortably,
+  M tasks are feasible, L+ tasks benefit from a fresh session
+- **<5M tokens remaining:** context is getting tight — wrap unless the
+  next task is XS and directly related to current work
+
+Factors to weigh:
 
 | Factor | Favours continue/next | Favours wrap |
 |--------|----------------------|--------------|
+| Context budget >10M tokens | yes | — |
+| Context budget 5–10M tokens | XS/S only | M+ |
+| Context budget <5M tokens | — | yes |
 | Next issue is in the same repo | yes | — |
 | Next issue is a topic change (different repo, different domain) | — | yes |
 | Session has been long (3+ issues completed) | — | yes |
@@ -331,8 +349,11 @@ Never present bare options. Factors to weigh:
 | Next issue is L/XL or High complexity | — | yes |
 | Current session built up relevant context for the next issue | yes | — |
 
-Example: "Next is work#405 (M scale, different repo). That's a topic change
-that benefits from a fresh session. I'd recommend wrapping here."
+Example: "This session completed 2 issues: #377 (landing skip fix) and
+#380 (this decision-point update). ~12M tokens remaining — context is
+fresh. Next is #378 (clone directory, M scale, same repo, builds on
+today's slot discussion). I'd recommend continuing — the context from
+the earlier brainstorming is directly relevant."
 
 **On switch (option 2):**
 Route to **work-pause** (saves current branch), then **work-resume**
