@@ -40,6 +40,11 @@ class Topology:
     primary_repo: str | None
     in_worktree: bool
     main_worktree_root: Path | None
+    in_clone: bool = False
+    clone_dir: Path | None = None
+    family_root: Path | None = None
+    in_canonical_family: bool = False
+    clone_path: Path | None = None
 
     @property
     def is_scoped(self) -> bool:
@@ -82,6 +87,36 @@ def _resolve_symlink_target(symlink: Path) -> str | None:
             return str(candidate)
         candidate = candidate.parent
     return None
+
+
+def _detect_clone(project: Path) -> tuple[bool, Path | None, Path | None]:
+    """Detect if project is inside a family clone/ directory.
+
+    Returns (in_clone, clone_dir, family_root).
+    Clone detection: parent is named 'clone' and grandparent has 'slots/'.
+    """
+    parent = project.parent
+    if parent.name == "clone":
+        grandparent = parent.parent
+        if (grandparent / "slots").is_dir():
+            return True, parent, grandparent
+    return False, None, None
+
+
+def _detect_canonical_family(project: Path) -> tuple[bool, Path | None]:
+    """Detect if project is a canonical repo inside a family root.
+
+    Returns (in_canonical_family, clone_path).
+    Canonical detection: parent has 'slots/' dir, and we're NOT inside
+    'clone/' or 'slots/' subdirectories.
+    """
+    parent = project.parent
+    if not (parent / "slots").is_dir():
+        return False, None
+    if parent.name in ("clone", "slots"):
+        return False, None
+    clone_path = parent / "clone" / project.name
+    return True, clone_path
 
 
 def _detect_slot(project: Path) -> tuple[Path | None, str | None]:
@@ -206,6 +241,14 @@ def resolve(cwd: str | None = None) -> Topology:
     else:
         layout = "single"
 
+    in_clone, clone_dir, family_root = _detect_clone(project)
+    in_canonical_family = False
+    clone_path = None
+    if not slot_dir and not in_clone:
+        in_canonical_family, clone_path = _detect_canonical_family(project)
+        if in_canonical_family and clone_path:
+            family_root = project.parent
+
     return Topology(
         layout=layout,
         project=project,
@@ -216,6 +259,11 @@ def resolve(cwd: str | None = None) -> Topology:
         primary_repo=primary_repo,
         in_worktree=in_worktree,
         main_worktree_root=main_worktree_path,
+        in_clone=in_clone,
+        clone_dir=clone_dir,
+        family_root=family_root,
+        in_canonical_family=in_canonical_family,
+        clone_path=clone_path,
     )
 
 

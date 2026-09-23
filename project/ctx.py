@@ -314,6 +314,11 @@ def resolve(cwd=None) -> dict[str, str]:
         "SLOT_PATH": str(topo.slot_dir) if topo.slot_dir else "",
         "IN_ATTIC": "yes" if topo.slot_dir and "/attic/" in str(topo.slot_dir) else "no",
         "LANDED_NOT_ARCHIVED": ",".join(_scan_landed_not_archived(topo.slot_dir)) if topo.layout == "slot" else "",
+        "IN_CLONE": "yes" if topo.in_clone else "no",
+        "CLONE_DIR": str(topo.clone_dir) if topo.clone_dir else "",
+        "IN_CANONICAL_FAMILY": "yes" if topo.in_canonical_family else "no",
+        "CLONE_PATH": str(topo.clone_path) if topo.clone_path else "",
+        "FAMILY_ROOT": str(topo.family_root) if topo.family_root else "",
         # WorkState fields (F1/F3 — work/SKILL.md reads these)
         "ROUTE": state.route,
         "ON_MAIN": "yes" if state.on_main else "no",

@@ -48,6 +48,50 @@ in CLAUDE.md; defaults to `main`. The workspace always uses `main` as its base b
 
 ---
 
+## Clone Redirect (after path resolution, before detection)
+
+**Feature gate:** This feature is OFF by default system-wide. Check:
+```bash
+python3 ~/.claude/skills/project/clone_manager.py enabled
+```
+If `ENABLED=no`, skip this section entirely.
+
+**When `IN_CANONICAL_FAMILY=yes` and clone feature is enabled:**
+
+The user is in a canonical repo that belongs to a family. Solo work
+should happen in the clone, not the canonical.
+
+```bash
+python3 ~/.claude/skills/project/clone_manager.py status family_root=$FAMILY_ROOT repo=<repo-name>
+```
+
+| State | Action |
+|-------|--------|
+| `EXISTS=yes` | "Your clone is at `<CLONE_PATH>`. Continue your session there for solo work." → stop |
+| `EXISTS=no`, `DECLINED=no` | Offer: "Set up a clone for solo work? Clone path: `<CLONE_PATH>` (YES / n / never)" |
+| `DECLINED=yes` | Skip silently — user previously declined for this repo |
+
+On **YES**:
+```bash
+python3 ~/.claude/skills/project/clone_manager.py create family_root=$FAMILY_ROOT repo=<repo-name>
+```
+Report the clone path. The user opens a session there.
+
+On **n**: proceed in canonical this time. Do not record decline.
+
+On **never**: record decline and proceed.
+```bash
+python3 ~/.claude/skills/project/clone_manager.py decline family_root=$FAMILY_ROOT repo=<repo-name>
+```
+
+**When `IN_CLONE=yes`:** Normal flow — the user is already in a clone.
+Before branching, sync from canonical:
+```bash
+git -C "$PROJECT" fetch origin
+```
+
+---
+
 ## Branch Switch Helper
 
 Use any time both repos must switch branches together. Never switch one alone.

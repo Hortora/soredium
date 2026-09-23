@@ -344,3 +344,77 @@ class TestFindDesignFile:
         topo = topology.resolve(str(project))
         result = topology.find_design_file(".meta", topo)
         assert result == workspace / "design" / ".meta"
+
+
+class TestCloneDetection:
+    """Clone directory detection for family repos (#378)."""
+
+    def test_in_clone_detected(self, tmp_path):
+        """Project inside clone/ with grandparent having slots/ is detected."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        (family / "slots").mkdir()
+        clone_dir = family / "clone"
+        clone_dir.mkdir()
+        project = init_repo(clone_dir / "engine")
+        topo = _resolve(str(project))
+        assert topo.in_clone is True
+        assert topo.clone_dir == clone_dir
+        assert topo.family_root == family
+        assert topo.in_canonical_family is False
+
+    def test_canonical_in_family_detected(self, tmp_path):
+        """Project directly under family root (with slots/) is canonical."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        (family / "slots").mkdir()
+        project = init_repo(family / "engine")
+        topo = _resolve(str(project))
+        assert topo.in_canonical_family is True
+        assert topo.clone_path == family / "clone" / "engine"
+        assert topo.family_root == family
+        assert topo.in_clone is False
+
+    def test_not_in_family_without_slots(self, tmp_path):
+        """Project in a dir without slots/ is not detected as family."""
+        parent = tmp_path / "projects"
+        parent.mkdir()
+        project = init_repo(parent / "engine")
+        topo = _resolve(str(project))
+        assert topo.in_clone is False
+        assert topo.in_canonical_family is False
+        assert topo.family_root is None
+
+    def test_slot_repo_not_detected_as_canonical(self, tmp_path):
+        """Project inside slots/ is a slot, not a canonical."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        (family / "slots").mkdir()
+        slot_dir = family / "slots" / "195"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text(
+            "# Slot 195\n\n## Repos\n- engine (primary)\n"
+        )
+        project = init_repo(slot_dir / "engine")
+        topo = _resolve(str(project))
+        assert topo.layout == "slot"
+        assert topo.in_clone is False
+        assert topo.in_canonical_family is False
+
+    def test_clone_dir_not_detected_without_slots(self, tmp_path):
+        """clone/ dir without sibling slots/ is not a family clone."""
+        parent = tmp_path / "projects"
+        parent.mkdir()
+        (parent / "clone").mkdir()
+        project = init_repo(parent / "clone" / "engine")
+        topo = _resolve(str(project))
+        assert topo.in_clone is False
+
+    def test_canonical_clone_path_points_to_clone_dir(self, tmp_path):
+        """CLONE_PATH for a canonical repo points to clone/<repo-name>."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        (family / "slots").mkdir()
+        project = init_repo(family / "platform")
+        topo = _resolve(str(project))
+        assert topo.clone_path == family / "clone" / "platform"
