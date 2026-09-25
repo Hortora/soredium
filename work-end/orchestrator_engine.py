@@ -224,6 +224,12 @@ def run_loop(
             if ctx.done(step.name):
                 continue
 
+            # CHECK: postcondition already met? skip without executing.
+            if step.postcondition_fn and step.postcondition_fn(ctx):
+                update_close_progress(ctx.workspace, step.name, "done")
+                ctx.steps_executed.append(f"{step.name}:postcondition_skip")
+                continue
+
             attempt_key = f"{step.name}_mechanical_attempt"
             attempt = int(ctx.progress.get(attempt_key, "0"))
 
@@ -246,6 +252,23 @@ def run_loop(
                     continue
                 ctx.steps_executed.append(f"{step.name}:ERROR:{attempt}")
                 return _make_error_result(step.name, attempt, result)
+
+            # VERIFY: postcondition met after execution?
+            if step.postcondition_fn and not step.postcondition_fn(ctx):
+                attempt += 1
+                update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                if attempt >= MAX_MECHANICAL_RETRIES:
+                    update_close_progress(ctx.workspace, step.name, "skipped_error")
+                    ctx.steps_executed.append(f"{step.name}:POSTCONDITION_FAIL:skipped")
+                    continue
+                ctx.steps_executed.append(f"{step.name}:POSTCONDITION_FAIL:{attempt}")
+                return {
+                    "ACTION": "error",
+                    "ERROR": "postcondition_failed",
+                    "STEP": step.name,
+                    "RETRY": str(attempt),
+                    "REASON": f"Step '{step.name}' executed but postcondition not met",
+                }
 
             ctx.last_output = result or {}
             if on_step_done:
