@@ -79,6 +79,21 @@ from orchestrator_engine import run_script as _run_script, run_loop, log_call as
 
 MECHANICAL_STEPS = None  # populated after STEPS is defined
 
+_verification_dir = str(Path(__file__).resolve().parent.parent / "verification")
+if _verification_dir not in sys.path:
+    sys.path.insert(0, _verification_dir)
+from step_postconditions import (
+    rebase_postcondition,
+    push_postcondition,
+    promote_postcondition,
+    archive_move_postcondition,
+    landed_marker_postcondition,
+    checkout_main_postcondition,
+    write_marker_postcondition,
+    cleanup_scaffold_postcondition,
+    issues_closed_postcondition,
+)
+
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
     sys.path.insert(0, str(_lib))
@@ -911,7 +926,8 @@ STEPS: list[StepDef] = [
 
     # --- closing:verified ---
     StepDef("promote", "closing:verified", "mechanical",
-            script_fn=_promote_script),
+            script_fn=_promote_script,
+            postcondition_fn=promote_postcondition),
     StepDef("report_promote", "closing:verified", "mechanical",
             script_fn=_report_promote_script),
     StepDef("promote_pass", "closing:verified", "lifecycle",
@@ -922,7 +938,8 @@ STEPS: list[StepDef] = [
             action_context_fn=lambda ctx: {"COVERS": ctx.covers, "OWNER_REPO": ctx.issue_repo}),
     StepDef("rebase", "closing:promoted", "mechanical",
             skip_fn=_skip_on_main,
-            script_fn=_rebase_script),
+            script_fn=_rebase_script,
+            postcondition_fn=rebase_postcondition),
     StepDef("report_rebase", "closing:promoted", "mechanical",
             skip_fn=_skip_on_main,
             script_fn=_report_rebase_script),
@@ -935,9 +952,11 @@ STEPS: list[StepDef] = [
             script_fn=_report_squash_script),
     StepDef("write_marker", "closing:promoted", "mechanical",
             skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode),
-            script_fn=_write_marker_script),
+            script_fn=_write_marker_script,
+            postcondition_fn=write_marker_postcondition),
     StepDef("land", "closing:promoted", "mechanical",
-            script_fn=_land_script),
+            script_fn=_land_script,
+            postcondition_fn=push_postcondition),
     StepDef("report_land", "closing:promoted", "mechanical",
             script_fn=_report_land_script),
     StepDef("push_pass", "closing:promoted", "lifecycle",
@@ -955,10 +974,12 @@ STEPS: list[StepDef] = [
     # --- closing:stamped ---
     StepDef("write_landed", "closing:stamped", "mechanical",
             skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode),
-            script_fn=_write_landed_script),
+            script_fn=_write_landed_script,
+            postcondition_fn=landed_marker_postcondition),
     StepDef("close_issues", "closing:stamped", "mechanical",
             skip_fn=_skip_no_covers,
-            script_fn=_close_issues_script),
+            script_fn=_close_issues_script,
+            postcondition_fn=issues_closed_postcondition),
     StepDef("report_close_issues", "closing:stamped", "mechanical",
             skip_fn=_skip_no_covers,
             script_fn=_report_close_issues_script),
@@ -968,10 +989,12 @@ STEPS: list[StepDef] = [
             script_fn=_report_verify_script),
     StepDef("upstream_push", "closing:stamped", "mechanical",
             skip_fn=_skip_no_upstream,
-            script_fn=_upstream_push_script),
+            script_fn=_upstream_push_script,
+            postcondition_fn=push_postcondition),
     StepDef("archive_slot", "closing:stamped", "mechanical",
             skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode),
-            script_fn=_archive_slot_script),
+            script_fn=_archive_slot_script,
+            postcondition_fn=archive_move_postcondition),
     StepDef("report_archive", "closing:stamped", "mechanical",
             skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode),
             script_fn=_report_archive_script),
@@ -980,13 +1003,15 @@ STEPS: list[StepDef] = [
             script_fn=_elevate_plan_script),
     StepDef("checkout_main", "closing:stamped", "mechanical",
             skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode),
-            script_fn=_checkout_main_script),
+            script_fn=_checkout_main_script,
+            postcondition_fn=checkout_main_postcondition),
     StepDef("cleanup_stack", "closing:stamped", "mechanical",
             skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode),
             script_fn=_cleanup_stack_script),
     StepDef("cleanup", "closing:stamped", "mechanical",
             skip_fn=_skip_cycle_mode,
-            script_fn=_cleanup_scaffold_script),
+            script_fn=_cleanup_scaffold_script,
+            postcondition_fn=cleanup_scaffold_postcondition),
     StepDef("report_scaffold", "closing:stamped", "mechanical",
             script_fn=_report_scaffold_script),
     StepDef("arc42_scan", "closing:stamped", "judgment",

@@ -13,6 +13,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
 
+def _disable_postconditions(monkeypatch):
+    """Disable postcondition checks on all STEPS for tests that mock _run_script.
+
+    Tests that mock _run_script don't produce real side effects (no git repos,
+    no .artifacts-promoted files), so postcondition checks always fail. This
+    helper disables them so the tests can focus on orchestrator logic.
+    """
+    from work_end_orchestrator import STEPS
+    for step in STEPS:
+        if step.postcondition_fn is not None:
+            monkeypatch.setattr(step, "postcondition_fn", None)
+
+
 class TestRunScript:
     """_run_script calls subprocess and parses KEY=VALUE output."""
 
@@ -352,6 +365,7 @@ class TestMainMode:
         from work_end_orchestrator import run_orchestrator
         from close_progress import update_close_progress
         monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        _disable_postconditions(monkeypatch)
         monkeypatch.setattr("work_end_orchestrator._push_main_mode", lambda ctx: {"PUSHED": "yes", "LANDED_SHA": "abc"})
         monkeypatch.setattr("work_end_orchestrator._verify_main_mode", lambda ctx: {"VERIFIED": "yes"})
         monkeypatch.setattr("work_end_orchestrator._cleanup_main_mode", lambda ctx: {"CLEANED": "yes"})
@@ -619,6 +633,7 @@ class TestIntegrationBranchMode:
                     "CLOSED": "1", "VERIFIED": "yes", "SWITCHED": "yes",
                     "CLEANED": "yes"}
         monkeypatch.setattr("work_end_orchestrator._run_script", mock_run)
+        _disable_postconditions(monkeypatch)
 
         actions_seen = []
 
@@ -785,6 +800,7 @@ class TestIntegrationCrashRecovery:
         def mock_run(cmd, workspace, **kw):
             return {"CLOSED": "1", "VERIFIED": "yes", "SWITCHED": "yes", "CLEANED": "yes"}
         monkeypatch.setattr("work_end_orchestrator._run_script", mock_run)
+        _disable_postconditions(monkeypatch)
         from close_progress import update_close_progress
         for step in ["review", "sweep_config", "trajectory", "squash",
                      "rebase", "land", "verify", "arc42_scan",
@@ -954,6 +970,7 @@ class TestMechanicalStepWiring:
 
     def test_close_issues_includes_completed_epic_parents(self, tmp_path, monkeypatch):
         """close_issues includes epic parent issue numbers from .plan."""
+        _disable_postconditions(monkeypatch)
         plan_path = tmp_path / ".plan"
         plan_path.write_text(
             "# Work Plan — issue-50-weighted\n\n"
@@ -2251,6 +2268,7 @@ class TestPromoteScopeFilter:
 
     def test_slot_promote_does_not_create_per_repo_progress_keys(self, tmp_path, monkeypatch):
         """promote should use a single progress key, not promote:repo composite keys."""
+        _disable_postconditions(monkeypatch)
         slot_path = self._make_slot(tmp_path, ["neocortex", "engine"], primary="neocortex")
         monkeypatch.setattr("work_end_orchestrator._run_script",
                             lambda *a, **kw: {"WORKSPACE_PROMOTED": "0", "PROJECT_PROMOTED": "1"})
@@ -2962,3 +2980,17 @@ class TestLandSkipWhenNoBranchCommits:
 
         land_calls = [c for c in calls if any("land" in str(a) for a in c) and any("work_end_execute" in str(a) for a in c)]
         assert len(land_calls) >= 1, f"Land should run for ledger: {calls}"
+
+
+class TestPostconditionsWired:
+    """Every mechanical step should have a postcondition_fn."""
+
+    def test_all_mechanical_steps_have_postcondition(self):
+        from work_end_orchestrator import STEPS
+        mechanical = [s for s in STEPS if s.step_type == "mechanical"]
+        exempt = {s.name for s in mechanical
+                  if s.name.startswith("report_") or s.name in (
+                      "delete_progress", "elevate_plan", "cleanup_stack", "verify")}
+        required = [s for s in mechanical if s.name not in exempt]
+        missing = [s.name for s in required if s.postcondition_fn is None]
+        assert missing == [], f"Mechanical steps missing postcondition_fn: {missing}"
