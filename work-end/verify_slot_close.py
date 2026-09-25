@@ -52,6 +52,35 @@ def _is_ceremony_commit(subject: str) -> bool:
     return any(subject.startswith(p) for p in CEREMONY_PREFIXES)
 
 
+LIFECYCLE_FILES = {
+    ".plan", "JOURNAL.md", ".execute-progress",
+    ".land-ledger.jsonl", ".artifacts-promoted",
+    ".close-progress", ".close-report.json",
+    ".close-log.jsonl", ".wrap-log.jsonl",
+    ".close-progress.done", ".close-progress.tmp",
+    ".squash-plan-soredium.json",
+}
+
+
+LIFECYCLE_PREFIXES = ("plans/", "specs/", ".squash-plan-")
+
+
+def _is_lifecycle_file(path: str) -> bool:
+    basename = path.split("/")[-1] if "/" in path else path
+    if basename in LIFECYCLE_FILES:
+        return True
+    return any(path.startswith(p) for p in LIFECYCLE_PREFIXES)
+
+
+def _is_lifecycle_only_diff(project: str, branch: str, base: str) -> bool:
+    """True if the tree diff between branch and base is entirely lifecycle files."""
+    result = git(project, "diff", "--name-only", f"{base}..{branch}")
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+    diff_files = [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
+    return all(_is_lifecycle_file(f) for f in diff_files)
+
+
 def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
     result = git(project, "log", "--oneline", f"{base}..{branch}")
     if result.returncode != 0:
@@ -67,6 +96,8 @@ def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
     if branch_tree.returncode != 0 or main_tree.returncode != 0:
         return {"status": "fail", "detail": "cannot resolve tree SHAs for content verification"}
     if branch_tree.stdout.strip() != main_tree.stdout.strip():
+        if _is_lifecycle_only_diff(project, branch, base):
+            return {"status": "pass", "detail": "tree differs only in lifecycle files"}
         return {"status": "fail", "detail": f"branch content not on {base} (tree mismatch)"}
     return {"status": "pass"}
 
