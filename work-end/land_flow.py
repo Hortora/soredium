@@ -519,8 +519,6 @@ def _merge_and_push_direct(
     sha_r = _git(desc.repo_path, "rev-parse", "HEAD")
     landed_sha = sha_r.stdout.strip() if sha_r.returncode == 0 else ""
     status.landed_sha = landed_sha
-    status.pushed = True
-    _write_progress(progress_file, key, "pushed")
 
     _git(desc.repo_path, "fetch", desc.push_target, desc.base_branch)
     verify = _git(
@@ -529,6 +527,9 @@ def _merge_and_push_direct(
     )
     if verify.returncode != 0:
         print(f"PUSH_VERIFY_WARN=landed SHA {landed_sha[:12]} not confirmed")
+
+    status.pushed = True
+    _write_progress(progress_file, key, "pushed")
 
     if desc.mirror_target:
         mirror = _git(desc.repo_path, "push", desc.mirror_target, desc.base_branch, "--force-with-lease")
