@@ -97,6 +97,8 @@ def write_stamp(workspace: Path, branch: str, results: dict[str, str]) -> Path:
         lines.append(f"{key}={results.get(key, '0')}")
 
     stamp_path.write_text("\n".join(lines) + "\n")
+    if not stamp_path.exists():
+        raise RuntimeError(f"Failed to write stamp to {stamp_path}")
 
     subprocess.run(
         ["git", "-C", str(workspace), "add", str(stamp_path.relative_to(workspace))],

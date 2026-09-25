@@ -384,6 +384,10 @@ def cmd_write_marker(opts: dict[str, str]) -> int:
         f"branch={branch}\n"
         f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
     )
+    if not marker.exists():
+        print("ERROR=MARKER_WRITE_FAILED")
+        print(f"ERROR_DETAIL=failed to write {marker}")
+        return 1
     print(f"MARKER_WRITTEN={marker}")
     return 0
 
