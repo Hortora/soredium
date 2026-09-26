@@ -98,6 +98,10 @@ def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
     if branch_tree.stdout.strip() != main_tree.stdout.strip():
         if _is_lifecycle_only_diff(project, branch, base):
             return {"status": "pass", "detail": "tree differs only in lifecycle files"}
+        ancestor = git(project, "merge-base", "--is-ancestor",
+                       f"{branch}~1", base)
+        if ancestor.returncode == 0:
+            return {"status": "pass", "detail": f"stamp is ancestor of {base} — main advanced after landing"}
         return {"status": "fail", "detail": f"branch content not on {base} (tree mismatch)"}
     return {"status": "pass"}
 
