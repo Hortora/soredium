@@ -56,6 +56,7 @@ STEP_TO_PHASE = {
     "land": "closing:promoted",
     "report_land": "closing:promoted",
     "sync_pass": "closing:stamped",
+    "promote_plan_next": "closing:stamped",
     "close_issues": "closing:stamped",
     "report_close_issues": "closing:stamped",
     "verify": "closing:stamped",

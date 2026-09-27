@@ -1416,6 +1416,33 @@ def main() -> int:
                 print(f"SKIP={ref} (not found or already unchecked)")
         return 0
 
+    elif command == "build-next":
+        if not plan_path or not plan_path.exists():
+            print("ERROR=plan_not_found", file=_sys.stderr)
+            return 1
+        tree = parse_plan(plan_path)
+        uncompleted = [item for item in tree.queue if not item.completed]
+        if not uncompleted:
+            print("NO_REMAINING=yes")
+            return 0
+        for i, item in enumerate(uncompleted):
+            item.active = (i == 0)
+        next_state = dict(tree.state)
+        next_state["state"] = "active"
+        content = build_plan_content(
+            next_state.get("branch", ""),
+            uncompleted,
+            tree.started,
+            last_wrap=tree.last_wrap,
+            deferred=tree.deferred,
+            state=next_state,
+        )
+        next_path = plan_path.parent / ".plan-next"
+        next_path.write_text(content)
+        print(f"BUILT={next_path}")
+        print(f"ITEMS={len(uncompleted)}")
+        return 0
+
     else:
         print(f"Unknown command: {command}", file=_sys.stderr)
         return 1

@@ -120,6 +120,10 @@ def issues_closed_postcondition(ctx) -> bool:
     return True
 
 
+def promote_plan_next_postcondition(ctx) -> bool:
+    return not (ctx.workspace / ".plan-next").exists()
+
+
 def cleanup_scaffold_postcondition(ctx) -> bool:
     ws = ctx.workspace
     scaffold = ["JOURNAL.md", ".execute-progress", ".land-ledger.jsonl",

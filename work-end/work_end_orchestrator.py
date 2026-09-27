@@ -92,6 +92,7 @@ from step_postconditions import (
     write_marker_postcondition,
     cleanup_scaffold_postcondition,
     issues_closed_postcondition,
+    promote_plan_next_postcondition,
 )
 
 _lib = Path.home() / ".claude" / "lib"
@@ -536,6 +537,67 @@ def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
         ctx.call_log.append(["(internal)", "elevate_plan", str(slot_plan)])
 
     return {"ELEVATED": "yes", "SLOT_PLAN": str(slot_plan)}
+
+
+def _promote_plan_next_inline(ctx: OrchestratorContext) -> dict[str, str]:
+    """Promote .plan-next → .plan and HANDOFF-next.md → HANDOFF.md."""
+    plan_next = ctx.workspace / ".plan-next"
+    handoff_next = ctx.workspace / "HANDOFF-next.md"
+
+    if not plan_next.exists() and not handoff_next.exists():
+        return {"PROMOTED": "no", "REASON": "no_next_files"}
+
+    if ctx.dry_run:
+        if ctx.call_log is not None:
+            if plan_next.exists():
+                ctx.call_log.append(["(internal)", "promote_plan_next", str(plan_next)])
+            if handoff_next.exists():
+                ctx.call_log.append(["(internal)", "promote_handoff_next", str(handoff_next)])
+        return {"PROMOTED": "yes", "DRY_RUN": "yes"}
+
+    import shutil as _shutil
+    promoted = []
+
+    if plan_next.exists():
+        _shutil.copy2(plan_next, ctx.workspace / ".plan")
+        plan_next.unlink()
+        subprocess.run(
+            ["git", "-C", str(ctx.workspace), "add", ".plan"],
+            capture_output=True, timeout=10,
+        )
+        subprocess.run(
+            ["git", "-C", str(ctx.workspace), "rm", "--ignore-unmatch", "-f", ".plan-next"],
+            capture_output=True, timeout=10,
+        )
+        promoted.append(".plan-next")
+
+    if handoff_next.exists():
+        _shutil.copy2(handoff_next, ctx.workspace / "HANDOFF.md")
+        handoff_next.unlink()
+        subprocess.run(
+            ["git", "-C", str(ctx.workspace), "add", "HANDOFF.md"],
+            capture_output=True, timeout=10,
+        )
+        subprocess.run(
+            ["git", "-C", str(ctx.workspace), "rm", "--ignore-unmatch", "-f", "HANDOFF-next.md"],
+            capture_output=True, timeout=10,
+        )
+        promoted.append("HANDOFF-next.md")
+
+    if promoted:
+        subprocess.run(
+            ["git", "-C", str(ctx.workspace), "commit", "--no-verify", "-m",
+             f"chore: promote {', '.join(promoted)}"],
+            capture_output=True, timeout=10,
+        )
+
+    return {"PROMOTED": "yes", "FILES": ",".join(promoted)}
+
+
+def _promote_plan_next_script(ctx):
+    result = _promote_plan_next_inline(ctx)
+    ctx.last_output.update(result)
+    return None
 
 
 def _checkout_main_script(ctx):
@@ -1050,6 +1112,12 @@ STEPS: list[StepDef] = [
     StepDef("sync_pass", "closing:stamped", "lifecycle",
             skip_fn=_skip_not_sync_mode,
             from_state="closing:stamped", to_state="active", event="sync_pass"),
+
+    # --- continuation promotion (runs in both sync and end modes) ---
+    StepDef("promote_plan_next", "closing:stamped", "mechanical",
+            script_fn=_promote_plan_next_script,
+            postcondition_fn=promote_plan_next_postcondition),
+
     StepDef("cleanup_pass", "closing:stamped", "lifecycle",
             skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode, _skip_sync_mode),
             from_state="closing:stamped", to_state="idle", event="cleanup_pass"),
