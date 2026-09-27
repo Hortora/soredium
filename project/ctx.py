@@ -373,10 +373,12 @@ def resolve(cwd=None) -> dict[str, str]:
         "SOURCES_PATH": sources_path,
         # Corruption detection
         "CORRUPTION_COUNT": str(len(corruption_findings)),
+        "AUTO_RECOVERABLE": "yes" if corruption_findings and all(f.auto_recoverable for f in corruption_findings) else "no",
         **{f"CORRUPTION_{i}": f.scenario for i, f in enumerate(corruption_findings)},
         **{f"CORRUPTION_{i}_SEVERITY": f.severity for i, f in enumerate(corruption_findings)},
         **{f"CORRUPTION_{i}_DETAIL": f.detail for i, f in enumerate(corruption_findings)},
         **{f"CORRUPTION_{i}_ACTIONS": ",".join(f.actions) for i, f in enumerate(corruption_findings)},
+        **{f"CORRUPTION_{i}_AUTO_ACTION": f.auto_action for i, f in enumerate(corruption_findings) if f.auto_action},
     }
 
 

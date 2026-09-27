@@ -83,7 +83,27 @@ this state with additional tool calls.
 
 **Step 1b-pre — Corruption triage (before normal routing)**
 
-If `CORRUPTION_COUNT` > 0, enter triage flow instead of normal routing:
+If `CORRUPTION_COUNT` > 0, enter triage flow instead of normal routing.
+
+**Auto-recovery (deterministic cases):**
+
+If `AUTO_RECOVERABLE=yes`, all findings have a deterministic fix. Execute
+each finding's `CORRUPTION_N_AUTO_ACTION` without prompting:
+
+```
+🔧 Auto-recovering N finding(s):
+  1. [SCENARIO] — DETAIL → AUTO_ACTION
+  ...
+AUTO_RECOVERED=yes
+```
+
+After executing all auto-actions, re-run `ctx.py` to verify corruption
+is resolved. If `CORRUPTION_COUNT` is still > 0, fall through to manual
+triage below.
+
+**Manual triage (ambiguous cases):**
+
+If `AUTO_RECOVERABLE=no` (or auto-recovery didn't fully resolve):
 
 ```
 ⚠️ Lifecycle corruption detected (N finding(s)):

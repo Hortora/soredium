@@ -28,6 +28,8 @@ class Finding:
     severity: str
     detail: str
     actions: list[str] = field(default_factory=list)
+    auto_recoverable: bool = False
+    auto_action: str = ""
 
 
 def _git(repo: Path, *args: str, timeout: int = 10) -> tuple[str, int]:
@@ -112,6 +114,8 @@ def check_stale_plan_on_main(
         severity="warning",
         detail=f"stale .plan on {base_branch} — references branch '{plan_branch}' with state '{meta_state}'",
         actions=["switch_to_branch", "remove_plan"],
+        auto_recoverable=True,
+        auto_action="remove_plan",
     )
 
 
@@ -137,6 +141,8 @@ def check_branch_exists(plan_path: Path, project: Path) -> Optional[Finding]:
         severity="error",
         detail=f"branch '{plan_branch}' doesn't exist locally or on remote",
         actions=["remove_plan", "recreate_branch"],
+        auto_recoverable=True,
+        auto_action="remove_plan",
     )
 
 
@@ -240,6 +246,8 @@ def check_active_all_closed(
         severity="warning",
         detail=f"state: active, all covers ({covers}) CLOSED, queue: 0 uncompleted / {total} total items",
         actions=["transition_to_drained", "mark_complete_and_next", "reopen_issues"],
+        auto_recoverable=True,
+        auto_action="transition_to_drained",
     )
 
 
