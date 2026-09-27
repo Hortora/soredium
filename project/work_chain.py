@@ -66,6 +66,8 @@ def evaluate(
         return {**base, **_evaluate_next(state, has_plan, active_issue, issue_state, remaining)}
     elif command == "end":
         return {**base, **_evaluate_end(state, has_plan, active_issue, issue_state, remaining)}
+    elif command == "sync":
+        return {**base, **_evaluate_sync(state, has_plan, active_issue, on_main)}
     elif command == "find":
         return {**base, **_evaluate_find(state, has_plan, active_issue, issue_state)}
     else:
@@ -104,6 +106,18 @@ def _evaluate_end(
     if has_plan and active_issue and issue_state == "OPEN":
         return {"DIRECTIVE": "guard_next", "REASON": "queue_not_empty"}
     return {"DIRECTIVE": "proceed", "REASON": "ready_to_close"}
+
+
+def _evaluate_sync(
+    state: str, has_plan: bool, active_issue: str, on_main: bool,
+) -> dict:
+    if on_main:
+        return {"DIRECTIVE": "chain_to_end", "REASON": "sync_requires_branch"}
+    if state in ("drained", "paused", "idle", "scaffolded", "transitioning"):
+        return {"DIRECTIVE": "chain_to_end", "REASON": f"cannot_sync_from_{state}"}
+    if not active_issue:
+        return {"DIRECTIVE": "chain_to_end", "REASON": "no_active_work"}
+    return {"DIRECTIVE": "proceed", "REASON": "ready_to_sync"}
 
 
 def _evaluate_find(

@@ -187,6 +187,7 @@ class OrchestratorContext:
     slot_path: Path | None = None
     family_root: Path | None = None
     slot_num: str = ""
+    mode: str = "end"
     last_output: dict[str, str] = field(default_factory=dict)
     landed_shas: dict[str, str] = field(default_factory=dict)
     expected_state: str = ""
@@ -294,6 +295,16 @@ def _skip_cycle_mode(ctx) -> bool:
 def _skip_not_cycle_mode(ctx) -> bool:
     """Skip cycle step when in terminal mode."""
     return not _skip_cycle_mode(ctx)
+
+
+def _skip_sync_mode(ctx) -> bool:
+    """Skip terminal steps when in sync mode (land without closing)."""
+    return ctx.mode == "sync"
+
+
+def _skip_not_sync_mode(ctx) -> bool:
+    """Skip sync step when in end mode."""
+    return ctx.mode != "sync"
 
 
 # --- Script paths ---
@@ -653,6 +664,8 @@ def _build_evidence(event, ctx):
         if ctx.on_main:
             return {"stamp_shas": {}}
         return {"stamp_shas": ctx.landed_shas}
+    if event == "sync_pass":
+        return {"stamp_shas": ctx.landed_shas or {}}
     if event == "cleanup_pass":
         return {
             "repos_on_main": {ctx.project.name: True, ctx.workspace.name: True},
@@ -973,12 +986,12 @@ STEPS: list[StepDef] = [
             from_state="closing:merged", to_state="active",
             event="issue_cycle"),
     StepDef("stamp_pass", "closing:merged", "lifecycle",
-            skip_fn=_skip_cycle_mode,
+            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             from_state="closing:merged", to_state="closing:stamped", event="stamp_pass"),
 
     # --- closing:stamped ---
     StepDef("write_landed", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode),
+            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode),
             script_fn=_write_landed_script,
             postcondition_fn=landed_marker_postcondition),
     StepDef("close_issues", "closing:stamped", "mechanical",
@@ -997,43 +1010,51 @@ STEPS: list[StepDef] = [
             script_fn=_upstream_push_script,
             postcondition_fn=push_postcondition),
     StepDef("archive_slot", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode),
+            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode),
             script_fn=_archive_slot_script,
             postcondition_fn=archive_move_postcondition),
     StepDef("report_archive", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode),
+            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode),
             script_fn=_report_archive_script),
     StepDef("elevate_plan", "closing:stamped", "mechanical",
-            skip_fn=_skip_not_slot,
+            skip_fn=_or_skip(_skip_not_slot, _skip_sync_mode),
             script_fn=_elevate_plan_script),
     StepDef("checkout_main", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode),
+            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode, _skip_sync_mode),
             script_fn=_checkout_main_script,
             postcondition_fn=checkout_main_postcondition),
     StepDef("cleanup_stack", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode),
+            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode, _skip_sync_mode),
             script_fn=_cleanup_stack_script),
     StepDef("cleanup", "closing:stamped", "mechanical",
-            skip_fn=_skip_cycle_mode,
+            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             script_fn=_cleanup_scaffold_script,
             postcondition_fn=cleanup_scaffold_postcondition),
     StepDef("report_scaffold", "closing:stamped", "mechanical",
+            skip_fn=_skip_sync_mode,
             script_fn=_report_scaffold_script),
     StepDef("arc42_scan", "closing:stamped", "judgment",
+            skip_fn=_skip_sync_mode,
             action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"}),
     StepDef("session_rename", "closing:stamped", "judgment",
+            skip_fn=_skip_sync_mode,
             action_context_fn=lambda ctx: {"CONTEXT": "session_rename"}),
     StepDef("garden_feedback", "closing:stamped", "judgment",
+            skip_fn=_skip_sync_mode,
             action_context_fn=lambda ctx: {"CONTEXT": "garden_feedback"}),
     StepDef("notes", "closing:stamped", "judgment",
+            skip_fn=_skip_sync_mode,
             action_context_fn=lambda ctx: {"CONTEXT": "notes"}),
 
-    # --- lifecycle: stamped -> idle/drained ---
+    # --- lifecycle: stamped -> idle/drained/active(sync) ---
+    StepDef("sync_pass", "closing:stamped", "lifecycle",
+            skip_fn=_skip_not_sync_mode,
+            from_state="closing:stamped", to_state="active", event="sync_pass"),
     StepDef("cleanup_pass", "closing:stamped", "lifecycle",
-            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode),
+            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode, _skip_sync_mode),
             from_state="closing:stamped", to_state="idle", event="cleanup_pass"),
     StepDef("cleanup_main", "closing:stamped", "lifecycle",
-            skip_fn=_or_skip(_skip_not_main, _skip_cycle_mode),
+            skip_fn=_or_skip(_skip_not_main, _skip_cycle_mode, _skip_sync_mode),
             from_state="closing:stamped", to_state="drained", event="cleanup_main"),
 
     # --- post-close ---
@@ -1085,6 +1106,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     slot_path = Path(args["slot_path"]) if args.get("slot_path") else None
     family_root = Path(args["family_root"]) if args.get("family_root") else None
     slot_num = args.get("slot_num", "")
+    mode = args.get("mode", "end")
 
     if args.get("abort") == "yes":
         return _handle_abort(workspace, meta_state)
@@ -1194,6 +1216,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         dry_run=dry_run, call_log=[],
         plan_path=plan_path, slot_path=slot_path,
         family_root=family_root, slot_num=slot_num,
+        mode=mode,
         expected_state=meta_state,
         slot_repos=slot_repos,
     )

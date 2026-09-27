@@ -2,13 +2,14 @@
 name: work
 description: >
   Use when the user says "work", "work end", "work pause", "work resume",
-  "work continue", "work next", or "work find" — detects current branch state
-  and routes to the correct work lifecycle skill automatically. "work" alone
-  starts new work or shows the pause stack. "work end" closes the branch.
-  "work pause" saves state. "work continue" keeps working on the current branch.
-  "work resume" restores a paused branch from the stack.
-  "work next" advances to the next issue in the .plan queue.
-  "work find" discovers and populates the queue with new work.
+  "work continue", "work next", "work sync", or "work find" — detects current
+  branch state and routes to the correct work lifecycle skill automatically.
+  "work" alone starts new work or shows the pause stack. "work end" closes the
+  branch. "work pause" saves state. "work continue" keeps working on the current
+  branch. "work resume" restores a paused branch from the stack. "work next"
+  advances to the next issue in the .plan queue. "work sync" lands completed
+  work without closing the branch. "work find" discovers and populates the
+  queue with new work.
 ---
 
 # work
@@ -31,12 +32,13 @@ correct skill — developer says `work` to begin, `work end` to close,
 | `work resume` / `resume` | → **work-resume** (pause-stack only; error if on active branch — see Step 1d) |
 | `work continue` / `continue` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
 | `work find` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
+| `work sync` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
 | `work` / `work start` | → run router (Step 1b) |
 | `resume handover` | → handover skill directly (manual invocation) |
 
 For `work end` and `work pause`, route immediately — no state
-detection needed. For `continue`, `next`, `end`, and `find`, the
-Python chaining engine (`work_chain.py`) determines the directive.
+detection needed. For `continue`, `next`, `sync`, `end`, and `find`,
+the Python chaining engine (`work_chain.py`) determines the directive.
 
 **Step 1c — Bidirectional chaining**
 
@@ -237,6 +239,9 @@ If `STACK_DEPTH > 0`:
 If `HAS_PLAN=yes`:
 > N. **next** — mark current issue done, advance to next in queue
 
+If `HAS_PLAN=yes` or multiple issues on branch:
+> N. **sync** — land completed work on main, keep branch open
+
 Always present:
 > N+1. **end** — close this branch, merge, push, return to main
 
@@ -372,6 +377,9 @@ the earlier brainstorming is directly relevant."
 Route to **work-pause** (saves current branch), then **work-resume**
 (shows pause stack picker).
 
+**On sync:**
+Route to Step 7 (`work sync`).
+
 **On end/pause/wrap:**
 Route to work-end, work-pause, or handover respectively.
 
@@ -471,6 +479,38 @@ Runs the enrichment/what-next pipeline (previously Step 2a).
      (garden search, load specs, check protocols)
 7. If zero items selected or enrichment returns nothing:
    Stay in current state. Report: "No work found."
+
+**Step 7 — `work sync` (land without closing)**
+
+Lands completed work via the close ceremony but returns to `active`
+instead of stamping/archiving. The branch stays open for continued work.
+
+1. Run ctx.py. Read `CHAIN_DIRECTIVE` — if not `proceed`, follow the
+   directive (Step 1c). The chaining engine blocks sync when on main,
+   paused, drained, or when no active issue exists.
+2. Fire transition:
+   ```bash
+   python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_sync
+   ```
+3. Commit transition:
+   ```bash
+   python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=active new_state=closing:review event=work_sync
+   ```
+4. Run the orchestrator in sync mode:
+   ```bash
+   python3 work-end/work_end_orchestrator.py \
+       workspace=<ws> project=<proj> branch=<branch> \
+       base_branch=<base> meta_state=closing:review \
+       mode=sync \
+       [covers=...] [issue_repo=...] [plan_path=...]
+   ```
+   The orchestrator runs the full close sequence. After `closing:merged`,
+   it fires `sync_pass` (→ `active`) instead of `stamp_pass` (→
+   `closing:stamped`). Terminal steps (stamp, archive, checkout main,
+   cleanup) and session-end judgment steps (arc42_scan, session_rename,
+   garden_feedback, notes) are skipped.
+5. After sync completes, state is `active`. Branch stays open.
+   Report: "Work synced — landed on main, branch still active."
 
 ---
 

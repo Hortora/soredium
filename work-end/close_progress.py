@@ -55,6 +55,7 @@ STEP_TO_PHASE = {
     "write_marker": "closing:promoted",
     "land": "closing:promoted",
     "report_land": "closing:promoted",
+    "sync_pass": "closing:stamped",
     "close_issues": "closing:stamped",
     "report_close_issues": "closing:stamped",
     "verify": "closing:stamped",

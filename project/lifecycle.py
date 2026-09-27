@@ -139,6 +139,9 @@ TRANSITION_TABLE: dict[tuple[str, str], tuple[str, list[str], list[str]]] = {
     ('closing:pushed', 'reset_for_next'):    ('active',            ['clear_closing_markers'],                                           []),
     ('closing:merged', 'reset_for_next'):    ('active',            ['clear_closing_markers'],                                           []),
     ('closing:stamped', 'reset_for_next'):   ('active',            ['clear_closing_markers'],                                           []),
+    # Sync (land without closing — returns to active after stamped)
+    ('active', 'work_sync'):                 ('closing:review',    ['pre_close_sweep'],                                                []),
+    ('closing:stamped', 'sync_pass'):        ('active',            ['clear_closing_markers'],                                          []),
 }
 
 INVALID_MESSAGES: dict[tuple[str, str], str] = {
@@ -170,6 +173,11 @@ INVALID_MESSAGES: dict[tuple[str, str], str] = {
     ('drained', 'work_next'):      "Queue is empty. Use `work find` to discover new work.",
     ('drained', 'work_continue'):  "Queue is drained. Use `work find` to discover new work.",
     ('drained', 'work'):           "Queue is drained. Use `work find` to discover new work, or `work start #N` for a specific issue.",
+    ('idle', 'work_sync'):       "Cannot sync — no active branch. Start work first.",
+    ('paused', 'work_sync'):     "Cannot sync — branch is paused. Resume first.",
+    ('drained', 'work_sync'):    "Cannot sync — queue is drained.",
+    ('scaffolded', 'work_sync'): "Cannot sync — branch not yet active.",
+    ('transitioning', 'work_sync'): "Cannot sync — issue transition in progress.",
 }
 
 
@@ -330,6 +338,7 @@ EVIDENCE_GATES: dict[str, list[str]] = {
     'stamp_pass':    ['stamp_shas'],
     'cleanup_pass':  ['repos_on_main', 'work_items_ended'],
     'cleanup_main':  ['work_items_ended'],
+    'sync_pass':     ['stamp_shas'],
 }
 
 
