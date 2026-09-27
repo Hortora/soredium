@@ -1342,6 +1342,10 @@ def main() -> int:
         if not key:
             print("ERROR=key is required", file=_sys.stderr)
             return 1
+        if key == "state":
+            print("ERROR=state writes must go through lifecycle.py commit-transition")
+            print("HINT=python3 project/lifecycle.py commit-transition <plan> from_state=<current> new_state=<target> event=<event>")
+            return 1
         tree = parse_plan(plan_path)
         tree.state[key] = value
         rewrite_plan(plan_path, tree)

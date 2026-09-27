@@ -96,7 +96,7 @@ def _git(repo: Path | str, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 LIFECYCLE_FILES = [
-    ".plan", "JOURNAL.md", ".execute-progress",
+    "JOURNAL.md", ".execute-progress",
     ".land-ledger.jsonl", ".artifacts-promoted",
     ".close-progress", ".close-report.json",
     ".close-log.jsonl", ".wrap-log.jsonl",

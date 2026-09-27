@@ -1769,7 +1769,7 @@ class TestSlotFormatGuard:
         )
         assert result.returncode != 0
 
-    def test_set_state_works_on_plan_file(self, tmp_path):
+    def test_set_state_blocks_state_field_on_plan(self, tmp_path):
         plan = tmp_path / ".plan"
         plan.write_text(SINGLE_ISSUE_PLAN)
         import subprocess
@@ -1778,8 +1778,8 @@ class TestSlotFormatGuard:
              "set-state", str(plan), "key=state", "value=closing:review"],
             capture_output=True, text=True,
         )
-        assert result.returncode == 0
-        assert "SET=state=closing:review" in result.stdout
+        assert result.returncode != 0
+        assert "lifecycle" in result.stdout.lower()
 
 
 PLAN_WITH_EPIC = """\

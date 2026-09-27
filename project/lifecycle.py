@@ -130,6 +130,15 @@ TRANSITION_TABLE: dict[tuple[str, str], tuple[str, list[str], list[str]]] = {
     # Abort (pre-artifact only)
     ('closing:review', 'abort_close'):       ('active',            ['clear_closing_markers'],                                           []),
     ('closing:verified', 'abort_close'):     ('active',            ['clear_closing_markers'],                                           []),
+    # Elevate (slot plan promotion — reset closing state to active)
+    ('closing:stamped', 'elevate'):          ('active',            ['elevate_plan_to_slot'],                                            []),
+    # Reset for next issue cycle (cleanup resets closing → active when queue has items)
+    ('closing:review', 'reset_for_next'):    ('active',            ['clear_closing_markers'],                                           []),
+    ('closing:verified', 'reset_for_next'):  ('active',            ['clear_closing_markers'],                                           []),
+    ('closing:promoted', 'reset_for_next'):  ('active',            ['clear_closing_markers'],                                           []),
+    ('closing:pushed', 'reset_for_next'):    ('active',            ['clear_closing_markers'],                                           []),
+    ('closing:merged', 'reset_for_next'):    ('active',            ['clear_closing_markers'],                                           []),
+    ('closing:stamped', 'reset_for_next'):   ('active',            ['clear_closing_markers'],                                           []),
 }
 
 INVALID_MESSAGES: dict[tuple[str, str], str] = {
@@ -186,6 +195,24 @@ def write_state(plan_path: Path, state: str) -> None:
 def write_branch(plan_path: Path, branch: str) -> None:
     """Write branch field to .plan's ## State section atomically."""
     write_field(plan_path, 'branch', branch)
+
+
+def _commit_plan_to_git(plan_path: Path, result: 'TransitionResult') -> None:
+    """Commit .plan state change to git. Best-effort — never blocks."""
+    workspace = plan_path.parent
+    try:
+        _sp.run(
+            ["git", "-C", str(workspace), "add", str(plan_path.name)],
+            capture_output=True, timeout=10,
+        )
+        _sp.run(
+            ["git", "-C", str(workspace), "commit",
+             "--no-verify", "-m",
+             f"chore: lifecycle {result.from_state} → {result.new_state}"],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass
 
 
 _DEPRECATED_EVENTS = {
@@ -425,6 +452,7 @@ def commit_transition(
             )
         if result.new_state != 'idle':
             write_state(plan_path, result.new_state)
+            _commit_plan_to_git(plan_path, result)
 
     if result.new_state == 'drained' and plan_path.exists():
         write_branch(plan_path, 'main')

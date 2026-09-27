@@ -509,13 +509,18 @@ def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
         return {"ELEVATED": "no", "REASON": "parse_error"}
 
     if not ctx.dry_run:
-        content = ws_plan.read_text()
-        lines = content.splitlines()
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith("state:") and "closing:" in stripped:
-                lines[i] = "state: active"
-        slot_plan.write_text("\n".join(lines) + "\n")
+        from lifecycle import TransitionResult, commit_transition, read_state
+        import shutil as _shutil
+        current = read_state(ws_plan)
+        if current and current.startswith("closing:"):
+            result = TransitionResult(
+                from_state=current, new_state="active", event="elevate",
+            )
+            try:
+                commit_transition(ws_plan, result)
+            except Exception:
+                pass
+        _shutil.copy2(ws_plan, slot_plan)
     elif ctx.call_log is not None:
         ctx.call_log.append(["(internal)", "elevate_plan", str(slot_plan)])
 

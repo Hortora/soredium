@@ -60,17 +60,22 @@ def _plan_has_remaining(plan_path: Path) -> bool:
 
 
 def _reset_plan_state(plan_path: Path) -> None:
-    """Reset .plan state from closing:* to active for next session."""
+    """Reset .plan state from closing:* to active via lifecycle transition."""
     if not plan_path.exists():
         return
-    content = plan_path.read_text()
-    lines = content.splitlines()
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("state:") and "closing:" in stripped:
-            lines[i] = "state: active"
-            break
-    plan_path.write_text("\n".join(lines) + "\n")
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    from lifecycle import TransitionResult, commit_transition, read_state
+    current = read_state(plan_path)
+    if current and current.startswith("closing:"):
+        result = TransitionResult(
+            from_state=current, new_state="active", event="reset_for_next",
+        )
+        try:
+            commit_transition(plan_path, result)
+        except Exception:
+            pass
 
 
 def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:

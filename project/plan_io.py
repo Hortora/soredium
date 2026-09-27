@@ -139,7 +139,20 @@ def has_uncompleted_items(plan_state: PlanState) -> bool:
     return any(not item.completed for item in plan_state.queue_items)
 
 
+def _validate_state_value(value: str) -> None:
+    try:
+        from lifecycle import VALID_STATES
+        if value not in VALID_STATES:
+            raise ValueError(
+                f"Invalid state '{value}'. Valid states: {sorted(VALID_STATES)}"
+            )
+    except ImportError:
+        pass
+
+
 def write_field(plan_path: Path, field_name: str, value: str) -> None:
+    if field_name == "state":
+        _validate_state_value(value)
     write_fields(plan_path, {field_name: value})
 
 

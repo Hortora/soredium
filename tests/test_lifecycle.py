@@ -1377,6 +1377,30 @@ class TestEvidenceGating:
             assert event in EVIDENCE_GATES, f"{event} should be gated"
 
 
+class TestElevateTransition:
+    """Tests for the elevate lifecycle event (slot plan promotion)."""
+
+    def test_elevate_transition_exists(self):
+        assert ("closing:stamped", "elevate") in TRANSITION_TABLE
+
+    def test_elevate_goes_to_active(self):
+        new_state, _, _ = TRANSITION_TABLE[("closing:stamped", "elevate")]
+        assert new_state == "active"
+
+    def test_elevate_from_closing_stamped(self, tmp_path):
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="closing:stamped", branch="issue-1-test")
+        result = transition(meta, "elevate")
+        assert result.new_state == "active"
+        assert result.from_state == "closing:stamped"
+
+    def test_elevate_from_active_fails(self, tmp_path):
+        meta = tmp_path / ".plan"
+        _write_plan(meta, state="active", branch="issue-1-test")
+        with pytest.raises(InvalidTransition):
+            transition(meta, "elevate")
+
+
 class TestIssueCycleTransition:
     """Tests for the issue_cycle lifecycle event."""
 
