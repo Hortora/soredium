@@ -598,6 +598,29 @@ class TestDiagnose:
         assert "S7_STALE_PLAN_ON_MAIN" in scenarios
 
 
+    def test_s7_subsumes_s5_on_main_with_stale_plan(self, tmp_path, monkeypatch):
+        """S5+S7 both fire for stale plan on main — S7 should suppress S5
+        so auto-recovery works instead of blocking on manual triage."""
+        from corruption import diagnose
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-382-pipeline", state="closing:promoted")
+        monkeypatch.setattr("corruption.subprocess.run", lambda *a, **kw: type('R', (), {
+            'stdout': '', 'returncode': 0,
+        })())
+        findings = diagnose(
+            plan_path=plan, meta_state="closing:promoted",
+            project=tmp_path, workspace=tmp_path,
+            current_branch="main", on_main=True, base_branch="main",
+            owner_repo="Hortora/soredium",
+        )
+        scenarios = [f.scenario for f in findings]
+        assert "S7_STALE_PLAN_ON_MAIN" in scenarios
+        assert "S5_BRANCH_MISMATCH" not in scenarios, "S7 should suppress S5"
+        s7 = [f for f in findings if f.scenario == "S7_STALE_PLAN_ON_MAIN"][0]
+        assert s7.auto_recoverable is True
+        assert s7.auto_action == "remove_plan"
+
+
 class TestS10SymlinkRoundtrip:
     def test_correct_roundtrip_no_finding(self, tmp_path):
         from corruption import check_symlink_roundtrip

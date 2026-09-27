@@ -435,17 +435,18 @@ def diagnose(
             return findings
 
         s5 = check_branch_mismatch(plan_path, workspace, current_branch, base_branch)
-        if s5:
+        s7 = check_stale_plan_on_main(plan_path, meta_state, base_branch, on_main)
+
+        if s7:
+            # S7 subsumes S5 — "stale plan on main" is the specific diagnosis
+            findings.append(s7)
+        elif s5:
             findings.append(s5)
 
-        if not s5:
+        if not s5 and not s7:
             s6 = check_branch_exists(plan_path, project)
             if s6:
                 findings.append(s6)
-
-        s7 = check_stale_plan_on_main(plan_path, meta_state, base_branch, on_main)
-        if s7:
-            findings.append(s7)
 
         s4 = check_closing_postconditions(meta_state, plan_path, project, workspace, base_branch)
         if s4:
