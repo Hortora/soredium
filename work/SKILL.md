@@ -14,543 +14,182 @@ description: >
 
 # work
 
-Unified entry point for the work lifecycle. Detects state and routes to the
-correct skill — developer says `work` to begin, `work end` to close,
-`work pause` to save and switch, `work resume` to return to paused work.
+Unified entry point for the work lifecycle. Routes to Python-driven
+pipelines for mechanical operations. The LLM handles routing decisions
+and judgment steps; `project/work.py` handles mechanical execution.
 
 ---
 
-## Routing
+## Step 1 — Parse and route
 
-**Step 1 — Parse the invocation and detect state**
+**Step 1a — Command table**
 
-| Invocation | Route to |
-|------------|---------|
-| `work end` | → **work-end** immediately (no router needed) |
-| `work pause` | → **work-pause** immediately (no router needed) |
-| `work next` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
-| `work resume` / `resume` | → **work-resume** (pause-stack only; error if on active branch — see Step 1d) |
-| `work continue` / `continue` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
-| `work find` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
-| `work sync` | → read `CHAIN_DIRECTIVE` from ctx.py → follow directive (Step 1c) |
-| `work` / `work start` | → run router (Step 1b) |
-| `resume handover` | → handover skill directly (manual invocation) |
+| Invocation | Route |
+|------------|-------|
+| `work end` | → **work-end** (work_end_orchestrator.py) |
+| `work sync` | → **work sync** (work_end_orchestrator.py mode=sync) |
+| `work pause` | → pipeline: `pause` |
+| `work resume` / `resume` | → pipeline: `resume` |
+| `work continue` / `continue` | → pipeline: `continue` |
+| `work next` | → pipeline: `next` |
+| `work find` | → pipeline: `find` |
+| `work` / `work start` | → router (Step 1b) → pipeline: `start` |
+| `resume handover` | → handover skill directly |
 
-For `work end` and `work pause`, route immediately — no state
-detection needed. For `continue`, `next`, `sync`, `end`, and `find`,
-the Python chaining engine (`work_chain.py`) determines the directive.
+For `continue`, `next`, `find`: read `CHAIN_DIRECTIVE` from ctx.py
+first (Step 1c).
+
+**Step 1b — Run ctx.py**
+
+```bash
+python3 ~/.claude/skills/project/ctx.py
+```
+
+Read all KEY=VALUE lines. These determine the route AND provide
+context for work.py args.
+
+**Step 1b-pre — Corruption triage (before normal routing)**
+
+If `CORRUPTION_COUNT` > 0, enter triage flow:
+
+- If `AUTO_RECOVERABLE=yes`: execute each `CORRUPTION_N_AUTO_ACTION`
+  without prompting, re-run ctx.py to verify.
+- If `AUTO_RECOVERABLE=no`: present findings with actions, wait for
+  user to pick. Execute actions, re-run ctx.py.
+
+| Action | Command |
+|--------|---------|
+| `accept_default` | No-op |
+| `write_active` | `lifecycle.py commit-transition ... new_state=active` |
+| `switch_to_plan_branch` | Checkout both repos to plan branch |
+| `update_plan_branch` | `plan_manager.py set-state ... key=branch value=<branch>` |
+| `remove_plan` | `rm <PLAN_PATH>` and commit |
+| `continue_close` | Route to work-end |
+| `rollback_to_active` | `lifecycle.py commit-transition ... new_state=active event=abort_close` |
+| `sync_plan_with_github` | `work_health.py --scope entry` |
+| `fetch_and_checkout` | `git fetch origin <branch> && git checkout <branch>` |
+| `ignore` | No-op |
 
 **Step 1c — Bidirectional chaining**
-
-For `continue`, `next`, `end`, and `find`: read `CHAIN_DIRECTIVE` from
-the ctx.py output. The Python chaining engine (`work_chain.py`) has
-already evaluated the current state and determined the correct action.
-Follow the directive:
 
 | DIRECTIVE | Action |
 |-----------|--------|
 | `proceed` | Continue with the invoked command |
-| `chain_to_next` | Redirect to `work next` (Step 5) |
-| `chain_to_end` | Redirect to **work-end** |
-| `chain_to_find` | Redirect to `work find` (Step 6) |
-| `guard_continue` | "Issue #ACTIVE_ISSUE still open. Continue working." → run continue path |
-| `guard_next` | "Queue has remaining items or unfinished work. Continue or advance?" → present choice |
-| `no_work_found` | "No work found." → stay in current state |
+| `chain_to_next` | Redirect to `next` pipeline |
+| `chain_to_end` | Redirect to work-end |
+| `chain_to_find` | Redirect to `find` pipeline |
+| `guard_continue` | "Issue still open. Continue working." → `continue` pipeline |
+| `guard_next` | "Queue has items. Continue or advance?" → present choice |
+| `no_work_found` | "No work found." → stay |
 
-The chaining engine handles all context detection — main vs branch,
-issue state, queue state, drained state. The LLM never makes these
-routing decisions itself.
-
-**Step 1d — Wrong-context error handling (work resume only)**
+**Step 1d — Wrong-context errors**
 
 | Invocation | Condition | Action |
 |------------|-----------|--------|
-| `work resume` | `ON_MAIN=no` (on feature branch, not paused) | Error: "Not paused — use `continue` to keep working, or `work pause` first." |
-| `work resume` | `ON_MAIN=yes` + `STACK_DEPTH=0` | Error: "Nothing to resume — pause stack is empty. Use `work` to start new work." |
-| `work start` | `ROUTE=resume_branch` | Redirect → `continue` + note: "Already on `<branch>` — continuing." |
+| `work resume` | on feature branch | Error: "Use `continue`, not `resume`." |
+| `work resume` | main + empty stack | Error: "Nothing to resume." |
+| `work start` | `ROUTE=resume_branch` | Redirect → `continue` |
 
-**Step 1b — Run the router**
-
-```bash
-python3 ~/.claude/skills/project/ctx.py
-# Read all fields from output — ctx.py includes both topology and
-# routing fields (ROUTE, ON_MAIN, STACK_DEPTH, HAS_HANDOFF, etc.)
-```
-
-ctx.py outputs all KEY=VALUE lines. Read them all — they determine
-the route AND provide context for the options menu. Do NOT re-derive
-this state with additional tool calls.
-
-**Step 1b-pre — Corruption triage (before normal routing)**
-
-If `CORRUPTION_COUNT` > 0, enter triage flow instead of normal routing.
-
-**Auto-recovery (deterministic cases):**
-
-If `AUTO_RECOVERABLE=yes`, all findings have a deterministic fix. Execute
-each finding's `CORRUPTION_N_AUTO_ACTION` without prompting:
-
-```
-🔧 Auto-recovering N finding(s):
-  1. [SCENARIO] — DETAIL → AUTO_ACTION
-  ...
-AUTO_RECOVERED=yes
-```
-
-After executing all auto-actions, re-run `ctx.py` to verify corruption
-is resolved. If `CORRUPTION_COUNT` is still > 0, fall through to manual
-triage below.
-
-**Manual triage (ambiguous cases):**
-
-If `AUTO_RECOVERABLE=no` (or auto-recovery didn't fully resolve):
-
-```
-⚠️ Lifecycle corruption detected (N finding(s)):
-
-  1. [SEVERITY] SCENARIO — DETAIL
-     Actions:
-       a. action_1 (Recommended)
-       b. action_2
-       c. action_3
-
-Pick actions (e.g. "1a 2a") or describe what you want:
-```
-
-After the user confirms actions, execute them:
-
-| Action | Command |
-|--------|---------|
-| `accept_default` | No-op — continue with defaulted state |
-| `write_active` | `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=idle new_state=active event=work` |
-| `write_scaffolded` | Same pattern with `new_state=scaffolded` |
-| `switch_to_plan_branch` | Branch Switch Helper from work-start |
-| `update_plan_branch` | `python3 ~/.claude/skills/work-slot/plan_manager.py set-state <PLAN_PATH> key=branch value=<current_branch>` |
-| `remove_plan` | `rm <PLAN_PATH>` and commit |
-| `continue_close` | Route to work-end at current gate |
-| `rollback_to_active` | `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=<current> new_state=active event=abort_close` |
-| `transition_to_drained` | Route to work-end |
-| `sync_plan_with_github` | `python3 project/work_health.py --scope entry --project $PROJECT --workspace $WORKSPACE --owner-repo $OWNER_REPO` |
-| `fetch_and_checkout` | `git -C $PROJECT fetch origin <branch> && git -C $PROJECT checkout <branch>` |
-| `recreate_branch` | Route to work-start with the issue number |
-| `ignore` | No-op — continue normally |
-
-After executing actions, re-run `ctx.py` to verify corruption is resolved.
-If `CORRUPTION_COUNT` is still > 0, report remaining findings.
-
-**Step 2 — Route based on output**
+## Step 2 — Route based on ctx.py output
 
 | `ROUTE` | Action |
 |---------|--------|
-| `start` | → what-next recommendation (Step 2a), then **work-start** |
-| `resume_stack` | → show stack picker (Step 3), then **work-resume** |
-| `resume_branch` | → contextual options (Step 4) |
-| `workspace_dirty` | → warn and offer to reset (Step 2b) |
-| `drained` | → "Queue drained. Run `work find` to discover new work, or `work start #N` for a specific issue." |
+| `start` | What-next recommendation (if no issue specified), then → `start` pipeline |
+| `resume_stack` | → `resume` pipeline (stack_pick handler shows picker) |
+| `resume_branch` | → contextual options menu |
+| `workspace_dirty` | Warn, offer reset, then → `start` pipeline |
+| `drained` | "Queue drained. Run `work find` or `work start #N`." |
 
-**Step 2a — What-next recommendation (when no issue specified)**
+**What-next recommendation (start without issue):**
 
-If the user invoked `work` without an issue number and `ROUTE=start`:
+1. `python3 scripts/enrichment.py refresh --repo $OWNER_REPO`
+2. `python3 scripts/enrichment.py what-next --repo $OWNER_REPO --mode general --limit 5`
+3. Present candidates. User picks → `start` pipeline with issue number.
 
-1. Refresh the GitHub cache:
-   ```bash
-   python3 scripts/enrichment.py refresh --repo $OWNER_REPO
-   ```
+**Contextual options (on feature branch):**
 
-2. Query for recommendations:
-   ```bash
-   python3 scripts/enrichment.py what-next --repo $OWNER_REPO --mode general --limit 5
-   ```
+Present: continue / switch / next / sync / end / pause / wrap.
+User picks → route to the matching pipeline or skill.
 
-3. If results exist and any are enriched, present them:
-   ```
-   Recommended next:
-     1. #42 — Fix caching bug (score: 12, quick-win, ready, compounding)
-     2. #55 — Refactor auth (score: 8, load-bearing, ready, stable)
-     3. #99 — Add tests (score: 0, not enriched)
+**Mid-session issue completion (D4):** When an issue completes during
+a session, check queue state before suggesting next action.
+Recommend `next` or `wrap` with reasoning. Never suggest work-end
+when queue has remaining issues.
 
-   Pick a number, type an issue #, or describe what you want to work on.
-   ```
+---
 
-4. If no enrichment data exists yet (all scores are 0) or what-next
-   returns no results, check HANDOFF.md for a What's Next section:
+## Orchestrator Loop
 
-   a. Read `$HANDOFF_PATH` (from router output) or `$WORKSPACE/HANDOFF.md`
-   b. Parse the What's Next table (if present)
-   c. If items found, present them:
-      ```
-      From last session's handover:
-        1. Layer 4a: Trust & routing (M / Med)
-        2. Layer 4b: CBR & incident lifecycle (M / High)
+For commands: `start`, `continue`, `pause`, `resume`, `next`, `find`.
 
-      Pick a number, type an issue #, or describe what you want to work on.
-      ```
-   d. If the user picks an item without an issue number, route to work-start
-      which invokes issue-workflow Phase 2 to create the issue.
-   e. If no HANDOFF.md or no What's Next section, route directly to work-start.
+Once routing determines the command, call `project/work.py` in a loop:
 
-5. **Surface notes (if present):**
-   If `$WORKSPACE/.notes/NOTES.md` exists, read the most recent date
-   section and surface it below the recommendations:
-   ```
-   Notes (2026-08-10):
-     - Remember to check auth token expiry after the migration
-     - [engine] reindex needed after next schema change
-   ```
-   Show only the most recent date section. Skip silently if the file
-   doesn't exist or is empty.
-
-6. If the user specified an issue number in their `work` invocation,
-   skip this step entirely — route directly to work-start with the
-   specified issue.
-
-7. User picks → route to **work-start** with the selected issue number.
-
-**Step 2b — Workspace on stale branch (workspace_dirty)**
-
-The workspace is on a non-main branch left by another session — the project
-is on main but the workspace wasn't switched back. This means another session
-switched the workspace branch without pausing.
-
-Present:
-
-> ⚠️ Workspace is on `$WORKSPACE_BRANCH` (project is on main).
-> Another session left the workspace on this branch.
->
-> 1. **reset** (Recommended) — switch workspace to main and start fresh.
->    The stale branch has no matching project branch, so continuing on it
->    risks misaligned state.
-> 2. **continue** — stay on this workspace branch. Choose this only if you
->    know the workspace branch has uncommitted work you need to preserve
->    before resetting.
-
-- **reset** → `git -C "$WORKSPACE" checkout main`, then route to **work-start**
-- **continue** → route to **work-start** (user takes responsibility for alignment)
-
-**Step 3 — Stack picker (on main, 1+ paused branches)**
-
-Show paused branches with age and note. Adapt phrasing to stack depth:
-
-```
-You have <N> paused branch(es):
-  1. <branch>  #<issue>  paused <duration> ago
-  2. <branch>  #<issue>  paused <duration> ago   (if N > 1)
-  ...
-
-Resume one, or start something new? (1 / 2 / ... / new)
-```
-
-- Number → **work-resume** with that branch pre-selected
-- `new` → **work-start**
-
-If stack depth > 3, prefix with: `⚠️  Stack has <N> paused branches — consider closing some before adding more.`
-
-**Step 4 — On feature branch: contextual options**
-
-Present options based on the router output. The router has already
-determined slot context, queue state, pause stack depth, and handoff
-existence — do NOT re-derive these.
-
-> 1. **continue** — keep working (loads context automatically)
-
-If `STACK_DEPTH > 0`:
-> 2. **switch** — you have <N> paused branch(es) — restore one from stack
-
-If `HAS_PLAN=yes`:
-> N. **next** — mark current issue done, advance to next in queue
-
-If `HAS_PLAN=yes` or multiple issues on branch:
-> N. **sync** — land completed work on main, keep branch open
-
-Always present:
-> N+1. **end** — close this branch, merge, push, return to main
-
-If `HAS_PLAN=yes` and queue has remaining items, annotate the end option:
-> N+1. **end** — ⚠️ queue has N remaining issues — close this branch, merge, push, return to main
-
-> N+2. **pause** — commit WIP, push to stack, switch to main
-> N+3. **wrap** — end session but keep branch open (write handover)
-
-**On continue (option 1):**
-
-**Lifecycle — auto-resolve transient states first:**
-
-Read `META_STATE` from the ctx.py output (already run in Step 1b).
-If the state is transient, resolve it before firing `work_continue`:
-
-| `META_STATE` | Action |
-|-------------|--------|
-| `scaffolded` | `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_setup` then `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=scaffolded new_state=active event=auto_setup` |
-| `transitioning` | `python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_refresh` then `python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=transitioning new_state=active event=auto_refresh` |
-| `active` | No auto-resolve needed — proceed directly |
-
-Then fire:
 ```bash
-python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_continue
+python3 project/work.py <command> \
+    workspace=$WORKSPACE project=$PROJECT \
+    branch=$BRANCH base_branch=$BASE_BRANCH \
+    on_main=$ON_MAIN in_slot=$IN_SLOT \
+    covers=$COVERS issue_repo=$ISSUE_REPO \
+    meta_state=$META_STATE owner_repo=$OWNER_REPO \
+    issue_n=$ISSUE_N issue_title=$ISSUE_TITLE \
+    has_handoff=$HAS_HANDOFF handoff_path=$HANDOFF_PATH \
+    has_platform_doc=$HAS_PLATFORM_DOC \
+    has_protocols_dir=$HAS_PROTOCOLS_DIR \
+    flyway_next_v=$FLYWAY_NEXT_V \
+    design_repo_key=$DESIGN_REPO_KEY \
+    [plan_path=$PLAN_PATH] [slot_path=$SLOT_PATH]
 ```
-Validates branch is `active`, emits worklog event. No state change (self-transition).
 
-When `HAS_HANDOFF=yes` (subsequent session):
+Read `ACTION=` from output. Dispatch:
 
-**.plan is the authority on remaining work — not the handoff.** The
-handoff is context from a prior session. The `.plan` is the live queue.
-When they disagree, trust the `.plan`.
+| ACTION | Handler |
+|--------|---------|
+| `resolve_issue` | Read `handlers/resolve-issue.md` |
+| `branch_name` | Read `handlers/branch-name.md` |
+| `platform_coherence` | Read `handlers/platform-coherence.md` |
+| `check_protocols` | Read `handlers/check-protocols.md` |
+| `brainstorm_offer` | Read `handlers/brainstorm-offer.md` |
+| `load_context` | Read `handlers/load-context.md` |
+| `stack_pick` | Read `handlers/stack-pick.md` |
+| `present_candidates` | Read `handlers/present-candidates.md` |
+| `deferred_check` | Read `handlers/deferred-check.md` |
+| `resolve_conflict` | Read `handlers/resolve-conflict.md` |
+| `complete` | Done. Report summary. |
+| `error` | Read ERROR= and STEP=. Diagnose and retry. |
+| `user_input` | A judgment step failed repeatedly. Ask the user. |
 
-1. **Check .plan FIRST** (before reading the handoff):
-   If `HAS_PLAN=yes`: read `.plan` at `$PLAN_PATH` for queue progress and
-   active issue. Display prominently:
-   ```
-   ━━━ Queue state ━━━
-   Position: $PLAN_POSITION
-   Active issue: #$ACTIVE_ISSUE — <title>
-   ━━━━━━━━━━━━━━━━━━━
-   ```
-   Set active issue for commit linkage (`Refs #$ACTIVE_ISSUE`).
-   If `ACTIVE_ISSUE` is non-empty, state: "Work remains on this branch."
-2. Read `$HANDOFF_PATH` — summarise last session's narrative.
-   **If the handoff does not mention the active issue from step 1**,
-   flag the divergence:
-   > ⚠️ Handoff is stale — does not reflect active issue #$ACTIVE_ISSUE.
-   > The .plan queue is the source of truth.
-3. Run health check:
-   ```bash
-   python3 ~/.claude/skills/project/work_health.py --scope entry --project $PROJECT --workspace $WORKSPACE --owner-repo $OWNER_REPO
-   ```
-   Syncs `.plan` with GitHub, validates workspace state.
-4. If `IN_SLOT=yes` and `HAS_PLAN=no`: read .slot for issue context
-5. **Load design specs (mandatory):** Run work-start Step 3c — scan workspace
-   and project for specs, read them all
-6. **Done-detection auto-suggest (D3):** If `ACTIVE_ISSUE` is empty after
-   health sync (issue was marked complete), suggest next action with a
-   **recommendation** (see §Decision-Point Recommendations below):
-   - If remaining items in queue: recommend `next` or `wrap` with reasoning
-   - If queue is empty: recommend `end` to close the branch
-7. Summarise what the last session accomplished and continue working.
-   Do NOT invoke work-start — the branch and scaffold already exist.
+After handling a judgment step, call work.py again with the same args
+plus `step_done=<step_name>` and any values the handler produced.
+Repeat until `ACTION=complete`.
 
-When `HAS_HANDOFF=no` (first session, or HANDOFF.md missing):
-1. Run work-start resume path (Steps 0, 2, 3, 3b, 3c, 11)
-   for platform coherence, protocols, spec loading, and IntelliJ pre-checks
-2. Run health check:
-   ```bash
-   python3 ~/.claude/skills/project/work_health.py --scope entry --project $PROJECT --workspace $WORKSPACE --owner-repo $OWNER_REPO
-   ```
-3. If `HAS_PLAN=yes` or `IN_SLOT=yes`: read .plan/slot context as above
-4. Done-detection auto-suggest (D3)
-5. Begin working — the branch and scaffold already exist.
+---
 
-**Mid-session issue completion (D4):** When the active issue is completed
-during a session (GitHub issue closed, user says "that's done", execution
-skill reports all tasks done, or a `Closes #N` commit is made), ALWAYS
-check queue state before suggesting next action:
+## Close / Sync (work-end orchestrator)
 
-1. Run `python3 ~/.claude/skills/project/ctx.py`
-2. Read `HAS_PLAN` and `ACTIVE_ISSUE`
-3. If `HAS_PLAN=yes`:
-   - If `ACTIVE_ISSUE` is non-empty → more work remains.
-     Recommend `next` or `wrap` with reasoning (see §Decision-Point
-     Recommendations below). Never suggest `work end` when items remain.
-   - If `ACTIVE_ISSUE` is empty → queue is exhausted.
-     Recommend `work end`.
-4. If `HAS_PLAN=no` → recommend `work end`.
+`work end` and `work sync` use `work_end_orchestrator.py` directly:
 
-**Never suggest work-end when the queue has remaining issues.**
+```bash
+python3 work-end/work_end_orchestrator.py \
+    workspace=$WORKSPACE project=$PROJECT branch=$BRANCH \
+    base_branch=$BASE meta_state=$META_STATE \
+    [mode=sync] [covers=...] [issue_repo=...] [plan_path=...]
+```
 
-**Decision-Point Recommendations:** Every time you present "continue vs
-wrap" or "next vs end" options, you MUST recommend one with reasoning.
-Never present bare options.
-
-**Always lead with a session summary.** The user loses track of how much
-work they've done. Before presenting options, state:
-- How many issues/tasks were completed this session
-- What they were (one-line each)
-- Approximate context budget remaining (from `<total_tokens>` in system reminders)
-
-**Context budget guidance:**
-- **>10M tokens remaining:** context is fresh — continue if the task fits
-- **5–10M tokens remaining:** moderate use — XS/S tasks fit comfortably,
-  M tasks are feasible, L+ tasks benefit from a fresh session
-- **<5M tokens remaining:** context is getting tight — wrap unless the
-  next task is XS and directly related to current work
-
-Factors to weigh:
-
-| Factor | Favours continue/next | Favours wrap |
-|--------|----------------------|--------------|
-| Context budget >10M tokens | yes | — |
-| Context budget 5–10M tokens | XS/S only | M+ |
-| Context budget <5M tokens | — | yes |
-| Next issue is in the same repo | yes | — |
-| Next issue is a topic change (different repo, different domain) | — | yes |
-| Session has been long (3+ issues completed) | — | yes |
-| Next issue is XS/S scale | yes | — |
-| Next issue is L/XL or High complexity | — | yes |
-| Current session built up relevant context for the next issue | yes | — |
-
-Example: "This session completed 2 issues: #377 (landing skip fix) and
-#380 (this decision-point update). ~12M tokens remaining — context is
-fresh. Next is #378 (clone directory, M scale, same repo, builds on
-today's slot discussion). I'd recommend continuing — the context from
-the earlier brainstorming is directly relevant."
-
-**On switch (option 2):**
-Route to **work-pause** (saves current branch), then **work-resume**
-(shows pause stack picker).
-
-**On sync:**
-Route to Step 7 (`work sync`).
-
-**On end/pause/wrap:**
-Route to work-end, work-pause, or handover respectively.
-
-**Step 5 — `work next` (advance to next issue in `.plan` queue)**
-
-Advances to the next issue in the `.plan` queue. Works identically in
-branch and slot mode — the `.plan` file is the single source of truth.
-
-**Precondition:** `.plan` must exist (`HAS_PLAN=yes` from ctx.py).
-
-Steps:
-
-1. Run `ctx.py` to resolve paths. Read `PLAN_PATH` from output.
-2. Fire transition:
-   ```bash
-   python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_next
-   ```
-   Read `EFFECTS=` from output — validates the transition, returns effects.
-3. Execute effects:
-   - `advance_issue`: Call `plan_manager.advance(<PLAN_PATH>)`.
-     The function atomically checks off the current issue and moves the
-     `← active` marker to the next leaf issue.
-   - `tick_github`: Check off the completed issue's checkbox on the
-     GitHub epic body (if the completed issue was an epic child).
-4. Commit transition:
-   ```bash
-   python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=<FROM> new_state=<NEW> event=work_next
-   ```
-   Writes `state: transitioning`.
-5. If `has_deferred` in the result → deferred items exist and the agreed
-   queue is complete. Read deferred items:
-   ```bash
-   python3 ~/.claude/skills/work-slot/plan_manager.py list-deferred <PLAN_PATH>
-   ```
-   Present each item individually with scale, complexity, and deferral reason.
-   The reason is the advice — it tells the user whether the item is feasible now.
-   ```
-   All planned issues complete. N deferred items:
-
-     0. <title> (S / Low) — <reason>
-        → Recommendation: feasible now, no blockers
-     1. <title> (M / High) — blocked by #55 upstream release
-        → Recommendation: not feasible until #55 lands
-     2. <title> (L / High) — needs schema migration first
-        → Recommendation: do in a separate branch after migration
-
-   Select items to add to queue (e.g. "0,2"), or "none" to close:
-   ```
-   Assess each item's feasibility based on its reason and the current context
-   (available repos, what just landed, known blockers). Items with no reason
-   or reasons that are no longer blocking should be recommended. Items with
-   active blockers should be flagged.
-
-   - **User selects items** → call `plan_manager.promote_selected(<PLAN_PATH>, [indices])`,
-     then proceed to step 8 (context refresh) with the first promoted item as active.
-     Remaining unselected items stay in the deferred list.
-   - **"none"** → run work-end. Deferred items stay in `.plan` for the next branch
-     or can be filed as GitHub issues.
-6. If `queue_complete` and not `has_deferred` → report: "All issues done. Run work end."
-7. If `batch_complete` and not `queue_complete` → log: "Batch N complete.
-   Safe exit point — run work end to close, or continue."
-8. **Context refresh (auto-resolve):**
-   ```bash
-   python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> auto_refresh
-   ```
-   Execute context refresh effects (garden search with new issue keywords,
-   load specs matching new issue, check protocols), then:
-   ```bash
-   python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=transitioning new_state=active event=auto_refresh
-   ```
-   The branch transitions back to `active`.
-9. Report new active issue. Set `Refs #<next-issue>` for commit linkage.
-
-**Step 6 — `work find` (discover and populate queue)**
-
-Discovers candidate work items and appends them to the `.plan` queue.
-Runs the enrichment/what-next pipeline (previously Step 2a).
-
-1. Run ctx.py. Read `CHAIN_DIRECTIVE` — if not `proceed`, follow the
-   directive (Step 1c). The chaining engine guards against calling find
-   when there is unfinished work.
-2. Refresh the GitHub cache:
-   ```bash
-   python3 scripts/enrichment.py refresh --repo $OWNER_REPO
-   ```
-3. Query for recommendations:
-   ```bash
-   python3 scripts/enrichment.py what-next --repo $OWNER_REPO --mode general --limit 5
-   ```
-4. Also check HANDOFF.md What's Next section if available.
-5. Present candidates. User selects items.
-6. If items selected:
-   - Append to queue: `python3 ~/.claude/skills/work-slot/plan_manager.py append <PLAN_PATH> issues=<N>:<title>,...`
-   - If no `.plan` exists, create one with `branch: main`, `state: active`
-   - If state is `drained`: fire `work_find` transition (`drained → transitioning`)
-   - Then `auto_refresh` (`transitioning → active`) with full context loading
-     (garden search, load specs, check protocols)
-7. If zero items selected or enrichment returns nothing:
-   Stay in current state. Report: "No work found."
-
-**Step 7 — `work sync` (land without closing)**
-
-Lands completed work via the close ceremony but returns to `active`
-instead of stamping/archiving. The branch stays open for continued work.
-
-1. Run ctx.py. Read `CHAIN_DIRECTIVE` — if not `proceed`, follow the
-   directive (Step 1c). The chaining engine blocks sync when on main,
-   paused, drained, or when no active issue exists.
-2. Fire transition:
-   ```bash
-   python3 ~/.claude/skills/project/lifecycle.py transition <PLAN_PATH> work_sync
-   ```
-3. Commit transition:
-   ```bash
-   python3 ~/.claude/skills/project/lifecycle.py commit-transition <PLAN_PATH> from_state=active new_state=closing:review event=work_sync
-   ```
-4. Run the orchestrator in sync mode:
-   ```bash
-   python3 work-end/work_end_orchestrator.py \
-       workspace=<ws> project=<proj> branch=<branch> \
-       base_branch=<base> meta_state=closing:review \
-       mode=sync \
-       [covers=...] [issue_repo=...] [plan_path=...]
-   ```
-   The orchestrator runs the full close sequence. After `closing:merged`,
-   it fires `sync_pass` (→ `active`) instead of `stamp_pass` (→
-   `closing:stamped`). Terminal steps (stamp, archive, checkout main,
-   cleanup) and session-end judgment steps (arc42_scan, session_rename,
-   garden_feedback, notes) are skipped.
-5. After sync completes, state is `active`. Branch stays open.
-   Report: "Work synced — landed on main, branch still active."
+These commands are NOT routed through `project/work.py`. They use the
+existing work-end close pipeline with its own step list and handlers.
 
 ---
 
 ## Skill Chaining
 
 **Routes to:**
-- `work-start` — when beginning new work from main
-- `work-resume` — when returning to a paused branch from main
-- `work-end` — when closing a completed branch or main work (includes full wrap + HANDOFF.md)
-- `work-pause` — when saving state to switch to something else
-- `handover` — when ending the session but keeping the branch open (mid-work wrap)
+- `work-end` (work_end_orchestrator.py) — for `end` and `sync` commands
+- `handover` — when user picks "wrap" from contextual options
 
-**Complements:**
-- `quick-fix` — lands small changes on main without a feature branch;
-  work routes to work-start for branch-based work
+**Uses:**
+- `project/work.py` — Python-driven pipeline for start/continue/pause/resume/next/find
+- `work_chain.py` — bidirectional chaining engine for routing directives
 
-**Depends on:**
-- `work_chain.py` — Python chaining engine that determines all routing
-  directives. The skill reads directives, never makes routing decisions.
-
-**This skill does not implement the lifecycle itself** — it detects state and
-delegates. All logic lives in the individual lifecycle skills and the
-Python chaining engine.
+**This skill routes and dispatches.** Mechanical execution lives in
+`work.py`. Judgment step details live in `handlers/*.md`. Close ceremony
+lives in `work_end_orchestrator.py`.
