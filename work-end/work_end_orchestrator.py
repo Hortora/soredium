@@ -246,6 +246,26 @@ def _skip_not_slot(ctx: OrchestratorContext) -> bool:
     return not ctx.in_slot
 
 
+def _skip_multi_repo_partial_close(ctx: OrchestratorContext) -> bool:
+    """Skip archival when a multi-repo slot has repos with remaining work."""
+    if not ctx.in_slot or not ctx.slot_repos or len(ctx.slot_repos) <= 1:
+        return False
+    if not ctx.slot_path:
+        return False
+    for repo_name in ctx.slot_repos:
+        repo_dir = ctx.slot_path / repo_name
+        if not repo_dir.is_dir():
+            continue
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "branch", "--show-current"],
+            capture_output=True, text=True, timeout=5,
+        )
+        branch = result.stdout.strip()
+        if branch and branch != ctx.base_branch and branch != "main":
+            return True
+    return False
+
+
 def _skip_no_covers(ctx: OrchestratorContext) -> bool:
     return not ctx.covers
 
@@ -1072,11 +1092,13 @@ STEPS: list[StepDef] = [
             script_fn=_upstream_push_script,
             postcondition_fn=push_postcondition),
     StepDef("archive_slot", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode),
+            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode,
+                             _skip_multi_repo_partial_close),
             script_fn=_archive_slot_script,
             postcondition_fn=archive_move_postcondition),
     StepDef("report_archive", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode),
+            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode,
+                             _skip_multi_repo_partial_close),
             script_fn=_report_archive_script),
     StepDef("elevate_plan", "closing:stamped", "mechanical",
             skip_fn=_or_skip(_skip_not_slot, _skip_sync_mode),
