@@ -63,7 +63,14 @@ def stamp_postcondition(ctx) -> bool:
 
 def promote_postcondition(ctx) -> bool:
     ws = getattr(ctx, "current_repo_workspace", None) or ctx.workspace
-    return (ws / ".artifacts-promoted").exists()
+    if (ws / ".artifacts-promoted").exists():
+        return True
+    project = getattr(ctx, "current_repo_project", None) or ctx.project
+    result = _git(project, "diff", "--stat",
+                  f"{ctx.base_branch}..{ctx.branch}")
+    if result.returncode == 0 and not result.stdout.strip():
+        return True
+    return False
 
 
 def archive_move_postcondition(ctx) -> bool:

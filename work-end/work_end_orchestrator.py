@@ -283,6 +283,21 @@ def _upstream_push_script(ctx):
             f"project={ctx.project}", f"base_branch={ctx.base_branch}"]
 
 
+def _skip_empty_branch(ctx) -> bool:
+    """Skip review/audit steps when branch has no code changes."""
+    if ctx.on_main:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(ctx.project), "diff", "--stat",
+             f"{ctx.base_branch}..{ctx.branch}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0 and not result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
 def _is_sweep_deselected(step_name: str):
     def check(ctx: OrchestratorContext) -> bool:
         if "sweep_selected" not in ctx.progress:
@@ -300,17 +315,49 @@ def _or_skip(*fns):
 
 
 def _skip_cycle_mode(ctx) -> bool:
-    """Skip terminal steps when .plan has remaining items (cycle mode)."""
+    """Skip terminal steps when .plan has remaining items (cycle mode).
+
+    Also returns False (don't skip terminal steps) when all covered
+    issues are already closed — even if uncompleted queue items exist,
+    cycling back to active on a closed issue causes an infinite loop.
+    """
     _project_dir = str(Path(__file__).resolve().parent.parent / "project")
     if _project_dir not in sys.path:
         sys.path.insert(0, _project_dir)
     try:
-        from plan_io import read_plan, has_uncompleted_items
+        from plan_io import read_plan, has_uncompleted_items, parse_covers
         ws_plan = Path(ctx.workspace) / ".plan"
         state = read_plan(ws_plan)
-        return state is not None and has_uncompleted_items(state)
+        if state is None or not has_uncompleted_items(state):
+            return False
+        covers = state.fields.get("covers", "")
+        issue_repo = state.fields.get("issue-repo", "")
+        if covers and issue_repo:
+            if _all_covers_closed_from_plan(covers, issue_repo):
+                return False
+        return True
     except Exception:
         return False
+
+
+def _all_covers_closed_from_plan(covers: str, issue_repo: str) -> bool:
+    """Check if all covered issues are closed on GitHub."""
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    from plan_io import parse_covers
+    for num in parse_covers(covers):
+        try:
+            result = subprocess.run(
+                ["gh", "issue", "view", str(num), "--repo", issue_repo,
+                 "--json", "state", "--jq", ".state"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0 or result.stdout.strip() != "CLOSED":
+                return False
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return False
+    return True
 
 
 def _skip_not_cycle_mode(ctx) -> bool:
@@ -983,24 +1030,31 @@ STEPS: list[StepDef] = [
     StepDef("report_init", "closing:review", "mechanical",
             script_fn=_report_init_script),
     StepDef("code_review", "closing:review", "judgment",
+            skip_fn=_skip_empty_branch,
             action_context_fn=_diff_range_context,
             verify_fn=_verify_produced_required),
     StepDef("branch_audit_conformance", "closing:review", "judgment",
+            skip_fn=_skip_empty_branch,
             action_context_fn=_dimension_context("conformance"),
             verify_fn=_verify_produced_required),
     StepDef("branch_audit_coherence", "closing:review", "judgment",
+            skip_fn=_skip_empty_branch,
             action_context_fn=_dimension_context("coherence"),
             verify_fn=_verify_produced_required),
     StepDef("branch_audit_structure", "closing:review", "judgment",
+            skip_fn=_skip_empty_branch,
             action_context_fn=_dimension_context("structure"),
             verify_fn=_verify_produced_required),
     StepDef("branch_audit_robustness", "closing:review", "judgment",
+            skip_fn=_skip_empty_branch,
             action_context_fn=_dimension_context("robustness"),
             verify_fn=_verify_produced_required),
     StepDef("loose_ends", "closing:review", "judgment",
+            skip_fn=_skip_empty_branch,
             action_context_fn=_loose_ends_context,
             verify_fn=_verify_produced_required),
     StepDef("forcing_function", "closing:review", "judgment",
+            skip_fn=_skip_empty_branch,
             action_context_fn=_forcing_function_context,
             verify_fn=_verify_forcing_function),
     StepDef("sweep_config", "closing:review", "judgment",
@@ -1044,7 +1098,7 @@ STEPS: list[StepDef] = [
             skip_fn=_skip_on_main,
             script_fn=_report_rebase_script),
     StepDef("squash", "closing:promoted", "judgment",
-            skip_fn=_skip_on_main,
+            skip_fn=_or_skip(_skip_on_main, _skip_empty_branch),
             action_context_fn=lambda ctx: {"REPOS": ctx.project.name},
             verify_fn=_verify_squash),
     StepDef("report_squash", "closing:promoted", "mechanical",
