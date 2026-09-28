@@ -91,7 +91,8 @@ def _yield_judgment(step_name: str, workspace: Path,
 
     update_close_progress(workspace, attempt_key, str(attempt))
     update_close_progress(workspace, "last_yielded", step_name)
-    result = {"ACTION": step_name}
+    result = {"ACTION": step_name,
+              "COMPLETE_WITH": f"step_done={step_name} produced=N"}
     result.update(context)
     return result
 
@@ -112,7 +113,8 @@ def _yield_user_input(step_name: str, workspace: Path,
         }
     update_close_progress(workspace, attempt_key, str(attempt))
     update_close_progress(workspace, "last_yielded", step_name)
-    return {"ACTION": "user_input", "STEP": step_name, **context}
+    return {"ACTION": "user_input", "STEP": step_name,
+            "COMPLETE_WITH": f"step_done={step_name}", **context}
 
 
 def validate_skip(workspace: Path, step: str) -> dict[str, str] | None:
