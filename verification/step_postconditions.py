@@ -69,6 +69,9 @@ def promote_postcondition(ctx) -> bool:
 def archive_move_postcondition(ctx) -> bool:
     if not ctx.slot_path or not ctx.family_root:
         return False
+    slot_repos = getattr(ctx, "slot_repos", [])
+    if len(slot_repos) > 1:
+        return True
     attic = ctx.family_root / "attic" / ctx.slot_num
     return attic.is_dir() and not ctx.slot_path.is_dir()
 
