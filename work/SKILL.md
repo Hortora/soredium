@@ -116,6 +116,36 @@ a session, check queue state before suggesting next action.
 Recommend `next` or `wrap` with reasoning. Never suggest work-end
 when queue has remaining issues.
 
+**Wrap-vs-continue guidance:**
+
+Do NOT use `<total_tokens>` to judge session freshness — compression
+resets the count, so it always reads ~15M regardless of how long the
+session has been running. A compressed context loses fidelity: earlier
+decisions, file contents, and reasoning are summarised, not preserved.
+
+Use **session work completed** as the signal instead:
+
+| Signal | Favours continue | Favours wrap |
+|--------|-----------------|--------------|
+| 0–1 issues completed this session | yes | — |
+| 2 issues completed | yes if next is related | wrap if topic change |
+| 3+ issues completed | — | yes |
+| Next issue is XS/S and same domain | yes | — |
+| Next issue is M+ or different domain | — | yes |
+| Session has hit compression (you can't recall early details) | — | yes |
+| Current work built context the next issue needs | yes | — |
+
+**Compression is not always bad.** When the session has moved in one
+direction — same domain, same codebase, decisions building on each
+other — compressed context still carries accumulated understanding
+that a cold start would have to rebuild from scratch. A fresh session
+re-reads files but loses the reasoning chain. Favour continuing when
+the next task builds directly on what this session explored, even if
+compression has happened. Favour wrapping when the next task is a
+topic change where the compressed context adds noise, not signal.
+
+Always recommend one option with reasoning. Never present bare choices.
+
 ---
 
 ## Orchestrator Loop
