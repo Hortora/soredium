@@ -21,6 +21,7 @@ if str(_project_dir) not in sys.path:
 from orchestrator_engine import run_loop, run_script
 from shared_steps import StepDef, OrchestratorContextBase
 from work_progress import read_progress, update_progress, delete_progress
+from conflict_resolution import make_rebase_error_handler
 
 VALID_COMMANDS = {"start", "continue", "pause", "resume", "next", "find"}
 
@@ -339,7 +340,11 @@ def main() -> int:
         print(f"ERROR=pipeline_not_implemented:{command}")
         return 1
     steps = PIPELINES[command]
-    result = run_loop(steps, ctx, complete_summary=f"{command} complete.")
+    result = run_loop(
+        steps, ctx,
+        on_mechanical_error=make_rebase_error_handler(),
+        complete_summary=f"{command} complete.",
+    )
     for k, v in result.items():
         print(f"{k}={v}")
     return 0
