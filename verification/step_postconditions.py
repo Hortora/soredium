@@ -32,11 +32,18 @@ def push_postcondition(ctx) -> bool:
     project = getattr(ctx, "current_repo_project", None) or ctx.project
     repo_name = project.name
     sha = ctx.landed_shas.get(repo_name, "")
-    if not sha:
+    if sha:
+        result = _git(project, "merge-base", "--is-ancestor",
+                      sha, f"origin/{ctx.base_branch}")
+        return result.returncode == 0
+    # Fallback: landed_shas may be empty if on_step_done hasn't run yet
+    # (postcondition checked before on_step_done in run_loop).
+    # Check git state directly: is local base branch pushed to remote?
+    local = _git(project, "rev-parse", ctx.base_branch)
+    remote = _git(project, "rev-parse", f"origin/{ctx.base_branch}")
+    if local.returncode != 0 or remote.returncode != 0:
         return False
-    result = _git(project, "merge-base", "--is-ancestor",
-                  sha, f"origin/{ctx.base_branch}")
-    return result.returncode == 0
+    return local.stdout.strip() == remote.stdout.strip()
 
 
 def stamp_postcondition(ctx) -> bool:

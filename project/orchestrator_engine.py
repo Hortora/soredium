@@ -242,6 +242,10 @@ def run_loop(
                 ctx.steps_executed.append(f"{step.name}:ERROR:{attempt}")
                 return _make_error_result(step.name, attempt, result)
 
+            ctx.last_output = result or {}
+            if on_step_done:
+                on_step_done(step, ctx, result or {})
+
             if step.postcondition_fn and not step.postcondition_fn(ctx):
                 attempt += 1
                 update_close_progress(ctx.workspace, attempt_key, str(attempt))
@@ -257,10 +261,6 @@ def run_loop(
                     "RETRY": str(attempt),
                     "REASON": f"Step '{step.name}' executed but postcondition not met",
                 }
-
-            ctx.last_output = result or {}
-            if on_step_done:
-                on_step_done(step, ctx, result or {})
             update_close_progress(ctx.workspace, step.name, "done")
             ctx.steps_executed.append(step.name)
             continue
