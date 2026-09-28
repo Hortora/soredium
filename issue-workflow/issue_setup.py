@@ -7,6 +7,7 @@ Subcommands:
   install-hooks <project>                       Install commit-msg hook
   create-epic <repo> title=<t> body-file=<path> Create epic issue
   create-issue <repo> title=<t> body-file=<path> labels=<csv> Create issue
+  link-sub-issue <repo> parent=<N> child-repo=<owner/repo> child=<N> Link child as native sub-issue
   update-scope <repo> epic=<N> body-file=<path> Update epic body
   activate-issues <repo> issues=<csv> project=<N> [status=<name>] Activate issues on project board
 
@@ -212,15 +213,59 @@ def create_issue(repo: str, title: str | None, body_file: str | None, labels: st
         print(f"ERROR=gh_failed stderr={stderr.strip()}")
         sys.exit(1)
 
-    # Extract issue number
+    # Extract issue number and fetch database ID for sub-issue linking
     for line in stdout.splitlines():
         if "/issues/" in line:
             issue_num = line.rstrip("/").split("/")[-1]
             print(f"ISSUE_NUMBER={issue_num}")
+            # Fetch database ID (needed for native sub-issue API)
+            rc, id_out, _ = run_gh(["api", f"/repos/{repo}/issues/{issue_num}", "--jq", ".id"])
+            if rc == 0 and id_out.strip():
+                print(f"ISSUE_ID={id_out.strip()}")
             return
 
     print("ERROR=could_not_parse_issue_number")
     sys.exit(1)
+
+
+def link_sub_issue(repo: str, parent: str | None, child_repo: str | None, child: str | None) -> None:
+    """Link a child issue as a native GitHub sub-issue of a parent."""
+    if not parent:
+        print("ERROR=missing_parent")
+        sys.exit(1)
+    if not child:
+        print("ERROR=missing_child")
+        sys.exit(1)
+
+    # child-repo defaults to same repo if not specified
+    target_repo = child_repo if child_repo else repo
+
+    # Get child issue database ID
+    rc, stdout, stderr = run_gh(["api", f"/repos/{target_repo}/issues/{child}", "--jq", ".id"])
+    if rc != 0:
+        print(f"ERROR=child_not_found child={target_repo}#{child}")
+        sys.exit(1)
+
+    child_db_id = stdout.strip()
+    if not child_db_id:
+        print(f"ERROR=child_id_not_found child={target_repo}#{child}")
+        sys.exit(1)
+
+    # Create native sub-issue link
+    rc, stdout, stderr = run_gh([
+        "api", f"/repos/{repo}/issues/{parent}/sub_issues",
+        "--method", "POST",
+        "-f", f"sub_issue_id={child_db_id}",
+    ])
+
+    if rc != 0:
+        if "one parent" in stderr.lower():
+            print(f"LINKED=already_has_parent child={target_repo}#{child}")
+        else:
+            print(f"ERROR=link_failed child={target_repo}#{child} stderr={stderr.strip()}")
+            sys.exit(1)
+    else:
+        print(f"LINKED=yes parent={repo}#{parent} child={target_repo}#{child}")
 
 
 def update_scope(repo: str, epic: str | None, body_file: str | None) -> None:
@@ -399,6 +444,13 @@ def main() -> None:
         body_file = args.get("body-file")
         labels = args.get("labels")
         create_issue(repo, title, body_file, labels)
+
+    elif subcommand == "link-sub-issue":
+        repo = args.get("target")
+        if not repo:
+            print("ERROR=missing_repo")
+            sys.exit(1)
+        link_sub_issue(repo, args.get("parent"), args.get("child-repo"), args.get("child"))
 
     elif subcommand == "update-scope":
         repo = args.get("target")

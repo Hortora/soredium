@@ -356,9 +356,26 @@ python3 ~/.claude/skills/issue-workflow/issue_setup.py create-issue {owner/repo}
   labels="{type-label},scale: {XS|S|M|L|XL},complexity: {Low|Med|High}"
 ```
 
-**Output:** `ISSUE_NUMBER=<N>` — the created issue's number.
+**Output:** `ISSUE_NUMBER=<N>` and `ISSUE_ID=<db_id>` — the created issue's number and database ID.
 
-Repeat for every task. Then update the epic's Scope checklist with real issue numbers.
+After creating each child issue, **link it as a native sub-issue** of the epic:
+
+```bash
+python3 ~/.claude/skills/issue-workflow/issue_setup.py link-sub-issue {owner/repo} \
+  parent={epic-number} child={child-number}
+```
+
+For cross-repo children (child issue in a different repo than the epic):
+
+```bash
+python3 ~/.claude/skills/issue-workflow/issue_setup.py link-sub-issue {owner/repo} \
+  parent={epic-number} child-repo={child-owner/child-repo} child={child-number}
+```
+
+**Output:** `LINKED=yes` — native sub-issue link created. GitHub automatically tracks
+completion progress on the parent via `sub_issues_summary`.
+
+Repeat for every task. Then update the epic body with the Scope section for human context:
 
 Write the updated epic body (with filled Scope section) to `/tmp/updated-epic-body.md`, then:
 
@@ -368,6 +385,10 @@ python3 ~/.claude/skills/issue-workflow/issue_setup.py update-scope {owner/repo}
 ```
 
 **Output:** `UPDATED=yes` — epic body updated successfully.
+
+> **Note:** The Scope section in the body is for human-readable context only. Progress
+> tracking is handled by native sub-issues — do not rely on body task lists (`- [ ] #N`)
+> for tracking. GitHub's sub-issues UI shows completion status automatically.
 
 ### Step 5 — Establish active epic and active issue
 
