@@ -304,7 +304,9 @@ def cmd_land(opts: dict[str, str]) -> int:
     repo_name = Path(project).name
     progress_key = f"{repo_name}:{branch}"
     if progress.get(progress_key) == "stamped":
+        landed_sha = git(project, "rev-parse", base_branch).stdout.strip()
         print("LANDED=yes")
+        print(f"LANDED_SHA={landed_sha}")
         print(f"SKIPPED={repo_name} already stamped")
         return 0
 
