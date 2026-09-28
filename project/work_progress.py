@@ -81,6 +81,11 @@ STEP_TO_PHASE = {
 }
 
 
+def _read_plan_state(plan_path: Path) -> str:
+    """Read the lifecycle state from a .plan file."""
+    return _read_plan_field(plan_path, "state") or ""
+
+
 def read_progress(workspace: Path) -> dict[str, str]:
     for name in (PROGRESS_FILE, LEGACY_FILE):
         path = workspace / name
