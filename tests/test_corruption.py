@@ -621,6 +621,49 @@ class TestDiagnose:
         assert s7.auto_action == "remove_plan"
 
 
+class TestS13MergeConflict:
+    def test_conflict_markers_detected(self, tmp_path):
+        from corruption import check_merge_conflict
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "## State\nbranch: issue-477-foo\nstate: active\n"
+            "<<<<<<< HEAD\ncovers: 477\n=======\ncovers: 480\n"
+            ">>>>>>> issue-480-bar\n"
+        )
+        finding = check_merge_conflict(plan)
+        assert finding is not None
+        assert finding.scenario == "S13_MERGE_CONFLICT"
+        assert finding.auto_recoverable is True
+        assert finding.auto_action == "remove_plan"
+
+    def test_clean_plan_no_finding(self, tmp_path):
+        from corruption import check_merge_conflict
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nbranch: issue-42-foo\nstate: active\n")
+        assert check_merge_conflict(plan) is None
+
+    def test_no_plan_no_finding(self, tmp_path):
+        from corruption import check_merge_conflict
+        assert check_merge_conflict(tmp_path / ".plan") is None
+
+    def test_diagnose_short_circuits_on_conflict(self, tmp_path, monkeypatch):
+        from corruption import diagnose
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "<<<<<<< HEAD\nstate: active\n=======\nstate: closing:review\n>>>>>>>\n"
+        )
+        monkeypatch.setattr("corruption.subprocess.run", lambda *a, **kw: type('R', (), {
+            'stdout': '', 'returncode': 0,
+        })())
+        findings = diagnose(
+            plan_path=plan, meta_state="",
+            project=tmp_path, workspace=tmp_path,
+            current_branch="main", on_main=True, base_branch="main",
+        )
+        assert len(findings) == 1
+        assert findings[0].scenario == "S13_MERGE_CONFLICT"
+
+
 class TestS10SymlinkRoundtrip:
     def test_correct_roundtrip_no_finding(self, tmp_path):
         from corruption import check_symlink_roundtrip

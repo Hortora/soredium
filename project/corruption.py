@@ -43,6 +43,25 @@ def _git(repo: Path, *args: str, timeout: int = 10) -> tuple[str, int]:
         return "", 1
 
 
+def check_merge_conflict(plan_path: Path) -> Optional[Finding]:
+    if not plan_path.exists():
+        return None
+    try:
+        content = plan_path.read_text()
+    except OSError:
+        return None
+    if "<<<<<<" in content or "=======" in content and ">>>>>>>" in content:
+        return Finding(
+            scenario="S13_MERGE_CONFLICT",
+            severity="error",
+            detail=f".plan contains merge conflict markers — file is corrupted",
+            actions=["remove_plan"],
+            auto_recoverable=True,
+            auto_action="remove_plan",
+        )
+    return None
+
+
 def check_missing_state(plan_path: Path) -> Optional[Finding]:
     state = read_plan(plan_path)
     if state is None:
@@ -424,6 +443,12 @@ def diagnose(
         if orphan:
             findings.append(orphan)
         return findings
+
+    s13 = check_merge_conflict(plan_path)
+    if s13:
+        findings.append(s13)
+        return findings
+
     try:
         s1 = check_missing_state(plan_path)
         if s1:
