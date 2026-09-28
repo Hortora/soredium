@@ -116,35 +116,33 @@ a session, check queue state before suggesting next action.
 Recommend `next` or `wrap` with reasoning. Never suggest work-end
 when queue has remaining issues.
 
-**Wrap-vs-continue guidance:**
+**Wrap-vs-continue decision:**
 
-Do NOT use `<total_tokens>` to judge session freshness — compression
-resets the count, so it always reads ~15M regardless of how long the
-session has been running. A compressed context loses fidelity: earlier
-decisions, file contents, and reasoning are summarised, not preserved.
+Present four things, then recommend:
 
-Use **session work completed** as the signal instead:
+1. **Context usage** — approximate percentage of the context window used.
+   Do NOT trust `<total_tokens>` — compression resets it, so it always
+   reads ~15M. Instead estimate from session work: each issue/task
+   consumes roughly 10-20% of the window. A session that has completed
+   3+ issues is likely past 50%. If you can't recall specifics from
+   early in the session without re-reading, compression has happened.
+2. **Next task scale and complexity** — XS/S/M/L/XL and Low/Med/High
+3. **Relevance to current context** — does the next task build on what
+   this session worked on, or is it a topic change?
+4. **Recommendation with reasoning** — one of:
+   - "Continue — context is ~30% used, next task is S/Low and builds
+     directly on the orchestrator work we just did"
+   - "Continue — context is full but next task is XS and same domain,
+     compressed context still carries the understanding we built"
+   - "Wrap — context is ~60% used and next task is a different repo
+     with different domain, fresh session will reason better"
+   - "Wrap — we've completed 4 issues, context is heavily compressed,
+     next task is M/High in a different area"
 
-| Signal | Favours continue | Favours wrap |
-|--------|-----------------|--------------|
-| 0–1 issues completed this session | yes | — |
-| 2 issues completed | yes if next is related | wrap if topic change |
-| 3+ issues completed | — | yes |
-| Next issue is XS/S and same domain | yes | — |
-| Next issue is M+ or different domain | — | yes |
-| Session has hit compression (you can't recall early details) | — | yes |
-| Current work built context the next issue needs | yes | — |
-
-**Compression is not always bad.** When the session has moved in one
-direction — same domain, same codebase, decisions building on each
-other — compressed context still carries accumulated understanding
-that a cold start would have to rebuild from scratch. A fresh session
-re-reads files but loses the reasoning chain. Favour continuing when
-the next task builds directly on what this session explored, even if
-compression has happened. Favour wrapping when the next task is a
-topic change where the compressed context adds noise, not signal.
-
-Always recommend one option with reasoning. Never present bare choices.
+Compressed context is not always bad — when the session moved in one
+direction, compressed understanding is still better than a cold start
+that has to re-read everything. Wrap when the next task is a topic
+change where compressed context adds noise, not signal.
 
 ---
 
