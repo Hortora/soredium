@@ -1,77 +1,45 @@
-"""slot_maven.py — Maven settings generation and slot repo setup."""
+"""slot_maven.py — Maven CLRM wrapper and slot repo setup.
 
-import shutil
+Uses Maven's Chained Local Repository Manager (3.9.0+) to layer a
+slot-specific .m2 over the host ~/.m2. The slot .m2 is the head
+(read-write), the host .m2 is the tail (read-only). No duplication
+of third-party deps, no staleness of org artifacts.
+"""
+
+import os
+import stat
 from pathlib import Path
 
 
-def _write_slot_settings(slot_dir: Path) -> Path:
-    """Generate a slot-specific settings.xml that adds the global ~/.m2/repository
-    as a file:// fallback remote. This lets Maven resolve artifacts from the host
-    cache without polluting it — writes go to the slot .m2, reads fall through."""
-    settings_path = slot_dir / "slot-settings.xml"
-    if settings_path.exists():
-        return settings_path
-    global_m2 = Path.home() / ".m2" / "repository"
-    settings_path.write_text(f"""\
-<settings>
-  <profiles>
-    <profile>
-      <id>slot-host-fallback</id>
-      <repositories>
-        <repository>
-          <id>host-m2</id>
-          <url>file://{global_m2}</url>
-          <releases><enabled>true</enabled></releases>
-          <snapshots><enabled>true</enabled><updatePolicy>always</updatePolicy></snapshots>
-        </repository>
-      </repositories>
-      <pluginRepositories>
-        <pluginRepository>
-          <id>host-m2-plugins</id>
-          <url>file://{global_m2}</url>
-          <releases><enabled>true</enabled></releases>
-          <snapshots><enabled>true</enabled><updatePolicy>always</updatePolicy></snapshots>
-        </pluginRepository>
-      </pluginRepositories>
-    </profile>
-  </profiles>
-  <activeProfiles>
-    <activeProfile>slot-host-fallback</activeProfile>
-  </activeProfiles>
-</settings>
+def generate_mvn_wrapper(slot_dir: Path) -> Path:
+    """Generate a slot-level mvn wrapper that configures CLRM.
+
+    The wrapper passes -Dmaven.repo.local (head) and
+    -Dmaven.repo.local.tail (tail) to every mvn invocation.
+    All repos in the slot use this wrapper instead of /opt/homebrew/bin/mvn.
+    """
+    wrapper = slot_dir / "mvn"
+    m2_path = slot_dir / ".m2" / "repository"
+    m2_path.mkdir(parents=True, exist_ok=True)
+    host_m2 = Path.home() / ".m2" / "repository"
+
+    wrapper.write_text(f"""\
+#!/bin/bash
+# Slot Maven wrapper — CLRM (Chained Local Repository Manager)
+# Head (read-write): slot .m2 — receives installed and cached artifacts
+# Tail (read-only):  host .m2 — shared deps, never modified by slot builds
+SLOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec /opt/homebrew/bin/mvn \\
+  -Dmaven.repo.local="${{SLOT_DIR}}/.m2/repository" \\
+  -Dmaven.repo.local.tail="{host_m2}" \\
+  "$@"
 """)
-    return settings_path
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return wrapper
 
 
 def setup_slot_repo(repo_worktree: Path, m2_path: Path) -> bool:
-    slot_dir = m2_path.parent
-    slot_settings = _write_slot_settings(slot_dir)
-
-    mvn_dir = repo_worktree / ".mvn"
-    mvn_dir.mkdir(parents=True, exist_ok=True)
-
-    local_settings = mvn_dir / "slot-settings.xml"
-    if not local_settings.exists():
-        shutil.copy2(slot_settings, local_settings)
-
-    config_file = mvn_dir / "maven.config"
-    repo_line = f"-Dmaven.repo.local={m2_path}"
-    settings_line = "--settings=.mvn/slot-settings.xml"
-    if config_file.exists():
-        content = config_file.read_text()
-        lines = content.splitlines()
-        fixed = [settings_line if l.strip().startswith("-s ") else l for l in lines]
-        content = "\n".join(fixed) + "\n" if fixed else ""
-        lines_to_add = []
-        if repo_line not in content:
-            lines_to_add.append(repo_line)
-        if settings_line not in content:
-            lines_to_add.append(settings_line)
-        if lines_to_add:
-            content = content.rstrip() + "\n" + "\n".join(lines_to_add) + "\n"
-        config_file.write_text(content)
-    else:
-        config_file.write_text(repo_line + "\n" + settings_line + "\n")
+    """Set up .gitignore for a slot repo. Returns True if .gitignore was modified."""
     BASELINE_PATTERNS = [
         ".mvn/maven.config",
         ".mvn/slot-settings.xml",

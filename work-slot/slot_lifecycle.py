@@ -37,7 +37,7 @@ from slot_metadata import (
     parse_slot_md, write_slot_md,
     is_slot_landed, verify_landed_shas, _fix_stale_checkboxes,
 )
-from slot_maven import setup_slot_repo
+from slot_maven import setup_slot_repo, generate_mvn_wrapper
 from slot_isx import (
     _check_isx_available, _truncate_instance_name,
     _teardown_isx, _wire_isx_remotes,
@@ -270,6 +270,7 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
         slot_dir.mkdir()
         m2_dir = slot_dir / ".m2"
         m2_dir.mkdir()
+        generate_mvn_wrapper(slot_dir)
         path_map: dict[str, str] = {}
 
         for repo_name in repos:
