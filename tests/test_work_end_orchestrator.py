@@ -263,7 +263,7 @@ class TestPostconditionVerification:
         import json
         audit = tmp_path / ".audit"
         audit.mkdir()
-        finding = {"status": "open", "detail": "test bug", "check": "t", "branch": "t"}
+        finding = {"status": "open", "detail": "test bug", "check": "t", "branch": "issue-271-test"}
         (audit / "findings.jsonl").write_text(json.dumps(finding) + "\n")
         result = self._run(tmp_path, step_done="forcing_function")
         assert result["ERROR"] == "postcondition_failed"
@@ -273,10 +273,47 @@ class TestPostconditionVerification:
         import json
         audit = tmp_path / ".audit"
         audit.mkdir()
-        finding = {"status": "resolved", "detail": "fixed", "check": "t", "branch": "t"}
+        finding = {"status": "resolved", "detail": "fixed", "check": "t", "branch": "issue-271-test"}
         (audit / "findings.jsonl").write_text(json.dumps(finding) + "\n")
         result = self._run(tmp_path, step_done="forcing_function")
         assert result.get("ERROR") != "postcondition_failed"
+
+    def test_forcing_function_ignores_other_branch_findings(self, tmp_path):
+        import json
+        audit = tmp_path / ".audit"
+        audit.mkdir()
+        findings = [
+            {"status": "open", "detail": "old bug", "check": "t", "branch": "issue-100-old"},
+            {"status": "open", "detail": "another old", "check": "t2", "branch": "issue-200-other"},
+        ]
+        (audit / "findings.jsonl").write_text("\n".join(json.dumps(f) for f in findings) + "\n")
+        result = self._run(tmp_path, step_done="forcing_function")
+        assert result.get("ERROR") != "postcondition_failed"
+
+    def test_forcing_function_ignores_unscoped_findings(self, tmp_path):
+        import json
+        audit = tmp_path / ".audit"
+        audit.mkdir()
+        findings = [
+            {"status": "open", "detail": "legacy finding", "check": "t"},
+            {"status": "open", "detail": "no branch field", "check": "t2"},
+        ]
+        (audit / "findings.jsonl").write_text("\n".join(json.dumps(f) for f in findings) + "\n")
+        result = self._run(tmp_path, step_done="forcing_function")
+        assert result.get("ERROR") != "postcondition_failed"
+
+    def test_forcing_function_blocks_on_current_branch_findings(self, tmp_path):
+        import json
+        audit = tmp_path / ".audit"
+        audit.mkdir()
+        findings = [
+            {"status": "open", "detail": "old bug", "check": "t", "branch": "issue-100-old"},
+            {"status": "open", "detail": "current bug", "check": "t2", "branch": "issue-271-test"},
+        ]
+        (audit / "findings.jsonl").write_text("\n".join(json.dumps(f) for f in findings) + "\n")
+        result = self._run(tmp_path, step_done="forcing_function")
+        assert result["ERROR"] == "postcondition_failed"
+        assert "1 open" in result["REASON"]
 
     def test_unverified_step_accepted_without_produced(self, tmp_path):
         result = self._run(tmp_path, step_done="trajectory")

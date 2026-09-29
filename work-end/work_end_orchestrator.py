@@ -973,27 +973,35 @@ def _loose_ends_context(ctx):
 
 def _forcing_function_context(ctx):
     findings_path = ctx.workspace / ".audit" / "findings.jsonl"
+    branch = ctx.branch
     count = 0
+    other_count = 0
     if findings_path.exists():
         for line in findings_path.read_text().splitlines():
             try:
                 entry = json.loads(line)
                 if entry.get("status", "open") == "open":
-                    count += 1
+                    if entry.get("branch") == branch:
+                        count += 1
+                    else:
+                        other_count += 1
             except (json.JSONDecodeError, ValueError):
                 pass
-    return {"CONTEXT": "forcing_function", "OPEN_FINDINGS": str(count)}
+    result = {"CONTEXT": "forcing_function", "OPEN_FINDINGS": str(count)}
+    if other_count:
+        result["OTHER_BRANCH_FINDINGS"] = str(other_count)
+    return result
 
 
 # --- Verify functions (postcondition checks) ---
 
-def _verify_produced_required(workspace: Path, produced: str | None) -> str | None:
+def _verify_produced_required(workspace: Path, produced: str | None, **_kw) -> str | None:
     if produced is None:
         return "produced count required — retry with: step_done=<STEP> produced=N (use 0 if no findings)"
     return None
 
 
-def _verify_squash(workspace: Path, produced: str | None) -> str | None:
+def _verify_squash(workspace: Path, produced: str | None, **_kw) -> str | None:
     for plan_file in workspace.glob(".squash-plan-*.json"):
         try:
             data = json.loads(plan_file.read_text())
@@ -1007,7 +1015,7 @@ def _verify_squash(workspace: Path, produced: str | None) -> str | None:
     return None
 
 
-def _verify_forcing_function(workspace: Path, produced: str | None) -> str | None:
+def _verify_forcing_function(workspace: Path, produced: str | None, branch: str = "") -> str | None:
     findings_path = workspace / ".audit" / "findings.jsonl"
     if not findings_path.exists():
         return None
@@ -1016,7 +1024,7 @@ def _verify_forcing_function(workspace: Path, produced: str | None) -> str | Non
     try:
         from findings import read_findings
         findings = read_findings(findings_path)
-        open_findings = [f for f in findings if f.get("status", "open") == "open"]
+        open_findings = [f for f in findings if f.get("status", "open") == "open" and f.get("branch") == branch]
         if open_findings:
             details = "; ".join(f.get("detail", "?")[:40] for f in open_findings[:3])
             return f"{len(open_findings)} open finding(s): {details}"
@@ -1293,7 +1301,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             }
         step_def = next((s for s in STEPS if s.name == step_name), None)
         if step_def and step_def.verify_fn:
-            verify_error = step_def.verify_fn(workspace, args.get("produced"))
+            verify_error = step_def.verify_fn(workspace, args.get("produced"), branch=branch)
             if verify_error:
                 rec("postcondition-failed", step=step_name, reason=verify_error)
                 return {
