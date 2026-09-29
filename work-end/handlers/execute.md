@@ -28,4 +28,10 @@ LLM does not need to handle this.
 ## verify_recover
 
 Verify returned VERIFIED=no. Present per-check failures from FAILURES=.
-Offer recovery: re-run the failing Execute sub-step, then re-run verify.
+ATTEMPT= shows the current attempt number (max 3). Offer recovery:
+re-run the failing Execute sub-step, then re-run verify.
+
+After 3 failed attempts, the orchestrator escalates to user_input
+with CONTEXT=final-gate-exhausted instead of looping. At that point,
+manual resolution is required — fix the issue, then pass
+force_done=verify to continue.

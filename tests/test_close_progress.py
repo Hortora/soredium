@@ -3,7 +3,7 @@
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -158,3 +158,49 @@ class TestIsStale:
             "sweep_selected": "forage,protocol",
         }
         assert is_stale(progress, "closing:promoted") is False
+
+    def test_not_stale_when_stamped_progress_and_branch_landed(self):
+        """Work landed on main — progress with stamped-phase steps is not stale
+        even if meta_state regressed to active/idle."""
+        progress = {
+            "review": "done", "promote": "done", "land": "done",
+            "verify": "done", "checkout_main": "done",
+        }
+        project = Path("/fake/project")
+        landed = MagicMock(return_value=True)
+        is_stale.__globals__["_branch_landed_on_main"] = landed
+        try:
+            assert is_stale(progress, "active", project=project, branch="feat-x") is False
+            landed.assert_called_once_with(project, "feat-x")
+        finally:
+            from close_progress import _branch_landed_on_main
+            is_stale.__globals__["_branch_landed_on_main"] = _branch_landed_on_main
+
+    def test_still_stale_when_stamped_progress_but_not_landed(self):
+        """Progress ahead of meta and branch NOT on main — genuinely stale."""
+        progress = {
+            "review": "done", "promote": "done", "land": "done",
+            "verify": "done", "checkout_main": "done",
+        }
+        project = Path("/fake/project")
+        landed = MagicMock(return_value=False)
+        is_stale.__globals__["_branch_landed_on_main"] = landed
+        try:
+            assert is_stale(progress, "active", project=project, branch="feat-x") is True
+        finally:
+            from close_progress import _branch_landed_on_main
+            is_stale.__globals__["_branch_landed_on_main"] = _branch_landed_on_main
+
+    def test_evidence_gate_not_checked_for_non_stamped_progress(self):
+        """If max progress phase is below closing:stamped, skip evidence check —
+        the work hasn't reached the landing stage yet."""
+        progress = {"review": "done", "promote": "done"}
+        assert is_stale(progress, "closing:review", project=Path("/x"), branch="b") is True
+
+    def test_evidence_gate_skipped_without_project_or_branch(self):
+        """Backward compat: no project/branch means skip evidence check."""
+        progress = {
+            "review": "done", "promote": "done", "land": "done",
+            "verify": "done", "checkout_main": "done",
+        }
+        assert is_stale(progress, "active") is True

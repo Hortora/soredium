@@ -3031,3 +3031,78 @@ class TestPostconditionsWired:
         required = [s for s in mechanical if s.name not in exempt]
         missing = [s.name for s in required if s.postcondition_fn is None]
         assert missing == [], f"Mechanical steps missing postcondition_fn: {missing}"
+
+
+class TestFinalGateRetryLimit:
+    """_final_gate tracks attempts and escalates to user_input after exhaustion."""
+
+    def _mark_all_done(self, tmp_path):
+        from close_progress import update_close_progress, STEP_TO_PHASE
+        from work_end_orchestrator import STEPS
+        for step in STEPS:
+            phase = STEP_TO_PHASE.get(step.name, step.phase)
+            if phase == "idle":
+                continue
+            update_close_progress(tmp_path, step.name, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+    def _call(self, tmp_path, meta_state="closing:stamped"):
+        from work_end_orchestrator import run_orchestrator
+        return run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-test",
+            "base_branch": "main",
+            "meta_state": meta_state,
+            "covers": "42",
+            "issue_repo": "Hortora/test",
+        })
+
+    def test_first_attempt_returns_verify_recover(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script",
+                            lambda cmd, ws, **kw: {"VERIFIED": "no", "FAILURE_1": "not pushed"})
+        _disable_postconditions(monkeypatch)
+        self._mark_all_done(tmp_path)
+        result = self._call(tmp_path)
+        assert result["ACTION"] == "verify_recover"
+        assert result.get("ATTEMPT") == "1"
+
+    def test_exhausted_attempts_returns_user_input(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script",
+                            lambda cmd, ws, **kw: {"VERIFIED": "no", "FAILURE_1": "not pushed"})
+        _disable_postconditions(monkeypatch)
+        self._mark_all_done(tmp_path)
+
+        from close_progress import update_close_progress
+        from work_end_orchestrator import MAX_FINAL_GATE_ATTEMPTS
+        update_close_progress(tmp_path, "_final_gate_attempt",
+                              str(MAX_FINAL_GATE_ATTEMPTS - 1))
+
+        result = self._call(tmp_path)
+        assert result["ACTION"] == "user_input"
+        assert result.get("CONTEXT") == "final-gate-exhausted"
+        assert int(result.get("ATTEMPTS", "0")) == MAX_FINAL_GATE_ATTEMPTS
+
+    def test_verified_yes_completes_regardless_of_attempts(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script",
+                            lambda cmd, ws, **kw: {"VERIFIED": "yes"})
+        _disable_postconditions(monkeypatch)
+        self._mark_all_done(tmp_path)
+
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "_final_gate_attempt", "2")
+
+        result = self._call(tmp_path)
+        assert result["ACTION"] == "complete"
+
+    def test_attempt_count_persisted_in_progress(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script",
+                            lambda cmd, ws, **kw: {"VERIFIED": "no"})
+        _disable_postconditions(monkeypatch)
+        self._mark_all_done(tmp_path)
+
+        self._call(tmp_path)
+
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("_final_gate_attempt") == "1"

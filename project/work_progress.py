@@ -5,6 +5,7 @@ Atomic write-then-rename. Reads .work-progress or .close-progress
 (backward compat). Writes .work-progress only.
 """
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -120,8 +121,38 @@ def delete_progress(workspace: Path) -> None:
             p.unlink()
 
 
+def _branch_landed_on_main(project: Path, branch: str) -> bool:
+    """Check if branch content reached main (merge-base ancestry or tree match)."""
+    if not project or not branch:
+        return False
+    try:
+        ancestor = subprocess.run(
+            ["git", "-C", str(project), "merge-base", "--is-ancestor",
+             branch, "main"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if ancestor.returncode == 0:
+            return True
+        tree_result = subprocess.run(
+            ["git", "-C", str(project), "rev-parse", f"{branch}~1^{{tree}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        main_tree = subprocess.run(
+            ["git", "-C", str(project), "rev-parse", "main^{tree}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if (tree_result.returncode == 0 and main_tree.returncode == 0
+                and tree_result.stdout.strip() == main_tree.stdout.strip()):
+            return True
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return False
+
+
 def is_stale(progress: dict[str, str], meta_state: str,
-             plan_path: Path | None = None) -> bool:
+             plan_path: Path | None = None,
+             project: Path | None = None,
+             branch: str = "") -> bool:
     if not progress:
         return False
     if plan_path and plan_path.exists():
@@ -142,7 +173,13 @@ def is_stale(progress: dict[str, str], meta_state: str,
         if phase in LIFECYCLE_PHASE_ORDER:
             idx = LIFECYCLE_PHASE_ORDER.index(phase)
             max_progress_idx = max(max_progress_idx, idx)
-    return max_progress_idx > meta_idx
+    if max_progress_idx <= meta_idx:
+        return False
+    stamped_idx = LIFECYCLE_PHASE_ORDER.index("closing:stamped")
+    if max_progress_idx >= stamped_idx and project and branch:
+        if _branch_landed_on_main(project, branch):
+            return False
+    return True
 
 
 # Backward compat aliases — work-end imports these names

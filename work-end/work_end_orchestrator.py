@@ -1337,7 +1337,8 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
             progress[sub] = "done"
         write_close_progress(workspace, progress)
 
-    if is_stale(progress, meta_state, plan_path=plan_path):
+    if is_stale(progress, meta_state, plan_path=plan_path,
+                project=project, branch=branch):
         rec("stale-progress-reset", meta_state=meta_state,
             progress_keys=",".join(progress.keys()))
         delete_close_progress(workspace)
@@ -1638,6 +1639,9 @@ def _close_mechanical_error(step: StepDef, ctx: OrchestratorContext,
     return {"ACTION": "user_input", **context}
 
 
+MAX_FINAL_GATE_ATTEMPTS = 3
+
+
 def _final_gate(ctx: OrchestratorContext) -> dict[str, str] | None:
     """Inescapable verify before ACTION=complete. Runs the verify script
     mechanically regardless of .close-progress — force_done cannot bypass this."""
@@ -1649,6 +1653,10 @@ def _final_gate(ctx: OrchestratorContext) -> dict[str, str] | None:
     cmd = verify_step.script_fn(ctx)
     if cmd is None:
         return None
+
+    attempt = int(ctx.progress.get("_final_gate_attempt", "0")) + 1
+    update_close_progress(ctx.workspace, "_final_gate_attempt", str(attempt))
+
     result = _run_script(cmd, ctx.workspace, dry_run=False, call_log=ctx.call_log)
     if result.get("VERIFIED") == "yes":
         return None
@@ -1656,10 +1664,25 @@ def _final_gate(ctx: OrchestratorContext) -> dict[str, str] | None:
     for k, v in result.items():
         if k.startswith("FAILURE_") or (isinstance(v, str) and "fail" in v.lower()):
             failures.append(f"{k}={v}")
+    failure_str = "; ".join(failures) if failures else "final gate verify failed"
+
+    if attempt >= MAX_FINAL_GATE_ATTEMPTS:
+        return {
+            "ACTION": "user_input",
+            "CONTEXT": "final-gate-exhausted",
+            "VERIFIED": "no",
+            "FAILURES": failure_str,
+            "ATTEMPTS": str(attempt),
+            "REASON": (f"Final gate failed {attempt} times. "
+                       "Manual intervention required — verify and resolve, "
+                       "then pass force_done=verify to continue."),
+        }
+
     return {
         "ACTION": "verify_recover",
         "VERIFIED": "no",
-        "FAILURES": "; ".join(failures) if failures else "final gate verify failed",
+        "FAILURES": failure_str,
+        "ATTEMPT": str(attempt),
         "REASON": "final-gate: landing must be verified before close completes",
     }
 
