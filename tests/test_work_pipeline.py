@@ -307,6 +307,77 @@ class TestFindPipeline:
         assert result["ACTION"] == "present_candidates"
 
 
+class TestStepDoneHandling:
+    def test_step_done_marks_judgment_step_complete(self, tmp_path):
+        from work import main, PIPELINES
+        from work_progress import read_progress
+        import sys as _sys
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        original = _sys.argv
+        _sys.argv = ["work.py", "continue",
+                      f"workspace={ws}", f"project={proj}",
+                      "branch=issue-42-foo", "base_branch=main",
+                      "on_main=no", "in_slot=no", "covers=42",
+                      "issue_repo=Org/repo", "meta_state=active",
+                      "owner_repo=Org/repo",
+                      "step_done=load_context"]
+        try:
+            main()
+        finally:
+            _sys.argv = original
+        progress = read_progress(ws)
+        assert progress.get("load_context") == "done"
+
+    def test_step_done_rejects_mechanical_step(self, tmp_path, capsys):
+        from work import main
+        import sys as _sys
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        original = _sys.argv
+        _sys.argv = ["work.py", "pause",
+                      f"workspace={ws}", f"project={proj}",
+                      "branch=issue-42-foo", "base_branch=main",
+                      "on_main=no", "in_slot=no", "covers=42",
+                      "issue_repo=Org/repo", "meta_state=active",
+                      "step_done=wip_commit_project"]
+        try:
+            code = main()
+        finally:
+            _sys.argv = original
+        assert code == 1
+        captured = capsys.readouterr()
+        assert "invalid_step_done" in captured.out
+
+    def test_skip_step_marks_step_skipped(self, tmp_path):
+        from work import main
+        from work_progress import update_progress, read_progress
+        import sys as _sys
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        update_progress(ws, "last_yielded", "brainstorm_offer")
+        original = _sys.argv
+        _sys.argv = ["work.py", "start",
+                      f"workspace={ws}", f"project={proj}",
+                      "branch=issue-42-foo", "base_branch=main",
+                      "on_main=no", "in_slot=no", "covers=42",
+                      "issue_repo=Org/repo", "meta_state=active",
+                      "issue_n=42",
+                      "skip_step=brainstorm_offer"]
+        try:
+            main()
+        finally:
+            _sys.argv = original
+        progress = read_progress(ws)
+        assert progress.get("brainstorm_offer") == "skipped"
+
+
 class TestAllPipelinesRegistered:
     def test_all_commands_have_pipelines(self):
         from work import PIPELINES, VALID_COMMANDS

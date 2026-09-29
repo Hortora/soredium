@@ -339,6 +339,29 @@ def main() -> int:
     if command not in PIPELINES:
         print(f"ERROR=pipeline_not_implemented:{command}")
         return 1
+
+    if args.get("step_done"):
+        from orchestrator_engine import apply_step_done
+        steps = PIPELINES[command]
+        mechanical = {s.name for s in steps if s.step_type == "mechanical"}
+        err = apply_step_done(ctx.workspace, args["step_done"],
+                              args.get("produced"),
+                              mechanical_steps=mechanical)
+        if err:
+            for k, v in err.items():
+                print(f"{k}={v}")
+            return 1
+        ctx.progress = read_progress(ctx.workspace)
+
+    if args.get("skip_step"):
+        from orchestrator_engine import validate_skip
+        err = validate_skip(ctx.workspace, args["skip_step"])
+        if err:
+            for k, v in err.items():
+                print(f"{k}={v}")
+            return 1
+        ctx.progress = read_progress(ctx.workspace)
+
     steps = PIPELINES[command]
     result = run_loop(
         steps, ctx,
