@@ -199,7 +199,7 @@ def _review_step_detail(step_name: str, progress: dict[str, str],
     if step_name == "loose_ends":
         by_source = _findings_by_source(findings)
         le_findings = by_source.get("loose-ends-sweep", [])
-        count = int(produced) if produced else len(le_findings)
+        count = int(produced) if produced and produced.isdigit() else len(le_findings)
         return f"{count} finding{'s' if count != 1 else ''}" if count else "clean"
 
     if step_name == "forcing_function":
