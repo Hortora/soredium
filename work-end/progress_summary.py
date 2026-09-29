@@ -186,14 +186,14 @@ def _review_step_detail(step_name: str, progress: dict[str, str],
     if step_name == "code_review":
         by_source = _findings_by_source(findings)
         code_findings = by_source.get("code-review", [])
-        count = int(produced) if produced else len(code_findings)
+        count = int(produced) if produced and produced.isdigit() else len(code_findings)
         return f"{count} finding{'s' if count != 1 else ''}" if count else "clean"
 
     if step_name in DIMENSION_MAP:
         dim = DIMENSION_MAP[step_name]
         by_dim = _findings_by_dimension(findings)
         dim_findings = by_dim.get(dim, [])
-        count = int(produced) if produced else len(dim_findings)
+        count = int(produced) if produced and produced.isdigit() else len(dim_findings)
         return f"{count} finding{'s' if count != 1 else ''}" if count else "clean"
 
     if step_name == "loose_ends":
