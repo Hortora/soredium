@@ -897,6 +897,41 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     print(f"ARCHIVED={slot_num}")
 
 
+def process_archive_requests(family_root: Path) -> list[dict]:
+    """Find slots with .archive-requested markers and archive if no active sessions."""
+    from slot_claude import find_active_sessions, check_occupant_pid
+    results = []
+    for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+        slots_dir = family_root / dir_name
+        if not slots_dir.is_dir():
+            continue
+        for entry in sorted(slots_dir.iterdir()):
+            if not entry.is_dir() or entry.name == "attic":
+                continue
+            marker = entry / ".archive-requested"
+            if not marker.exists():
+                continue
+            try:
+                slot_num = int(entry.name)
+            except ValueError:
+                continue
+            alive, pid = check_occupant_pid(entry)
+            if alive:
+                results.append({"slot": slot_num, "action": "deferred",
+                                "reason": f"occupant PID {pid} still alive"})
+                continue
+            active = find_active_sessions(entry)
+            if active:
+                pids = [str(p) for p, _, _ in active]
+                results.append({"slot": slot_num, "action": "deferred",
+                                "reason": f"active sessions: {','.join(pids)}"})
+                continue
+            marker.unlink(missing_ok=True)
+            archive_slot(family_root, slot_num, force=True)
+            results.append({"slot": slot_num, "action": "archived"})
+    return results
+
+
 def restore_slot(family_root: Path, slot_num: int) -> None:
     attic_dir = family_root / SLOT_DIR_NAME / "attic" / str(slot_num)
     if not attic_dir.exists():

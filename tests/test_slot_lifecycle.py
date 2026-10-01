@@ -2476,3 +2476,71 @@ class TestStripInheritedLifecycle:
         ws_clone = slot_dir / "wsp-casehub-engine"
         assert not (ws_clone / ".plan").exists() or "stale" not in (ws_clone / ".plan").read_text(), \
             "Stale .plan from main survived into slot workspace clone"
+
+
+class TestProcessArchiveRequests:
+    """process_archive_requests processes .archive-requested markers."""
+
+    def test_archives_slot_with_marker_and_no_sessions(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("slot_claude.find_active_sessions", lambda d: [])
+        monkeypatch.setattr("slot_claude.check_occupant_pid", lambda d: (False, None))
+        monkeypatch.setattr("slot_lifecycle._has_unmerged_content", lambda d: [])
+        monkeypatch.setattr("slot_lifecycle.verify_landed_shas", lambda d, f: (True, []))
+        monkeypatch.setattr("slot_lifecycle._repack_broken_alternates", lambda d, f: 0)
+        monkeypatch.setattr("slot_lifecycle._teardown_isx", lambda d: None)
+        monkeypatch.setattr("slot_lifecycle.sweep_orphaned_claude_projects", lambda f: 0)
+        monkeypatch.setattr("slot_lifecycle._escape_slot_cwd", lambda d, f: (False, None))
+        monkeypatch.setattr("slot_lifecycle.relocate_claude_projects", lambda s, d: 0)
+
+        slot_dir = tmp_path / "slots" / "50"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".landed").write_text("landed_shas=abc:123\n")
+        (slot_dir / ".slot").write_text("## Repos\n- blocks (primary)\n\n## State\nstate: landed\n")
+        (slot_dir / ".archive-requested").write_text("requested_by=test\n")
+        repo = slot_dir / "blocks"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+
+        results = slot_lifecycle.process_archive_requests(tmp_path)
+        assert len(results) == 1
+        assert results[0]["slot"] == 50
+        assert results[0]["action"] == "archived"
+        assert not slot_dir.exists()
+        assert (tmp_path / "slots" / "attic" / "50").is_dir()
+
+    def test_defers_when_active_session(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "slot_claude.find_active_sessions",
+            lambda d: [(99999, "claude", str(d))],
+        )
+        monkeypatch.setattr("slot_claude.check_occupant_pid", lambda d: (False, None))
+
+        slot_dir = tmp_path / "slots" / "51"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".archive-requested").write_text("requested_by=test\n")
+
+        results = slot_lifecycle.process_archive_requests(tmp_path)
+        assert len(results) == 1
+        assert results[0]["action"] == "deferred"
+        assert slot_dir.exists()
+        assert (slot_dir / ".archive-requested").exists()
+
+    def test_skips_slots_without_marker(self, tmp_path, monkeypatch):
+        slot_dir = tmp_path / "slots" / "52"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text("test\n")
+
+        results = slot_lifecycle.process_archive_requests(tmp_path)
+        assert len(results) == 0
+
+    def test_defers_when_occupant_pid_alive(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("slot_claude.check_occupant_pid", lambda d: (True, 12345))
+
+        slot_dir = tmp_path / "slots" / "53"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".archive-requested").write_text("requested_by=test\n")
+
+        results = slot_lifecycle.process_archive_requests(tmp_path)
+        assert len(results) == 1
+        assert results[0]["action"] == "deferred"
+        assert "12345" in results[0]["reason"]

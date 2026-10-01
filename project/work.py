@@ -173,7 +173,17 @@ def _skip_flyway_none(ctx) -> bool:
     return ctx.flyway_next_v == "none"
 
 
+def _process_pending_archives_script(ctx):
+    if not ctx.family_root:
+        return None
+    slot_cli = _project_dir.parent / "work-slot" / "slot_manager.py"
+    return ["python3", str(slot_cli), "process-archive-requests", str(ctx.family_root)]
+
+
 START_STEPS: list[StepDef] = [
+    StepDef("process_archive_requests", "start", "mechanical",
+            skip_fn=lambda ctx: not ctx.family_root,
+            script_fn=_process_pending_archives_script),
     StepDef("sync_main", "start", "mechanical",
             script_fn=lambda ctx: [
                 "python3", str(_WORK_START_DIR / "branch_create.py"), "sync-main",

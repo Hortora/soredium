@@ -199,6 +199,22 @@ def _scan_db(family_root: str) -> dict[int, dict]:
     }
 
 
+def _process_pending_archives(family_root: Path) -> None:
+    """Process .archive-requested markers before the main audit."""
+    try:
+        from slot_lifecycle import process_archive_requests
+    except ImportError:
+        return
+    results = process_archive_requests(family_root)
+    for r in results:
+        if r["action"] == "archived":
+            print(f"  ARCHIVE: slot {r['slot']} archived (was marked for archiving)")
+        else:
+            print(f"  ARCHIVE: slot {r['slot']} deferred — {r['reason']}")
+    if results:
+        print()
+
+
 def audit(family_root: Path) -> list[dict]:
     """Phase 1: scan disk and DB, classify all divergences."""
     disk = _scan_disk(family_root)
@@ -801,6 +817,8 @@ def main() -> int:
         phase = "execute"
     elif "--strategy" in sys.argv:
         phase = "strategy"
+
+    _process_pending_archives(family_root)
 
     divergences = audit(family_root)
     if not divergences:

@@ -134,6 +134,14 @@ def main() -> None:
         resolution = args.get("resolution")
         archive_slot(family_root, slot_num, force=force, resolution=resolution)
 
+    elif subcommand == "process-archive-requests":
+        family_root = Path(args.get("target", "."))
+        from slot_lifecycle import process_archive_requests
+        results = process_archive_requests(family_root)
+        for r in results:
+            print(f"SLOT={r['slot']} ACTION={r['action']}"
+                  + (f" REASON={r['reason']}" if r.get('reason') else ""))
+
     elif subcommand == "restore-slot":
         family_root = Path(args.get("target", "."))
         slot_num = int(args.get("slot", "0"))
