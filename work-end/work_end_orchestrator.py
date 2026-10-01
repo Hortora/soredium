@@ -974,6 +974,8 @@ def _loose_ends_context(ctx):
         "WORKSPACE": str(ctx.workspace),
         "PROJECT": str(ctx.project),
         "BRANCH": ctx.branch,
+        "COVERS": ctx.covers or "",
+        "BASE_BRANCH": ctx.base_branch,
     }
 
 

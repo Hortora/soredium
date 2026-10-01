@@ -46,11 +46,21 @@ you skipped.
 Run the loose ends sweep script:
 
 ```bash
-python3 work-end/loose_ends_sweep.py workspace=$WORKSPACE project=$PROJECT branch=$BRANCH cycle_start=<ISO>
+python3 work-end/loose_ends_sweep.py workspace=$WORKSPACE project=$PROJECT branch=$BRANCH covers=$COVERS base_branch=$BASE_BRANCH cycle_start=<ISO>
 ```
 
 Pass `cycle_start` as the timestamp when code_review started — this
 filters out findings just written by prior review steps.
+
+The script checks three things:
+1. Deferred plan items (from .plan)
+2. TODOs referencing the branch issue
+3. **Commit coverage** — commits referencing issues NOT in `covers`
+
+Commit coverage findings (`check: commit-outside-covers`) are serious —
+they mean work on this branch won't land. Present each orphaned commit
+to the user and ask: land it (add to covers), defer it (file a new
+issue), or acknowledge it (already landed elsewhere, duplicate, etc).
 
 Supplement script output with conversation-context items
 ("I'll come back to this") and append those to `findings.jsonl`.

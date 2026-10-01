@@ -112,6 +112,72 @@ def scan_todos(project: str, branch: str) -> list[dict]:
     return findings
 
 
+ISSUE_REF_PATTERN = re.compile(
+    r"(?:Refs|Closes|Fixes|refs|closes|fixes)?\s*#(\d+)"
+    r"|(?:\(#(\d+)\))"
+)
+
+
+def _extract_issue_refs(message: str) -> set[int]:
+    """Extract issue numbers from a commit message."""
+    refs: set[int] = set()
+    for m in ISSUE_REF_PATTERN.finditer(message):
+        num = m.group(1) or m.group(2)
+        if num:
+            refs.add(int(num))
+    return refs
+
+
+def scan_commit_coverage(project: str, branch: str, covers: str,
+                         base: str = "main") -> list[dict]:
+    """Flag commits referencing issues not in the covers list."""
+    if not project or not branch or not covers:
+        return []
+    covers_set = {int(c.strip()) for c in covers.split(",") if c.strip().isdigit()}
+    if not covers_set:
+        return []
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", project, "log", "--format=%H %s", f"{base}..{branch}"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return []
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+
+    findings: list[dict] = []
+    stamp = datetime.now(timezone.utc).isoformat()
+
+    for line in result.stdout.strip().splitlines():
+        if not line.strip():
+            continue
+        parts = line.split(" ", 1)
+        if len(parts) < 2:
+            continue
+        sha, subject = parts[0], parts[1]
+        if subject.startswith("chore: branch closed") or subject.startswith("chore: commit lifecycle"):
+            continue
+        refs = _extract_issue_refs(subject)
+        orphaned = refs - covers_set
+        for issue_num in sorted(orphaned):
+            findings.append({
+                "category": "loose-end",
+                "check": "commit-outside-covers",
+                "location": f"{sha[:8]}",
+                "detail": f"Commit {sha[:8]} references #{issue_num} (not in covers: {covers}): {subject[:120]}",
+                "severity": "warning",
+                "source": "loose-ends-sweep",
+                "branch": branch,
+                "status": "open",
+                "timestamp": stamp,
+                "issue_num": issue_num,
+            })
+
+    return findings
+
+
 def count_prior_open(workspace: str, branch: str, cycle_start: str | None = None) -> int:
     findings_path = Path(workspace) / ".audit" / "findings.jsonl"
     if not findings_path.exists():
@@ -131,6 +197,8 @@ def main() -> int:
     workspace = args.get("workspace", "")
     project = args.get("project", "")
     branch = args.get("branch", "")
+    covers = args.get("covers", "")
+    base_branch = args.get("base_branch", "main")
     cycle_start = args.get("cycle_start")
 
     if not workspace or not branch:
@@ -142,6 +210,7 @@ def main() -> int:
 
     if project:
         new_findings.extend(scan_todos(project, branch))
+        new_findings.extend(scan_commit_coverage(project, branch, covers, base=base_branch))
 
     prior_open = count_prior_open(workspace, branch, cycle_start)
 
