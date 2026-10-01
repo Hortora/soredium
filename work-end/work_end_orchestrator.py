@@ -86,7 +86,6 @@ from step_postconditions import (
     rebase_postcondition,
     push_postcondition,
     promote_postcondition,
-    archive_move_postcondition,
     landed_marker_postcondition,
     checkout_main_postcondition,
     write_marker_postcondition,
@@ -540,6 +539,14 @@ def _archive_slot_script(ctx):
             f"family_root={ctx.family_root}", f"slot_num={ctx.slot_num}"]
 
 
+def _archive_slot_context(ctx):
+    return {
+        "SLOT_NUM": ctx.slot_num or "",
+        "SLOT_PATH": str(ctx.slot_path or ""),
+        "FAMILY_ROOT": str(ctx.family_root or ""),
+    }
+
+
 def _report_archive_script(ctx):
     return [sys.executable, str(REPORT_SCRIPT), "record", str(_report_path(ctx)),
             "step=archive", f"slot={ctx.slot_num or ''}", f"dest=attic/{ctx.slot_num or ''}"]
@@ -859,7 +866,6 @@ EVIDENCE_CHECKS: dict[str, Callable] = {
     "checkout_main": _check_checkout_main,
     "cleanup_stack": _check_cleanup_stack,
     "promote": lambda ws, proj: True,
-    "archive_slot": lambda ws, proj: True,
 }
 JUDGMENT_STEPS_SET = {"code_review", "branch_audit_conformance",
                       "branch_audit_coherence", "branch_audit_structure",
@@ -867,7 +873,7 @@ JUDGMENT_STEPS_SET = {"code_review", "branch_audit_conformance",
                       "sweep_config", "forage", "protocol",
                       "update_claude_md", "impl_doc_sync", "doc_freshness_gate", "adr",
                       "write_content", "trajectory", "squash",
-                      "upstream_push",
+                      "upstream_push", "archive_slot",
                       "arc42_scan", "session_rename", "garden_feedback", "notes"}
 
 
@@ -1153,11 +1159,10 @@ STEPS: list[StepDef] = [
             skip_fn=_skip_no_upstream,
             script_fn=_upstream_push_script,
             postcondition_fn=push_postcondition),
-    StepDef("archive_slot", "closing:stamped", "mechanical",
+    StepDef("archive_slot", "closing:stamped", "judgment",
             skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode,
                              _skip_multi_repo_partial_close),
-            script_fn=_archive_slot_script,
-            postcondition_fn=archive_move_postcondition),
+            action_context_fn=_archive_slot_context),
     StepDef("report_archive", "closing:stamped", "mechanical",
             skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode,
                              _skip_multi_repo_partial_close),
