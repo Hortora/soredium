@@ -93,6 +93,11 @@ def main() -> int:
     upstream_r = git(project, "branch", "--set-upstream-to", f"origin/{orig}", orig)
     upstream_set = "yes" if upstream_r.returncode == 0 else "no"
 
+    # Step 3b: Checkout the target branch (swap may leave repo on main)
+    head_r = git(project, "rev-parse", "--abbrev-ref", "HEAD")
+    if head_r.returncode == 0 and head_r.stdout.strip() != orig:
+        git(project, "checkout", orig)
+
     # Step 4: Force push
     r = git(project, "push", "--force-with-lease", "origin", orig)
     push_failed = r.returncode != 0

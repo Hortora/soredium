@@ -204,3 +204,34 @@ class TestIsStale:
             "verify": "done", "checkout_main": "done",
         }
         assert is_stale(progress, "active") is True
+
+    def test_not_stale_when_review_gates_passed(self):
+        """#398: progress with completed review gates should never be wiped,
+        even if .plan is missing and meta_state regressed."""
+        progress = {
+            "code_review": "done",
+            "branch_audit_conformance": "done",
+            "branch_audit_coherence": "done",
+            "branch_audit_structure": "done",
+            "branch_audit_robustness": "done",
+            "loose_ends": "done",
+            "forcing_function": "done",
+            "sweep_config": "done",
+        }
+        assert is_stale(progress, "active") is False
+
+    def test_still_stale_when_partial_review(self):
+        """Only code_review done (not all audit dimensions) — genuinely stale."""
+        progress = {"code_review": "done", "promote": "done"}
+        assert is_stale(progress, "active") is True
+
+    def test_not_stale_review_gate_with_skipped_steps(self):
+        """Review gate steps marked 'skipped' still count as passed."""
+        progress = {
+            "code_review": "skipped",
+            "branch_audit_conformance": "done",
+            "branch_audit_coherence": "done",
+            "branch_audit_structure": "skipped",
+            "branch_audit_robustness": "done",
+        }
+        assert is_stale(progress, "active") is False

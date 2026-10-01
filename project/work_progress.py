@@ -121,6 +121,18 @@ def delete_progress(workspace: Path) -> None:
             p.unlink()
 
 
+REVIEW_GATE_STEPS = frozenset({
+    "code_review", "branch_audit_conformance", "branch_audit_coherence",
+    "branch_audit_structure", "branch_audit_robustness",
+})
+
+
+def _review_gate_passed(progress: dict[str, str]) -> bool:
+    """True if expensive review steps are complete — progress is from a real close."""
+    done_values = ("done", "skipped", "skipped_error")
+    return all(progress.get(s) in done_values for s in REVIEW_GATE_STEPS)
+
+
 def _branch_landed_on_main(project: Path, branch: str) -> bool:
     """Check if branch content reached main (merge-base ancestry or tree match)."""
     if not project or not branch:
@@ -174,6 +186,8 @@ def is_stale(progress: dict[str, str], meta_state: str,
             idx = LIFECYCLE_PHASE_ORDER.index(phase)
             max_progress_idx = max(max_progress_idx, idx)
     if max_progress_idx <= meta_idx:
+        return False
+    if _review_gate_passed(progress):
         return False
     stamped_idx = LIFECYCLE_PHASE_ORDER.index("closing:stamped")
     if max_progress_idx >= stamped_idx and project and branch:
