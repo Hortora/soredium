@@ -764,3 +764,73 @@ class TestS11SlotBoundary:
         project.mkdir()
         workspace.mkdir()
         assert check_slot_boundary(project, workspace, None) is None
+
+
+class TestS14MissingPlan:
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "-b", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_feature_branch_with_commits_no_plan(self, tmp_path):
+        from corruption import diagnose
+        project = tmp_path / "project"
+        self._init_git(project)
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-99-feat"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "feat(#99): work"], capture_output=True)
+
+        findings = diagnose(
+            plan_path=None, meta_state="",
+            project=project, workspace=tmp_path,
+            base_branch="main", current_branch="issue-99-feat", on_main=False,
+        )
+        scenarios = {f.scenario for f in findings}
+        assert "S14_MISSING_PLAN" in scenarios
+        s14 = next(f for f in findings if f.scenario == "S14_MISSING_PLAN")
+        assert s14.severity == "error"
+        assert "create_plan" in s14.actions
+        assert "switch_to_main" in s14.actions
+
+    def test_no_finding_on_main(self, tmp_path):
+        from corruption import diagnose
+        findings = diagnose(
+            plan_path=None, meta_state="",
+            project=tmp_path, workspace=tmp_path,
+            base_branch="main", current_branch="main", on_main=True,
+        )
+        scenarios = {f.scenario for f in findings}
+        assert "S14_MISSING_PLAN" not in scenarios
+
+    def test_no_finding_when_no_commits_ahead(self, tmp_path):
+        from corruption import diagnose
+        project = tmp_path / "project"
+        self._init_git(project)
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-99-empty"], capture_output=True)
+
+        findings = diagnose(
+            plan_path=None, meta_state="",
+            project=project, workspace=tmp_path,
+            base_branch="main", current_branch="issue-99-empty", on_main=False,
+        )
+        scenarios = {f.scenario for f in findings}
+        assert "S14_MISSING_PLAN" not in scenarios
+
+    def test_no_finding_when_plan_exists(self, tmp_path):
+        from corruption import diagnose
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-99-feat")
+        project = tmp_path / "project"
+        self._init_git(project)
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-99-feat"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "work"], capture_output=True)
+
+        findings = diagnose(
+            plan_path=plan, meta_state="active",
+            project=project, workspace=tmp_path,
+            base_branch="main", current_branch="issue-99-feat", on_main=False,
+        )
+        scenarios = {f.scenario for f in findings}
+        assert "S14_MISSING_PLAN" not in scenarios

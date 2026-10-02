@@ -68,6 +68,8 @@ If `CORRUPTION_COUNT` > 0, enter triage flow:
 | `rollback_to_active` | `lifecycle.py commit-transition ... new_state=active event=abort_close` |
 | `sync_plan_with_github` | `work_health.py --scope entry` |
 | `fetch_and_checkout` | `git fetch origin <branch> && git checkout <branch>` |
+| `create_plan` | Extract issue from branch name (`issue-(\d+)`), validate on GitHub, scaffold `.plan` via `plan_manager.py` |
+| `switch_to_main` | `git checkout main` in both project and workspace repos |
 | `ignore` | No-op |
 
 **Step 1c — Bidirectional chaining**

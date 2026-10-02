@@ -442,6 +442,17 @@ def diagnose(
         orphan = _check_plan_in_project(project, workspace)
         if orphan:
             findings.append(orphan)
+        if not on_main and current_branch and current_branch != base_branch:
+            ahead, rc = _git(project, "rev-list", "--count",
+                             f"{base_branch}..{current_branch}")
+            if rc == 0 and ahead.strip() and int(ahead.strip() or "0") > 0:
+                findings.append(Finding(
+                    scenario="S14_MISSING_PLAN",
+                    severity="error",
+                    detail=(f"branch '{current_branch}' has {ahead.strip()} "
+                            "commits but no .plan — no lifecycle tracking"),
+                    actions=["create_plan", "switch_to_main"],
+                ))
         return findings
 
     s13 = check_merge_conflict(plan_path)
