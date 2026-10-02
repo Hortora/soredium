@@ -178,6 +178,95 @@ def scan_commit_coverage(project: str, branch: str, covers: str,
     return findings
 
 
+def _classify_file(path: str) -> str:
+    """Classify a file as src, test, or config."""
+    lower = path.lower()
+    if "test" in lower or "spec" in lower:
+        return "test"
+    if any(lower.endswith(ext) for ext in (
+        ".yaml", ".yml", ".json", ".toml", ".xml", ".properties",
+        ".cfg", ".ini", ".env",
+    )):
+        return "config"
+    return "src"
+
+
+def _find_introducing_commit(project: str, filepath: str,
+                              base: str, branch: str) -> tuple[str, str]:
+    """Find the commit that introduced a file on the branch."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", project, "log", "--diff-filter=A",
+             "--format=%H %s", f"{base}..{branch}", "--", filepath],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            line = result.stdout.strip().splitlines()[0]
+            parts = line.split(" ", 1)
+            return parts[0][:8], parts[1] if len(parts) > 1 else ""
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return "", ""
+
+
+def scan_orphaned_content(project: str, branch: str,
+                          base: str = "main") -> list[dict]:
+    """Flag files added on branch that don't exist on main."""
+    if not project or not branch:
+        return []
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", project, "diff", "--diff-filter=A",
+             "--name-only", f"{base}..{branch}"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return []
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+
+    added_files = [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
+    if not added_files:
+        return []
+
+    orphaned: list[str] = []
+    for filepath in added_files:
+        check = subprocess.run(
+            ["git", "-C", project, "cat-file", "-e", f"{base}:{filepath}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if check.returncode != 0:
+            orphaned.append(filepath)
+
+    if not orphaned:
+        return []
+
+    findings: list[dict] = []
+    stamp = datetime.now(timezone.utc).isoformat()
+
+    for filepath in orphaned:
+        sha, subject = _find_introducing_commit(project, filepath, base, branch)
+        issue_refs = _extract_issue_refs(subject) if subject else set()
+        findings.append({
+            "category": "loose-end",
+            "check": "orphaned-content",
+            "location": filepath,
+            "detail": (f"File added on branch but not on {base}"
+                       + (f" (introduced by {sha}: {subject[:80]})" if sha else "")),
+            "severity": "warning",
+            "source": "loose-ends-sweep",
+            "branch": branch,
+            "status": "open",
+            "timestamp": stamp,
+            "file_type": _classify_file(filepath),
+            "introducing_commit": sha,
+            "issue_refs": sorted(issue_refs) if issue_refs else [],
+        })
+
+    return findings
+
+
 def count_prior_open(workspace: str, branch: str, cycle_start: str | None = None) -> int:
     findings_path = Path(workspace) / ".audit" / "findings.jsonl"
     if not findings_path.exists():
@@ -210,6 +299,7 @@ def main() -> int:
 
     if project:
         new_findings.extend(scan_todos(project, branch))
+        new_findings.extend(scan_orphaned_content(project, branch, base=base_branch))
         new_findings.extend(scan_commit_coverage(project, branch, covers, base=base_branch))
 
     prior_open = count_prior_open(workspace, branch, cycle_start)

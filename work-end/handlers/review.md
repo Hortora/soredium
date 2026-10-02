@@ -52,15 +52,22 @@ python3 work-end/loose_ends_sweep.py workspace=$WORKSPACE project=$PROJECT branc
 Pass `cycle_start` as the timestamp when code_review started — this
 filters out findings just written by prior review steps.
 
-The script checks three things:
+The script checks four things:
 1. Deferred plan items (from .plan)
 2. TODOs referencing the branch issue
-3. **Commit coverage** — commits referencing issues NOT in `covers`
+3. **Orphaned content** (primary) — files added on the branch that
+   don't exist on main. Content-based, survives squash and cherry-pick.
+4. **Commit coverage** (secondary) — commits referencing issues NOT
+   in `covers`. Message-based, supplementary signal.
 
-Commit coverage findings (`check: commit-outside-covers`) are serious —
-they mean work on this branch won't land. Present each orphaned commit
-to the user and ask: land it (add to covers), defer it (file a new
-issue), or acknowledge it (already landed elsewhere, duplicate, etc).
+Orphaned content findings (`check: orphaned-content`) are the most
+serious — they mean files on this branch will be silently lost on
+close. Present each orphaned file to the user with its introducing
+commit. Ask: land it (add to covers or cherry-pick), defer it (file
+a new issue), or acknowledge it (duplicate, already superseded, etc).
+
+Commit coverage findings (`check: commit-outside-covers`) are a
+secondary signal for commits tagged with issue numbers outside covers.
 
 Supplement script output with conversation-context items
 ("I'll come back to this") and append those to `findings.jsonl`.

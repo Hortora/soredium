@@ -288,3 +288,149 @@ class TestScanCommitCoverage:
         coverage_findings = [f for f in lines if f.get("check") == "commit-outside-covers"]
         assert len(coverage_findings) == 1
         assert coverage_findings[0]["issue_num"] == 500
+
+
+class TestClassifyFile:
+    def test_src(self):
+        from loose_ends_sweep import _classify_file
+        assert _classify_file("src/main/java/Foo.java") == "src"
+
+    def test_test(self):
+        from loose_ends_sweep import _classify_file
+        assert _classify_file("src/test/java/FooTest.java") == "test"
+
+    def test_config(self):
+        from loose_ends_sweep import _classify_file
+        assert _classify_file("application.yaml") == "config"
+
+    def test_spec(self):
+        from loose_ends_sweep import _classify_file
+        assert _classify_file("handler.spec.ts") == "test"
+
+
+class TestScanOrphanedContent:
+    def _init_git(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "-b", "main"], capture_output=True)
+
+    def test_detects_orphaned_added_files(self, tmp_path):
+        from loose_ends_sweep import scan_orphaned_content
+        project = tmp_path / "project"
+        self._init_git(project)
+        (project / "base.py").write_text("base\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "init"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "feat-branch"], capture_output=True)
+        (project / "orphan.py").write_text("orphan code\n")
+        (project / "landed.py").write_text("will land\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat(#42): add files"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        (project / "landed.py").write_text("will land\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "land landed.py"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "feat-branch"], capture_output=True)
+
+        findings = scan_orphaned_content(str(project), "feat-branch")
+        orphaned_files = {f["location"] for f in findings}
+        assert "orphan.py" in orphaned_files
+        assert "landed.py" not in orphaned_files
+
+    def test_no_findings_when_all_landed(self, tmp_path):
+        from loose_ends_sweep import scan_orphaned_content
+        project = tmp_path / "project"
+        self._init_git(project)
+        (project / "base.py").write_text("base\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "init"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "feat-branch"], capture_output=True)
+        (project / "new.py").write_text("new code\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "add new.py"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        (project / "new.py").write_text("new code\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "land new.py"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "feat-branch"], capture_output=True)
+
+        findings = scan_orphaned_content(str(project), "feat-branch")
+        assert findings == []
+
+    def test_includes_file_type_and_commit(self, tmp_path):
+        from loose_ends_sweep import scan_orphaned_content
+        project = tmp_path / "project"
+        self._init_git(project)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "feat-branch"], capture_output=True)
+        (project / "SomeTest.java").write_text("test\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat(#99): add test"], capture_output=True)
+
+        findings = scan_orphaned_content(str(project), "feat-branch")
+        assert len(findings) == 1
+        assert findings[0]["file_type"] == "test"
+        assert findings[0]["introducing_commit"] != ""
+        assert 99 in findings[0]["issue_refs"]
+
+    def test_survives_squash(self, tmp_path):
+        """Content check works after squash — doesn't depend on individual commit messages."""
+        from loose_ends_sweep import scan_orphaned_content
+        project = tmp_path / "project"
+        self._init_git(project)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "feat-branch"], capture_output=True)
+        (project / "a.py").write_text("a\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat(#1): add a"], capture_output=True)
+        (project / "b.py").write_text("b\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat(#2): add b"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "reset", "--soft", "HEAD~2"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "squashed: add a and b"], capture_output=True)
+
+        findings = scan_orphaned_content(str(project), "feat-branch")
+        orphaned_files = {f["location"] for f in findings}
+        assert "a.py" in orphaned_files
+        assert "b.py" in orphaned_files
+
+    def test_integration_via_script(self, tmp_path):
+        """Full integration: script surfaces orphaned-content findings."""
+        project = tmp_path / "project"
+        self._init_git(project)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "feat-branch"], capture_output=True)
+        (project / "orphan.py").write_text("orphan\n")
+        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-m", "feat(#42): add orphan"], capture_output=True)
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT),
+             f"workspace={workspace}", f"project={project}",
+             "branch=feat-branch", "covers=42", "base_branch=main"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        output = json.loads(result.stdout)
+        assert output["new_findings"] >= 1
+
+        findings_path = workspace / ".audit" / "findings.jsonl"
+        lines = [json.loads(l) for l in findings_path.read_text().strip().split("\n") if l]
+        content_findings = [f for f in lines if f.get("check") == "orphaned-content"]
+        assert len(content_findings) == 1
+        assert content_findings[0]["location"] == "orphan.py"
