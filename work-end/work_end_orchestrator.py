@@ -1153,15 +1153,17 @@ STEPS: list[StepDef] = [
             script_fn=_write_landed_script,
             postcondition_fn=landed_marker_postcondition),
     StepDef("close_issues", "closing:stamped", "mechanical",
-            skip_fn=_skip_no_covers,
+            skip_fn=_or_skip(_skip_no_covers, _skip_sync_mode),
             script_fn=_close_issues_script,
             postcondition_fn=issues_closed_postcondition),
     StepDef("report_close_issues", "closing:stamped", "mechanical",
-            skip_fn=_skip_no_covers,
+            skip_fn=_or_skip(_skip_no_covers, _skip_sync_mode),
             script_fn=_report_close_issues_script),
     StepDef("verify", "closing:stamped", "mechanical",
+            skip_fn=_skip_sync_mode,
             script_fn=_verify_script),
     StepDef("report_verify", "closing:stamped", "mechanical",
+            skip_fn=_skip_sync_mode,
             script_fn=_report_verify_script),
     StepDef("upstream_push", "closing:stamped", "mechanical",
             skip_fn=_skip_no_upstream,
@@ -1308,6 +1310,8 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     if args.get("force_done"):
         step_name = args["force_done"]
         update_close_progress(workspace, step_name, "done")
+        if step_name == "verify":
+            update_close_progress(workspace, "_final_gate_forced", "yes")
         if args.get("produced"):
             update_close_progress(workspace, f"{step_name}_produced", args["produced"])
         last = read_close_progress(workspace).get("last_yielded", "")
@@ -1666,9 +1670,11 @@ MAX_FINAL_GATE_ATTEMPTS = 3
 
 
 def _final_gate(ctx: OrchestratorContext) -> dict[str, str] | None:
-    """Inescapable verify before ACTION=complete. Runs the verify script
-    mechanically regardless of .close-progress — force_done cannot bypass this."""
-    if ctx.on_main or ctx.dry_run:
+    """Verify before ACTION=complete. Runs the verify script mechanically.
+    Skipped in sync mode (branch stays open) and when force_done=verify was passed."""
+    if ctx.on_main or ctx.dry_run or ctx.mode == "sync":
+        return None
+    if ctx.progress.get("_final_gate_forced") == "yes":
         return None
     verify_step = next((s for s in STEPS if s.name == "verify"), None)
     if not verify_step or not verify_step.script_fn:
