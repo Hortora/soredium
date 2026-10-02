@@ -235,3 +235,13 @@ class TestIsStale:
             "branch_audit_robustness": "done",
         }
         assert is_stale(progress, "active") is False
+
+    def test_report_steps_excluded_from_staleness(self):
+        """#403: report_init alone should not trigger staleness — it's bookkeeping."""
+        progress = {"report_init": "done"}
+        assert is_stale(progress, "active") is False
+
+    def test_report_steps_with_substantive_still_detects(self):
+        """report_* excluded but substantive steps still trigger staleness."""
+        progress = {"report_init": "done", "promote": "done"}
+        assert is_stale(progress, "active") is True
