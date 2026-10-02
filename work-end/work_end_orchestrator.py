@@ -41,7 +41,8 @@ from close_progress import (
 
 CLOSE_LOG_FILE = ".close-log.jsonl"
 CLOSE_FILES_TO_EXCLUDE = [".close-progress", ".close-progress.tmp", ".close-progress.done",
-                          ".close-log.jsonl", ".close-report.json"]
+                          ".close-log.jsonl", ".close-report.json",
+                          ".work-progress", ".work-progress.tmp"]
 
 
 def _ensure_close_files_excluded(workspace: Path) -> None:
@@ -195,6 +196,7 @@ class OrchestratorContext:
     steps_executed: list[str] = field(default_factory=list)
     current_repo_project: Path | None = None
     current_repo_workspace: Path | None = None
+    final_progress: dict[str, str] = field(default_factory=dict)
 
     def done(self, step: str) -> bool:
         return self.progress.get(step) in ("done", "skipped", "skipped_error")
@@ -703,14 +705,18 @@ def _report_render_script(ctx):
     return [sys.executable, str(REPORT_SCRIPT), "render", str(_report_path(ctx))]
 
 
-def _archive_close_progress(workspace: Path) -> None:
-    src = workspace / ".close-progress"
-    dst = workspace / ".close-progress.done"
-    if src.exists():
-        os.replace(src, dst)
-    tmp = workspace / ".close-progress.tmp"
-    if tmp.exists():
-        tmp.unlink()
+_CLOSE_ARTIFACT_NAMES = [
+    ".close-progress", ".close-progress.tmp", ".close-progress.done",
+    ".close-report.json", ".close-log.jsonl",
+    ".work-progress", ".work-progress.tmp",
+]
+
+
+def _cleanup_close_artifacts(workspace: Path) -> None:
+    for name in _CLOSE_ARTIFACT_NAMES:
+        p = workspace / name
+        if p.exists():
+            p.unlink()
 
 
 # --- Main-mode special cases ---
@@ -1270,6 +1276,23 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     if args.get("abort") == "yes":
         return _handle_abort(workspace, meta_state)
 
+    if meta_state in ("scaffolded", "transitioning") and plan_path and plan_path.exists():
+        try:
+            _run_script(
+                [sys.executable, str(LIFECYCLE_SCRIPT),
+                 "commit-transition", str(plan_path),
+                 f"from_state={meta_state}", "new_state=active",
+                 "event=auto_setup"],
+                workspace, dry_run=dry_run,
+            )
+            meta_state = "active"
+        except Exception:
+            pass
+
+    stale_done = workspace / ".close-progress.done"
+    if stale_done.exists():
+        stale_done.unlink()
+
     rec = lambda evt, **kw: _record(evt, branch, project, issue_repo, dry_run, **kw)
 
     if args.get("conflict_resolved") == "yes":
@@ -1398,15 +1421,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     if result.get("ACTION") == "complete":
         from progress_summary import format_summary
-        done_path = workspace / ".close-progress.done"
-        if done_path.exists():
-            final_progress = {}
-            for line in done_path.read_text().splitlines():
-                if "=" in line:
-                    k, _, v = line.partition("=")
-                    final_progress[k.strip()] = v.strip()
-        else:
-            final_progress = read_close_progress(workspace)
+        final_progress = getattr(ctx, "final_progress", None) or read_close_progress(workspace)
         if final_progress:
             result["REPORT"] = format_summary(final_progress, "close",
                                               workspace=workspace)
@@ -1449,8 +1464,9 @@ def _handle_abort(workspace: Path, meta_state: str) -> dict[str, str]:
 def _close_execute_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str]:
     """Work-end-specific mechanical execution with main-mode overrides."""
     if step.name == "delete_progress":
+        ctx.final_progress = dict(read_close_progress(ctx.workspace))
         if not ctx.dry_run:
-            _archive_close_progress(ctx.workspace)
+            _cleanup_close_artifacts(ctx.workspace)
         elif ctx.call_log is not None:
             ctx.call_log.append(["(internal)", "delete_progress"])
         return {"DELETED": "yes"}
