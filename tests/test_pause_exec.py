@@ -223,6 +223,69 @@ def test_push_and_stack_checkout_main(workspace_with_stack, clean_git_repo):
     assert proj_branch == "main"
 
 
+def test_push_and_stack_dirty_workspace(workspace_with_stack, clean_git_repo):
+    """push-and-stack succeeds even when workspace has dirty files (hook artifacts)."""
+    workspace = workspace_with_stack
+    project = clean_git_repo
+
+    subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "issue-7-test"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-7-test"], check=True, capture_output=True)
+
+    # Simulate hook-modified files that appear after WIP commit
+    (workspace / ".work-progress").write_text("code_review=done\n")
+    (workspace / ".wrap-log.jsonl").write_text('{"step": "review"}\n')
+
+    result = subprocess.run(
+        ["python3", str(PAUSE_EXEC), "push-and-stack",
+         str(workspace), str(project),
+         "branch=issue-7-test", "issue=7", "base-branch=main"],
+        capture_output=True,
+        text=True
+    )
+
+    assert result.returncode == 0, f"push-and-stack failed: {result.stdout}"
+    assert "STACKED=yes" in result.stdout
+    assert "STASHED=" in result.stdout
+
+    ws_branch = subprocess.run(
+        ["git", "-C", str(workspace), "branch", "--show-current"],
+        capture_output=True, text=True
+    ).stdout.strip()
+    assert ws_branch == "main"
+
+    stack_file = workspace / ".pause-stack"
+    assert "branch: issue-7-test" in stack_file.read_text()
+
+
+def test_push_and_stack_dirty_project(workspace_with_stack, clean_git_repo):
+    """push-and-stack succeeds even when project has dirty files."""
+    workspace = workspace_with_stack
+    project = clean_git_repo
+
+    subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "issue-8-test"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-8-test"], check=True, capture_output=True)
+
+    # Simulate dirty project repo
+    (project / "uncommitted.txt").write_text("dirty")
+
+    result = subprocess.run(
+        ["python3", str(PAUSE_EXEC), "push-and-stack",
+         str(workspace), str(project),
+         "branch=issue-8-test", "issue=8", "base-branch=main"],
+        capture_output=True,
+        text=True
+    )
+
+    assert result.returncode == 0, f"push-and-stack failed: {result.stdout}"
+    assert "STACKED=yes" in result.stdout
+
+    proj_branch = subprocess.run(
+        ["git", "-C", str(project), "branch", "--show-current"],
+        capture_output=True, text=True
+    ).stdout.strip()
+    assert proj_branch == "main"
+
+
 # ---------------------------------------------------------------------------
 # General tests
 # ---------------------------------------------------------------------------

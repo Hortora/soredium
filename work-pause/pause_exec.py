@@ -135,6 +135,17 @@ def _resolve_slot_dir(clone_path: Path) -> Path | None:
     return None
 
 
+def _stash_if_dirty(repo: str) -> bool:
+    """Stash uncommitted changes if the working tree is dirty. Returns True if stashed."""
+    ok, status_out = run_git(repo, "status", "--short")
+    if not ok or not status_out.strip():
+        return False
+    stash_ok, _ = run_git(repo, "stash", "-u")
+    if stash_ok:
+        print(f"STASHED={Path(repo).name}")
+    return stash_ok
+
+
 def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_branch: str) -> int:
     """
     Push project/workspace branches, checkout base, pull, add stack entry.
@@ -174,13 +185,15 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
         run_git(str(original_workspace), "push", "origin", branch)
     print(f"WORKSPACE_PUSHED={'yes' if workspace_push_ok else 'no'}")
 
-    # Checkout base in project
+    # Checkout base in project (stash dirty files first)
+    _stash_if_dirty(project)
     checkout_ok, _ = run_git(project, "checkout", base_branch)
     if not checkout_ok:
         print("ERROR=project_checkout_failed")
         return 1
 
-    # Checkout main in workspace clone (independent branches — always works)
+    # Checkout main in workspace clone (stash dirty files first)
+    _stash_if_dirty(workspace)
     ws_checkout_ok, _ = run_git(workspace, "checkout", "main")
     if not ws_checkout_ok:
         print("ERROR=workspace_checkout_failed")
