@@ -34,7 +34,7 @@ from slot_core import (
     _cleanup_remnant_dir, _escape_slot_cwd, _has_unmerged_content,
 )
 from slot_metadata import (
-    parse_slot_md, write_slot_md,
+    parse_slot_md, write_slot_md, set_slot_state,
     is_slot_landed, verify_landed_shas, _fix_stale_checkboxes,
 )
 from slot_maven import setup_slot_repo, generate_mvn_wrapper
@@ -58,7 +58,7 @@ from slot_workspace import (
     validate_claude_md_paths, sanitize_slot_claude_md,
 )
 from slot_query import find_slot_by_branch
-from slot_state import transition as _transition
+from slot_state import transition as _transition, current_state as _current_state
 
 
 def _validate_covers_state(issue_repo: str, covers: str) -> None:
@@ -636,6 +636,8 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         print(f"ERROR=already_landed slot={slot_num}")
         return 1
 
+    _converge_state(slot_dir, family_root, slot_num)
+
     slot_info = parse_slot_md(slot_dir)
     _slot_is_epic = slot_info.get("is_epic", False)
     if _slot_is_epic:
@@ -758,12 +760,39 @@ def _has_active_plan(slot_dir: Path) -> str | None:
     return None
 
 
+def _converge_state(slot_dir: Path, family_root: Path, slot_num: int) -> str | None:
+    """Sync .slot state with disk reality. Returns the converged state, or None if no change."""
+    cur = _current_state(slot_dir)
+    has_landed = (slot_dir / ".landed").exists()
+    has_phase_a = (slot_dir / ".phase-a-complete").exists()
+
+    if has_landed and cur not in ("landed", "archived"):
+        _transition(slot_dir, "landed", family_root=family_root,
+                    slot_number=slot_num, force=True)
+        print(f"STATE_CONVERGED=landed from={cur} slot={slot_num}")
+        return "landed"
+    if has_phase_a and cur == "active":
+        _transition(slot_dir, "ready", family_root=family_root,
+                    slot_number=slot_num, force=True)
+        print(f"STATE_CONVERGED=ready from={cur} slot={slot_num}")
+        return "ready"
+    return None
+
+
 def archive_slot(family_root: Path, slot_num: int, force: bool = False,
                   resolution: str | None = None) -> None:
     slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
     if not slot_dir.exists():
+        for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+            attic_entry = family_root / dir_name / "attic" / str(slot_num)
+            if attic_entry.exists():
+                print(f"NOTE=already_archived slot={slot_num}")
+                print(f"ARCHIVED={slot_num}")
+                return
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
+
+    _converge_state(slot_dir, family_root, slot_num)
 
     from slot_claude import find_active_sessions, check_occupant_pid
     alive, occupant_pid = check_occupant_pid(slot_dir)
@@ -783,20 +812,28 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
         print(f"ERROR_DETAIL=active .plan at {active_plan} — work is in progress")
         print("HINT=complete or pause the work first, or pass --force to override")
         sys.exit(1)
+    shas_verified = False
+    if is_slot_landed(slot_dir):
+        shas_verified, _ = verify_landed_shas(slot_dir, family_root)
     unmerged = _has_unmerged_content(slot_dir)
-    if unmerged:
+    if unmerged and not shas_verified and not force:
         print(f"ERROR=unmerged_content slot={slot_num}")
         print(f"ERROR_DETAIL=repos with unmerged branch content: {', '.join(unmerged)}")
         print("HINT=land the branch content first, or manually verify it's already on main under different SHAs")
         sys.exit(1)
+    if unmerged and (shas_verified or force):
+        print(f"NOTE=unmerged_content_bypassed slot={slot_num} repos={','.join(unmerged)} reason={'shas_verified' if shas_verified else 'force'}")
     if not force and not is_slot_landed(slot_dir):
         print(f"ERROR=slot_not_landed slot={slot_num}")
         print("ERROR_DETAIL=slot has no .landed marker — work may be in progress")
         print("HINT=pass --force to override, or run merge-slot first")
         sys.exit(1)
     if not force:
-        verified, failures = verify_landed_shas(slot_dir, family_root)
-        if not verified:
+        if not shas_verified:
+            shas_verified, failures = verify_landed_shas(slot_dir, family_root)
+        else:
+            failures = []
+        if not shas_verified:
             print(f"ERROR=sha_not_on_main slot={slot_num}")
             for f in failures:
                 print(f"ERROR_DETAIL={f}")
@@ -860,18 +897,28 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     escaped, cwd_offset = _escape_slot_cwd(slot_dir, family_root)
     if escaped:
         print(f"CWD_ESCAPED={family_root}")
-    if merge_into_existing:
-        for item in sorted(slot_dir.iterdir()):
-            target = dest / item.name
-            if target.exists():
-                if item.is_dir() and target.is_dir():
-                    shutil.rmtree(target)
-                elif item.is_file() or item.is_symlink():
-                    target.unlink()
-            shutil.move(str(item), str(target))
-        _cleanup_remnant_dir(slot_dir)
-    else:
-        shutil.move(str(slot_dir), str(dest))
+
+    prior_state = _current_state(slot_dir)
+    set_slot_state(slot_dir, "archived")
+
+    try:
+        if merge_into_existing:
+            for item in sorted(slot_dir.iterdir()):
+                target = dest / item.name
+                if target.exists():
+                    if item.is_dir() and target.is_dir():
+                        shutil.rmtree(target)
+                    elif item.is_file() or item.is_symlink():
+                        target.unlink()
+                shutil.move(str(item), str(target))
+            _cleanup_remnant_dir(slot_dir)
+        else:
+            shutil.move(str(slot_dir), str(dest))
+    except Exception:
+        if slot_dir.exists():
+            set_slot_state(slot_dir, prior_state)
+        raise
+
     relocate_claude_projects(slot_dir, dest)
     if slot_dir.exists():
         if not _cleanup_remnant_dir(slot_dir):
@@ -892,6 +939,7 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
         resolution=resolution,
         archived_from=str(slot_dir),
         archived_to=str(dest),
+        force=True,
     )
 
     print(f"ARCHIVED={slot_num}")
@@ -976,6 +1024,9 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
     if not slot_dir.exists():
         print(f"ERROR=slot_not_found slot={slot_num}")
         sys.exit(1)
+
+    _converge_state(slot_dir, family_root, slot_num)
+
     if not force and not is_slot_landed(slot_dir):
         print(f"ERROR=slot_not_landed slot={slot_num}")
         print("ERROR_DETAIL=slot has no .landed marker — work may be in progress")
@@ -996,7 +1047,17 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
         print(f"ERROR_DETAIL=attic/{slot_num}/ already exists — would nest. Remove the existing attic entry first.")
         sys.exit(1)
     swept = sweep_orphaned_claude_projects(family_root)
-    shutil.move(str(slot_dir), str(dest))
+
+    prior_state = _current_state(slot_dir)
+    set_slot_state(slot_dir, "archived")
+
+    try:
+        shutil.move(str(slot_dir), str(dest))
+    except Exception:
+        if slot_dir.exists():
+            set_slot_state(slot_dir, prior_state)
+        raise
+
     relocate_claude_projects(slot_dir, dest)
     if slot_dir.exists():
         if not _cleanup_remnant_dir(slot_dir):
@@ -1016,6 +1077,7 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
         resolution=resolution,
         archived_from=str(slot_dir),
         archived_to=str(dest),
+        force=True,
     )
     print(f"ARCHIVED={slot_num}")
 

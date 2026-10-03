@@ -684,6 +684,7 @@ class TestArchiveSlot:
     def test_blocks_archive_without_landed_marker(self, tmp_path, capsys):
         family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
         subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(slot / "engine"), "branch", "-D", "issue-42-test"], capture_output=True)
 
         with pytest.raises(SystemExit):
             slot_lifecycle.archive_slot(family, 1)
@@ -696,6 +697,7 @@ class TestArchiveSlot:
             ["git", "-C", str(slot / "engine"), "rev-parse", "HEAD"]
         )
         subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(slot / "engine"), "branch", "-D", "issue-42-test"], capture_output=True)
         (slot / ".landed").write_text(
             f"branch=issue-42-test\nrepos=engine\nlanded_shas=engine:{sha.strip()}\n"
         )
@@ -706,13 +708,23 @@ class TestArchiveSlot:
         assert "ERROR=sha_not_on_main" in captured.out
 
     def test_blocks_archive_with_unmerged_content(self, tmp_path, capsys):
-        """Unmerged content gate fires before landed/SHA checks — no force override."""
+        """Unmerged content blocks archive without force or verified SHAs."""
         family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
 
         with pytest.raises(SystemExit):
-            slot_lifecycle.archive_slot(family, 1, force=True)
+            slot_lifecycle.archive_slot(family, 1)
         captured = capsys.readouterr()
         assert "ERROR=unmerged_content" in captured.out
+
+    def test_force_bypasses_unmerged_content(self, tmp_path, capsys):
+        """Force bypasses unmerged content check."""
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+
+        slot_lifecycle.archive_slot(family, 1, force=True)
+
+        captured = capsys.readouterr()
+        assert "NOTE=unmerged_content_bypassed" in captured.out
+        assert (family / "slots" / "attic" / "1").exists()
 
     def test_force_bypasses_all_checks(self, tmp_path):
         family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
@@ -960,10 +972,12 @@ class TestArchiveSlotDoubleArchive:
         slot_lifecycle.archive_slot(family, 1, force=True)
         captured = capsys.readouterr()
         assert "WARN=attic_slot_exists" in captured.out
-        assert "ARCHIVING=1" in captured.out
+        assert "ARCHIVED=1" in captured.out
         # New content merged into attic
         assert (attic / ".landed").read_text() == "re-landed"
-        assert (attic / ".slot").read_text() == "restored"
+        slot_content = (attic / ".slot").read_text()
+        assert "restored" in slot_content
+        assert "state: archived" in slot_content
         # Original slot dir removed
         assert not (family / "slots" / "1").exists()
 
@@ -1051,6 +1065,151 @@ class TestArchiveSlotPromotionGate:
         captured = capsys.readouterr()
         assert "WARN=artifacts_not_promoted" in captured.out
 
+
+
+class TestArchiveSlotIdempotent:
+    def test_already_archived_returns_success(self, tmp_path, capsys):
+        """Calling archive on a slot already in attic returns success."""
+        family = tmp_path / "family"
+        (family / "slots" / "attic" / "1").mkdir(parents=True)
+        (family / "slots" / "attic" / "1" / ".slot").write_text("state: archived\n")
+
+        slot_lifecycle.archive_slot(family, 1)
+
+        captured = capsys.readouterr()
+        assert "NOTE=already_archived" in captured.out
+        assert "ARCHIVED=1" in captured.out
+
+    def test_not_found_and_not_in_attic_errors(self, tmp_path, capsys):
+        """Slot not in slots/ or attic/ exits with error."""
+        family = tmp_path / "family"
+        (family / "slots").mkdir(parents=True)
+
+        with pytest.raises(SystemExit):
+            slot_lifecycle.archive_slot(family, 1)
+        captured = capsys.readouterr()
+        assert "ERROR=slot_not_found" in captured.out
+
+
+class TestArchiveSlotStateConvergence:
+    def test_converges_active_to_landed_when_landed_marker_exists(self, tmp_path, capsys):
+        """State converges from active to landed when .landed file is present."""
+        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_lifecycle.merge_slot(family, 1)
+
+        slot_lifecycle.archive_slot(family, 1)
+
+        captured = capsys.readouterr()
+        assert "ARCHIVED=1" in captured.out
+        attic = family / "slots" / "attic" / "1"
+        assert attic.exists()
+        slot_content = (attic / ".slot").read_text()
+        assert "state: archived" in slot_content
+
+    def test_converges_active_to_ready_when_phase_a_complete(self, tmp_path, capsys):
+        """State converges from active to ready when .phase-a-complete exists."""
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(slot / "engine"), "branch", "-D", "issue-42-test"], capture_output=True)
+
+        slot_lifecycle.archive_slot(family, 1, force=True)
+
+        captured = capsys.readouterr()
+        assert "STATE_CONVERGED=ready" in captured.out
+        assert "ARCHIVED=1" in captured.out
+
+
+class TestArchiveSlotTransitionBeforeMove:
+    def test_slot_state_set_before_physical_move(self, tmp_path):
+        """Slot .slot file has state: archived even if _transition would fail."""
+        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_lifecycle.merge_slot(family, 1)
+
+        slot_lifecycle.archive_slot(family, 1)
+
+        attic_slot = family / "slots" / "attic" / "1"
+        slot_content = (attic_slot / ".slot").read_text()
+        assert "state: archived" in slot_content
+
+    def test_state_rollback_on_move_failure(self, tmp_path, capsys):
+        """If shutil.move fails, .slot state rolls back to prior value."""
+        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_lifecycle.merge_slot(family, 1)
+
+        def fail_move(src, dst):
+            raise OSError("simulated move failure")
+
+        with patch("slot_lifecycle.shutil.move", side_effect=fail_move):
+            with pytest.raises(OSError, match="simulated move failure"):
+                slot_lifecycle.archive_slot(family, 1)
+
+        slot_content = (slot / ".slot").read_text()
+        assert "state: landed" in slot_content
+
+
+class TestArchiveSlotUnmergedBypass:
+    def test_unmerged_bypassed_when_shas_verified(self, tmp_path, capsys):
+        """Unmerged content is bypassed when .landed SHAs are verified on main."""
+        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
+        slot_lifecycle.merge_slot(family, 1)
+
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "-b", "leftover-branch"], capture_output=True)
+        (slot / "engine" / "leftover.txt").write_text("extra")
+        subprocess.run(["git", "-C", str(slot / "engine"), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(slot / "engine"), "commit", "-m", "extra"], capture_output=True)
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "main"], capture_output=True)
+
+        slot_lifecycle.archive_slot(family, 1)
+
+        captured = capsys.readouterr()
+        assert "NOTE=unmerged_content_bypassed" in captured.out
+        assert "shas_verified" in captured.out
+        assert "ARCHIVED=1" in captured.out
+
+    def test_unmerged_blocks_without_shas_or_force(self, tmp_path, capsys):
+        """Unmerged content blocks when no .landed SHAs and no force."""
+        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
+
+        with pytest.raises(SystemExit):
+            slot_lifecycle.archive_slot(family, 1)
+        captured = capsys.readouterr()
+        assert "ERROR=unmerged_content" in captured.out
+
+
+class TestVerifyLandedShasWorkspace:
+    def test_resolves_workspace_via_local_remote(self, tmp_path):
+        """verify_landed_shas finds workspace repos via git remote get-url local."""
+        family = tmp_path / "family"
+        family.mkdir()
+
+        ws_orig = init_repo_with_remote(tmp_path / "workspace-repo")
+        rc, sha, _ = slot_core.run_cmd(["git", "-C", str(ws_orig), "rev-parse", "HEAD"])
+        sha = sha.strip()
+
+        slot = family / "slots" / "1"
+        slot.mkdir(parents=True)
+
+        ws_clone = slot / "workspace-repo"
+        subprocess.run(["git", "clone", "--shared", str(ws_orig), str(ws_clone)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws_clone), "remote", "rename", "origin", "local"], capture_output=True, check=True)
+
+        (slot / ".landed").write_text(f"branch=test\nrepos=workspace-repo\nlanded_shas=workspace-repo:{sha}\n")
+
+        verified, failures = slot_metadata.verify_landed_shas(slot, family)
+        assert verified, f"Expected verified but got failures: {failures}"
+
+    def test_fails_when_no_local_remote_and_not_in_family(self, tmp_path):
+        """verify_landed_shas fails for unknown repos not resolvable via local remote."""
+        family = tmp_path / "family"
+        family.mkdir()
+        slot = family / "slots" / "1"
+        slot.mkdir(parents=True)
+
+        (slot / ".landed").write_text("branch=test\nrepos=ghost-repo\nlanded_shas=ghost-repo:abc123\n")
+
+        verified, failures = slot_metadata.verify_landed_shas(slot, family)
+        assert not verified
+        assert any("not found" in f for f in failures)
 
 
 class TestMergeSlotIncludesWorkspace:

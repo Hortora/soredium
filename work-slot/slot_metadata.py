@@ -213,8 +213,18 @@ def verify_landed_shas(slot_dir: Path, family_root: Path) -> tuple[bool, list[st
             continue
         canonical = family_root / repo_name
         if not canonical.is_dir():
-            failures.append(f"{repo_name}: canonical repo not found at {canonical}")
-            continue
+            clone_in_slot = slot_dir / repo_name
+            if clone_in_slot.is_dir():
+                rc, url, _ = run_cmd([
+                    "git", "-C", str(clone_in_slot), "remote", "get-url", "local",
+                ])
+                if rc == 0 and url.strip():
+                    resolved = Path(url.strip())
+                    if resolved.is_dir():
+                        canonical = resolved
+            if not canonical.is_dir():
+                failures.append(f"{repo_name}: canonical repo not found at {canonical}")
+                continue
         rc, _, _ = run_cmd([
             "git", "-C", str(canonical), "merge-base", "--is-ancestor", sha, "main",
         ])
