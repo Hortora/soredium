@@ -472,6 +472,87 @@ class TestStaleProgress:
         assert "land" not in progress
 
 
+class TestLifecycleTransitionOnEntry:
+    """Orchestrator transitions active→closing:review on first entry."""
+
+    def test_active_transitions_to_closing_review(self, tmp_path, monkeypatch):
+        """When meta_state=active and .plan exists, orchestrator transitions
+        to closing:review before yielding code_review."""
+        plan = tmp_path / ".plan"
+        plan.write_text("state: active\nbranch: issue-99-test\n")
+
+        lifecycle_calls = []
+
+        def mock_run(cmd, workspace, **kw):
+            if "commit-transition" in cmd:
+                lifecycle_calls.append(cmd)
+                for i, arg in enumerate(cmd):
+                    if arg.startswith("new_state="):
+                        new_state = arg.split("=", 1)[1]
+                        content = plan.read_text()
+                        plan.write_text(content.replace("state: active", f"state: {new_state}"))
+            return {}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", mock_run)
+
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test",
+            "base_branch": "main",
+            "meta_state": "active",
+            "plan_path": str(plan),
+        })
+
+        assert result["ACTION"] == "code_review"
+        assert any("new_state=closing:review" in " ".join(c) for c in lifecycle_calls)
+
+    def test_step_done_persists_after_active_entry(self, tmp_path, monkeypatch):
+        """step_done=code_review persists when entering from active state."""
+        plan = tmp_path / ".plan"
+        plan.write_text("state: closing:review\nbranch: issue-99-test\n")
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "report_init", "done")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "plan_path": str(plan),
+            "step_done": "code_review",
+            "produced": "0",
+        })
+
+        assert result["ACTION"] != "code_review", f"Looped back to code_review: {result}"
+        progress = read_close_progress(tmp_path)
+        assert progress.get("code_review") == "done"
+
+    def test_closing_review_not_stale(self, tmp_path):
+        """Progress with code_review=done is NOT stale when meta_state=closing:review."""
+        plan = tmp_path / ".plan"
+        plan.write_text("state: closing:review\nbranch: issue-99-test\n")
+
+        from work_progress import is_stale
+        progress = {"_branch": "issue-99-test", "report_init": "done", "code_review": "done"}
+        assert not is_stale(progress, "closing:review", plan_path=plan)
+
+    def test_active_is_stale_with_review_progress(self, tmp_path):
+        """Progress with code_review=done IS stale when meta_state=active — this is the bug."""
+        plan = tmp_path / ".plan"
+        plan.write_text("state: active\nbranch: issue-99-test\n")
+
+        from work_progress import is_stale
+        progress = {"_branch": "issue-99-test", "report_init": "done", "code_review": "done"}
+        assert is_stale(progress, "active", plan_path=plan)
+
+
 class TestRetry:
     """Judgment step retry counting."""
 

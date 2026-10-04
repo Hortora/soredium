@@ -1291,6 +1291,19 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         except Exception:
             pass
 
+    if meta_state == "active" and plan_path and plan_path.exists():
+        try:
+            _run_script(
+                [sys.executable, str(LIFECYCLE_SCRIPT),
+                 "commit-transition", str(plan_path),
+                 "from_state=active", "new_state=closing:review",
+                 f"event=work_{mode}"],
+                workspace, dry_run=dry_run,
+            )
+            meta_state = "closing:review"
+        except Exception:
+            pass
+
     stale_done = workspace / ".close-progress.done"
     if stale_done.exists():
         stale_done.unlink()
