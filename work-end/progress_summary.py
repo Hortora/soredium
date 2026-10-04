@@ -81,7 +81,7 @@ DIMENSION_MAP = {
 }
 
 
-def _read_findings(workspace: Path) -> list[dict]:
+def _read_findings(workspace: Path, branch: str = "") -> list[dict]:
     path = workspace / ".audit" / "findings.jsonl"
     if not path.exists():
         return []
@@ -91,7 +91,10 @@ def _read_findings(workspace: Path) -> list[dict]:
         if not line:
             continue
         try:
-            findings.append(json.loads(line))
+            entry = json.loads(line)
+            if branch and entry.get("branch") and entry["branch"] != branch:
+                continue
+            findings.append(entry)
         except (json.JSONDecodeError, ValueError):
             pass
     return findings
@@ -366,7 +369,8 @@ def _build_incidents(log_entries: list[dict]) -> list[str]:
 
 
 def format_summary(progress: dict[str, str], mode: str = "close",
-                   workspace: Path | None = None) -> str:
+                   workspace: Path | None = None,
+                   branch: str = "") -> str:
     if mode == "wrap":
         visible = WRAP_VISIBLE_STEPS
         sweep_key = "wrap_sweep_selected"
@@ -376,7 +380,7 @@ def format_summary(progress: dict[str, str], mode: str = "close",
         sweep_key = "sweep_selected"
         sweep_steps = CLOSE_SWEEP_STEPS
 
-    findings = _read_findings(workspace) if workspace else []
+    findings = _read_findings(workspace, branch=branch) if workspace else []
     rows = _build_rows(progress, visible, sweep_key, sweep_steps, findings)
     lines = _render_table(rows)
 
@@ -422,7 +426,8 @@ def main() -> None:
         print("NO_PROGRESS=true")
         sys.exit(0)
 
-    print(format_summary(progress, mode, workspace=workspace))
+    branch = progress.get("_branch", "")
+    print(format_summary(progress, mode, workspace=workspace, branch=branch))
 
 
 if __name__ == "__main__":

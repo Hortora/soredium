@@ -311,6 +311,81 @@ class TestIncidents:
         assert "Incidents:" not in output
 
 
+class TestBranchFiltering:
+    def test_findings_filtered_by_branch(self, tmp_path):
+        """Only findings matching the branch appear in the summary."""
+        audit_dir = tmp_path / ".audit"
+        audit_dir.mkdir()
+        findings = [
+            {"severity": "warning", "source": "code-review", "detail": "Current branch finding",
+             "status": "open", "check": "cr1", "branch": "issue-99-current"},
+            {"severity": "warning", "source": "code-review", "detail": "Stale branch finding",
+             "status": "dismissed", "check": "cr2", "branch": "issue-50-old"},
+        ]
+        (audit_dir / "findings.jsonl").write_text(
+            "\n".join(json.dumps(f) for f in findings) + "\n"
+        )
+        progress = {"code_review": "done", "forcing_function": "done"}
+        output = format_summary(progress, "close", workspace=tmp_path,
+                                branch="issue-99-current")
+        assert "Current branch finding" in output
+        assert "Stale branch finding" not in output
+
+    def test_no_branch_filter_shows_all(self, tmp_path):
+        """When no branch is specified, all findings are shown (backward compat)."""
+        audit_dir = tmp_path / ".audit"
+        audit_dir.mkdir()
+        findings = [
+            {"severity": "warning", "source": "code-review", "detail": "Finding A",
+             "status": "open", "check": "a", "branch": "branch-a"},
+            {"severity": "warning", "source": "code-review", "detail": "Finding B",
+             "status": "open", "check": "b", "branch": "branch-b"},
+        ]
+        (audit_dir / "findings.jsonl").write_text(
+            "\n".join(json.dumps(f) for f in findings) + "\n"
+        )
+        progress = {"code_review": "done", "forcing_function": "done"}
+        output = format_summary(progress, "close", workspace=tmp_path)
+        assert "Finding A" in output
+        assert "Finding B" in output
+
+    def test_findings_without_branch_field_included(self, tmp_path):
+        """Findings missing the branch field are always included."""
+        audit_dir = tmp_path / ".audit"
+        audit_dir.mkdir()
+        findings = [
+            {"severity": "warning", "source": "code-review", "detail": "Legacy finding",
+             "status": "open", "check": "legacy"},
+        ]
+        (audit_dir / "findings.jsonl").write_text(
+            "\n".join(json.dumps(f) for f in findings) + "\n"
+        )
+        progress = {"code_review": "done", "forcing_function": "done"}
+        output = format_summary(progress, "close", workspace=tmp_path,
+                                branch="issue-99-current")
+        assert "Legacy finding" in output
+
+    def test_dimension_counts_filtered_by_branch(self, tmp_path):
+        """Branch filtering applies to dimension finding counts too."""
+        audit_dir = tmp_path / ".audit"
+        audit_dir.mkdir()
+        findings = [
+            {"source": "branch-audit", "dimension": "conformance", "detail": "current",
+             "status": "open", "check": "c1", "branch": "current-branch"},
+            {"source": "branch-audit", "dimension": "conformance", "detail": "old",
+             "status": "open", "check": "c2", "branch": "old-branch"},
+        ]
+        (audit_dir / "findings.jsonl").write_text(
+            "\n".join(json.dumps(f) for f in findings) + "\n"
+        )
+        progress = {"branch_audit_conformance": "done"}
+        output = format_summary(progress, "close", workspace=tmp_path,
+                                branch="current-branch")
+        lines = output.split("\n")
+        conf_line = [l for l in lines if "Conformance" in l][0]
+        assert "1 finding" in conf_line
+
+
 class TestLegacyReviewMigration:
     def test_legacy_review_done_not_in_close_summary(self):
         """Legacy 'review=done' should not appear as a visible step."""

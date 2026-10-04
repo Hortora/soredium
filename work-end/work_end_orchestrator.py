@@ -1441,7 +1441,8 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         final_progress = getattr(ctx, "final_progress", None) or read_close_progress(workspace)
         if final_progress:
             result["REPORT"] = format_summary(final_progress, "close",
-                                              workspace=workspace)
+                                              workspace=workspace,
+                                              branch=branch)
 
         if _wl and not dry_run:
             try:
