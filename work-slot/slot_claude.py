@@ -73,37 +73,42 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
 
 
 def find_active_sessions(slot_dir: Path) -> list[tuple[int, str, str]]:
-    """Find processes with open file descriptors inside slot_dir.
+    """Find processes with open file descriptors or CWD inside slot_dir.
 
-    Uses lsof +D for recursive scan. Returns [(pid, command, path)].
-    Fails open (returns []) if lsof is unavailable or times out.
+    Two-pass detection:
+    1. lsof +D for recursive FD scan (catches open files)
+    2. lsof -d cwd for CWD scan (catches sessions whose only footprint is CWD)
+
+    Returns [(pid, command, path)]. Fails open (returns []) if lsof is unavailable.
     """
     import subprocess as _sp
-    try:
-        result = _sp.run(
-            ["lsof", "+D", str(slot_dir)],
-            capture_output=True, text=True, timeout=10,
-        )
-    except (FileNotFoundError, _sp.TimeoutExpired):
-        return []
-    if not result.stdout.strip():
-        return []
     sessions = []
     seen_pids: set[int] = set()
-    for line in result.stdout.strip().splitlines()[1:]:
-        parts = line.split()
-        if len(parts) < 2:
-            continue
+    slot_str = str(slot_dir)
+
+    for lsof_args in [["lsof", "+D", slot_str], ["lsof", "-d", "cwd"]]:
         try:
-            pid = int(parts[1])
-        except ValueError:
+            result = _sp.run(lsof_args, capture_output=True, text=True, timeout=10)
+        except (FileNotFoundError, _sp.TimeoutExpired):
             continue
-        if pid in seen_pids:
+        if not result.stdout.strip():
             continue
-        seen_pids.add(pid)
-        cmd = parts[0]
-        path = parts[-1] if len(parts) >= 9 else ""
-        sessions.append((pid, cmd, path))
+        for line in result.stdout.strip().splitlines()[1:]:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[1])
+            except ValueError:
+                continue
+            if pid in seen_pids:
+                continue
+            path = parts[-1] if len(parts) >= 9 else ""
+            if lsof_args[1] == "-d" and not path.startswith(slot_str):
+                continue
+            seen_pids.add(pid)
+            cmd = parts[0]
+            sessions.append((pid, cmd, path))
     return sessions
 
 

@@ -10,6 +10,7 @@ Each invocation runs mechanical steps up to the next judgment point,
 then prints ACTION= and exits. The LLM calls this in a loop until
 ACTION=complete.
 """
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -339,6 +340,18 @@ PIPELINES: dict[str, list[StepDef]] = {
 }
 
 
+def _write_slot_occupant(slot_path: Path) -> None:
+    """Write current PID to .occupant-pid so archive-slot can detect active sessions."""
+    _slot_dir = str(slot_path.parent.parent / "work-slot")
+    if _slot_dir not in sys.path:
+        sys.path.insert(0, _slot_dir)
+    try:
+        from slot_claude import write_occupant_pid
+        write_occupant_pid(slot_path)
+    except ImportError:
+        (slot_path / ".occupant-pid").write_text(str(os.getpid()))
+
+
 def _complete_summary(command: str, ctx: WorkContext) -> str:
     parts = [f"{command} complete."]
     if ctx.issue_n:
@@ -383,6 +396,9 @@ def main() -> int:
                 print(f"{k}={v}")
             return 1
         ctx.progress = read_progress(ctx.workspace)
+
+    if ctx.in_slot and ctx.slot_path and command in ("start", "continue"):
+        _write_slot_occupant(ctx.slot_path)
 
     steps = PIPELINES[command]
     result = run_loop(

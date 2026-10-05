@@ -378,6 +378,30 @@ class TestStepDoneHandling:
         assert progress.get("brainstorm_offer") == "skipped"
 
 
+class TestSlotOccupantPid:
+    def test_write_occupant_pid_on_slot_start(self, tmp_path):
+        """work.py writes .occupant-pid when starting in slot context."""
+        from work import _write_slot_occupant
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        _write_slot_occupant(slot)
+        pid_file = slot / ".occupant-pid"
+        assert pid_file.exists()
+        assert int(pid_file.read_text().strip()) > 0
+
+    def test_no_occupant_pid_outside_slot(self, tmp_path):
+        """work.py does not write .occupant-pid when not in slot context."""
+        from work import build_context
+        ctx = build_context({
+            "command": "start",
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "in_slot": "no",
+        })
+        assert not ctx.in_slot
+        assert not (tmp_path / ".occupant-pid").exists()
+
+
 class TestAllPipelinesRegistered:
     def test_all_commands_have_pipelines(self):
         from work import PIPELINES, VALID_COMMANDS
