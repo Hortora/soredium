@@ -141,6 +141,26 @@ def promote_plan_next_postcondition(ctx) -> bool:
     return not (ctx.workspace / ".plan-next").exists()
 
 
+def content_landed_postcondition(ctx) -> bool:
+    """Verify source content from the branch is on main after landing.
+
+    Checks that the source diff between main and the landed SHA is empty.
+    Handles both direct merges (SHA is ancestor) and squash merges
+    (different SHA but identical content).
+    """
+    project = getattr(ctx, "current_repo_project", None) or ctx.project
+    repo_name = project.name
+    sha = ctx.landed_shas.get(repo_name, "")
+    if not sha:
+        return True
+    result = _git(project, "merge-base", "--is-ancestor", sha, ctx.base_branch)
+    if result.returncode == 0:
+        return True
+    diff = _git(project, "diff", f"{ctx.base_branch}..{sha}",
+                "--", "*.java", "*.ts", "*.tsx", "*.py", "*.kt")
+    return diff.returncode == 0 and not diff.stdout.strip()
+
+
 def cleanup_scaffold_postcondition(ctx) -> bool:
     ws = ctx.workspace
     scaffold = ["JOURNAL.md", ".execute-progress", ".land-ledger.jsonl",

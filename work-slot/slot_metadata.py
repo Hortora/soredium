@@ -228,8 +228,25 @@ def verify_landed_shas(slot_dir: Path, family_root: Path) -> tuple[bool, list[st
         rc, _, _ = run_cmd([
             "git", "-C", str(canonical), "merge-base", "--is-ancestor", sha, "main",
         ])
-        if rc != 0:
-            failures.append(f"{repo_name}: SHA {sha[:12]} not reachable from main")
+        if rc == 0:
+            continue
+        rc2, msg, _ = run_cmd([
+            "git", "-C", str(canonical), "log", "-1", "--format=%s", sha,
+        ])
+        if rc2 == 0 and msg.strip():
+            rc3, match, _ = run_cmd([
+                "git", "-C", str(canonical), "log", "--oneline",
+                "--grep", msg.strip(), "main", "-1",
+            ])
+            if rc3 == 0 and match.strip():
+                continue
+        rc4, diff_out, _ = run_cmd([
+            "git", "-C", str(canonical), "diff", f"main..{sha}",
+            "--", "*.java", "*.ts", "*.tsx", "*.py", "*.kt",
+        ])
+        if rc4 == 0 and not diff_out.strip():
+            continue
+        failures.append(f"{repo_name}: SHA {sha[:12]} not reachable from main")
     return len(failures) == 0, failures
 
 

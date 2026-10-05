@@ -93,6 +93,7 @@ from step_postconditions import (
     cleanup_scaffold_postcondition,
     issues_closed_postcondition,
     promote_plan_next_postcondition,
+    content_landed_postcondition,
 )
 
 _lib = Path.home() / ".claude" / "lib"
@@ -1132,7 +1133,7 @@ STEPS: list[StepDef] = [
             postcondition_fn=write_marker_postcondition),
     StepDef("land", "closing:promoted", "mechanical",
             script_fn=_land_script,
-            postcondition_fn=push_postcondition),
+            postcondition_fn=lambda ctx: push_postcondition(ctx) and content_landed_postcondition(ctx)),
     StepDef("report_land", "closing:promoted", "mechanical",
             script_fn=_report_land_script),
     StepDef("push_pass", "closing:promoted", "lifecycle",

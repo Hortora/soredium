@@ -363,6 +363,64 @@ class TestVerifyLandedShas:
         assert ok is True, f"Should pass with local-only SHA, got failures: {failures}"
 
 
+    def test_passes_squash_merged_content(self, tmp_path):
+        """SHA not ancestor of main, but commit message found on main (squash-merge)."""
+        from slot_core import run_cmd
+        from slot_test_helpers import init_repo_with_remote
+        family = tmp_path / "family"
+        family.mkdir()
+        (family / "slots").mkdir()
+        original = init_repo_with_remote(family / "engine")
+        slot = family / "slots" / "1"
+        slot.mkdir()
+
+        subprocess.run(["git", "-C", str(original), "checkout", "-b", "feature"], capture_output=True, check=True)
+        (original / "feat.txt").write_text("feature\n")
+        run_cmd(["git", "-C", str(original), "add", "."])
+        run_cmd(["git", "-C", str(original), "commit", "-m", "feat: unique-squash-marker-test"])
+        _, feature_sha, _ = run_cmd(["git", "-C", str(original), "rev-parse", "HEAD"])
+        feature_sha = feature_sha.strip()
+
+        subprocess.run(["git", "-C", str(original), "checkout", "main"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(original), "merge", "--squash", "feature"], capture_output=True, check=True)
+        run_cmd(["git", "-C", str(original), "commit", "-m", "feat: unique-squash-marker-test"])
+
+        (slot / ".landed").write_text(
+            f"branch=feature\nrepos=engine\nlanded_shas=engine:{feature_sha}\n"
+        )
+        ok, failures = slot_metadata.verify_landed_shas(slot, family)
+        assert ok is True, f"Squash-merged content should pass: {failures}"
+
+    def test_passes_source_diff_empty(self, tmp_path):
+        """SHA not ancestor and different message, but source diff is empty."""
+        from slot_core import run_cmd
+        from slot_test_helpers import init_repo_with_remote
+        family = tmp_path / "family"
+        family.mkdir()
+        (family / "slots").mkdir()
+        original = init_repo_with_remote(family / "engine")
+        slot = family / "slots" / "1"
+        slot.mkdir()
+
+        subprocess.run(["git", "-C", str(original), "checkout", "-b", "feature"], capture_output=True, check=True)
+        (original / "Feature.java").write_text("class Feature {}\n")
+        run_cmd(["git", "-C", str(original), "add", "."])
+        run_cmd(["git", "-C", str(original), "commit", "-m", "feat: add feature"])
+        _, feature_sha, _ = run_cmd(["git", "-C", str(original), "rev-parse", "HEAD"])
+        feature_sha = feature_sha.strip()
+
+        subprocess.run(["git", "-C", str(original), "checkout", "main"], capture_output=True, check=True)
+        (original / "Feature.java").write_text("class Feature {}\n")
+        run_cmd(["git", "-C", str(original), "add", "."])
+        run_cmd(["git", "-C", str(original), "commit", "-m", "chore: different message"])
+
+        (slot / ".landed").write_text(
+            f"branch=feature\nrepos=engine\nlanded_shas=engine:{feature_sha}\n"
+        )
+        ok, failures = slot_metadata.verify_landed_shas(slot, family)
+        assert ok is True, f"Content-equal should pass: {failures}"
+
+
 class TestReadPromotionStamp:
     """Tests for _read_promotion_stamp helper."""
 
