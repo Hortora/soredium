@@ -1192,19 +1192,19 @@ STEPS: list[StepDef] = [
             script_fn=_cleanup_scaffold_script,
             postcondition_fn=cleanup_scaffold_postcondition),
     StepDef("report_scaffold", "closing:stamped", "mechanical",
-            skip_fn=_skip_sync_mode,
+            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             script_fn=_report_scaffold_script),
     StepDef("arc42_scan", "closing:stamped", "judgment",
-            skip_fn=_skip_sync_mode,
+            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"}),
     StepDef("session_rename", "closing:stamped", "judgment",
-            skip_fn=_skip_sync_mode,
+            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             action_context_fn=lambda ctx: {"CONTEXT": "session_rename"}),
     StepDef("garden_feedback", "closing:stamped", "judgment",
-            skip_fn=_skip_sync_mode,
+            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             action_context_fn=lambda ctx: {"CONTEXT": "garden_feedback"}),
     StepDef("notes", "closing:stamped", "judgment",
-            skip_fn=_skip_sync_mode,
+            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             action_context_fn=lambda ctx: {"CONTEXT": "notes"}),
 
     # --- lifecycle: stamped -> idle/drained/active(sync) ---
@@ -1424,7 +1424,10 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     result = _next_action(ctx)
     if ctx.expected_state and ctx.expected_state != meta_state:
-        result["META_STATE"] = ctx.expected_state
+        if mode == "end" and meta_state.startswith("closing:") and ctx.expected_state == "active":
+            pass
+        else:
+            result["META_STATE"] = ctx.expected_state
     _log_call(workspace, meta_state, result, ctx.steps_executed, dry_run=dry_run)
 
     if result.get("ERROR") and not dry_run:

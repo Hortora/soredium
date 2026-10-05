@@ -472,6 +472,93 @@ class TestStaleProgress:
         assert "land" not in progress
 
 
+class TestMetaStateRegression:
+    """META_STATE must never regress from closing:* to active in end mode."""
+
+    def test_no_active_regression_in_end_mode(self, tmp_path, monkeypatch):
+        """cycle_pass sets expected_state=active, but META_STATE should not regress."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        _disable_postconditions(monkeypatch)
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+
+        update_close_progress(tmp_path, "report_init", "done")
+        for step in ["code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends",
+                      "forcing_function", "sweep_config"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "review_pass", "done")
+        update_close_progress(tmp_path, "promote", "done")
+        update_close_progress(tmp_path, "promote_pass", "done")
+        update_close_progress(tmp_path, "trajectory", "done")
+        update_close_progress(tmp_path, "squash", "done")
+        update_close_progress(tmp_path, "report_squash", "done")
+        update_close_progress(tmp_path, "write_marker", "done")
+        update_close_progress(tmp_path, "land", "done")
+        update_close_progress(tmp_path, "report_land", "done")
+        update_close_progress(tmp_path, "push_pass", "done")
+        update_close_progress(tmp_path, "merge_pass", "done")
+        update_close_progress(tmp_path, "cycle_pass", "done")
+        update_close_progress(tmp_path, "stamp_pass", "done")
+        update_close_progress(tmp_path, "close_issues", "done")
+        update_close_progress(tmp_path, "verify", "done")
+        update_close_progress(tmp_path, "checkout_main", "done")
+        update_close_progress(tmp_path, "cleanup", "done")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-185-test",
+            "base_branch": "main",
+            "meta_state": "closing:stamped",
+            "mode": "end",
+        })
+
+        assert result.get("META_STATE") != "active", (
+            f"META_STATE regressed to active during close: {result}")
+
+    def test_terminal_steps_skipped_in_cycle_mode(self, tmp_path, monkeypatch):
+        """arc42_scan, session_rename, etc. should be skipped when cycle_pass ran."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        _disable_postconditions(monkeypatch)
+
+        plan = tmp_path / ".plan"
+        plan.write_text("state: closing:stamped\nbranch: issue-99\n## Queue\n- [ ] #1 — first ← active\n- [ ] #2 — second\n")
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends",
+                      "forcing_function", "sweep_config",
+                      "review_pass", "promote", "promote_pass",
+                      "trajectory", "squash", "report_squash",
+                      "write_marker", "land", "report_land",
+                      "push_pass", "merge_pass",
+                      "stamp_pass",
+                      "close_issues", "verify",
+                      "checkout_main", "cleanup_stack", "cleanup",
+                      "report_scaffold"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99",
+            "base_branch": "main",
+            "meta_state": "closing:stamped",
+            "plan_path": str(plan),
+        })
+
+        assert result["ACTION"] != "arc42_scan", (
+            f"arc42_scan should be skipped in cycle mode but got: {result}")
+
+
 class TestLifecycleTransitionOnEntry:
     """Orchestrator transitions active→closing:review on first entry."""
 
