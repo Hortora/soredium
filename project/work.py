@@ -339,6 +339,18 @@ PIPELINES: dict[str, list[StepDef]] = {
 }
 
 
+def _complete_summary(command: str, ctx: WorkContext) -> str:
+    parts = [f"{command} complete."]
+    if ctx.issue_n:
+        label = f"#{ctx.issue_n}"
+        if ctx.issue_title:
+            label = f"#{ctx.issue_n}: {ctx.issue_title}"
+        parts.append(label)
+    if ctx.branch:
+        parts.append(f"branch: {ctx.branch}")
+    return " ".join(parts)
+
+
 def main() -> int:
     args = parse_args(sys.argv)
     if "error" in args:
@@ -376,7 +388,7 @@ def main() -> int:
     result = run_loop(
         steps, ctx,
         on_mechanical_error=make_rebase_error_handler(),
-        complete_summary=f"{command} complete.",
+        complete_summary=_complete_summary(command, ctx),
     )
     for k, v in result.items():
         print(f"{k}={v}")
