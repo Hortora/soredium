@@ -50,7 +50,18 @@ def _scan_dir(workspace: Path, cat_dir: Path, ext: str | None,
 
 _MD_IMG = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
 _HTML_IMG = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']')
+_INLINE_SVG = re.compile(r'<svg[\s>]', re.IGNORECASE)
 _SKIP_PREFIXES = ("http://", "https://", "chrome://", "data:")
+
+
+def check_inline_svg(md_path: Path) -> list[str]:
+    """Check for inline <svg> tags in a markdown file. Returns list of warnings."""
+    text = md_path.read_text(errors="replace")
+    warnings = []
+    for i, line in enumerate(text.splitlines(), 1):
+        if _INLINE_SVG.search(line):
+            warnings.append(f"{md_path}:{i}: inline <svg> — save as .svg file in images/ instead")
+    return warnings
 
 
 def extract_image_refs(md_path: Path, root: Path) -> list[str]:

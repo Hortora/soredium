@@ -283,6 +283,9 @@ written before the convention change without requiring bulk frontmatter updates.
 - [ ] All entries scanned, `entry_type` parsed
 - [ ] Routing plan shown and user confirmed before any file operations
 - [ ] All destination directories validated before copying
+- [ ] All image references resolve to existing files (no broken `![](images/...)` links)
+- [ ] No inline `<svg>` tags in any entry (must be separate `.svg` files)
+- [ ] Referenced `.svg` files copied alongside entries to each destination
 - [ ] Entries copied to each resolved destination
 - [ ] Git destinations committed; remote destinations pushed (or failure reported)
 - [ ] Source entries retained in project `docs/blog/` (not deleted)

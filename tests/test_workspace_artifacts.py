@@ -512,3 +512,28 @@ class TestDocsAltPaths:
         result = scan(tmp_path)
         assert "blog/root-entry.md" in result["blog"]
         assert "docs/blog/docs-entry.md" in result["blog"]
+
+
+class TestInlineSvgCheck:
+    def test_detects_inline_svg(self, tmp_path):
+        md = tmp_path / "entry.md"
+        md.write_text("# Title\n\n<svg width='100'>\n<circle/>\n</svg>\n")
+        from workspace_artifacts import check_inline_svg
+        warnings = check_inline_svg(md)
+        assert len(warnings) == 1
+        assert "inline <svg>" in warnings[0]
+
+    def test_clean_file_no_warnings(self, tmp_path):
+        md = tmp_path / "entry.md"
+        md.write_text("# Title\n\n![diagram](images/flow.svg)\n")
+        from workspace_artifacts import check_inline_svg
+        warnings = check_inline_svg(md)
+        assert warnings == []
+
+    def test_svg_in_code_block_still_warns(self, tmp_path):
+        """Conservative: warns even in code blocks — better false positive than missed inline."""
+        md = tmp_path / "entry.md"
+        md.write_text("```html\n<svg width='100'></svg>\n```\n")
+        from workspace_artifacts import check_inline_svg
+        warnings = check_inline_svg(md)
+        assert len(warnings) == 1
