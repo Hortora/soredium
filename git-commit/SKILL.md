@@ -203,6 +203,12 @@ Once an issue is confirmed, include it in the commit:
 - Work in progress: append `Refs #{N}` to the commit body
 - Completing the issue: append `Closes #{N}` to the commit body
 
+**Cross-repo issue references:** If the issue lives in a different repo
+than the one being committed to (i.e. `ISSUE_REPO` from ctx.py differs
+from `OWNER_REPO`), use the full prefix: `Refs owner/repo#N` or
+`Closes owner/repo#N`. GitHub resolves bare `#N` against the current
+repo — without the prefix, the reference links to the wrong issue.
+
 **If the user explicitly says to skip issue linking** (e.g. "commit as is",
 "no issue", "just commit it"):
 - Add `no-issue: <reason>` to the commit body
