@@ -48,7 +48,7 @@ Choose the element that minimises reading effort for the reader:
 | **Numbered list** | Sequential steps where order matters |
 | **Bold lead-in** | Key claim or concept at the start of a paragraph |
 | **Prose paragraph** | Connected reasoning where ideas build on each other |
-| **SVG/diagram** | Flows, architecture, relationships |
+| **SVG/diagram** | Flows, architecture, relationships — **never inline `<svg>` in markdown** (see below) |
 | **Code block** | Only when code IS the explanation, not decoration |
 
 **The test:** Would a reader understand this faster as a list or prose?
@@ -56,6 +56,16 @@ If list → use it. If the ideas connect and build → prose.
 
 **Never:** force connected reasoning into bullet points. Bullets fragment
 what needs to connect.
+
+**SVG diagrams:** Never inline `<svg>` in markdown — CommonMark spec §4.6
+does not list `<svg>` as a block-level tag, so parsers (Typora, GitHub,
+any strict CommonMark renderer) treat it as inline HTML and escape it as
+raw text. Save each SVG as a separate `.svg` file in an `images/`
+subdirectory relative to the content file, then reference with:
+
+```markdown
+![Description](images/diagram-name.svg)
+```
 
 ---
 
