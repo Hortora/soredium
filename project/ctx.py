@@ -302,6 +302,42 @@ def resolve(cwd=None) -> dict[str, str]:
         or "blog-technical" in _combined_text.lower()
     ) else "no"
 
+    # Worklog cross-check: detect unfinished work from prior sessions
+    unfinished_work = "no"
+    unfinished_branch = ""
+    unfinished_issue = ""
+    unfinished_warn = ""
+    _has_local_plan = Path(workspace) / ".plan"
+    if not _has_local_plan.exists():
+        try:
+            _lib = Path.home() / ".claude" / "lib"
+            if str(_lib) not in sys.path:
+                sys.path.insert(0, str(_lib))
+            import worklog as _wl
+            _conn = _wl.connect()
+            _rows = _conn.execute(
+                "SELECT wi.branch, wi.state, wii.issue_number, wii.issue_repo "
+                "FROM work_items wi "
+                "JOIN repos r ON wi.repo_id = r.id "
+                "LEFT JOIN work_item_issues wii ON wii.work_item_id = wi.id "
+                "WHERE r.path = ? AND wi.state IN ('active', 'paused') "
+                "ORDER BY wi.id DESC LIMIT 1",
+                (project,),
+            ).fetchall()
+            _conn.close()
+            if _rows:
+                _row = _rows[0]
+                _ub = _row["branch"]
+                if _ub and _ub != current_branch:
+                    unfinished_work = "yes"
+                    unfinished_branch = _ub
+                    unfinished_issue = str(_row["issue_number"]) if _row["issue_number"] else ""
+                    _branch_exists = _run("git", "-C", project, "rev-parse", "--verify", f"refs/heads/{_ub}")
+                    if not _branch_exists:
+                        unfinished_warn = f"db_branch_missing:{_ub}"
+        except Exception:
+            pass
+
     return {
         # Topology fields
         "WORKSPACE": workspace,
@@ -371,6 +407,11 @@ def resolve(cwd=None) -> dict[str, str]:
         "HAS_PROTOCOLS_DIR": has_protocols_dir,
         "HAS_SOURCES": has_sources,
         "SOURCES_PATH": sources_path,
+        # Worklog cross-check
+        "UNFINISHED_WORK": unfinished_work,
+        "UNFINISHED_BRANCH": unfinished_branch,
+        "UNFINISHED_ISSUE": unfinished_issue,
+        "UNFINISHED_WARN": unfinished_warn,
         # Corruption detection
         "CORRUPTION_COUNT": str(len(corruption_findings)),
         "AUTO_RECOVERABLE": "yes" if corruption_findings and all(f.auto_recoverable for f in corruption_findings) else "no",
