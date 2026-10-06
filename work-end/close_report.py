@@ -164,8 +164,7 @@ def main() -> None:
         record(report_path, step, pairs)
     elif command == "render":
         if not report_path.exists():
-            print("ERROR=no_report", file=sys.stderr)
-            sys.exit(1)
+            init(report_path)
         render(report_path)
     else:
         print(f"ERROR=unknown_command command={command}", file=sys.stderr)
