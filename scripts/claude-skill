@@ -490,6 +490,15 @@ def cmd_sync_local(args: argparse.Namespace) -> None:
         shutil.copy2(str(worklog_src), str(lib_dir / "worklog.py"))
         print("  ✅ worklog.py → ~/.claude/lib/")
 
+    verification_src = repo_root / "verification"
+    verification_dest = SKILLS_DIR / "verification"
+    if verification_src.is_dir():
+        if verification_dest.exists():
+            shutil.rmtree(str(verification_dest))
+        shutil.copytree(str(verification_src), str(verification_dest),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        print("  ✅ verification/ → ~/.claude/skills/verification/")
+
     hook_status = sync_hook()
     hook_messages = {
         'installed':  '🔗 Session-start hook installed and registered',
