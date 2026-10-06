@@ -141,6 +141,24 @@ def promote_plan_next_postcondition(ctx) -> bool:
     return not (ctx.workspace / ".plan-next").exists()
 
 
+def fork_next_postcondition(ctx) -> bool:
+    """Verify the fork branch was created."""
+    fork_branch = ctx.progress.get("fork_next_branch", "")
+    if not fork_branch:
+        return False
+    result = _git(ctx.workspace, "branch", "--list", fork_branch)
+    return result.returncode == 0 and fork_branch in result.stdout
+
+
+def checkout_fork_postcondition(ctx) -> bool:
+    """Verify we're on the fork branch."""
+    fork_branch = ctx.progress.get("fork_next_branch", "")
+    if not fork_branch:
+        return True
+    result = _git(ctx.workspace, "branch", "--show-current")
+    return result.returncode == 0 and result.stdout.strip() == fork_branch
+
+
 def content_landed_postcondition(ctx) -> bool:
     """Verify source content from the branch is on main after landing.
 

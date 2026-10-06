@@ -94,6 +94,8 @@ from step_postconditions import (
     issues_closed_postcondition,
     promote_plan_next_postcondition,
     content_landed_postcondition,
+    fork_next_postcondition,
+    checkout_fork_postcondition,
 )
 
 _lib = Path.home() / ".claude" / "lib"
@@ -879,7 +881,7 @@ JUDGMENT_STEPS_SET = {"code_review", "branch_audit_conformance",
                       "branch_audit_robustness", "loose_ends", "forcing_function",
                       "sweep_config", "forage", "protocol",
                       "update_claude_md", "impl_doc_sync", "doc_freshness_gate", "adr",
-                      "write_content", "trajectory", "squash",
+                      "write_content", "queue_decision", "trajectory", "squash",
                       "upstream_push", "archive_slot",
                       "arc42_scan", "session_rename", "garden_feedback", "notes"}
 
@@ -984,6 +986,89 @@ def _loose_ends_context(ctx):
         "COVERS": ctx.covers or "",
         "BASE_BRANCH": ctx.base_branch,
     }
+
+
+def _skip_no_queue_remaining(ctx) -> bool:
+    """Skip queue_decision when .plan has no remaining items or mode is sync."""
+    if ctx.mode == "sync":
+        return True
+    ws_plan = ctx.workspace / ".plan"
+    if not ws_plan.exists():
+        return True
+    _proj_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _proj_dir not in sys.path:
+        sys.path.insert(0, _proj_dir)
+    try:
+        from plan_io import read_plan, has_uncompleted_items
+        state = read_plan(ws_plan)
+        if state is None:
+            return True
+        return not has_uncompleted_items(state)
+    except Exception:
+        return True
+
+
+def _queue_decision_context(ctx):
+    ws_plan = ctx.workspace / ".plan"
+    remaining = 0
+    next_title = ""
+    _proj_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _proj_dir not in sys.path:
+        sys.path.insert(0, _proj_dir)
+    try:
+        from plan_io import read_plan
+        state = read_plan(ws_plan)
+        if state:
+            items = state.queue_items
+            done_count = sum(1 for it in items if it.completed)
+            remaining = len(items) - done_count
+            for it in items:
+                if not it.completed and not it.active:
+                    next_title = it.title
+                    break
+    except Exception:
+        pass
+    return {
+        "CONTEXT": "queue_decision",
+        "REMAINING": str(remaining),
+        "NEXT_TITLE": next_title,
+    }
+
+
+def _skip_fork_next(ctx) -> bool:
+    """Skip fork_next_branch unless the user chose fork_next in queue_decision."""
+    return ctx.progress.get("queue_decision_produced") != "fork_next"
+
+
+def _fork_next_script(ctx):
+    fork_script = Path(__file__).parent / "fork_next_branch.py"
+    if not fork_script.exists():
+        return None
+    return [
+        sys.executable, str(fork_script),
+        f"workspace={ctx.workspace}",
+        f"project={ctx.project}",
+        f"branch={ctx.branch}",
+        f"base_branch={ctx.base_branch}",
+    ]
+
+
+def _skip_checkout_fork(ctx) -> bool:
+    """Skip checkout_fork unless fork_next was chosen and a fork branch was created."""
+    return not ctx.progress.get("fork_next_branch")
+
+
+def _checkout_fork_script(ctx):
+    fork_branch = ctx.progress.get("fork_next_branch", "")
+    if not fork_branch:
+        return None
+    return [
+        sys.executable, "-c",
+        f"import subprocess; "
+        f"subprocess.run(['git', '-C', '{ctx.workspace}', 'checkout', '{fork_branch}'], capture_output=True); "
+        f"subprocess.run(['git', '-C', '{ctx.project}', 'checkout', '{fork_branch}'], capture_output=True); "
+        f"print('CHECKED_OUT={fork_branch}')"
+    ]
 
 
 def _forcing_function_context(ctx):
@@ -1097,6 +1182,15 @@ STEPS: list[StepDef] = [
     StepDef("write_content", "closing:review", "judgment",
             skip_fn=_is_sweep_deselected("write_content")),
 
+    # --- queue continuation decision ---
+    StepDef("queue_decision", "closing:review", "judgment",
+            skip_fn=_skip_no_queue_remaining,
+            action_context_fn=_queue_decision_context),
+    StepDef("fork_next_branch", "closing:review", "mechanical",
+            skip_fn=_skip_fork_next,
+            script_fn=_fork_next_script,
+            postcondition_fn=fork_next_postcondition),
+
     # --- lifecycle: review -> verified ---
     StepDef("review_pass", "closing:review", "lifecycle",
             from_state="closing:review", to_state="closing:verified", event="review_pass"),
@@ -1195,6 +1289,10 @@ STEPS: list[StepDef] = [
     StepDef("report_scaffold", "closing:stamped", "mechanical",
             skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             script_fn=_report_scaffold_script),
+    StepDef("checkout_fork", "closing:stamped", "mechanical",
+            skip_fn=_skip_checkout_fork,
+            script_fn=_checkout_fork_script,
+            postcondition_fn=checkout_fork_postcondition),
     StepDef("arc42_scan", "closing:stamped", "judgment",
             skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
             action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"}),
@@ -1340,6 +1438,12 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     if args.get("step_done"):
         step_name = args["step_done"]
+        if step_name == "queue_decision" and args.get("produced") == "sync":
+            delete_close_progress(workspace)
+            return {
+                "ACTION": "redirect_sync",
+                "REASON": "User chose work sync — rerun with mode=sync",
+            }
         if step_name == "sweep_config":
             return {
                 "ACTION": "error",
@@ -1527,10 +1631,14 @@ def _hydrate_landed_shas(ctx: OrchestratorContext) -> None:
 
 
 def _close_on_step_done(step: StepDef, ctx: OrchestratorContext, result: dict[str, str]) -> None:
-    """Track landed SHAs after land step completes."""
+    """Track landed SHAs and fork branch after relevant steps complete."""
     if step.name == "land":
         ctx.landed_shas = _parse_landed_shas(result, ctx)
         _persist_landed_shas(ctx)
+    if step.name == "fork_next_branch":
+        fork_branch = result.get("FORK_BRANCH", "")
+        if fork_branch:
+            update_close_progress(ctx.workspace, "fork_next_branch", fork_branch)
 
 
 def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str] | None:

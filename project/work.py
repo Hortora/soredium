@@ -10,6 +10,7 @@ Each invocation runs mechanical steps up to the next judgment point,
 then prints ACTION= and exits. The LLM calls this in a loop until
 ACTION=complete.
 """
+import json
 import os
 import sys
 from dataclasses import dataclass, field
@@ -166,6 +167,22 @@ def _skip_no_platform_doc(ctx) -> bool:
     return not ctx.has_platform_doc
 
 
+def _recover_plan_context(ctx: WorkContext) -> dict[str, str]:
+    marker = ctx.workspace / ".orphaned-plan"
+    if not marker.exists():
+        return {"CONTEXT": "recover_plan_offer"}
+    try:
+        data = json.loads(marker.read_text())
+    except (json.JSONDecodeError, OSError):
+        data = {}
+    return {
+        "CONTEXT": "recover_plan_offer",
+        "ORPHANED_BRANCH": data.get("branch", ""),
+        "ORPHANED_REMAINING": str(data.get("remaining", 0)),
+        "ORPHANED_NEXT": data.get("next_title", ""),
+    }
+
+
 def _skip_no_protocols(ctx) -> bool:
     return not ctx.has_protocols_dir
 
@@ -214,6 +231,15 @@ START_STEPS: list[StepDef] = [
                 str(ctx.project), str(ctx.workspace),
                 f"branch={ctx.branch}",
                 f"base={ctx.base_branch}"]),
+    StepDef("recover_plan", "start", "mechanical",
+            script_fn=lambda ctx: [
+                "python3", str(_WORK_START_DIR / "recover_plan.py"),
+                f"workspace={ctx.workspace}",
+                f"project={ctx.project}",
+                f"branch={ctx.branch}"]),
+    StepDef("recover_plan_offer", "start", "judgment",
+            skip_fn=lambda ctx: not (ctx.workspace / ".orphaned-plan").exists(),
+            action_context_fn=_recover_plan_context),
     StepDef("design_routing", "start", "mechanical"),
     StepDef("scaffold", "start", "mechanical",
             script_fn=lambda ctx: [
@@ -361,6 +387,8 @@ def _complete_summary(command: str, ctx: WorkContext) -> str:
         parts.append(label)
     if ctx.branch:
         parts.append(f"branch: {ctx.branch}")
+    if ctx.in_slot and ctx.slot_path:
+        parts.append(f"slot: {ctx.slot_path.name} at {ctx.slot_path}")
     return " ".join(parts)
 
 

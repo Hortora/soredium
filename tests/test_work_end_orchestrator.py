@@ -472,6 +472,109 @@ class TestStaleProgress:
         assert "land" not in progress
 
 
+class TestQueueDecision:
+    """Queue decision step yields when .plan has remaining items."""
+
+    def test_yields_queue_decision_when_plan_has_items(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+
+        plan = tmp_path / ".plan"
+        plan.write_text("state: closing:review\nbranch: issue-99\n## Queue\n- [x] #1 — first ← done\n- [ ] #2 — second\n")
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends",
+                      "forcing_function", "sweep_config"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "plan_path": str(plan),
+        })
+
+        assert result["ACTION"] == "queue_decision"
+        assert "REMAINING" in result
+        assert result.get("NEXT_TITLE") == "second"
+
+    def test_skips_when_no_plan(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends",
+                      "forcing_function", "sweep_config"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+
+        assert result["ACTION"] != "queue_decision"
+
+    def test_sync_redirect(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends",
+                      "forcing_function", "sweep_config"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "step_done": "queue_decision",
+            "produced": "sync",
+        })
+
+        assert result["ACTION"] == "redirect_sync"
+
+    def test_end_continues_normally(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        _disable_postconditions(monkeypatch)
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends",
+                      "forcing_function", "sweep_config", "queue_decision"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+        update_close_progress(tmp_path, "queue_decision_produced", "end")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+        })
+
+        assert result["ACTION"] != "queue_decision"
+        assert result["ACTION"] != "fork_next_branch"
+
+
 class TestMetaStateRegression:
     """META_STATE must never regress from closing:* to active in end mode."""
 
