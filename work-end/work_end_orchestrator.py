@@ -1421,9 +1421,17 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     if args.get("force_done"):
         step_name = args["force_done"]
-        update_close_progress(workspace, step_name, "done")
         if step_name == "verify":
+            progress_snapshot = read_close_progress(workspace)
+            if progress_snapshot.get("_blocking_fail") == "yes":
+                return {
+                    "ACTION": "error",
+                    "ERROR": "BLOCKING_VERIFICATION_FAILURE",
+                    "STEP": "verify",
+                    "REASON": progress_snapshot.get("_blocking_detail", "blocking checks failed — cannot force"),
+                }
             update_close_progress(workspace, "_final_gate_forced", "yes")
+        update_close_progress(workspace, step_name, "done")
         if args.get("produced"):
             update_close_progress(workspace, f"{step_name}_produced", args["produced"])
         last = read_close_progress(workspace).get("last_yielded", "")
@@ -1631,7 +1639,7 @@ def _hydrate_landed_shas(ctx: OrchestratorContext) -> None:
 
 
 def _close_on_step_done(step: StepDef, ctx: OrchestratorContext, result: dict[str, str]) -> None:
-    """Track landed SHAs and fork branch after relevant steps complete."""
+    """Track landed SHAs, fork branch, and blocking failures after relevant steps complete."""
     if step.name == "land":
         ctx.landed_shas = _parse_landed_shas(result, ctx)
         _persist_landed_shas(ctx)
@@ -1639,6 +1647,11 @@ def _close_on_step_done(step: StepDef, ctx: OrchestratorContext, result: dict[st
         fork_branch = result.get("FORK_BRANCH", "")
         if fork_branch:
             update_close_progress(ctx.workspace, "fork_next_branch", fork_branch)
+    if step.name == "verify":
+        if result.get("BLOCKING_FAIL") == "yes":
+            update_close_progress(ctx.workspace, "_blocking_fail", "yes")
+            update_close_progress(ctx.workspace, "_blocking_detail",
+                                  result.get("BLOCKING_DETAIL", ""))
 
 
 def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[str, str] | None:
@@ -1778,7 +1791,7 @@ def _parse_landed_shas(result: dict[str, str], ctx: OrchestratorContext) -> dict
 
 CLOSE_USER_INPUT_STEPS = {"arc42_scan", "session_rename", "garden_feedback", "notes"}
 
-NON_RETRYABLE_ERRORS = {"REBASE_CONFLICT", "DIRTY_WORKTREE", "no_report"}
+NON_RETRYABLE_ERRORS = {"REBASE_CONFLICT", "DIRTY_WORKTREE", "no_report", "BLOCKING_VERIFICATION_FAILURE"}
 
 
 def _close_mechanical_error(step: StepDef, ctx: OrchestratorContext,

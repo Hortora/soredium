@@ -532,20 +532,35 @@ def verify(
         attic = str(Path(slot_dir).parent / "attic" / slot_num)
         checks.append(("archive_status", check_slot_archive_status(slot_dir, attic)))
 
+    BLOCKING_CHECKS = {
+        "landed_completeness", "project_merged", "project_landing_sha",
+    }
+    BLOCKING_PREFIXES = ("canonical_sync_",)
+
     all_pass = True
+    blocking_fail = False
+    blocking_details: list[str] = []
     for name, result in checks:
         status = result["status"]
         detail = result.get("detail", "")
+        is_blocking = name in BLOCKING_CHECKS or any(name.startswith(p) for p in BLOCKING_PREFIXES)
         icon = "✅" if status == "pass" else "❌" if status == "fail" else "⚠️"
+        tag = " [BLOCKING]" if is_blocking and status == "fail" else ""
         suffix = f" — {detail}" if detail else ""
-        print(f"  {icon} {name}: {status}{suffix}")
+        print(f"  {icon} {name}: {status}{suffix}{tag}")
         if status == "fail":
             all_pass = False
+            if is_blocking:
+                blocking_fail = True
+                blocking_details.append(f"{name}: {detail}")
 
     if all_pass:
         print("VERIFIED=yes")
     else:
         print("VERIFIED=no")
+    if blocking_fail:
+        print("BLOCKING_FAIL=yes")
+        print(f"BLOCKING_DETAIL={'; '.join(blocking_details)}")
 
     if all_pass and slot_dir:
         archive_result = next(

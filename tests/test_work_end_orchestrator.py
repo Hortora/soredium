@@ -575,6 +575,61 @@ class TestQueueDecision:
         assert result["ACTION"] != "fork_next_branch"
 
 
+class TestBlockingVerification:
+    """force_done=verify is blocked when verification has blocking failures."""
+
+    def test_force_done_verify_blocked_by_blocking_fail(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "_blocking_fail", "yes")
+        update_close_progress(tmp_path, "_blocking_detail",
+                              "landed_completeness: repos not in .landed: engine, platform")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99",
+            "base_branch": "main",
+            "meta_state": "closing:stamped",
+            "force_done": "verify",
+        })
+
+        assert result["ACTION"] == "error"
+        assert result["ERROR"] == "BLOCKING_VERIFICATION_FAILURE"
+        assert "landed_completeness" in result.get("REASON", "")
+
+    def test_force_done_verify_allowed_without_blocking_fail(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        _disable_postconditions(monkeypatch)
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends",
+                      "forcing_function", "sweep_config",
+                      "review_pass", "promote", "promote_pass",
+                      "trajectory", "squash", "report_squash",
+                      "write_marker", "land", "report_land",
+                      "push_pass", "merge_pass", "stamp_pass",
+                      "close_issues", "report_close_issues"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-99",
+            "base_branch": "main",
+            "meta_state": "closing:stamped",
+            "force_done": "verify",
+        })
+
+        assert result.get("ERROR") != "BLOCKING_VERIFICATION_FAILURE"
+
+
 class TestMetaStateRegression:
     """META_STATE must never regress from closing:* to active in end mode."""
 
