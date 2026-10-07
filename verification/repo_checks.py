@@ -185,3 +185,93 @@ def check_plan_in_project(project_path: Path) -> list[Finding]:
             f".plan exists in project repo but wksp/ symlink points to a workspace — .plan should be in the workspace",
         ))
     return findings
+
+
+def check_workspace_symlink_integrity(repo_path: Path) -> list[Finding]:
+    """Verify wksp symlink points to correct workspace and proj points back."""
+    findings: list[Finding] = []
+    wksp = repo_path / "wksp"
+    if not wksp.is_symlink():
+        return findings
+
+    try:
+        resolved = wksp.resolve()
+    except OSError:
+        findings.append(Finding("ERROR", "wksp-dangling", "wksp symlink is dangling"))
+        return findings
+
+    if not resolved.is_dir():
+        findings.append(Finding("ERROR", "wksp-not-dir", f"wksp resolves to non-directory {resolved}"))
+        return findings
+
+    proj = resolved / "proj"
+    if not proj.is_symlink():
+        findings.append(Finding("WARN", "wksp-no-proj", f"workspace at {resolved} has no proj symlink back"))
+        return findings
+
+    try:
+        proj_target = proj.resolve()
+        if proj_target != repo_path.resolve():
+            findings.append(Finding(
+                "ERROR", "wksp-wrong-target",
+                f"workspace proj points to {proj_target}, expected {repo_path.resolve()}",
+            ))
+    except OSError:
+        findings.append(Finding("ERROR", "wksp-proj-dangling", "workspace proj symlink is dangling"))
+
+    # Check workspace branch matches repo branch
+    if is_git_repo(repo_path) and is_git_repo(resolved):
+        r_repo = git(repo_path, "branch", "--show-current")
+        r_ws = git(resolved, "branch", "--show-current")
+        if r_repo.returncode == 0 and r_ws.returncode == 0:
+            repo_branch = r_repo.stdout.strip()
+            ws_branch = r_ws.stdout.strip()
+            if repo_branch != "main" and ws_branch != repo_branch and ws_branch != "main":
+                findings.append(Finding(
+                    "WARN", "ws-branch-mismatch",
+                    f"repo on {repo_branch} but workspace on {ws_branch}",
+                ))
+
+    return findings
+
+
+def check_db_state_matches_disk(
+    slot_number: int, family_root: str, slot_dir: Path, db_path: Path,
+) -> list[Finding]:
+    """Verify DB slot state matches disk markers."""
+    findings: list[Finding] = []
+    if not db_path.exists():
+        return findings
+
+    import sqlite3
+    try:
+        db = sqlite3.connect(str(db_path))
+        cur = db.cursor()
+        cur.execute(
+            "SELECT state FROM slots WHERE slot_number=? AND family_root=?",
+            (slot_number, family_root),
+        )
+        row = cur.fetchone()
+        db.close()
+    except Exception:
+        return findings
+
+    if not row:
+        findings.append(Finding("WARN", "db-missing", f"slot {slot_number} not in DB"))
+        return findings
+
+    db_state = row[0]
+    has_landed = (slot_dir / ".landed").exists()
+
+    if has_landed and db_state == "active":
+        findings.append(Finding(
+            "ERROR", "db-stale",
+            f".landed exists but DB state is '{db_state}' (should be 'landed')",
+        ))
+    elif not has_landed and db_state in ("landed", "archiving"):
+        findings.append(Finding(
+            "ERROR", "db-disk-mismatch",
+            f"DB state is '{db_state}' but no .landed marker on disk",
+        ))
+
+    return findings
