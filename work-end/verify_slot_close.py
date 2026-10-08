@@ -387,6 +387,10 @@ def check_landed_completeness(
             has_branch = git(str(clone_path), "rev-parse", "--verify", f"refs/heads/{branch}")
             if has_branch.returncode != 0:
                 auto_passed.append(repo_name)
+                continue
+            ahead = git(str(clone_path), "rev-list", "--count", f"main..{branch}")
+            if ahead.returncode == 0 and ahead.stdout.strip() == "0":
+                auto_passed.append(repo_name)
         missing -= set(auto_passed)
         if auto_passed:
             detail_parts = [f"{r}(no branch)" for r in auto_passed]
@@ -425,6 +429,9 @@ def check_canonical_sync(slot_dir: str, repo_name: str, canonical_path: str,
             has_branch = git(str(clone_path), "rev-parse", "--verify", f"refs/heads/{branch}")
             if has_branch.returncode != 0:
                 return {"status": "pass", "detail": f"{repo_name} unchanged (no feature branch)"}
+            ahead = git(str(clone_path), "rev-list", "--count", f"main..{branch}")
+            if ahead.returncode == 0 and ahead.stdout.strip() == "0":
+                return {"status": "pass", "detail": f"{repo_name} unchanged (branch has 0 commits ahead)"}
         return {"status": "fail", "detail": f"no landed SHA for {repo_name}"}
 
     clone_path = str(Path(slot_dir) / repo_name)
