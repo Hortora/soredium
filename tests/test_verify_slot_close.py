@@ -609,6 +609,65 @@ class TestLandedCompletenessScoped:
         assert result["status"] == "pass"
 
 
+class TestLandedCompletenessAutoPass:
+    """Repos without the feature branch auto-pass landed_completeness."""
+
+    def test_missing_repo_without_branch_auto_passes(self, tmp_path):
+        import subprocess
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_landed_completeness
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- engine\n- blocks\n")
+        (slot_dir / ".landed").write_text("landed_shas=engine:abc\n")
+        clone = slot_dir / "blocks"
+        clone.mkdir()
+        subprocess.run(["git", "init"], cwd=clone, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=clone, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=clone, capture_output=True)
+        (clone / "f.txt").write_text("x")
+        subprocess.run(["git", "add", "."], cwd=clone, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=clone, capture_output=True)
+
+        result = check_landed_completeness(str(slot_dir), branch="issue-42-feature")
+        assert result["status"] == "pass"
+        assert "unchanged" in result["detail"]
+
+    def test_missing_repo_with_branch_still_fails(self, tmp_path):
+        import subprocess
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_landed_completeness
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- engine\n- blocks\n")
+        (slot_dir / ".landed").write_text("landed_shas=engine:abc\n")
+        clone = slot_dir / "blocks"
+        clone.mkdir()
+        subprocess.run(["git", "init"], cwd=clone, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=clone, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=clone, capture_output=True)
+        (clone / "f.txt").write_text("x")
+        subprocess.run(["git", "add", "."], cwd=clone, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=clone, capture_output=True)
+        subprocess.run(["git", "checkout", "-b", "issue-42-feature"], cwd=clone, capture_output=True)
+
+        result = check_landed_completeness(str(slot_dir), branch="issue-42-feature")
+        assert result["status"] == "fail"
+        assert "blocks" in result["detail"]
+
+    def test_no_clone_dir_auto_passes(self, tmp_path):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from verify_slot_close import check_landed_completeness
+        slot_dir = tmp_path / "slot"
+        slot_dir.mkdir()
+        (slot_dir / ".slot").write_text("## Repos\n- engine\n- ghost\n")
+        (slot_dir / ".landed").write_text("landed_shas=engine:abc\n")
+
+        result = check_landed_completeness(str(slot_dir), branch="issue-42-feature")
+        assert result["status"] == "pass"
+        assert "unchanged" in result["detail"]
+
+
 class TestCeremonyCommitFilter:
     """Lifecycle ceremony commits are filtered from workspace_merged check."""
 

@@ -364,13 +364,36 @@ def check_landed_shas_populated(slot_dir: str) -> dict:
 def check_landed_completeness(
     slot_dir: str,
     covers_repos: set[str] | None = None,
+    branch: str = "",
 ) -> dict:
-    """Verify covered repos have SHAs in .landed."""
+    """Verify covered repos have SHAs in .landed.
+
+    Repos that have no feature branch in the slot clone are treated as
+    unchanged — they don't need a .landed entry. This handles cross-repo
+    slots where only some repos have feature branches.
+    """
     slot_repos = covers_repos if covers_repos else _parse_slot_repos(slot_dir)
     if not slot_repos:
         return {"status": "pass", "detail": "no repos in .slot"}
     landed_repos = _parse_landed_repos(slot_dir)
     missing = slot_repos - landed_repos
+    if missing and branch:
+        auto_passed: list[str] = []
+        for repo_name in sorted(missing):
+            clone_path = Path(slot_dir) / repo_name
+            if not clone_path.is_dir():
+                auto_passed.append(repo_name)
+                continue
+            has_branch = git(str(clone_path), "rev-parse", "--verify", f"refs/heads/{branch}")
+            if has_branch.returncode != 0:
+                auto_passed.append(repo_name)
+        missing -= set(auto_passed)
+        if auto_passed:
+            detail_parts = [f"{r}(no branch)" for r in auto_passed]
+            if not missing:
+                return {"status": "pass",
+                        "detail": f"{len(landed_repos)}/{len(slot_repos)} repos landed, "
+                                  f"{len(auto_passed)} unchanged: {', '.join(detail_parts)}"}
     if missing:
         return {"status": "fail", "detail": f"repos not in .landed: {', '.join(sorted(missing))}"}
     extra = landed_repos - slot_repos
@@ -379,7 +402,8 @@ def check_landed_completeness(
     return {"status": "pass", "detail": f"{len(landed_repos)}/{len(slot_repos)} repos landed"}
 
 
-def check_canonical_sync(slot_dir: str, repo_name: str, canonical_path: str) -> dict:
+def check_canonical_sync(slot_dir: str, repo_name: str, canonical_path: str,
+                         branch: str = "") -> dict:
     landed = Path(slot_dir) / ".landed"
     if not landed.exists():
         return {"status": "fail", "detail": "no .landed marker"}
@@ -396,6 +420,11 @@ def check_canonical_sync(slot_dir: str, repo_name: str, canonical_path: str) -> 
                         break
 
     if not landed_sha:
+        clone_path = Path(slot_dir) / repo_name
+        if branch and clone_path.is_dir():
+            has_branch = git(str(clone_path), "rev-parse", "--verify", f"refs/heads/{branch}")
+            if has_branch.returncode != 0:
+                return {"status": "pass", "detail": f"{repo_name} unchanged (no feature branch)"}
         return {"status": "fail", "detail": f"no landed SHA for {repo_name}"}
 
     clone_path = str(Path(slot_dir) / repo_name)
@@ -516,13 +545,14 @@ def verify(
         checks.append(("landed_marker", check_landed_marker(slot_dir)))
         checks.append(("landed_shas_populated", check_landed_shas_populated(slot_dir)))
         checks.append(("landed_completeness",
-                        check_landed_completeness(slot_dir, covers_repos=covers_repos)))
+                        check_landed_completeness(slot_dir, covers_repos=covers_repos,
+                                                  branch=branch)))
         checks.append(("phase_a_marker", check_slot_marker(slot_dir, ".phase-a-complete")))
         if canonical_repos:
             for repo_name, orig_path in canonical_repos.items():
                 checks.append((
                     f"canonical_sync_{repo_name}",
-                    check_canonical_sync(slot_dir, repo_name, orig_path),
+                    check_canonical_sync(slot_dir, repo_name, orig_path, branch=branch),
                 ))
                 checks.append((
                     f"canonical_pushed_{repo_name}",
