@@ -28,14 +28,7 @@ if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
 from common import parse_args
 from plan_io import parse_covers
-
-
-def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", repo, *args],
-        capture_output=True, text=True,
-        timeout=10,
-    )
+from git_util import git
 
 
 CEREMONY_PREFIXES = (
@@ -74,7 +67,7 @@ def _is_lifecycle_file(path: str) -> bool:
 
 def _is_lifecycle_only_diff(project: str, branch: str, base: str) -> bool:
     """True if the tree diff between branch and base is entirely lifecycle files."""
-    result = git(project, "diff", "--name-only", f"{base}..{branch}")
+    result = git(project, "diff", "--name-only", f"{base}..{branch}", timeout=10)
     if result.returncode != 0 or not result.stdout.strip():
         return False
     diff_files = [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
@@ -82,7 +75,7 @@ def _is_lifecycle_only_diff(project: str, branch: str, base: str) -> bool:
 
 
 def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
-    result = git(project, "log", "--oneline", f"{base}..{branch}")
+    result = git(project, "log", "--oneline", f"{base}..{branch}", timeout=10)
     if result.returncode != 0:
         return {"status": "fail", "detail": f"branch {branch} not found"}
     unmerged = [
@@ -91,15 +84,15 @@ def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
     ]
     if unmerged:
         return {"status": "fail", "detail": f"UNMERGED: {len(unmerged)} commits not on {base}"}
-    branch_tree = git(project, "rev-parse", f"{branch}~1^{{tree}}")
-    main_tree = git(project, "rev-parse", f"{base}^{{tree}}")
+    branch_tree = git(project, "rev-parse", f"{branch}~1^{{tree}}", timeout=10)
+    main_tree = git(project, "rev-parse", f"{base}^{{tree}}", timeout=10)
     if branch_tree.returncode != 0 or main_tree.returncode != 0:
         return {"status": "fail", "detail": "cannot resolve tree SHAs for content verification"}
     if branch_tree.stdout.strip() != main_tree.stdout.strip():
         if _is_lifecycle_only_diff(project, branch, base):
             return {"status": "pass", "detail": "tree differs only in lifecycle files"}
         ancestor = git(project, "merge-base", "--is-ancestor",
-                       f"{branch}~1", base)
+                       f"{branch}~1", base, timeout=10)
         if ancestor.returncode == 0:
             return {"status": "pass", "detail": f"stamp is ancestor of {base} — main advanced after landing"}
         return {"status": "fail", "detail": f"branch content not on {base} (tree mismatch)"}
@@ -107,7 +100,7 @@ def check_branch_merged(project: str, branch: str, base: str = "main") -> dict:
 
 
 def check_branch_stamped(project: str, branch: str) -> dict:
-    result = git(project, "log", "-5", "--format=%s", branch)
+    result = git(project, "log", "-5", "--format=%s", branch, timeout=10)
     if result.returncode != 0:
         return {"status": "fail", "detail": f"branch {branch} not found"}
     for line in result.stdout.strip().splitlines():
@@ -119,7 +112,7 @@ def check_branch_stamped(project: str, branch: str) -> dict:
 
 def _find_tree_on_ref(repo: str, tree_sha: str, ref: str, max_commits: int = 500) -> str | None:
     """Find a commit on ref with the given tree SHA. Returns commit SHA or None."""
-    result = git(repo, "log", ref, f"--format=%H %T", f"--max-count={max_commits}")
+    result = git(repo, "log", ref, f"--format=%H %T", f"--max-count={max_commits}", timeout=10)
     if result.returncode != 0:
         return None
     for line in result.stdout.strip().splitlines():
@@ -131,24 +124,24 @@ def _find_tree_on_ref(repo: str, tree_sha: str, ref: str, max_commits: int = 500
 
 def _verify_sha_on_ref(repo: str, sha: str, ref: str) -> dict:
     """Check if sha is on ref — tries direct ancestry first, then tree-SHA fallback."""
-    direct = git(repo, "merge-base", "--is-ancestor", sha, ref)
+    direct = git(repo, "merge-base", "--is-ancestor", sha, ref, timeout=10)
     if direct.returncode == 0:
         return {"status": "pass", "detail": f"SHA {sha[:8]} on {ref}"}
-    tree_result = git(repo, "rev-parse", f"{sha}^{{tree}}")
+    tree_result = git(repo, "rev-parse", f"{sha}^{{tree}}", timeout=10)
     if tree_result.returncode != 0:
         return {"status": "fail", "detail": f"SHA {sha[:8]} not resolvable"}
     tree_sha = tree_result.stdout.strip()
     match = _find_tree_on_ref(repo, tree_sha, ref)
     if match:
         return {"status": "pass", "detail": f"content on {ref} via tree match ({match[:8]}, landed SHA {sha[:8]} was rebased)"}
-    diff_result = git(repo, "diff", "--stat", sha, ref)
+    diff_result = git(repo, "diff", "--stat", sha, ref, timeout=10)
     if diff_result.returncode == 0 and not diff_result.stdout.strip():
         return {"status": "pass", "detail": f"content on {ref} via diff match (landed SHA {sha[:8]} was squash-rebased)"}
     return {"status": "fail", "detail": f"SHA {sha[:8]} not on {ref} (tree {tree_sha[:8]} not found)"}
 
 
 def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
-    result = git(project, "log", "-1", "--format=%s", branch)
+    result = git(project, "log", "-1", "--format=%s", branch, timeout=10)
     if result.returncode != 0:
         return {"status": "fail", "detail": "branch not found"}
     msg = result.stdout.strip()
@@ -158,7 +151,7 @@ def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
     sha = sha_match.group(1)
     verify = _verify_sha_on_ref(project, sha, base)
 
-    body_result = git(project, "log", "-1", "--format=%b", branch)
+    body_result = git(project, "log", "-1", "--format=%b", branch, timeout=10)
     if body_result.returncode == 0 and "stamp-history:" in body_result.stdout:
         sys.path.insert(0, str(Path(__file__).parent))
         from land_flow import _parse_stamp_history
@@ -172,7 +165,7 @@ def check_landing_sha(project: str, branch: str, base: str = "main") -> dict:
 
 
 def check_main_pushed(project: str, base: str = "main") -> dict:
-    result = git(project, "log", f"origin/{base}..{base}", "--oneline")
+    result = git(project, "log", f"origin/{base}..{base}", "--oneline", timeout=10)
     if result.returncode != 0:
         return {"status": "pass", "detail": "no remote tracking"}
     unpushed = result.stdout.strip()
@@ -183,14 +176,14 @@ def check_main_pushed(project: str, base: str = "main") -> dict:
 
 
 def check_workspace_stamped(workspace: str, branch: str) -> dict:
-    result = git(workspace, "branch", "--list", branch)
+    result = git(workspace, "branch", "--list", branch, timeout=10)
     if result.returncode != 0 or not result.stdout.strip():
         return {"status": "warn", "detail": "workspace branch not found"}
     return check_branch_stamped(workspace, branch)
 
 
 def check_on_main(repo: str, label: str) -> dict:
-    result = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    result = git(repo, "rev-parse", "--abbrev-ref", "HEAD", timeout=10)
     if result.returncode != 0:
         return {"status": "fail", "detail": f"cannot read HEAD for {label}"}
     branch = result.stdout.strip()
@@ -384,11 +377,11 @@ def check_landed_completeness(
             if not clone_path.is_dir():
                 auto_passed.append(repo_name)
                 continue
-            has_branch = git(str(clone_path), "rev-parse", "--verify", f"refs/heads/{branch}")
+            has_branch = git(str(clone_path), "rev-parse", "--verify", f"refs/heads/{branch}", timeout=10)
             if has_branch.returncode != 0:
                 auto_passed.append(repo_name)
                 continue
-            ahead = git(str(clone_path), "rev-list", "--count", f"main..{branch}")
+            ahead = git(str(clone_path), "rev-list", "--count", f"main..{branch}", timeout=10)
             if ahead.returncode == 0 and ahead.stdout.strip() == "0":
                 auto_passed.append(repo_name)
         missing -= set(auto_passed)
@@ -426,29 +419,29 @@ def check_canonical_sync(slot_dir: str, repo_name: str, canonical_path: str,
     if not landed_sha:
         clone_path = Path(slot_dir) / repo_name
         if branch and clone_path.is_dir():
-            has_branch = git(str(clone_path), "rev-parse", "--verify", f"refs/heads/{branch}")
+            has_branch = git(str(clone_path), "rev-parse", "--verify", f"refs/heads/{branch}", timeout=10)
             if has_branch.returncode != 0:
                 return {"status": "pass", "detail": f"{repo_name} unchanged (no feature branch)"}
-            ahead = git(str(clone_path), "rev-list", "--count", f"main..{branch}")
+            ahead = git(str(clone_path), "rev-list", "--count", f"main..{branch}", timeout=10)
             if ahead.returncode == 0 and ahead.stdout.strip() == "0":
                 return {"status": "pass", "detail": f"{repo_name} unchanged (branch has 0 commits ahead)"}
         return {"status": "fail", "detail": f"no landed SHA for {repo_name}"}
 
     clone_path = str(Path(slot_dir) / repo_name)
-    direct = git(canonical_path, "merge-base", "--is-ancestor", landed_sha, "main")
+    direct = git(canonical_path, "merge-base", "--is-ancestor", landed_sha, "main", timeout=10)
     if direct.returncode == 0:
         return {"status": "pass", "detail": f"{repo_name} SHA {landed_sha[:8]} on main"}
-    tree_result = git(clone_path, "rev-parse", f"{landed_sha}^{{tree}}")
+    tree_result = git(clone_path, "rev-parse", f"{landed_sha}^{{tree}}", timeout=10)
     if tree_result.returncode != 0:
-        tree_result = git(canonical_path, "rev-parse", f"{landed_sha}^{{tree}}")
+        tree_result = git(canonical_path, "rev-parse", f"{landed_sha}^{{tree}}", timeout=10)
     if tree_result.returncode != 0:
         return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not resolvable in clone or canonical"}
     tree_sha = tree_result.stdout.strip()
     match = _find_tree_on_ref(canonical_path, tree_sha, "main")
     if match:
         return {"status": "pass", "detail": f"{repo_name} content on main (tree match via {match[:8]}, SHA {landed_sha[:8]} was rebased)"}
-    if git(canonical_path, "rev-parse", landed_sha).returncode == 0:
-        diff_result = git(canonical_path, "diff", "--stat", landed_sha, "main")
+    if git(canonical_path, "rev-parse", landed_sha, timeout=10).returncode == 0:
+        diff_result = git(canonical_path, "diff", "--stat", landed_sha, "main", timeout=10)
         if diff_result.returncode == 0 and not diff_result.stdout.strip():
             return {"status": "pass", "detail": f"{repo_name} content on main (diff match, SHA {landed_sha[:8]} was squash-rebased)"}
     return {"status": "fail", "detail": f"{repo_name} SHA {landed_sha[:8]} not reachable from main (tree {tree_sha[:8]} not found)"}
@@ -508,7 +501,7 @@ def _resolve_canonical_repos(
             continue
         if covers_repos and sub.name not in covers_repos:
             continue
-        local_url = git(str(sub), "remote", "get-url", "local")
+        local_url = git(str(sub), "remote", "get-url", "local", timeout=10)
         if local_url.returncode == 0 and local_url.stdout.strip():
             orig_path = local_url.stdout.strip()
             if Path(orig_path).is_dir():

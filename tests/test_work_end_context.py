@@ -270,7 +270,7 @@ class TestIsxStaleness:
             "## Created\n2026-08-12, branch: test\n"
         )
         sha = "abc123def456"
-        def mock_git(repo, *args):
+        def mock_git(repo, *args, **kwargs):
             r = MagicMock()
             r.returncode = 0
             if "rev-parse" in args:
@@ -294,7 +294,7 @@ class TestIsxStaleness:
             "template: tpl-java\n\n"
             "## Created\n2026-08-12, branch: test\n"
         )
-        def mock_git(repo, *args):
+        def mock_git(repo, *args, **kwargs):
             r = MagicMock()
             r.returncode = 0
             if "rev-parse" in args:
@@ -320,7 +320,7 @@ class TestIsxStaleness:
             "template: tpl-java\n\n"
             "## Created\n2026-08-12, branch: test\n"
         )
-        def mock_git(repo, *args):
+        def mock_git(repo, *args, **kwargs):
             r = MagicMock()
             if "rev-parse" in args:
                 r.returncode = 0

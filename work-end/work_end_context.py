@@ -26,19 +26,12 @@ if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
 from common import parse_args
 from plan_io import read_plan
-
-
-def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", repo, *args],
-        capture_output=True, text=True,
-        timeout=10,
-    )
+from git_util import git
 
 
 def check_clean_tree(workspace: str, project: str) -> dict:
-    ws_status = git(workspace, "status", "--porcelain", "--", ".")
-    proj_status = git(project, "status", "--porcelain", "--", ".")
+    ws_status = git(workspace, "status", "--porcelain", "--", ".", timeout=10)
+    proj_status = git(project, "status", "--porcelain", "--", ".", timeout=10)
 
     ws_dirty = bool(ws_status.stdout.strip()) if ws_status.returncode == 0 else False
     proj_dirty = bool(proj_status.stdout.strip()) if proj_status.returncode == 0 else False
@@ -81,7 +74,7 @@ def check_meta_exists(workspace: str, current_branch: str = "") -> dict:
 
 
 def get_branch(repo: str) -> str:
-    result = git(repo, "branch", "--show-current")
+    result = git(repo, "branch", "--show-current", timeout=10)
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
@@ -108,8 +101,8 @@ def check_isx_staleness(workspace: str, project: str) -> dict:
         clone_path = slot_dir / repo_name
         if not clone_path.is_dir():
             continue
-        local_head = git(str(clone_path), "rev-parse", "HEAD")
-        remote = git(str(clone_path), "ls-remote", "isx", "HEAD")
+        local_head = git(str(clone_path), "rev-parse", "HEAD", timeout=10)
+        remote = git(str(clone_path), "ls-remote", "isx", "HEAD", timeout=10)
         if local_head.returncode != 0 or remote.returncode != 0:
             continue
         local_sha = local_head.stdout.strip()

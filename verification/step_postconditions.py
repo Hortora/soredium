@@ -11,14 +11,17 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from git_util import git as _canonical_git  # noqa: E402
 
 
 def _git(repo_path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", str(repo_path), *args],
-        capture_output=True, text=True, timeout=10,
-    )
+    return _canonical_git(repo_path, *args, timeout=10)
 
 
 def rebase_postcondition(ctx) -> bool:

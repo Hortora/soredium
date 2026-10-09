@@ -27,7 +27,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 from common import parse_args, detect_topology
+from git_util import git
 
 _lib = Path.home() / ".claude" / "lib"
 if _lib.exists():
@@ -144,13 +148,6 @@ def push_to_remote(project: str, base_branch: str = "main",
             return PushResult(True, attempt)
     return PushResult(False, max_retries, f"push_failed_after_{max_retries}_retries")
 
-
-def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", repo, *args],
-        capture_output=True, text=True,
-        timeout=30,
-    )
 
 
 def read_progress(progress_path: Path) -> dict[str, str]:

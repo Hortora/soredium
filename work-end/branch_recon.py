@@ -26,13 +26,7 @@ if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
 from common import parse_args
 from plan_io import parse_covers
-
-
-def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", repo, *args],
-        capture_output=True, text=True,
-    )
+from git_util import git
 
 
 def gh_issue(issue_repo: str, number: str) -> dict:

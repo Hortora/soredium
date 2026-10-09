@@ -34,22 +34,13 @@ _project_dir = str(Path(__file__).resolve().parent.parent / "project")
 if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
 from common import parse_args, detect_topology
+from git_util import git
 from plan_io import parse_covers
 
 
-def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", cwd] + list(cmd),
-        capture_output=True, text=True, check=True,
-    )
-
-
 def _has_remote(cwd: str) -> bool:
-    try:
-        r = git("remote", cwd=cwd)
-        return bool(r.stdout.strip())
-    except subprocess.CalledProcessError:
-        return False
+    r = git(cwd, "remote")
+    return r.returncode == 0 and bool(r.stdout.strip())
 
 
 def _resolve_push_remote(cwd: str) -> str:
@@ -63,22 +54,22 @@ def _push_or_report(cwd: str) -> None:
         print("PUSHED=skipped")
         return
     remote = _resolve_push_remote(cwd)
-    try:
-        git("push", "--no-verify", remote, "main", cwd=cwd)
+    r = git(cwd, "push", "--no-verify", remote, "main")
+    if r.returncode == 0:
         print("PUSHED=yes")
         print(f"PUSH_REMOTE={remote}")
-    except subprocess.CalledProcessError:
-        try:
-            branch = subprocess.run(
-                ["git", "-C", cwd, "branch", "--show-current"],
-                capture_output=True, text=True,
-            ).stdout.strip()
-            git("push", "--no-verify", "-u", remote, branch, cwd=cwd)
+    else:
+        branch = subprocess.run(
+            ["git", "-C", cwd, "branch", "--show-current"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        r2 = git(cwd, "push", "--no-verify", "-u", remote, branch)
+        if r2.returncode == 0:
             print("PUSHED=yes")
             print(f"PUSH_REMOTE={remote}")
-        except subprocess.CalledProcessError as e2:
+        else:
             print("PUSHED=failed")
-            print(f"PUSH_ERROR={e2.stderr.strip()}")
+            print(f"PUSH_ERROR={r2.stderr.strip()}")
 
 
 def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
@@ -107,18 +98,14 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
         return 1
 
     wt = ws / ".promote-tmp"
-    try:
-        git("worktree", "add", str(wt), "main", cwd=workspace)
-    except subprocess.CalledProcessError as e:
+    r = git(workspace, "worktree", "add", str(wt), "main")
+    if r.returncode != 0:
         print("ERROR=worktree_failed")
-        print(f"ERROR_DETAIL=Failed to create worktree for main: {e.stderr.strip()}")
+        print(f"ERROR_DETAIL=Failed to create worktree for main: {r.stderr.strip()}")
         return 1
 
     try:
-        try:
-            git("pull", "--rebase", "origin", "main", cwd=str(wt))
-        except subprocess.CalledProcessError:
-            pass
+        git(str(wt), "pull", "--rebase", "origin", "main")
 
         promoted = 0
         skipped: list[str] = []
@@ -139,35 +126,27 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
                 shutil.copytree(str(src), str(dst))
             else:
                 shutil.copy2(str(src), str(dst))
-            git("add", artifact, cwd=str(wt))
+            git(str(wt), "add", artifact)
             promoted += 1
 
         if promoted > 0:
-            try:
-                git("commit", "-m", f"docs(work-end): promote artifacts from {branch}", cwd=str(wt))
-            except subprocess.CalledProcessError as e:
-                if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
+            r = git(str(wt), "commit", "-m", f"docs(work-end): promote artifacts from {branch}")
+            if r.returncode != 0:
+                if "nothing to commit" not in r.stdout and "nothing to commit" not in r.stderr:
                     print("ERROR=commit_failed")
-                    print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
+                    print(f"ERROR_DETAIL=Failed to commit: {r.stderr.strip()}")
                     return 1
 
             _push_or_report(str(wt))
     finally:
-        try:
-            git("worktree", "remove", str(wt), "--force", cwd=workspace)
-        except subprocess.CalledProcessError:
+        r = git(workspace, "worktree", "remove", str(wt), "--force")
+        if r.returncode != 0:
             if wt.exists():
                 shutil.rmtree(wt, ignore_errors=True)
-                try:
-                    git("worktree", "prune", cwd=workspace)
-                except subprocess.CalledProcessError:
-                    pass
+                git(workspace, "worktree", "prune")
 
     # Switch back to branch
-    try:
-        git("checkout", branch, cwd=workspace)
-    except subprocess.CalledProcessError:
-        pass
+    git(workspace, "checkout", branch)
 
     print(f"PROMOTED={promoted}")
     if skipped:
@@ -226,12 +205,12 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
 
-        try:
-            git("add", dst_rel, cwd=project)
+        r = git(project, "add", dst_rel)
+        if r.returncode == 0:
             promoted += 1
-        except subprocess.CalledProcessError as e:
+        else:
             skipped.append(artifact)
-            print(f"SKIP_DETAIL={artifact}: {e.stderr.strip()}", file=sys.stderr)
+            print(f"SKIP_DETAIL={artifact}: {r.stderr.strip()}", file=sys.stderr)
 
     if promoted > 0:
         has_staged = subprocess.run(
@@ -240,12 +219,11 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
         ).returncode != 0
         if has_staged:
             issue_ref = f"  Refs #{parse_covers(covers)[0]}" if covers else ""
-            try:
-                git("commit", "-m", f"docs(work-end): project-promote artifacts from workspace{issue_ref}", cwd=project)
-            except subprocess.CalledProcessError as e:
-                if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
+            r = git(project, "commit", "-m", f"docs(work-end): project-promote artifacts from workspace{issue_ref}")
+            if r.returncode != 0:
+                if "nothing to commit" not in r.stdout and "nothing to commit" not in r.stderr:
                     print("ERROR=commit_failed")
-                    print(f"ERROR_DETAIL=Failed to commit: {e.stderr.strip()}")
+                    print(f"ERROR_DETAIL=Failed to commit: {r.stderr.strip()}")
                     return 1
 
             _push_or_report(project)
@@ -326,20 +304,16 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
         target = ws
     else:
         wt = ws / ".promote-tmp"
-        try:
-            git("worktree", "add", str(wt), "main", cwd=workspace)
-        except subprocess.CalledProcessError as e:
+        r = git(workspace, "worktree", "add", str(wt), "main")
+        if r.returncode != 0:
             print("ERROR=worktree_failed")
-            print(f"ERROR_DETAIL=Failed to create worktree for main: {e.stderr.strip()}")
+            print(f"ERROR_DETAIL=Failed to create worktree for main: {r.stderr.strip()}")
             return 1
         target = wt
 
     try:
         if not on_main:
-            try:
-                git("pull", "--rebase", "origin", "main", cwd=str(target))
-            except subprocess.CalledProcessError:
-                pass
+            git(str(target), "pull", "--rebase", "origin", "main")
 
         target_plans = target / "plans"
         target_plans.mkdir(parents=True, exist_ok=True)
@@ -367,27 +341,22 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
                 archived += 1
 
         if archived > 0:
-            try:
-                git("add", "-A", "plans/", cwd=str(target))
-                git("commit", "-m", f"docs(work-end): archive plans from {branch}", cwd=str(target))
-            except subprocess.CalledProcessError as e:
-                if "nothing to commit" not in (e.stdout + e.stderr):
+            git(str(target), "add", "-A", "plans/")
+            r = git(str(target), "commit", "-m", f"docs(work-end): archive plans from {branch}")
+            if r.returncode != 0:
+                if "nothing to commit" not in (r.stdout + r.stderr):
                     print("ERROR=commit_failed")
-                    print(f"ERROR_DETAIL={e.stderr.strip()}")
+                    print(f"ERROR_DETAIL={r.stderr.strip()}")
                     return 1
 
             _push_or_report(str(target))
     finally:
         if not on_main:
-            try:
-                git("worktree", "remove", str(wt), "--force", cwd=workspace)
-            except subprocess.CalledProcessError:
+            r = git(workspace, "worktree", "remove", str(wt), "--force")
+            if r.returncode != 0:
                 if wt.exists():
                     shutil.rmtree(wt, ignore_errors=True)
-                    try:
-                        git("worktree", "prune", cwd=workspace)
-                    except subprocess.CalledProcessError:
-                        pass
+                    git(workspace, "worktree", "prune")
 
     print(f"ARCHIVED={archived}")
     if skipped:

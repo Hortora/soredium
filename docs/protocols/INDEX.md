@@ -27,6 +27,12 @@ Standing rules and principles for the soredium skill collection and garden tooli
 |------|---------|------------|
 | [evidence-before-claims.md](evidence-before-claims.md) | Run the command, read the output, THEN claim the result — at every completion boundary | Any completion claim: commits, PRs, task completion, agent delegation |
 
+## Pipeline Infrastructure
+
+| File | Summary | Applies to |
+|------|---------|------------|
+| [git-util-single-source.md](git-util-single-source.md) | Pipeline git operations must use project/git_util.py — no local helpers | Any Python file in work-end/, verification/, or project/ that runs git commands |
+
 ## Skill Architecture
 
 | File | Summary | Applies to |

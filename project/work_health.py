@@ -20,13 +20,13 @@ from lifecycle import is_closed, ClosureState
 from plan_io import read_field
 
 
+from git_util import git as _canonical_git
+
+
 def _git(repo, *args, timeout=10):
     try:
-        result = subprocess.run(
-            ["git", "-C", str(repo)] + list(args),
-            capture_output=True, text=True, timeout=timeout,
-        )
-        return result.stdout.strip(), result.returncode
+        r = _canonical_git(repo, *args, timeout=timeout)
+        return r.stdout.strip(), r.returncode
     except subprocess.TimeoutExpired:
         return "", 1
 

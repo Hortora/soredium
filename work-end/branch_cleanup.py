@@ -29,17 +29,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+
 from common import detect_topology, parse_args
+from git_util import git
 
 # Path to remove_from_stack.py — resolve relative to this script's location
 REMOVE_FROM_STACK = Path(__file__).parent.parent / "project" / "remove_from_stack.py"
-
-
-def git(*cmd: str, cwd: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", cwd] + list(cmd),
-        capture_output=True, text=True, check=True,
-    )
 
 
 def _plan_has_remaining(plan_path: Path) -> bool:
@@ -115,11 +113,10 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
         print("CLEANED=yes")
         return 0
 
-    try:
-        git("rm", "-f", "--ignore-unmatch", *files_to_remove, cwd=workspace)
-    except subprocess.CalledProcessError as e:
+    r = git(workspace, "rm", "-f", "--ignore-unmatch", *files_to_remove)
+    if r.returncode != 0:
         print("ERROR=rm_failed")
-        print(f"ERROR_DETAIL=Failed to remove scaffold files: {e.stderr.strip()}")
+        print(f"ERROR_DETAIL=Failed to remove scaffold files: {r.stderr.strip()}")
         return 1
 
     # Remove design/ dir if empty
@@ -135,24 +132,21 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
         from slot_claude import clear_occupant_pid
         clear_occupant_pid(Path(slot_path))
 
-    try:
-        git("commit", "-m", "chore(work-end): cleanup branch scaffold", cwd=workspace)
-    except subprocess.CalledProcessError as e:
-        if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
+    r = git(workspace, "commit", "-m", "chore(work-end): cleanup branch scaffold")
+    if r.returncode != 0:
+        if "nothing to commit" not in r.stdout and "nothing to commit" not in r.stderr:
             print("ERROR=commit_failed")
-            print(f"ERROR_DETAIL=Failed to commit scaffold cleanup: {e.stderr.strip()}")
+            print(f"ERROR_DETAIL=Failed to commit scaffold cleanup: {r.stderr.strip()}")
             return 1
 
     push_ok = False
-    try:
-        git("push", cwd=workspace)
+    r = git(workspace, "push")
+    if r.returncode == 0:
         push_ok = True
-    except subprocess.CalledProcessError:
-        try:
-            git("push", "origin", "main", cwd=workspace)
+    else:
+        r = git(workspace, "push", "origin", "main")
+        if r.returncode == 0:
             push_ok = True
-        except subprocess.CalledProcessError:
-            pass
 
     print("CLEANED=yes")
     if not push_ok:
@@ -198,21 +192,16 @@ def cleanup_stack(workspace: str, params: dict[str, str]) -> int:
         print(f"ERROR_DETAIL=Failed to remove from stack: {e.stderr.strip()}")
         return 1
 
-    try:
-        rel_path = str(stack_file.relative_to(ws))
-        git("add", rel_path, cwd=workspace)
-        git("commit", "-m", f"chore(work-end): remove {branch} from pause stack (closed)", cwd=workspace)
-    except subprocess.CalledProcessError as e:
-        if "nothing to commit" not in e.stdout and "nothing to commit" not in e.stderr:
+    rel_path = str(stack_file.relative_to(ws))
+    git(workspace, "add", rel_path)
+    r = git(workspace, "commit", "-m", f"chore(work-end): remove {branch} from pause stack (closed)")
+    if r.returncode != 0:
+        if "nothing to commit" not in r.stdout and "nothing to commit" not in r.stderr:
             print("ERROR=commit_failed")
-            print(f"ERROR_DETAIL=Failed to commit stack cleanup: {e.stderr.strip()}")
+            print(f"ERROR_DETAIL=Failed to commit stack cleanup: {r.stderr.strip()}")
             return 1
 
-    try:
-        git("push", cwd=workspace)
-    except subprocess.CalledProcessError:
-        # Push failure is non-fatal
-        pass
+    git(workspace, "push")
 
     print("REMOVED=yes")
     return 0
@@ -240,32 +229,22 @@ def checkout_main(project: str, workspace: str) -> int:
             capture_output=True, text=True,
         )
         if status.stdout.strip():
-            try:
-                git("add", "-A", cwd=repo_path)
-                git("commit", "-m", "chore: commit lifecycle state before branch switch", cwd=repo_path)
-            except subprocess.CalledProcessError:
-                pass
+            git(repo_path, "add", "-A")
+            git(repo_path, "commit", "-m", "chore: commit lifecycle state before branch switch")
 
     # Checkout main in both repos
     for repo_path, label in [(project, "project"), (workspace, "workspace")]:
-        try:
-            git("checkout", "main", cwd=repo_path)
-        except subprocess.CalledProcessError as e:
+        r = git(repo_path, "checkout", "main")
+        if r.returncode != 0:
             print(f"ERROR=checkout_failed")
-            print(f"ERROR_DETAIL=Failed to checkout main in {label}: {e.stderr.strip()}")
+            print(f"ERROR_DETAIL=Failed to checkout main in {label}: {r.stderr.strip()}")
             return 1
 
     # Pull --rebase from blessed remote (non-fatal if fails — no remote)
     fork_remote, blessed_remote = detect_topology(project)
     proj_remote = blessed_remote if blessed_remote else fork_remote or "origin"
-    try:
-        git("pull", "--rebase", proj_remote, "main", cwd=project)
-    except subprocess.CalledProcessError:
-        pass
-    try:
-        git("pull", "--rebase", "origin", "main", cwd=workspace)
-    except subprocess.CalledProcessError:
-        pass
+    git(project, "pull", "--rebase", proj_remote, "main")
+    git(workspace, "pull", "--rebase", "origin", "main")
 
     print("SWITCHED=yes")
     return 0
@@ -283,12 +262,12 @@ def wip_commit(project: str, workspace: str) -> int:
         )
         if not result.stdout.strip():
             continue
-        try:
-            git("add", "-A", cwd=repo_path)
-            git("commit", "-m", "WIP: session wrap — uncommitted changes", cwd=repo_path)
+        git(repo_path, "add", "-A")
+        r = git(repo_path, "commit", "-m", "WIP: session wrap — uncommitted changes")
+        if r.returncode == 0:
             print(f"COMMITTED_{label.upper()}=yes")
-        except subprocess.CalledProcessError as e:
-            if "nothing to commit" not in (e.stdout or "") and "nothing to commit" not in (e.stderr or ""):
+        else:
+            if "nothing to commit" not in (r.stdout or "") and "nothing to commit" not in (r.stderr or ""):
                 print(f"WARN=commit_failed_{label}")
     print("WIP_COMMITTED=yes")
     return 0

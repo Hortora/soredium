@@ -28,16 +28,10 @@ ROUTING_DIR = SKILL_ROOT / "project"
 sys.path.insert(0, str(ROUTING_DIR))
 from lifecycle import ClosureState, is_closed  # noqa: E402
 from routing import parse_layer2, parse_layer3, resolve  # noqa: E402
+from git_util import git  # noqa: E402
 
 sys.path.insert(0, str(SCRIPT_DIR))
 from common import parse_args, subdir_prefix  # noqa: E402
-
-
-def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", repo, *args],
-        capture_output=True, text=True,
-    )
 
 
 def check_unpublished_blogs(workspace: str, blog_dest: str) -> list[str]:

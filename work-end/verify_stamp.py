@@ -26,19 +26,18 @@ Exit codes:
 
 import subprocess
 import sys
+from pathlib import Path
+
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from git_util import git
 
 SOURCE_EXTENSIONS = (
     ".java", ".kt", ".xml", ".yaml", ".yml", ".json",
     ".properties", ".sql", ".py", ".ts", ".tsx", ".js",
     ".jsx", ".css", ".scss", ".html",
 )
-
-
-def git(project: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", project, *args],
-        capture_output=True, text=True,
-    )
 
 
 def main() -> int:

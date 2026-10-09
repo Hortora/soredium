@@ -32,13 +32,13 @@ class Finding:
     auto_action: str = ""
 
 
+from git_util import git as _canonical_git
+
+
 def _git(repo: Path, *args: str, timeout: int = 10) -> tuple[str, int]:
     try:
-        result = subprocess.run(
-            ["git", "-C", str(repo)] + list(args),
-            capture_output=True, text=True, timeout=timeout,
-        )
-        return result.stdout.strip(), result.returncode
+        r = _canonical_git(repo, *args, timeout=timeout)
+        return r.stdout.strip(), r.returncode
     except subprocess.TimeoutExpired:
         return "", 1
 

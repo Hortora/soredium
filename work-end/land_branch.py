@@ -26,7 +26,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
 from common import parse_args, detect_topology
+from git_util import git
 
 
 # ---------------------------------------------------------------------------
@@ -47,13 +51,6 @@ try:
     import worklog as _wl
 except ImportError:
     _wl = None
-
-
-def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", repo, *args],
-        capture_output=True, text=True,
-    )
 
 
 def cmd_rebase(project: str, opts: dict[str, str]) -> int:

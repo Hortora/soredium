@@ -24,6 +24,11 @@ try:
 except ImportError:
     _wl = None
 
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from git_util import git as _canonical_git  # noqa: E402
+
 
 def _record_worklog_end(branch: str, repo_path: str, landed_sha: str) -> None:
     if not _wl:
@@ -89,10 +94,7 @@ class LandResult:
 
 
 def _git(repo: Path | str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, timeout=60,
-    )
+    return _canonical_git(repo, *args, timeout=60)
 
 
 LIFECYCLE_FILES = [

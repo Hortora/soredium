@@ -28,11 +28,11 @@ if _slot_dir not in sys.path:
     sys.path.insert(0, _slot_dir)
 
 
+from git_util import git as _canonical_git
+
+
 def _git(repo: str, *args: str) -> tuple[bool, str]:
-    r = subprocess.run(
-        ["git", "-C", repo, *args],
-        capture_output=True, text=True, timeout=30,
-    )
+    r = _canonical_git(repo, *args, timeout=30)
     return r.returncode == 0, r.stdout.strip()
 
 
