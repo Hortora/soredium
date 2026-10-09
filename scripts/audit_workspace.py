@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Check workspace repos for unpromoted specs/blogs/ADRs on slot branches."""
-import subprocess, re
+import subprocess, re, sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
+from slot_io import parse_slot as _parse_slot_io
 
 FAMILY = Path.home() / "claude" / "casehub"
 ATTIC = FAMILY / "worktrees" / "attic"
@@ -19,19 +22,11 @@ all_slots = sorted(
 )
 
 for slot_dir in all_slots:
-    slot_file = slot_dir / ".slot"
-    if not slot_file.exists():
+    _si = _parse_slot_io(slot_dir)
+    if not _si or not _si.branch:
         continue
-    text = slot_file.read_text()
-    branch = ""
-    issue = ""
-    for line in text.splitlines():
-        if "branch:" in line and line.strip().startswith("20"):
-            branch = line.split("branch:")[1].strip()
-        if not issue and "/" in line and "#" in line and not line.startswith("#") and not line.startswith("-"):
-            issue = line.strip()
-    if not branch:
-        continue
+    branch = _si.branch
+    issue = f"{_si.issue_repo}#{_si.issue}" if _si.issue_repo and _si.issue else ""
 
     for wksp_name in WORKSPACE_REPOS:
         wksp = FAMILY / wksp_name

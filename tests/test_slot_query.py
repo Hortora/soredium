@@ -31,7 +31,7 @@ class TestListSlots:
         family = tmp_path / "casehub"
         slot = family / "slots" / "1"
         slot.mkdir(parents=True)
-        (slot / ".slot").write_text("# Slot 1 — issue-42-spi\n")
+        (slot / ".slot").write_text("# Slot 1 — issue-42-spi\n\n## Repos\n- engine (primary)\n")
         (slot / "engine").mkdir()
         (slot / "engine" / ".git").write_text("gitdir: /fake/.git/worktrees/engine")
 

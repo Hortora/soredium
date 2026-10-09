@@ -1870,10 +1870,14 @@ class TestPhaseSkipSlotMode:
     def _make_slot(self, tmp_path, repos):
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
-        for repo in repos:
+        lines = ["# Slot 1\n", "## Repos"]
+        for i, repo in enumerate(repos):
             repo_dir = slot_path / repo
             repo_dir.mkdir()
             (repo_dir / ".git").mkdir()
+            tag = " (primary)" if i == 0 else ""
+            lines.append(f"- {repo}{tag}")
+        (slot_path / ".slot").write_text("\n".join(lines) + "\n")
         return slot_path
 
     def test_phase_skip_does_not_write_single_key_for_per_repo_steps(self, tmp_path):
@@ -1924,10 +1928,14 @@ class TestPerRepoEscalation:
     def _make_slot(self, tmp_path, repos):
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
-        for repo in repos:
+        lines = ["# Slot 1\n", "## Repos"]
+        for i, repo in enumerate(repos):
             repo_dir = slot_path / repo
             repo_dir.mkdir()
             (repo_dir / ".git").mkdir()
+            tag = " (primary)" if i == 0 else ""
+            lines.append(f"- {repo}{tag}")
+        (slot_path / ".slot").write_text("\n".join(lines) + "\n")
         return slot_path
 
     def test_per_repo_step_auto_skips_after_max_retries(self, tmp_path, monkeypatch):
@@ -1962,10 +1970,14 @@ class TestPerRepoTryAllThenReport:
     def _make_slot(self, tmp_path, repos):
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
-        for repo in repos:
+        lines = ["# Slot 1\n", "## Repos"]
+        for i, repo in enumerate(repos):
             repo_dir = slot_path / repo
             repo_dir.mkdir()
             (repo_dir / ".git").mkdir()
+            tag = " (primary)" if i == 0 else ""
+            lines.append(f"- {repo}{tag}")
+        (slot_path / ".slot").write_text("\n".join(lines) + "\n")
         return slot_path
 
     def test_tries_all_repos_before_reporting(self, tmp_path, monkeypatch):
@@ -2070,10 +2082,14 @@ class TestDefenseInDepthPerRepo:
     def _make_slot(self, tmp_path, repos):
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
-        for repo in repos:
+        lines = ["# Slot 1\n", "## Repos"]
+        for i, repo in enumerate(repos):
             repo_dir = slot_path / repo
             repo_dir.mkdir()
             (repo_dir / ".git").mkdir()
+            tag = " (primary)" if i == 0 else ""
+            lines.append(f"- {repo}{tag}")
+        (slot_path / ".slot").write_text("\n".join(lines) + "\n")
         return slot_path
 
     def test_single_key_does_not_bypass_per_repo(self, tmp_path, monkeypatch):

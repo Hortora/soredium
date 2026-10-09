@@ -13,7 +13,10 @@ from slot_core import (
     resolve_canonical_repo,
     SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
 )
-from slot_metadata import parse_slot_md
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from slot_io import parse_slot
 from slot_workspace import validate_slot_wksp
 
 _lib = Path.home() / ".claude" / "lib"
@@ -35,8 +38,8 @@ def find_slot_by_branch(family_root: Path, branch: str) -> tuple[int, bool] | No
         for d in sorted(slots_dir.iterdir()):
             if not d.is_dir() or not d.name.isdigit() or d.name == "attic":
                 continue
-            info = parse_slot_md(d)
-            if info.get("branch") == branch:
+            info = parse_slot(d)
+            if info and info.branch == branch:
                 landed = (d / ".landed").exists()
                 return int(d.name), landed
     return None
@@ -71,8 +74,8 @@ def scan_ready(family_root: Path) -> list[dict]:
             for line in (d / ".phase-a-complete").read_text().splitlines():
                 if line.startswith("timestamp="):
                     timestamp = line.split("=", 1)[1]
-            md = parse_slot_md(d)
-            repo_names = md.get("repos", [])
+            md = parse_slot(d)
+            repo_names = md.repos if md else []
             repo_data = []
             for repo_name in repo_names:
                 repo_path = d / repo_name
@@ -83,12 +86,12 @@ def scan_ready(family_root: Path) -> list[dict]:
                     repo_data.append({"name": repo_name, "commits": 0, "diff": ""})
             slots.append({
                 "number": int(d.name),
-                "branch": md.get("branch", ""),
+                "branch": md.branch if md else "",
                 "repos": repo_data,
-                "issue": md.get("issue", ""),
-                "issue_repo": md.get("issue_repo", ""),
-                "covers": md.get("covers", ""),
-                "context": md.get("context", ""),
+                "issue": md.issue if md else "",
+                "issue_repo": md.issue_repo if md else "",
+                "covers": md.covers if md else "",
+                "context": md.context if md else "",
                 "phase_a_timestamp": timestamp,
             })
     return slots
@@ -120,17 +123,9 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
             if num in archived_nums or num in seen:
                 continue
             seen.add(num)
-            repos = [
-                sub.name for sub in sorted(d.iterdir())
-                if sub.is_dir() and (sub / ".git").exists() and is_project_repo(sub.name)
-            ]
-            branch = ""
-            slot_md = d / ".slot"
-            if slot_md.exists():
-                for line in slot_md.read_text().splitlines():
-                    if line.startswith("# Slot") and "—" in line:
-                        branch = line.split("—", 1)[1].strip()
-                        break
+            md = parse_slot(d)
+            repos = md.repos if md else []
+            branch = md.branch if md else ""
 
             if (d / ".landed").exists():
                 state = "landed"
@@ -139,10 +134,7 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
             else:
                 state = "active"
 
-            isolation = "none"
-            if slot_md.exists():
-                md = parse_slot_md(d)
-                isolation = md.get("isolation_type", "") or "none"
+            isolation = (md.isolation_type if md else "") or "none"
 
             wksp_ok = True
             if state not in ("archived", "landed"):
@@ -166,13 +158,13 @@ def list_slots(family_root: Path, include_archived: bool = False) -> list[dict]:
                 if num in seen:
                     continue
                 seen.add(num)
-                md = parse_slot_md(d)
+                md = parse_slot(d)
                 slots.append({
                     "number": num,
-                    "branch": md.get("branch", ""),
-                    "repos": md.get("repos", []),
+                    "branch": md.branch if md else "",
+                    "repos": md.repos if md else [],
                     "state": "archived",
-                    "isolation": md.get("isolation_type", "") or "none",
+                    "isolation": (md.isolation_type if md else "") or "none",
                     "wksp_ok": True,
                 })
 

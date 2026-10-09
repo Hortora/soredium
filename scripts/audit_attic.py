@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Audit every archived slot: verify code landed, check for lost artifacts."""
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
+from slot_io import parse_slot as _parse_slot_io
 
 FAMILY_ROOT = Path.home() / "claude" / "casehub"
 ATTIC = FAMILY_ROOT / "worktrees" / "attic"
@@ -11,47 +15,19 @@ def run(*cmd, cwd=None):
     r = subprocess.run(list(cmd), capture_output=True, text=True, cwd=cwd)
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 
-def parse_slot(slot_dir):
-    slot_file = slot_dir / ".slot"
-    if not slot_file.exists():
+def _build_slot_dict(slot_dir):
+    si = _parse_slot_io(slot_dir)
+    if si is None:
         return None
-    text = slot_file.read_text()
     info = {"path": str(slot_dir), "num": slot_dir.name}
-
-    for line in text.splitlines():
-        if "branch:" in line and line.strip().startswith("20"):
-            info["branch"] = line.split("branch:")[1].strip()
-
-    for line in text.splitlines():
-        if "/" in line and "#" in line and not line.startswith("#") and not line.startswith("-"):
-            info["issue"] = line.strip()
-            break
-
-    repos = []
-    in_repos = False
-    for line in text.splitlines():
-        if line.strip() == "## Repos":
-            in_repos = True
-            continue
-        if in_repos:
-            if line.startswith("## "):
-                break
-            if line.startswith("- "):
-                name = line.lstrip("- ").replace("(primary)", "").strip()
-                primary = "(primary)" in line
-                repos.append((name, primary))
-    info["repos"] = repos
-
+    info["branch"] = si.branch
+    info["issue"] = f"{si.issue_repo}#{si.issue}" if si.issue_repo and si.issue else ""
+    info["repos"] = [(r, r == si.primary) for r in si.repos]
     landed_file = slot_dir / ".landed"
-    if landed_file.exists():
-        info["landed"] = landed_file.read_text().strip()
-    else:
-        info["landed"] = None
-
+    info["landed"] = landed_file.read_text().strip() if landed_file.exists() else None
     remaining = [d.name for d in slot_dir.iterdir()
                  if d.is_dir() and not d.name.startswith(".")]
     info["remaining_dirs"] = remaining
-
     return info
 
 def check_branch_exists(repo_name, branch, family_root):
@@ -105,7 +81,7 @@ def check_workspace_branch(slot_info, family_root):
     return results
 
 def audit_slot(slot_dir, family_root):
-    info = parse_slot(slot_dir)
+    info = _build_slot_dict(slot_dir)
     if not info:
         return {"num": slot_dir.name, "error": "no .slot file"}
 

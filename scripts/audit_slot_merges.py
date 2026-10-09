@@ -23,32 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
 from lifecycle import ClosureState, is_closed
-
-
-def parse_slot(slot_path: Path) -> tuple[int | None, str | None, list[str], str | None]:
-    text = slot_path.read_text()
-    m = re.search(r"# Slot (\d+)", text)
-    slot_num = int(m.group(1)) if m else None
-    m = re.search(r"branch:\s*(\S+)", text)
-    branch = m.group(1) if m else None
-
-    repos: list[str] = []
-    primary = None
-    in_repos = False
-    for line in text.splitlines():
-        if line.strip() == "## Repos":
-            in_repos = True
-            continue
-        if in_repos:
-            if line.startswith("##"):
-                break
-            rm = re.match(r"-\s+(\S+)", line.strip())
-            if rm:
-                repo_name = rm.group(1)
-                repos.append(repo_name)
-                if "(primary)" in line:
-                    primary = repo_name
-    return slot_num, branch, repos, primary
+from slot_io import parse_slot as _parse_slot_io
 
 
 def git(repo_path: Path, *args: str) -> str:
@@ -280,7 +255,10 @@ def main() -> int:
     multi_repo_count = 0
 
     for slot_dir, status in slot_dirs:
-        slot_num, branch, repos, primary = parse_slot(slot_dir / ".slot")
+        _si = _parse_slot_io(slot_dir)
+        if not _si or not _si.repos or not _si.branch:
+            continue
+        slot_num, branch, repos, primary = _si.slot_number, _si.branch, _si.repos, _si.primary
         if not repos or not branch:
             continue
 

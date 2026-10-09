@@ -109,51 +109,7 @@ try:
 except ImportError:
     _wl = None
 from plan_io import parse_covers
-
-
-def _parse_slot_repos(slot_path: Path) -> list[str]:
-    if not slot_path or not slot_path.is_dir():
-        return []
-
-    primary = None
-    secondaries_from_file = []
-    slot_file = slot_path / ".slot"
-    if slot_file.exists():
-        in_repos = False
-        for line in slot_file.read_text().splitlines():
-            if line.strip() == "## Repos":
-                in_repos = True
-                continue
-            if in_repos:
-                if line.startswith("##"):
-                    break
-                stripped = line.strip()
-                if stripped.startswith("- "):
-                    is_primary = "(primary)" in stripped
-                    name = stripped[2:].split("(")[0].strip()
-                    if is_primary:
-                        primary = name
-                    else:
-                        secondaries_from_file.append(name)
-
-    file_repos = set()
-    if primary:
-        file_repos.add(primary)
-    file_repos.update(secondaries_from_file)
-
-    dir_repos = set()
-    skip_prefixes = ("wsp-", ".m2", "attic")
-    for entry in sorted(slot_path.iterdir()):
-        if not entry.is_dir() or not (entry / ".git").exists():
-            continue
-        if any(entry.name.startswith(p) for p in skip_prefixes):
-            continue
-        dir_repos.add(entry.name)
-
-    extra = sorted(dir_repos - file_repos)
-    if primary:
-        return [primary] + [s for s in secondaries_from_file if s in dir_repos] + extra
-    return sorted(dir_repos)
+from slot_io import parse_slot as _parse_slot
 
 
 PER_REPO_SWEEP_STEPS = {"protocol", "update_claude_md", "impl_doc_sync", "doc_freshness_gate"}
@@ -1510,7 +1466,8 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
                 corrected_steps=",".join(corrections))
             write_close_progress(workspace, progress)
 
-    slot_repos = _parse_slot_repos(slot_path) if in_slot and slot_path else []
+    _slot_info = _parse_slot(slot_path) if in_slot and slot_path else None
+    slot_repos = _slot_info.repos if _slot_info else []
 
     phase_skip_state = meta_state
     if plan_path and plan_path.exists():

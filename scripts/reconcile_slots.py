@@ -50,10 +50,10 @@ except ImportError:
     relocate_claude_projects = None
     remove_claude_projects = None
 
-try:
-    from slot_metadata import parse_slot_md
-except ImportError:
-    parse_slot_md = None
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from slot_io import parse_slot as _parse_slot
 
 try:
     from slot_state import current_state as _current_slot_state, set_slot_state
@@ -94,15 +94,8 @@ def _states_compatible(db_state: str, disk_state: str) -> bool:
 
 
 def _read_slot_state(slot_dir: Path) -> str | None:
-    """Read the state: field from a .slot file. Returns None if absent."""
-    slot_file = slot_dir / ".slot"
-    if not slot_file.exists():
-        return None
-    for line in slot_file.read_text().splitlines():
-        stripped = line.strip()
-        if stripped.startswith("state:") or stripped.startswith("status:"):
-            return stripped.split(":", 1)[1].strip()
-    return None
+    info = _parse_slot(slot_dir)
+    return info.state if info else None
 
 
 def _check_plan_complete(slot_dir: Path) -> bool:
@@ -580,30 +573,18 @@ def execute(actions: list[dict], family_root: Path) -> list[dict]:
 
 
 def _parse_slot_file(slot_path: Path) -> dict | None:
-    """Extract issue repo, number, branch, and primary repo dir from .slot file."""
-    slot_file = slot_path / ".slot"
-    if not slot_file.exists():
+    info = _parse_slot(slot_path)
+    if not info or not info.issue:
         return None
-    text = slot_file.read_text()
-    issue_match = re.search(r"^(\S+)#(\d+)", text, re.MULTILINE)
-    if not issue_match:
+    try:
+        issue_number = int(info.issue)
+    except ValueError:
         return None
-    branch_match = re.search(r"branch:\s*(\S+)", text)
-    repos_section = re.search(r"## Repos\n(.*?)(?:\n##|\Z)", text, re.DOTALL)
-    primary_repo = None
-    if repos_section:
-        for line in repos_section.group(1).strip().splitlines():
-            line = line.strip().lstrip("- ")
-            if "(primary)" in line:
-                primary_repo = line.replace("(primary)", "").strip()
-                break
-            if primary_repo is None:
-                primary_repo = line.strip()
     return {
-        "issue_repo": issue_match.group(1),
-        "issue_number": int(issue_match.group(2)),
-        "branch": branch_match.group(1) if branch_match else None,
-        "primary_repo": primary_repo,
+        "issue_repo": info.issue_repo,
+        "issue_number": issue_number,
+        "branch": info.branch or None,
+        "primary_repo": info.primary or None,
     }
 
 

@@ -16,6 +16,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
+from slot_io import parse_slot as _parse_slot
+
 ARTIFACT_DIRS = {"specs", "blog", "adr", "plans", "snapshots", "docs"}
 
 
@@ -74,25 +77,12 @@ def find_lost_artifacts(ws_clone: Path, hidden_dirs: list[str]) -> list[dict]:
     return lost
 
 
-def parse_slot_md(slot_dir: Path) -> tuple[str, str]:
-    slot_md = slot_dir / ".slot"
-    branch = ""
-    issue = ""
-    if slot_md.exists():
-        for line in slot_md.read_text().splitlines():
-            if line.startswith("# Slot") and "—" in line:
-                branch = line.split("—", 1)[1].strip()
-            if "#" in line and not line.startswith("#") and not line.startswith("Covers"):
-                parts = line.strip().split("#")
-                if len(parts) == 2 and parts[1].strip().isdigit():
-                    issue = f"#{parts[1].strip()}"
-    return branch, issue
-
-
 def audit_slot(slot_dir: Path, slot_id: str, location: str) -> list[dict]:
     findings = []
     ws_clones = find_workspace_clones(slot_dir)
-    branch, issue = parse_slot_md(slot_dir)
+    info = _parse_slot(slot_dir)
+    branch = info.branch if info else ""
+    issue = f"#{info.issue}" if info and info.issue else ""
 
     for ws_clone in ws_clones:
         hidden = check_gitignore_hides(ws_clone)

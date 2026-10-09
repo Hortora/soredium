@@ -33,8 +33,11 @@ from slot_core import (
     get_slot_repos, get_all_slot_repos,
     _cleanup_remnant_dir, _escape_slot_cwd, _has_unmerged_content,
 )
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from slot_io import parse_slot, write_slot, set_slot_state
 from slot_metadata import (
-    parse_slot_md, write_slot_md, set_slot_state,
     is_slot_landed, verify_landed_shas, _fix_stale_checkboxes,
 )
 from slot_maven import setup_slot_repo, generate_mvn_wrapper
@@ -390,12 +393,12 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
             if rc != 0:
                 raise SlotCreationError(f"isx_branch_failed instance={instance_name} err={stderr.strip()}")
 
-        write_slot_md(slot_dir, slot_num, repos, branch, issue,
-                      issue_repo, covers, context,
-                      title=title, description=description,
-                      isolation_type="isx" if isx else "",
-                      isx_instance=instance_name if isx else "",
-                      isx_template=isx_template if isx else "")
+        write_slot(slot_dir, slot_number=slot_num, repos=repos, branch=branch,
+                   issue=issue, issue_repo=issue_repo, covers=covers,
+                   context=context, title=title, description=description,
+                   isolation_type="isx" if isx else "",
+                   isx_instance=instance_name if isx else "",
+                   isx_template=isx_template if isx else "")
 
         if isx:
             _wire_isx_remotes(slot_dir, repos, instance_name)
@@ -478,9 +481,9 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
         run_cmd(["git", "-C", str(clone_dest), "commit", "-m",
                  "chore: add slot infrastructure to .gitignore"])
 
-    slot_info = parse_slot_md(slot_dir)
-    if slot_info.get("isolation_type") == "isx":
-        instance = slot_info.get("isx_instance", "")
+    slot_info = parse_slot(slot_dir)
+    if slot_info and slot_info.isolation_type == "isx":
+        instance = slot_info.isx_instance
         if instance:
             _wire_isx_remotes(slot_dir, [repo_name], instance)
 
@@ -572,8 +575,8 @@ def remove_repo(family_root: Path, slot_number: int, repo_name: str) -> None:
         print(f"ERROR=repo_not_in_slot repo={repo_name}")
         sys.exit(1)
 
-    slot_info = parse_slot_md(slot_dir)
-    repos = slot_info.get("repos", [])
+    slot_info = parse_slot(slot_dir)
+    repos = slot_info.repos if slot_info else []
     if repos and repos[0] == repo_name:
         raise ValueError(f"Cannot remove primary repo '{repo_name}' from slot {slot_number}")
 
@@ -638,8 +641,8 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
 
     _converge_state(slot_dir, family_root, slot_num)
 
-    slot_info = parse_slot_md(slot_dir)
-    _slot_is_epic = slot_info.get("is_epic", False)
+    slot_info = parse_slot(slot_dir)
+    _slot_is_epic = slot_info.is_epic if slot_info else False
     if _slot_is_epic:
         try:
             from plan_manager import detect as _plan_detect
@@ -861,17 +864,17 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     if not has_promotion_stamp:
         print(f"WARN=artifacts_not_promoted slot={slot_num}")
 
-    slot_info = parse_slot_md(slot_dir)
-    if slot_info.get("is_epic"):
-        covers_str = slot_info.get("covers", "")
+    slot_info = parse_slot(slot_dir)
+    if slot_info and slot_info.is_epic:
+        covers_str = slot_info.covers
         completed = parse_covers(covers_str)
         if completed:
             fixed = _fix_stale_checkboxes(slot_dir / ".slot", completed)
             if fixed:
                 print(f"CHECKBOXES_FIXED={fixed}")
                 print(f"WARN=stale_checkboxes issues={','.join(str(c) for c in completed)}")
-            epic_num = int(slot_info.get("issue", "0"))
-            epic_repo = slot_info.get("issue_repo", "")
+            epic_num = int(slot_info.issue or "0")
+            epic_repo = slot_info.issue_repo
             if epic_num and epic_repo:
                 try:
                     from plan_manager import _tick_github_checkboxes

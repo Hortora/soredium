@@ -15,6 +15,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
+from slot_io import parse_slot as _parse_slot_io
+
 
 def _gh_issue(repo: str, issue_num: str) -> tuple[str, str]:
     """Fetch issue title and body. Returns (title, body)."""
@@ -73,15 +76,9 @@ def backfill_slot(slot_dir: Path, dry_run: bool = False) -> dict[str, str]:
     if has_slug and has_description:
         return {"status": "skipped", "reason": "already has slug and description"}
 
-    issue_repo = ""
-    issue_num = ""
-    for line in content.splitlines():
-        if "#" in line and not line.startswith("#") and not line.startswith("Covers:"):
-            parts = line.strip().split("#")
-            if len(parts) == 2:
-                issue_repo = parts[0]
-                issue_num = parts[1]
-                break
+    info = _parse_slot_io(slot_dir)
+    issue_repo = info.issue_repo if info else ""
+    issue_num = info.issue if info else ""
 
     if not issue_repo or not issue_num:
         return {"status": "skipped", "reason": "no issue ref found"}

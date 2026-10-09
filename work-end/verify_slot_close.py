@@ -29,6 +29,7 @@ if _project_dir not in sys.path:
 from common import parse_args
 from plan_io import parse_covers
 from git_util import git
+from slot_io import parse_slot as _parse_slot, parse_landed as _parse_landed
 
 
 CEREMONY_PREFIXES = (
@@ -243,80 +244,6 @@ def check_no_stale_scaffold(workspace: str) -> dict:
     return {"status": "pass"}
 
 
-def _parse_landed_repos(slot_dir: str) -> set[str]:
-    """Parse .landed for repo names — handles both old (landed_shas=) and new (ledger) format."""
-    landed = Path(slot_dir) / ".landed"
-    if not landed.exists():
-        return set()
-    repos: set[str] = set()
-    for line in landed.read_text().splitlines():
-        if line.startswith("landed_shas="):
-            shas_str = line.split("=", 1)[1]
-            repos.update(entry.split(":")[0] for entry in shas_str.split(",") if ":" in entry)
-        if line.startswith("issue="):
-            repos.add("_has_ledger_entries")
-    return repos
-
-
-def _parse_covers_repos(slot_dir: str) -> set[str]:
-    """Extract repo names from the Covers: line in .slot."""
-    slot_file = Path(slot_dir) / ".slot"
-    if not slot_file.exists():
-        return set()
-    for line in slot_file.read_text().splitlines():
-        if line.startswith("Covers:"):
-            parts = line.split(":", 1)[1].strip()
-            return {
-                entry.split(":")[0].strip()
-                for entry in parts.split(",")
-                if ":" in entry
-            }
-    return set()
-
-
-def _parse_landed_issues(slot_dir: str) -> set[int]:
-    """Parse .landed ledger for completed issue numbers."""
-    landed = Path(slot_dir) / ".landed"
-    if not landed.exists():
-        return set()
-    issues: set[int] = set()
-    for line in landed.read_text().splitlines():
-        for part in line.split():
-            if part.startswith("issue="):
-                try:
-                    issues.add(int(part.split("=", 1)[1]))
-                except ValueError:
-                    pass
-    return issues
-
-
-def _parse_slot_repos(slot_dir: str) -> set[str]:
-    slot_file = Path(slot_dir) / ".slot"
-    if not slot_file.exists():
-        return set()
-    repos: set[str] = set()
-    in_repos = False
-    for line in slot_file.read_text().splitlines():
-        if line.strip() == "## Repos":
-            in_repos = True
-            continue
-        if in_repos:
-            if line.startswith("##"):
-                break
-            stripped = line.strip()
-            if stripped.startswith("- "):
-                name = stripped[2:].split("(")[0].strip()
-                if name:
-                    repos.add(name)
-    if not repos:
-        skip_prefixes = ("wsp-", ".m2", "attic")
-        for entry in sorted(Path(slot_dir).iterdir()):
-            if not entry.is_dir() or not (entry / ".git").exists():
-                continue
-            if any(entry.name.startswith(p) for p in skip_prefixes):
-                continue
-            repos.add(entry.name)
-    return repos
 
 
 def check_landed_marker(slot_dir: str) -> dict:
@@ -365,10 +292,15 @@ def check_landed_completeness(
     unchanged — they don't need a .landed entry. This handles cross-repo
     slots where only some repos have feature branches.
     """
-    slot_repos = covers_repos if covers_repos else _parse_slot_repos(slot_dir)
+    if covers_repos:
+        slot_repos = covers_repos
+    else:
+        _si = _parse_slot(Path(slot_dir))
+        slot_repos = set(_si.repos) if _si else set()
     if not slot_repos:
         return {"status": "pass", "detail": "no repos in .slot"}
-    landed_repos = _parse_landed_repos(slot_dir)
+    _li = _parse_landed(Path(slot_dir))
+    landed_repos = set(_li.shas.keys()) if _li else set()
     missing = slot_repos - landed_repos
     if missing and branch:
         auto_passed: list[str] = []
@@ -635,7 +567,8 @@ def main() -> int:
     canonical_repos = None
     covers_repos = None
     if slot_dir:
-        covers_repos = _parse_covers_repos(slot_dir)
+        _si = _parse_slot(Path(slot_dir))
+        covers_repos = set(_si.repos) if _si else None
         canonical_repos = _resolve_canonical_repos(slot_dir, covers_repos=covers_repos)
 
     verify(project, branch, workspace, base, covers,

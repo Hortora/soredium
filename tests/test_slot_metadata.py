@@ -1,4 +1,7 @@
-"""Tests for work-slot/slot_metadata.py"""
+"""Tests for work-slot/slot_metadata.py — retained functions only.
+
+Parsing and writing tests moved to tests/test_slot_io.py (Phase 2, #425).
+"""
 
 import subprocess
 import sys
@@ -59,230 +62,6 @@ def _create_merge_test_repos(tmp_path, repo_names):
     return family, canonicals, slot, branch
 
 
-class TestWriteSlotMd:
-    def test_writes_slot_md(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 1, ["engine"], "issue-42-spi",
-            "42", "casehubio/engine", "42", "Add SPI layer",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "# Slot 1" in content
-        assert "issue-42-spi" in content
-        assert "casehubio/engine#42" in content
-        assert "Add SPI layer" in content
-        assert "engine (primary)" in content
-
-    def test_multi_repo_slot(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 2, ["engine", "iot"], "issue-55-cross",
-            "55", "casehubio/engine", "55,56", "Cross-repo work",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "engine (primary)" in content
-        assert "- iot" in content
-        assert "55,56" in content
-
-
-class TestWriteSlotMdIsolation:
-    def test_write_with_isolation(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 7, ["soredium"], "issue-42-fix", "42",
-            "Hortora/soredium", "42", "Fix scoring",
-            isolation_type="isx", isx_instance="issue-42-fix",
-            isx_template="tpl-java",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "## Isolation" in content
-        assert "type: isx" in content
-        assert "instance: issue-42-fix" in content
-        assert "template: tpl-java" in content
-
-    def test_write_without_isolation(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 7, ["soredium"], "issue-42-fix", "42",
-            "Hortora/soredium", "42", "Fix scoring",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "## Isolation" not in content
-
-    def test_write_isolation_roundtrip(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 7, ["soredium"], "issue-42-fix", "42",
-            "Hortora/soredium", "42", "Fix scoring",
-            isolation_type="isx", isx_instance="issue-42-fix",
-            isx_template="tpl-java",
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["isolation_type"] == "isx"
-        assert result["isx_instance"] == "issue-42-fix"
-        assert result["isx_template"] == "tpl-java"
-        assert result["repos"] == ["soredium"]
-
-
-class TestParseSlotMd:
-    def test_parses_full_slot_md(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 1 — issue-42-spi\n\n## Issue\ncasehubio/engine#42\n"
-            "Covers: 42\n\n## What to do\nImplement SPI\n\n## Repos\n- engine (primary)\n- iot\n"
-        )
-        md = slot_metadata.parse_slot_md(tmp_path)
-        assert md["branch"] == "issue-42-spi"
-        assert md["issue"] == "42"
-        assert md["issue_repo"] == "casehubio/engine"
-        assert md["covers"] == "42"
-        assert md["context"] == "Implement SPI"
-        assert md["repos"] == ["engine", "iot"]
-
-    def test_detects_epic_type(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 1 — issue-50-profiles\n\n## Issue\n"
-            "casehubio/engine#50\nCovers: 108\nType: epic\n"
-            "Safe exit: after any completed batch\n\n"
-            "## What to do\nEpic work\n\n## Repos\n- engine\n"
-        )
-        md = slot_metadata.parse_slot_md(tmp_path)
-        assert md["is_epic"] is True
-        assert md["issue"] == "50"
-        assert md["issue_repo"] == "casehubio/engine"
-
-    def test_non_epic_defaults_false(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 1 — issue-42-spi\n\n## Issue\n"
-            "casehubio/engine#42\nCovers: 42\n\n"
-            "## What to do\nSPI work\n\n## Repos\n- engine\n"
-        )
-        md = slot_metadata.parse_slot_md(tmp_path)
-        assert md.get("is_epic") is False
-
-    def test_missing_slot_md(self, tmp_path):
-        assert slot_metadata.parse_slot_md(tmp_path) == {}
-
-
-class TestParseSlotMdIsolation:
-    def test_parse_with_isolation_section(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 7 — issue-42-fix\n\n"
-            "## Issue\nHortora/soredium#42\nCovers: 42\n\n"
-            "## What to do\nFix scoring\n\n"
-            "## Repos\n- soredium (primary)\n\n"
-            "## Isolation\ntype: isx\ninstance: issue-42-fix\n"
-            "template: tpl-java\n\n"
-            "## Created\n2026-08-12, branch: issue-42-fix\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["isolation_type"] == "isx"
-        assert result["isx_instance"] == "issue-42-fix"
-        assert result["isx_template"] == "tpl-java"
-
-    def test_parse_without_isolation_section(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 7 — issue-42-fix\n\n"
-            "## Issue\nHortora/soredium#42\nCovers: 42\n\n"
-            "## Repos\n- soredium (primary)\n\n"
-            "## Created\n2026-08-12, branch: issue-42-fix\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["isolation_type"] == ""
-        assert result["isx_instance"] == ""
-        assert result["isx_template"] == ""
-
-    def test_parse_isolation_preserves_existing_fields(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 7 — issue-42-fix\n\n"
-            "## Issue\nHortora/soredium#42\nCovers: 42\n\n"
-            "## What to do\nFix scoring\n\n"
-            "## Repos\n- soredium (primary)\n\n"
-            "## Isolation\ntype: isx\ninstance: issue-42-fix\n"
-            "template: tpl-java\n\n"
-            "## Created\n2026-08-12, branch: issue-42-fix\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["repos"] == ["soredium"]
-        assert result["issue"] == "42"
-
-
-class TestSlotTitleAndDescription:
-    def test_write_with_title(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 1, ["engine"], "issue-42-spi",
-            "42", "casehubio/engine", "42", "Add SPI layer",
-            title="SPI Extraction for Engine",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "# Slot 1\n" in content
-        assert "slug: issue-42-spi" in content
-        assert "title: SPI Extraction for Engine" in content
-
-    def test_write_without_title_omits_title_field(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 1, ["engine"], "issue-42-spi",
-            "42", "casehubio/engine", "42", "Add SPI layer",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "# Slot 1\n" in content
-        assert "slug: issue-42-spi" in content
-        assert "title:" not in content
-
-    def test_parse_reads_title_and_slug(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 1\n"
-            "slug: issue-42-spi\n"
-            "title: SPI Extraction for Engine\n\n"
-            "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
-            "## What to do\nAdd SPI layer\n\n"
-            "## Repos\n- engine (primary)\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["title"] == "SPI Extraction for Engine"
-        assert result["branch"] == "issue-42-spi"
-
-    def test_parse_legacy_format_reads_branch_from_heading(self, tmp_path):
-        """Old .slot files with # Slot N — branch — branch comes from heading."""
-        (tmp_path / ".slot").write_text(
-            "# Slot 1 — issue-42-spi\n\n"
-            "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
-            "## What to do\nAdd SPI layer\n\n"
-            "## Repos\n- engine (primary)\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["branch"] == "issue-42-spi"
-
-    def test_write_includes_description(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 1, ["engine"], "issue-42-spi",
-            "42", "casehubio/engine", "42", "Add SPI layer",
-            description="Implement the SPI extraction for engine module separation.",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "## Description" in content
-        assert "SPI extraction" in content
-
-    def test_parse_reads_description(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 1\n"
-            "slug: issue-42-spi\n"
-            "title: SPI Extraction\n\n"
-            "## Issue\ncasehubio/engine#42\nCovers: 42\n\n"
-            "## Description\nImplement SPI extraction for module separation.\n\n"
-            "## What to do\nAdd SPI layer\n\n"
-            "## Repos\n- engine (primary)\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert "SPI extraction" in result["description"]
-
-    def test_roundtrip_title_and_description(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 1, ["engine"], "issue-42-spi",
-            "42", "casehubio/engine", "42", "Add SPI layer",
-            title="SPI Extraction",
-            description="Extract SPI interfaces from engine runtime.",
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["title"] == "SPI Extraction"
-        assert result["branch"] == "issue-42-spi"
-        assert "SPI interfaces" in result["description"]
-
-
 class TestIsSlotLanded:
     def test_true_with_landed_marker(self, tmp_path):
         (tmp_path / ".landed").write_text("branch=test\n")
@@ -339,7 +118,6 @@ class TestVerifyLandedShas:
         assert "unknown" in failures[0]
 
     def test_passes_when_on_local_main_but_not_pushed(self, tmp_path):
-        """SHA on local main but NOT on origin/main should still pass."""
         from slot_core import run_cmd
         from slot_test_helpers import init_repo_with_remote
         family = tmp_path / "family"
@@ -354,7 +132,6 @@ class TestVerifyLandedShas:
         run_cmd(["git", "-C", str(original), "commit", "-m", "feat: feature"])
         _, sha, _ = run_cmd(["git", "-C", str(original), "rev-parse", "HEAD"])
         sha = sha.strip()
-        # Deliberately do NOT push to origin — SHA is local-only
 
         (slot / ".landed").write_text(
             f"branch=issue-42-test\nrepos=engine\nlanded_shas=engine:{sha}\n"
@@ -362,9 +139,7 @@ class TestVerifyLandedShas:
         ok, failures = slot_metadata.verify_landed_shas(slot, family)
         assert ok is True, f"Should pass with local-only SHA, got failures: {failures}"
 
-
     def test_passes_squash_merged_content(self, tmp_path):
-        """SHA not ancestor of main, but commit message found on main (squash-merge)."""
         from slot_core import run_cmd
         from slot_test_helpers import init_repo_with_remote
         family = tmp_path / "family"
@@ -392,7 +167,6 @@ class TestVerifyLandedShas:
         assert ok is True, f"Squash-merged content should pass: {failures}"
 
     def test_passes_source_diff_empty(self, tmp_path):
-        """SHA not ancestor and different message, but source diff is empty."""
         from slot_core import run_cmd
         from slot_test_helpers import init_repo_with_remote
         family = tmp_path / "family"
@@ -422,8 +196,6 @@ class TestVerifyLandedShas:
 
 
 class TestReadPromotionStamp:
-    """Tests for _read_promotion_stamp helper."""
-
     def test_reads_stamp_counts(self, tmp_path):
         slot = tmp_path / "1"
         slot.mkdir()
@@ -469,8 +241,6 @@ class TestReadPromotionStamp:
 
 
 class TestArchiveSlotCheckboxFix:
-    """Tests for _fix_stale_checkboxes."""
-
     def test_fixes_stale_checkboxes(self, tmp_path):
         slot_dir = tmp_path / "slots" / "72"
         slot_dir.mkdir(parents=True)
@@ -507,64 +277,3 @@ class TestArchiveSlotCheckboxFix:
         content = (slot_dir / ".slot").read_text()
         assert "- [x] #83" in content
         assert "- [ ] #84" in content
-
-
-class TestSlotStatus:
-    def test_write_includes_status_active(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 10, ["engine"], "issue-10-fix", "10",
-            "Hortora/soredium", "10", "Fix it",
-        )
-        content = (tmp_path / ".slot").read_text()
-        assert "status: active" in content
-
-    def test_parse_reads_status(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 10\nslug: issue-10-fix\n\n"
-            "## Issue\nHortora/soredium#10\nCovers: 10\n\n"
-            "## Repos\n- engine (primary)\n\n"
-            "## Status\nstatus: paused\n\n"
-            "## Created\n2026-09-06, branch: issue-10-fix\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["status"] == "paused"
-
-    def test_parse_defaults_to_active_when_missing(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 10\nslug: issue-10-fix\n\n"
-            "## Issue\nHortora/soredium#10\nCovers: 10\n\n"
-            "## Repos\n- engine (primary)\n\n"
-            "## Created\n2026-09-06, branch: issue-10-fix\n"
-        )
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["status"] == "active"
-
-    def test_set_status_updates_existing(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 10\n\n## Status\nstatus: active\n\n## Created\n2026-09-06\n"
-        )
-        assert slot_metadata.set_slot_status(tmp_path, "paused") is True
-        result = slot_metadata.parse_slot_md(tmp_path)
-        assert result["status"] == "paused"
-
-    def test_set_status_adds_when_missing(self, tmp_path):
-        (tmp_path / ".slot").write_text(
-            "# Slot 10\n\n## Issue\nOrg/repo#5\n\n## Created\n2026-09-06\n"
-        )
-        assert slot_metadata.set_slot_status(tmp_path, "paused") is True
-        content = (tmp_path / ".slot").read_text()
-        assert "status: paused" in content
-
-    def test_set_status_returns_false_when_no_slot(self, tmp_path):
-        assert slot_metadata.set_slot_status(tmp_path, "paused") is False
-
-    def test_roundtrip_pause_resume(self, tmp_path):
-        slot_metadata.write_slot_md(
-            tmp_path, 10, ["engine"], "issue-10-fix", "10",
-            "Hortora/soredium", "10", "Fix it",
-        )
-        assert slot_metadata.parse_slot_md(tmp_path)["status"] == "active"
-        slot_metadata.set_slot_status(tmp_path, "paused")
-        assert slot_metadata.parse_slot_md(tmp_path)["status"] == "paused"
-        slot_metadata.set_slot_status(tmp_path, "active")
-        assert slot_metadata.parse_slot_md(tmp_path)["status"] == "active"

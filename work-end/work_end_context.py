@@ -84,20 +84,14 @@ def check_isx_staleness(workspace: str, project: str) -> dict:
     if not slot_file.exists():
         return {"status": "skip"}
 
-    slot_skill = Path(__file__).parent.parent / "work-slot"
-    sys.path.insert(0, str(slot_skill))
-    try:
-        from slot_metadata import parse_slot_md
-        from slot_core import get_slot_repos
-    except ImportError:
-        return {"status": "skip"}
+    from slot_io import parse_slot, discover_repos
 
-    info = parse_slot_md(slot_dir)
-    if info.get("isolation_type") != "isx":
+    info = parse_slot(slot_dir)
+    if not info or info.isolation_type != "isx":
         return {"status": "skip"}
 
     stale_repos = []
-    for repo_name in get_slot_repos(slot_dir):
+    for repo_name in discover_repos(slot_dir):
         clone_path = slot_dir / repo_name
         if not clone_path.is_dir():
             continue

@@ -1,9 +1,11 @@
-"""slot_metadata.py — .slot file parsing/writing, promotion stamps, landed markers."""
+"""slot_metadata.py — promotion stamps, landed marker verification, checkbox fixes.
 
-import datetime
+Parsing and writing moved to project/slot_io.py (Phase 2, #425).
+"""
+
 from pathlib import Path
 
-from slot_core import run_cmd, get_slot_repos
+from slot_core import run_cmd
 
 
 def _read_promotion_stamp(slot_dir: Path) -> tuple[list[str], list[str], str]:
@@ -42,151 +44,6 @@ def _read_promotion_stamp(slot_dir: Path) -> tuple[list[str], list[str], str]:
             published.append(f"blog:{blog_count}")
 
     return promoted, published, pub_dest
-
-
-def write_slot_md(slot_dir: Path, slot_number: int, repos: list[str],
-                  branch: str, issue: str, issue_repo: str,
-                  covers: str, context: str,
-                  title: str = "",
-                  description: str = "",
-                  isolation_type: str = "", isx_instance: str = "",
-                  isx_template: str = "") -> None:
-    content = f"# Slot {slot_number}\n"
-    content += f"slug: {branch}\n"
-    if title:
-        content += f"title: {title}\n"
-    content += f"""
-## Issue
-{issue_repo}#{issue}
-Covers: {covers}
-"""
-    if description:
-        content += f"\n## Description\n{description}\n"
-    content += f"""
-## What to do
-{context}
-
-## Repos
-"""
-    for i, repo in enumerate(repos):
-        primary = " (primary)" if i == 0 else ""
-        content += f"- {repo}{primary}\n"
-    if isolation_type:
-        content += f"\n## Isolation\ntype: {isolation_type}\ninstance: {isx_instance}\ntemplate: {isx_template}\n"
-    content += f"\n## State\nstate: active\n"
-    content += f"\n## Created\n{datetime.date.today().isoformat()}, branch: {branch}\n"
-    (slot_dir / ".slot").write_text(content)
-
-
-def parse_slot_md(slot_dir: Path) -> dict:
-    slot_md = slot_dir / ".slot"
-    if not slot_md.exists():
-        return {}
-    content = slot_md.read_text()
-    result: dict = {"repos": [], "context": "", "title": "", "description": "", "issue": "", "issue_repo": "", "covers": "", "is_epic": False, "isolation_type": "", "isx_instance": "", "isx_template": "", "state": "active"}
-
-    in_issue = False
-    in_what = False
-    in_repos = False
-    in_isolation = False
-    in_description = False
-    in_status = False
-    context_lines: list[str] = []
-    description_lines: list[str] = []
-    for line in content.splitlines():
-        if line.startswith("# Slot"):
-            if "—" in line:
-                result["branch"] = line.split("—", 1)[1].strip()
-        if line.startswith("slug:"):
-            result["branch"] = line.split(":", 1)[1].strip()
-        if line.startswith("title:"):
-            result["title"] = line.split(":", 1)[1].strip()
-        if line.startswith("Covers:"):
-            result["covers"] = line.split(":", 1)[1].strip()
-        if line.startswith("## Issue"):
-            in_issue, in_what, in_repos, in_isolation, in_description, in_status = True, False, False, False, False, False
-            continue
-        if line.startswith("## Description"):
-            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, False, False, True, False
-            continue
-        if line.startswith("## What to do"):
-            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, True, False, False, False, False
-            continue
-        if line.startswith("## Repos"):
-            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, True, False, False, False
-            continue
-        if line.startswith("## Isolation"):
-            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, False, True, False, False
-            continue
-        if line.startswith("## State") or line.startswith("## Status"):
-            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, False, False, False, True
-            continue
-        if line.startswith("## "):
-            in_issue, in_what, in_repos, in_isolation, in_description, in_status = False, False, False, False, False, False
-            continue
-        if in_issue and line.strip().startswith("Type:"):
-            result["is_epic"] = line.strip().split(":", 1)[1].strip() == "epic"
-        if in_issue and "#" in line and not line.startswith("Covers:"):
-            parts = line.strip().split("#")
-            if len(parts) == 2:
-                result["issue_repo"] = parts[0]
-                result["issue"] = parts[1]
-        if in_description:
-            description_lines.append(line.strip())
-        if in_what:
-            context_lines.append(line.strip())
-        if in_repos and line.strip().startswith("- "):
-            repo_name = line.strip().lstrip("- ").split(" ")[0].strip()
-            if repo_name:
-                result["repos"].append(repo_name)
-        if in_isolation:
-            stripped = line.strip()
-            if stripped.startswith("type:"):
-                result["isolation_type"] = stripped.split(":", 1)[1].strip()
-            elif stripped.startswith("instance:"):
-                result["isx_instance"] = stripped.split(":", 1)[1].strip()
-            elif stripped.startswith("template:"):
-                result["isx_template"] = stripped.split(":", 1)[1].strip()
-        if in_status:
-            stripped = line.strip()
-            if stripped.startswith("state:") or stripped.startswith("status:"):
-                result["state"] = stripped.split(":", 1)[1].strip()
-
-    result["context"] = " ".join(l for l in context_lines if l).strip()
-    result["description"] = " ".join(l for l in description_lines if l).strip()
-    result["status"] = result["state"]  # legacy alias
-    return result
-
-
-def set_slot_state(slot_dir: Path, state: str) -> bool:
-    """Set the state field in .slot. Returns True if updated, False if .slot missing.
-    Handles both new 'state:' and legacy 'status:' field names."""
-    slot_md = slot_dir / ".slot"
-    if not slot_md.exists():
-        return False
-    content = slot_md.read_text()
-    lines = content.splitlines()
-    updated = False
-    for i, line in enumerate(lines):
-        if line.strip().startswith("state:") or line.strip().startswith("status:"):
-            lines[i] = f"state: {state}"
-            updated = True
-            break
-    if not updated:
-        for i, line in enumerate(lines):
-            if line.startswith("## Created"):
-                lines.insert(i, f"\n## State\nstate: {state}\n")
-                updated = True
-                break
-    if not updated:
-        lines.append(f"\n## State\nstate: {state}")
-    slot_md.write_text("\n".join(lines) + "\n")
-    return True
-
-
-def set_slot_status(slot_dir: Path, status: str) -> bool:
-    """Legacy alias for set_slot_state."""
-    return set_slot_state(slot_dir, status)
 
 
 def is_slot_landed(slot_dir: Path) -> bool:

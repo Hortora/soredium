@@ -6,7 +6,13 @@ No side effects, no fixes.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from slot_io import parse_slot as _parse_slot
 
 from verification import Finding, read_file_safe
 
@@ -20,21 +26,16 @@ def check_duplicate_slots(slots_dir: Path) -> list[Finding]:
     for slot_dir in sorted(slots_dir.iterdir()):
         if not slot_dir.is_dir() or not slot_dir.name.isdigit():
             continue
-        slot_file = slot_dir / ".slot"
-        content = read_file_safe(slot_file)
-        if content is None:
+        info = _parse_slot(slot_dir)
+        if not info or not info.branch:
             continue
-        for line in content.splitlines():
-            if line.startswith("# Slot") and "—" in line:
-                branch = line.split("—", 1)[1].strip()
-                if branch in branch_map:
-                    findings.append(Finding(
-                        "ERROR", "duplicate-slot",
-                        f"slots {branch_map[branch]} and {slot_dir.name} both use branch {branch}",
-                    ))
-                else:
-                    branch_map[branch] = slot_dir.name
-                break
+        if info.branch in branch_map:
+            findings.append(Finding(
+                "ERROR", "duplicate-slot",
+                f"slots {branch_map[info.branch]} and {slot_dir.name} both use branch {info.branch}",
+            ))
+        else:
+            branch_map[info.branch] = slot_dir.name
     return findings
 
 
@@ -47,19 +48,15 @@ def check_duplicate_issues(slots_dir: Path) -> list[Finding]:
     for slot_dir in sorted(slots_dir.iterdir()):
         if not slot_dir.is_dir() or not slot_dir.name.isdigit():
             continue
-        slot_file = slot_dir / ".slot"
-        content = read_file_safe(slot_file)
-        if content is None:
+        info = _parse_slot(slot_dir)
+        if not info:
             continue
-        issue_repo = ""
-        for line in content.splitlines():
-            if line.startswith("casehubio/") or line.startswith("Hortora/"):
-                issue_repo = line.split("#")[0].strip()
-            if line.startswith("Covers:"):
-                nums = re.findall(r'\d+', line.split(":", 1)[1])
-                for n in nums:
-                    key = f"{issue_repo}#{n}" if issue_repo else n
-                    issue_map.setdefault(key, []).append(f"slot {slot_dir.name}")
+        issue_repo = info.issue_repo
+        if info.covers:
+            nums = re.findall(r'\d+', info.covers)
+            for n in nums:
+                key = f"{issue_repo}#{n}" if issue_repo else n
+                issue_map.setdefault(key, []).append(f"slot {slot_dir.name}")
     for issue_key, locations in sorted(issue_map.items()):
         if len(locations) > 1:
             findings.append(Finding(

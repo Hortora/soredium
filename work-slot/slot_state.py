@@ -29,7 +29,7 @@ _scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
 if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
-from slot_metadata import parse_slot_md, set_slot_state
+from slot_io import parse_slot, set_slot_state
 
 try:
     import worklog as _wl
@@ -74,8 +74,8 @@ _DB_TO_SLOT = {
 
 def current_state(slot_dir: Path) -> str:
     """Read state from .slot file (authoritative). Defaults to 'active'."""
-    info = parse_slot_md(slot_dir)
-    return info.get("state", "active")
+    info = parse_slot(slot_dir)
+    return info.state if info else "active"
 
 
 def _update_db(slot_number: int, family_root: str, new_state: str,

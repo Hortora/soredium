@@ -119,11 +119,11 @@ def _get_clone_origin(clone_path: Path) -> str | None:
 
 
 def get_slot_repos(slot_dir: Path) -> list[str]:
-    return [
-        d.name for d in sorted(slot_dir.iterdir())
-        if d.is_dir() and (d / ".git").exists()
-        and is_project_repo(d.name) and not is_workspace_clone(d)
-    ]
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    from slot_io import discover_repos
+    return discover_repos(slot_dir)
 
 
 def get_all_slot_repos(slot_dir: Path) -> list[str]:

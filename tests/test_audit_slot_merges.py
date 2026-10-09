@@ -37,14 +37,11 @@ def _create_slot_dir(
         f"- {r} (primary)" if r == primary else f"- {r}"
         for r in repos
     )
-    (slot_dir / ".slot").write_text(textwrap.dedent(f"""\
-        # Slot {slot_num}
-
-        branch: {branch}
-
-        ## Repos
-        {repo_lines}
-    """))
+    (slot_dir / ".slot").write_text(
+        f"# Slot {slot_num}\nslug: {branch}\n\n## Repos\n" +
+        "\n".join(f"- {r} (primary)" if r == primary else f"- {r}" for r in repos) +
+        "\n"
+    )
     return slot_dir
 
 

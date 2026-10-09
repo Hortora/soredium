@@ -3,8 +3,14 @@
 import shutil
 from pathlib import Path
 
+import sys
+
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+
 from slot_core import run_cmd, get_slot_repos
-from slot_metadata import parse_slot_md
+from slot_io import parse_slot
 
 
 def _check_isx_available() -> bool:
@@ -18,10 +24,10 @@ def _truncate_instance_name(name: str, max_len: int = 63) -> str:
 
 
 def _teardown_isx(slot_dir: Path) -> None:
-    info = parse_slot_md(slot_dir)
-    if info.get("isolation_type") != "isx":
+    info = parse_slot(slot_dir)
+    if not info or info.isolation_type != "isx":
         return
-    instance = info.get("isx_instance", "")
+    instance = info.isx_instance
     if not instance:
         return
     rc, _, stderr = run_cmd(["isx", "destroy", instance])
@@ -39,13 +45,13 @@ def _wire_isx_remotes(slot_dir: Path, repos: list[str], instance: str) -> None:
 
 
 def sync_isx(slot_dir: Path) -> int:
-    info = parse_slot_md(slot_dir)
-    if info.get("isolation_type") != "isx":
+    info = parse_slot(slot_dir)
+    if not info or info.isolation_type != "isx":
         print("ERROR=not_isx_slot")
         print("ERROR_DETAIL=This slot has no ISX isolation.")
         return 1
 
-    branch = info.get("branch", "")
+    branch = info.branch
     repos = get_slot_repos(slot_dir)
 
     for repo_name in repos:

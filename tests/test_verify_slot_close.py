@@ -489,44 +489,6 @@ class TestVerifySlotModeCLI:
         assert "landed_marker" in result.stdout
 
 
-class TestParseCoverRepos:
-    """Extract repo names from the Covers: line in .slot."""
-
-    def test_parses_covers_line(self, tmp_path):
-        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-        from verify_slot_close import _parse_covers_repos
-        slot_dir = tmp_path / "slot"
-        slot_dir.mkdir()
-        (slot_dir / ".slot").write_text(
-            "# Slot 181\n"
-            "slug: test-slot\n\n"
-            "## Issue\n"
-            "casehubio/parent#469\n"
-            "Covers: platform:276,engine:1049,work:394\n\n"
-            "## Repos\n"
-            "- platform (primary)\n"
-            "- engine\n"
-            "- work\n"
-            "- aml\n"
-            "- clinical\n"
-        )
-        result = _parse_covers_repos(str(slot_dir))
-        assert result == {"platform", "engine", "work"}
-
-    def test_missing_covers_returns_empty(self, tmp_path):
-        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-        from verify_slot_close import _parse_covers_repos
-        slot_dir = tmp_path / "slot"
-        slot_dir.mkdir()
-        (slot_dir / ".slot").write_text("# Slot\n## Repos\n- engine\n")
-        result = _parse_covers_repos(str(slot_dir))
-        assert result == set()
-
-    def test_no_slot_file_returns_empty(self, tmp_path):
-        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-        from verify_slot_close import _parse_covers_repos
-        result = _parse_covers_repos(str(tmp_path / "nonexistent"))
-        assert result == set()
 
 
 class TestResolveCanonicalReposScoped:
