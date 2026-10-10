@@ -85,6 +85,21 @@ class TestMakeSteps:
         assert step.action_context_fn is not None
 
 
+class TestStepDefRequires:
+    def test_default_requires_is_empty(self):
+        step = StepDef("test", "phase", "mechanical")
+        assert step.requires == ()
+
+    def test_explicit_requires(self):
+        step = StepDef("close_issues", "phase", "mechanical", requires=("verify",))
+        assert step.requires == ("verify",)
+        assert "verify" in step.requires
+
+    def test_multiple_requires(self):
+        step = StepDef("archive", "phase", "judgment", requires=("verify", "stamp_pass"))
+        assert len(step.requires) == 2
+
+
 class TestPipelineMode:
     def test_enum_has_five_values(self):
         assert len(PipelineMode) == 5

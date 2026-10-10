@@ -21,6 +21,36 @@ from work_progress import update_progress as update_close_progress
 from shared_steps import StepDef, MAX_JUDGMENT_RETRIES, MAX_MECHANICAL_RETRIES
 
 
+def validate_requires(steps: list[StepDef]) -> None:
+    step_names = {s.name for s in steps}
+    for step in steps:
+        for req in step.requires:
+            if req == step.name:
+                raise ValueError(
+                    f"Step '{step.name}' requires itself"
+                )
+            if req not in step_names:
+                raise ValueError(
+                    f"Step '{step.name}' requires '{req}' which does not exist"
+                )
+
+
+def _per_repo_done(ctx, step_name: str) -> bool:
+    """Check if a step completed via per-repo fan-out (step:repo keys)."""
+    prefix = f"{step_name}:"
+    repo_keys = [k for k in ctx.progress if k.startswith(prefix)
+                 and not k.endswith("_attempt") and not k.endswith("_produced")]
+    if not repo_keys:
+        return False
+    done_states = ("done", "skipped", "skipped_error")
+    return all(ctx.progress[k] in done_states for k in repo_keys)
+
+
+def _mark_done(ctx, step_name: str, status: str = "done") -> None:
+    update_close_progress(ctx.workspace, step_name, status)
+    ctx.progress[step_name] = status
+
+
 def run_script(cmd: list[str], workspace: Path,
                dry_run: bool = False,
                call_log: list | None = None) -> dict[str, str]:
@@ -205,9 +235,24 @@ def run_loop(
     if pipeline_mode is not None:
         steps = [s for s in steps if pipeline_mode in s.modes]
 
+    active_step_names = {s.name for s in steps}
+
     for step in steps:
         if step.skip_fn and step.skip_fn(ctx):
             continue
+
+        if step.requires:
+            unmet = [r for r in step.requires
+                     if r in active_step_names
+                     and not ctx.done(r)
+                     and not _per_repo_done(ctx, r)]
+            if unmet:
+                return {
+                    "ACTION": "error",
+                    "ERROR": "unmet_dependency",
+                    "STEP": step.name,
+                    "REASON": f"Step '{step.name}' requires {unmet} to complete first",
+                }
 
         if step.step_type == "mechanical":
             if per_repo_mechanical:
@@ -221,7 +266,7 @@ def run_loop(
                 continue
 
             if step.postcondition_fn and step.postcondition_fn(ctx):
-                update_close_progress(ctx.workspace, step.name, "done")
+                _mark_done(ctx, step.name)
                 ctx.steps_executed.append(f"{step.name}:postcondition_skip")
                 continue
 
@@ -242,7 +287,7 @@ def run_loop(
                 attempt += 1
                 update_close_progress(ctx.workspace, attempt_key, str(attempt))
                 if attempt >= MAX_MECHANICAL_RETRIES:
-                    update_close_progress(ctx.workspace, step.name, "skipped_error")
+                    _mark_done(ctx, step.name, "skipped_error")
                     ctx.steps_executed.append(f"{step.name}:SKIPPED_ERROR")
                     continue
                 ctx.steps_executed.append(f"{step.name}:ERROR:{attempt}")
@@ -256,7 +301,7 @@ def run_loop(
                 attempt += 1
                 update_close_progress(ctx.workspace, attempt_key, str(attempt))
                 if attempt >= MAX_MECHANICAL_RETRIES:
-                    update_close_progress(ctx.workspace, step.name, "skipped_error")
+                    _mark_done(ctx, step.name, "skipped_error")
                     ctx.steps_executed.append(f"{step.name}:POSTCONDITION_FAIL:skipped")
                     continue
                 ctx.steps_executed.append(f"{step.name}:POSTCONDITION_FAIL:{attempt}")
@@ -267,7 +312,7 @@ def run_loop(
                     "RETRY": str(attempt),
                     "REASON": f"Step '{step.name}' executed but postcondition not met",
                 }
-            update_close_progress(ctx.workspace, step.name, "done")
+            _mark_done(ctx, step.name)
             ctx.steps_executed.append(step.name)
             continue
 
@@ -279,7 +324,7 @@ def run_loop(
                 handled = per_repo_judgment(step, ctx)
                 if handled is not None:
                     if not handled:
-                        update_close_progress(ctx.workspace, step.name, "done")
+                        _mark_done(ctx, step.name)
                         ctx.steps_executed.append(step.name)
                         continue
                     return handled
@@ -294,7 +339,7 @@ def run_loop(
         if step.step_type == "lifecycle":
             if handle_lifecycle:
                 handle_lifecycle(step, ctx)
-            update_close_progress(ctx.workspace, step.name, "done")
+            _mark_done(ctx, step.name)
             ctx.steps_executed.append(step.name)
             continue
 

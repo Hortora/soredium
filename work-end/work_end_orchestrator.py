@@ -77,7 +77,7 @@ MAX_MECHANICAL_RETRIES = 3
 ABORTABLE_STATES = {"closing:review", "closing:verified"}
 
 
-from orchestrator_engine import run_script as _run_script, run_loop, log_call as _engine_log_call, validate_skip, apply_step_done
+from orchestrator_engine import run_script as _run_script, run_loop, log_call as _engine_log_call, validate_skip, apply_step_done, validate_requires
 
 MECHANICAL_STEPS = None  # populated after STEPS is defined
 
@@ -1122,6 +1122,7 @@ STEPS: list[StepDef] = [
             skip_fn=_skip_no_queue_remaining,
             action_context_fn=_queue_decision_context),
     StepDef("fork_next_branch", "closing:review", "mechanical",
+            requires=("queue_decision",),
             skip_fn=_skip_fork_next,
             script_fn=_fork_next_script,
             postcondition_fn=fork_next_postcondition),
@@ -1135,6 +1136,7 @@ STEPS: list[StepDef] = [
             script_fn=_promote_script,
             postcondition_fn=promote_postcondition),
     StepDef("report_promote", "closing:verified", "mechanical",
+            requires=("promote",),
             script_fn=_report_promote_script),
     StepDef("promote_pass", "closing:verified", "lifecycle",
             from_state="closing:verified", to_state="closing:promoted", event="promote_pass"),
@@ -1148,25 +1150,32 @@ STEPS: list[StepDef] = [
             postcondition_fn=rebase_postcondition),
     StepDef("report_rebase", "closing:promoted", "mechanical",
             modes=NOT_MAIN,
+            requires=("rebase",),
             script_fn=_report_rebase_script),
     StepDef("squash", "closing:promoted", "judgment",
             modes=NOT_MAIN,
+            requires=("rebase",),
             skip_fn=_skip_empty_branch,
             action_context_fn=lambda ctx: {"REPOS": ctx.project.name},
             verify_fn=_verify_squash),
     StepDef("report_squash", "closing:promoted", "mechanical",
             modes=NOT_MAIN,
+            requires=("squash",),
             script_fn=_report_squash_script),
     StepDef("write_marker", "closing:promoted", "mechanical",
             modes=SLOT_ONLY,
+            requires=("squash",),
             script_fn=_write_marker_script,
             postcondition_fn=write_marker_postcondition),
     StepDef("land", "closing:promoted", "mechanical",
+            requires=("squash",),
             script_fn=_land_script,
             postcondition_fn=lambda ctx: push_postcondition(ctx) and content_landed_postcondition(ctx)),
     StepDef("report_land", "closing:promoted", "mechanical",
+            requires=("land",),
             script_fn=_report_land_script),
     StepDef("push_pass", "closing:promoted", "lifecycle",
+            requires=("land",),
             from_state="closing:promoted", to_state="closing:pushed", event="push_pass"),
     StepDef("merge_pass", "closing:pushed", "lifecycle",
             from_state="closing:pushed", to_state="closing:merged", event="merge_pass"),
@@ -1188,14 +1197,17 @@ STEPS: list[StepDef] = [
             script_fn=_verify_script),
     StepDef("report_verify", "closing:stamped", "mechanical",
             modes=NOT_SYNC,
+            requires=("verify",),
             script_fn=_report_verify_script),
     StepDef("close_issues", "closing:stamped", "mechanical",
             modes=NOT_SYNC,
+            requires=("verify",),
             skip_fn=_skip_no_covers,
             script_fn=_close_issues_script,
             postcondition_fn=issues_closed_postcondition),
     StepDef("report_close_issues", "closing:stamped", "mechanical",
             modes=NOT_SYNC,
+            requires=("close_issues",),
             skip_fn=_skip_no_covers,
             script_fn=_report_close_issues_script),
     StepDef("upstream_push", "closing:stamped", "mechanical",
@@ -1208,6 +1220,7 @@ STEPS: list[StepDef] = [
             action_context_fn=_archive_slot_context),
     StepDef("report_archive", "closing:stamped", "mechanical",
             modes=SLOT_ONLY,
+            requires=("archive_slot",),
             skip_fn=_skip_multi_repo_partial_close,
             script_fn=_report_archive_script),
     StepDef("elevate_plan", "closing:stamped", "mechanical",
@@ -1226,8 +1239,10 @@ STEPS: list[StepDef] = [
             postcondition_fn=cleanup_scaffold_postcondition),
     StepDef("report_scaffold", "closing:stamped", "mechanical",
             modes=TERMINAL,
+            requires=("cleanup",),
             script_fn=_report_scaffold_script),
     StepDef("checkout_fork", "closing:stamped", "mechanical",
+            requires=("checkout_main",),
             skip_fn=_skip_checkout_fork,
             script_fn=_checkout_fork_script,
             postcondition_fn=checkout_fork_postcondition),
@@ -1268,6 +1283,7 @@ STEPS: list[StepDef] = [
 ]
 
 MECHANICAL_STEPS = {s.name for s in STEPS if s.step_type == "mechanical"}
+validate_requires(STEPS)
 
 
 def _record(event_type, branch, project, issue_repo, dry_run, **kwargs):

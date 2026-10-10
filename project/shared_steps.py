@@ -39,6 +39,7 @@ class StepDef:
     to_state: str | None = None
     event: str | None = None
     modes: frozenset[PipelineMode] = field(default_factory=lambda: ALL_MODES)
+    requires: tuple[str, ...] = ()
 
 
 @dataclass
