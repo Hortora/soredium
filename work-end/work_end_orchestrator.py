@@ -153,6 +153,7 @@ class OrchestratorContext:
     expected_state: str = ""
     slot_repos: list[str] = field(default_factory=list)
     steps_executed: list[str] = field(default_factory=list)
+    repos: list = field(default_factory=list)
     current_repo_project: Path | None = None
     current_repo_workspace: Path | None = None
     final_progress: dict[str, str] = field(default_factory=dict)
@@ -161,17 +162,19 @@ class OrchestratorContext:
         return self.progress.get(step) in ("done", "skipped", "skipped_error")
 
     def per_repo_done(self, step: str) -> bool:
-        if not self.in_slot or not self.slot_repos:
+        if not self.in_slot or (not self.repos and not self.slot_repos):
             return self.done(step)
+        repo_names = [r.name for r in self.repos] if self.repos else self.slot_repos
         return all(
             self.progress.get(f"{step}:{repo}") in ("done", "skipped", "skipped_error")
-            for repo in self.slot_repos
+            for repo in repo_names
         )
 
     def next_repo_for(self, step: str) -> str | None:
-        if not self.in_slot or not self.slot_repos:
+        if not self.in_slot or (not self.repos and not self.slot_repos):
             return None
-        for repo in self.slot_repos:
+        repo_names = [r.name for r in self.repos] if self.repos else self.slot_repos
+        for repo in repo_names:
             if self.progress.get(f"{step}:{repo}") not in ("done", "skipped"):
                 return repo
         return None
@@ -207,22 +210,14 @@ def _skip_not_slot(ctx: OrchestratorContext) -> bool:
 
 
 def _skip_multi_repo_partial_close(ctx: OrchestratorContext) -> bool:
-    """Skip archival when a multi-repo slot has repos with remaining work."""
-    if not ctx.in_slot or not ctx.slot_repos or len(ctx.slot_repos) <= 1:
+    """Skip archival when a multi-repo slot has repos with unlanded work."""
+    if not ctx.in_slot or len(ctx.repos) <= 1:
         return False
-    if not ctx.slot_path:
-        return False
-    for repo_name in ctx.slot_repos:
-        repo_dir = ctx.slot_path / repo_name
-        if not repo_dir.is_dir():
-            continue
-        result = subprocess.run(
-            ["git", "-C", str(repo_dir), "branch", "--show-current"],
-            capture_output=True, text=True, timeout=5,
-        )
-        branch = result.stdout.strip()
-        if branch and branch != ctx.base_branch and branch != "main":
-            return True
+    from repo_state import RepoDisposition
+    for r in ctx.repos:
+        if r.disposition == RepoDisposition.HAS_WORK:
+            if ctx.progress.get(f"land:{r.name}") not in ("done", "skipped", "skipped_error"):
+                return True
     return False
 
 
@@ -231,11 +226,10 @@ def _skip_no_covers(ctx: OrchestratorContext) -> bool:
 
 
 def _skip_no_upstream(ctx: OrchestratorContext) -> bool:
-    result = subprocess.run(
-        ["git", "-C", str(ctx.project), "remote", "get-url", "upstream"],
-        capture_output=True, text=True,
-    )
-    return result.returncode != 0
+    if not ctx.repos:
+        return True
+    from repo_state import RepoType
+    return not any(r.has_upstream for r in ctx.repos if r.repo_type == RepoType.PROJECT)
 
 
 def _upstream_push_script(ctx):
@@ -247,15 +241,17 @@ def _skip_empty_branch(ctx) -> bool:
     """Skip review/audit steps when branch has no code changes."""
     if ctx.on_main:
         return False
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(ctx.project), "diff", "--stat",
-             f"{ctx.base_branch}..{ctx.branch}"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.returncode == 0 and not result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    if not ctx.repos:
         return False
+    from repo_state import RepoDisposition, RepoType
+    project_repos = [r for r in ctx.repos if r.repo_type == RepoType.PROJECT]
+    if not project_repos:
+        return False
+    return all(
+        r.disposition in (RepoDisposition.NO_BRANCH, RepoDisposition.EMPTY_BRANCH,
+                          RepoDisposition.ALREADY_LANDED)
+        for r in project_repos
+    )
 
 
 def _is_sweep_deselected(step_name: str):
@@ -1469,6 +1465,15 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     _slot_info = _parse_slot(slot_path) if in_slot and slot_path else None
     slot_repos = _slot_info.repos if _slot_info else []
 
+    from repo_state import classify_repos as _classify_repos
+    repos = _classify_repos(
+        project=project,
+        workspace=workspace,
+        branch=branch,
+        base_branch=base_branch,
+        slot_path=slot_path if in_slot else None,
+    )
+
     phase_skip_state = meta_state
     if plan_path and plan_path.exists():
         from close_progress import _read_plan_state, LIFECYCLE_PHASE_ORDER
@@ -1489,6 +1494,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         mode=mode,
         expected_state=meta_state,
         slot_repos=slot_repos,
+        repos=repos,
     )
     _hydrate_landed_shas(ctx)
 
@@ -1618,54 +1624,83 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
     marked done immediately. Failures are collected and returned as a
     consolidated report so the user sees the full picture.
     """
-    if step.name not in PER_REPO_EXECUTE_STEPS or not ctx.in_slot or not ctx.slot_repos:
+    if step.name not in PER_REPO_EXECUTE_STEPS or not ctx.in_slot:
+        return None
+    if not ctx.repos and not ctx.slot_repos:
         return None
     if ctx.per_repo_done(step.name):
         return {}
 
+    from repo_state import RepoDisposition
+
     failures: dict[str, dict[str, str]] = {}
     retryable_failure: tuple[str, int, dict[str, str]] | None = None
 
-    for repo in ctx.slot_repos:
-        step_key = f"{step.name}:{repo}"
+    repo_items = ctx.repos if ctx.repos else []
+    repo_names_fallback = ctx.slot_repos if not ctx.repos else []
+
+    for item in (repo_items or repo_names_fallback):
+        if ctx.repos:
+            repo_name = item.name
+            repo_path = item.path
+        else:
+            repo_name = item
+            repo_path = ctx.slot_path / item if ctx.slot_path else None
+
+        step_key = f"{step.name}:{repo_name}"
         if ctx.progress.get(step_key) in ("done", "skipped", "skipped_error"):
             continue
 
-        repo_path = ctx.slot_path / repo if ctx.slot_path else None
-        if step.name == "rebase" and repo_path and repo_path.is_dir():
-            ancestor_check = subprocess.run(
-                ["git", "-C", str(repo_path), "merge-base", "--is-ancestor", "HEAD", "main"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if ancestor_check.returncode == 0:
+        if ctx.repos:
+            if step.name == "rebase" and item.disposition in (
+                RepoDisposition.NO_BRANCH, RepoDisposition.ALREADY_LANDED,
+            ):
                 update_close_progress(ctx.workspace, step_key, "done")
-                ctx.steps_executed.append(f"{step_key}:already_on_main")
+                ctx.steps_executed.append(f"{step_key}:skipped_by_disposition")
                 continue
 
-        if step.name == "land" and repo_path and repo_path.is_dir():
-            has_branch = subprocess.run(
-                ["git", "-C", str(repo_path), "branch", "--list", ctx.branch],
-                capture_output=True, text=True, timeout=10,
-            )
-            if has_branch.returncode == 0 and not has_branch.stdout.strip():
+            if step.name == "land" and item.disposition in (
+                RepoDisposition.NO_BRANCH, RepoDisposition.EMPTY_BRANCH,
+                RepoDisposition.ALREADY_LANDED,
+            ):
                 update_close_progress(ctx.workspace, step_key, "done")
-                ctx.steps_executed.append(f"{step_key}:no_branch")
+                ctx.steps_executed.append(f"{step_key}:skipped_by_disposition")
                 continue
-            if has_branch.returncode == 0 and has_branch.stdout.strip():
-                commit_count = subprocess.run(
-                    ["git", "-C", str(repo_path), "rev-list", "--count",
-                     f"{ctx.base_branch}..{ctx.branch}"],
+        else:
+            if step.name == "rebase" and repo_path and repo_path.is_dir():
+                ancestor_check = subprocess.run(
+                    ["git", "-C", str(repo_path), "merge-base", "--is-ancestor", "HEAD", "main"],
                     capture_output=True, text=True, timeout=10,
                 )
-                if commit_count.returncode == 0 and commit_count.stdout.strip():
-                    count = int(commit_count.stdout.strip())
-                    if count == 0:
-                        update_close_progress(ctx.workspace, step_key, "done")
-                        ctx.steps_executed.append(f"{step_key}:no_commits")
-                        continue
+                if ancestor_check.returncode == 0:
+                    update_close_progress(ctx.workspace, step_key, "done")
+                    ctx.steps_executed.append(f"{step_key}:already_on_main")
+                    continue
+
+            if step.name == "land" and repo_path and repo_path.is_dir():
+                has_branch = subprocess.run(
+                    ["git", "-C", str(repo_path), "branch", "--list", ctx.branch],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if has_branch.returncode == 0 and not has_branch.stdout.strip():
+                    update_close_progress(ctx.workspace, step_key, "done")
+                    ctx.steps_executed.append(f"{step_key}:no_branch")
+                    continue
+                if has_branch.returncode == 0 and has_branch.stdout.strip():
+                    commit_count = subprocess.run(
+                        ["git", "-C", str(repo_path), "rev-list", "--count",
+                         f"{ctx.base_branch}..{ctx.branch}"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if commit_count.returncode == 0 and commit_count.stdout.strip():
+                        count = int(commit_count.stdout.strip())
+                        if count == 0:
+                            update_close_progress(ctx.workspace, step_key, "done")
+                            ctx.steps_executed.append(f"{step_key}:no_commits")
+                            continue
 
         ctx.current_repo_project = repo_path
-        ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo)
+        ctx.current_repo_workspace = _resolve_repo_workspace(ctx, repo_name)
         result = _close_execute_mechanical(step, ctx)
         ctx.current_repo_project = None
         ctx.current_repo_workspace = None
@@ -1673,7 +1708,7 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
         if result and "ERROR" in result:
             error = result.get("ERROR", "")
             if error in NON_RETRYABLE_ERRORS:
-                failures[repo] = result
+                failures[repo_name] = result
                 ctx.steps_executed.append(f"{step_key}:ERROR:classified")
             else:
                 attempt_key = f"{step_key}_mechanical_attempt"
@@ -1686,9 +1721,9 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
             ctx.last_output = result or {}
             if step.name == "land":
                 sha = (result or {}).get("LANDED_SHA", "")
-                ctx.landed_shas[repo] = sha
+                ctx.landed_shas[repo_name] = sha
                 if sha:
-                    update_close_progress(ctx.workspace, f"_landed_sha:{repo}", sha)
+                    update_close_progress(ctx.workspace, f"_landed_sha:{repo_name}", sha)
             update_close_progress(ctx.workspace, step_key, "done")
             ctx.steps_executed.append(step_key)
 

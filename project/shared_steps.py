@@ -47,6 +47,7 @@ class OrchestratorContextBase:
     slot_num: str = ""
     last_output: dict[str, str] = field(default_factory=dict)
     steps_executed: list[str] = field(default_factory=list)
+    repos: list = field(default_factory=list)
 
     def done(self, step: str) -> bool:
         return self.progress.get(step) in ("done", "skipped", "skipped_error")

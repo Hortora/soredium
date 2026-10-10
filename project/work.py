@@ -68,6 +68,14 @@ def build_context(args: dict[str, str]) -> WorkContext:
     ws = Path(args.get("workspace", "."))
     proj = Path(args.get("project", "."))
     progress = read_progress(ws)
+    from repo_state import classify_repos as _classify_repos
+    repos = _classify_repos(
+        project=proj,
+        workspace=ws,
+        branch=args.get("branch", ""),
+        base_branch=args.get("base_branch", "main"),
+        slot_path=Path(args["slot_path"]) if args.get("slot_path") else None,
+    )
     return WorkContext(
         workspace=ws,
         project=proj,
@@ -92,6 +100,7 @@ def build_context(args: dict[str, str]) -> WorkContext:
         has_protocols_dir=args.get("has_protocols_dir", "no") == "yes",
         flyway_next_v=args.get("flyway_next_v", "none"),
         design_repo_key=args.get("design_repo_key", ""),
+        repos=repos,
     )
 
 
