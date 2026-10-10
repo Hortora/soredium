@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
 
 from shared_steps import (
     StepDef,
+    PipelineMode,
+    ALL_MODES,
     _is_sweep_deselected,
     sweep_defaults,
     get_sweep_selected,
@@ -81,6 +83,35 @@ class TestMakeSteps:
         step = make_garden_feedback_step("wrapping")
         assert step.name == "garden_feedback"
         assert step.action_context_fn is not None
+
+
+class TestPipelineMode:
+    def test_enum_has_five_values(self):
+        assert len(PipelineMode) == 5
+        assert PipelineMode.BRANCH.value == "branch"
+        assert PipelineMode.SLOT.value == "slot"
+        assert PipelineMode.MAIN.value == "main"
+        assert PipelineMode.SYNC.value == "sync"
+        assert PipelineMode.CYCLE.value == "cycle"
+
+    def test_all_modes_contains_all_values(self):
+        assert ALL_MODES == frozenset(PipelineMode)
+
+    def test_stepdef_default_modes_is_all(self):
+        step = StepDef("test", "phase", "mechanical")
+        assert step.modes == ALL_MODES
+
+    def test_stepdef_explicit_modes(self):
+        modes = frozenset({PipelineMode.BRANCH, PipelineMode.SLOT})
+        step = StepDef("test", "phase", "mechanical", modes=modes)
+        assert step.modes == modes
+        assert PipelineMode.MAIN not in step.modes
+
+    def test_stepdef_single_mode(self):
+        modes = frozenset({PipelineMode.CYCLE})
+        step = StepDef("cycle_only", "phase", "lifecycle", modes=modes)
+        assert step.modes == modes
+        assert len(step.modes) == 1
 
 
 class TestWriteContentDiaryDetection:

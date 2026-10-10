@@ -9,8 +9,20 @@ Moved from work-end/ to project/ for shared access (#384).
 """
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Callable
+
+
+class PipelineMode(Enum):
+    BRANCH = "branch"
+    SLOT = "slot"
+    MAIN = "main"
+    SYNC = "sync"
+    CYCLE = "cycle"
+
+
+ALL_MODES = frozenset(PipelineMode)
 
 
 @dataclass
@@ -26,6 +38,7 @@ class StepDef:
     from_state: str | None = None
     to_state: str | None = None
     event: str | None = None
+    modes: frozenset[PipelineMode] = field(default_factory=lambda: ALL_MODES)
 
 
 @dataclass

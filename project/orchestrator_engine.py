@@ -201,6 +201,10 @@ def run_loop(
     if user_input_steps is None:
         user_input_steps = set()
 
+    pipeline_mode = getattr(ctx, "pipeline_mode", None)
+    if pipeline_mode is not None:
+        steps = [s for s in steps if pipeline_mode in s.modes]
+
     for step in steps:
         if step.skip_fn and step.skip_fn(ctx):
             continue

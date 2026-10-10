@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from work_end_orchestrator import run_orchestrator, STEPS
+from work_end_orchestrator import run_orchestrator, STEPS, determine_pipeline_mode
 from close_progress import update_close_progress, read_close_progress, delete_close_progress
 
 JUDGMENT_STEPS = {
@@ -79,14 +79,28 @@ def _setup_workspace(workspace, project, mode):
 
 
 def _expected_steps(mode):
+    from repo_state import RepoState, RepoType, RepoDisposition
+    p_mode = determine_pipeline_mode(
+        on_main=(mode == "main"),
+        in_slot=(mode == "slot"),
+        mode="end",
+        workspace=Path("/tmp/nonexistent"),
+        covers="999",
+        issue_repo="Hortora/soredium",
+    )
     result = []
     for step in STEPS:
+        if p_mode not in step.modes:
+            continue
         if step.skip_fn:
             class FakeCtx:
                 on_main = (mode == "main")
                 in_slot = (mode == "slot")
                 covers = "999"
                 progress = {}
+                repos = []
+                workspace = Path("/tmp")
+                mode_str = "end"
             if step.skip_fn(FakeCtx()):
                 continue
         result.append(step.name)

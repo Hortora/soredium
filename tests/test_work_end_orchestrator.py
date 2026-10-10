@@ -2545,32 +2545,17 @@ class TestWriteMarkerStep:
         assert squash_idx < marker_idx < land_idx, \
             f"write_marker at {marker_idx} must be between report_squash ({squash_idx}) and land ({land_idx})"
 
-    def test_write_marker_skipped_when_not_slot(self):
-        from work_end_orchestrator import STEPS
+    def test_write_marker_only_in_slot_mode(self):
+        from work_end_orchestrator import STEPS, SLOT_ONLY
         step = next(s for s in STEPS if s.name == "write_marker")
-        assert step.skip_fn is not None, "write_marker must have a skip_fn"
-        from work_end_orchestrator import OrchestratorContext
-        ctx = OrchestratorContext(
-            workspace=Path("/tmp/ws"), project=Path("/tmp/proj"),
-            branch="test", base_branch="main",
-            meta_state="closing:promoted", on_main=False,
-            in_slot=False, covers="99", issue_repo="Org/repo",
-            progress={},
-        )
-        assert step.skip_fn(ctx) is True, "write_marker must skip when not in slot"
+        assert step.modes == SLOT_ONLY, "write_marker must only run in SLOT mode"
 
-    def test_write_marker_runs_in_slot(self):
+    def test_write_marker_excluded_from_branch_mode(self):
         from work_end_orchestrator import STEPS
+        from shared_steps import PipelineMode
         step = next(s for s in STEPS if s.name == "write_marker")
-        from work_end_orchestrator import OrchestratorContext
-        ctx = OrchestratorContext(
-            workspace=Path("/tmp/ws"), project=Path("/tmp/proj"),
-            branch="test", base_branch="main",
-            meta_state="closing:promoted", on_main=False,
-            in_slot=True, covers="99", issue_repo="Org/repo",
-            progress={}, slot_path=Path("/tmp/slot"),
-        )
-        assert step.skip_fn(ctx) is False, "write_marker must run in slot mode"
+        assert PipelineMode.BRANCH not in step.modes
+        assert PipelineMode.SLOT in step.modes
 
     def test_write_marker_in_close_progress_phase_map(self):
         from close_progress import STEP_TO_PHASE
@@ -3102,73 +3087,58 @@ class TestClassifiedErrorForceDoneHint:
         assert result is None
 
 
-class TestOrSkip:
-    """Tests for _or_skip combiner."""
+class TestPipelineModeDeclarations:
+    """Tests that mode predicates are now expressed as StepDef.modes declarations."""
 
-    def test_any_true_returns_true(self):
-        from work_end_orchestrator import _or_skip
-        always_true = lambda ctx: True
-        always_false = lambda ctx: False
-        combined = _or_skip(always_false, always_true)
-        assert combined(None) is True
+    def test_sync_only_steps(self):
+        from work_end_orchestrator import STEPS, SYNC_ONLY
+        sync_steps = {"sync_pass"}
+        for step in STEPS:
+            if step.name in sync_steps:
+                assert step.modes == SYNC_ONLY, f"{step.name} should be SYNC_ONLY"
 
-    def test_all_false_returns_false(self):
-        from work_end_orchestrator import _or_skip
-        always_false = lambda ctx: False
-        combined = _or_skip(always_false, always_false)
-        assert combined(None) is False
+    def test_cycle_only_steps(self):
+        from work_end_orchestrator import STEPS, CYCLE_ONLY
+        cycle_steps = {"cycle_pass"}
+        for step in STEPS:
+            if step.name in cycle_steps:
+                assert step.modes == CYCLE_ONLY, f"{step.name} should be CYCLE_ONLY"
 
-    def test_single_predicate(self):
-        from work_end_orchestrator import _or_skip
-        always_true = lambda ctx: True
-        combined = _or_skip(always_true)
-        assert combined(None) is True
+    def test_slot_only_steps(self):
+        from work_end_orchestrator import STEPS, SLOT_ONLY
+        slot_steps = {"write_marker", "write_landed", "archive_slot",
+                      "report_archive", "elevate_plan"}
+        for step in STEPS:
+            if step.name in slot_steps:
+                assert step.modes == SLOT_ONLY, f"{step.name} should be SLOT_ONLY"
 
+    def test_not_main_steps(self):
+        from work_end_orchestrator import STEPS, NOT_MAIN
+        not_main_steps = {"rebase", "report_rebase", "squash", "report_squash"}
+        for step in STEPS:
+            if step.name in not_main_steps:
+                assert step.modes == NOT_MAIN, f"{step.name} should be NOT_MAIN"
 
-class TestSkipCycleMode:
-    """Tests for _skip_cycle_mode and _skip_not_cycle_mode."""
+    def test_terminal_steps(self):
+        from work_end_orchestrator import STEPS, TERMINAL
+        terminal_steps = {"stamp_pass", "cleanup", "report_scaffold",
+                          "arc42_scan", "session_rename", "garden_feedback", "notes"}
+        for step in STEPS:
+            if step.name in terminal_steps:
+                assert step.modes == TERMINAL, f"{step.name} should be TERMINAL"
 
-    def _make_ctx(self, tmp_path, plan_content=None):
-        ctx = MagicMock()
-        ctx.workspace = str(tmp_path)
-        if plan_content is not None:
-            (tmp_path / ".plan").write_text(plan_content)
-        return ctx
-
-    def test_skip_cycle_mode_with_uncompleted_items(self, tmp_path):
-        from work_end_orchestrator import _skip_cycle_mode
-        plan = (
-            "## State\nbranch: test\nstate: active\n"
-            "issue-repo: Org/repo\ncovers: 1\n\n"
-            "## Queue\n- [ ] org/repo#1 — Item1 ← active\n- [ ] org/repo#2 — Item2\n"
-        )
-        ctx = self._make_ctx(tmp_path, plan)
-        assert _skip_cycle_mode(ctx) is True
-
-    def test_skip_cycle_mode_with_all_completed(self, tmp_path):
-        from work_end_orchestrator import _skip_cycle_mode
-        plan = (
-            "## State\nbranch: test\nstate: active\n"
-            "issue-repo: Org/repo\ncovers: 1\n\n"
-            "## Queue\n- [x] org/repo#1 — Done\n"
-        )
-        ctx = self._make_ctx(tmp_path, plan)
-        assert _skip_cycle_mode(ctx) is False
-
-    def test_skip_cycle_mode_with_no_plan(self, tmp_path):
-        from work_end_orchestrator import _skip_cycle_mode
-        ctx = self._make_ctx(tmp_path, plan_content=None)
-        assert _skip_cycle_mode(ctx) is False
-
-    def test_skip_not_cycle_mode_inverse(self, tmp_path):
-        from work_end_orchestrator import _skip_not_cycle_mode
-        plan = (
-            "## State\nbranch: test\nstate: active\n"
-            "issue-repo: Org/repo\ncovers: 1\n\n"
-            "## Queue\n- [ ] org/repo#1 — Item1 ← active\n- [ ] org/repo#2 — Item2\n"
-        )
-        ctx = self._make_ctx(tmp_path, plan)
-        assert _skip_not_cycle_mode(ctx) is False
+    def test_no_mode_predicates_in_skip_fn(self):
+        """After migration, no step should have a mode-checking skip_fn."""
+        from work_end_orchestrator import STEPS
+        from shared_steps import PipelineMode
+        for step in STEPS:
+            if step.skip_fn is not None:
+                fn_name = getattr(step.skip_fn, "__name__", "")
+                assert "cycle_mode" not in fn_name, f"{step.name} still has cycle mode skip_fn"
+                assert "sync_mode" not in fn_name, f"{step.name} still has sync mode skip_fn"
+                assert "on_main" not in fn_name, f"{step.name} still has on_main skip_fn"
+                assert "not_slot" not in fn_name, f"{step.name} still has not_slot skip_fn"
+                assert "not_main" not in fn_name, f"{step.name} still has not_main skip_fn"
 
 
 class TestCyclePassStep:
@@ -3195,16 +3165,17 @@ class TestCyclePassStep:
         assert step.to_state == "active"
         assert step.event == "issue_cycle"
 
-    def test_terminal_steps_have_cycle_skip(self):
+    def test_terminal_steps_exclude_cycle_mode(self):
         from work_end_orchestrator import STEPS
+        from shared_steps import PipelineMode
         terminal_steps = {"write_marker", "stamp_pass", "write_landed",
                           "archive_slot", "report_archive", "checkout_main",
                           "cleanup_stack", "cleanup", "cleanup_pass",
                           "cleanup_main"}
         for step in STEPS:
             if step.name in terminal_steps:
-                assert step.skip_fn is not None, (
-                    f"Step {step.name} must have a skip_fn for cycle mode"
+                assert PipelineMode.CYCLE not in step.modes, (
+                    f"Step {step.name} must exclude CYCLE mode"
                 )
 
 

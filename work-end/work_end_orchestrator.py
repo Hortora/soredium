@@ -38,6 +38,7 @@ from close_progress import (
     delete_close_progress,
     is_stale,
 )
+from shared_steps import StepDef, PipelineMode, ALL_MODES
 
 CLOSE_LOG_FILE = ".close-log.jsonl"
 CLOSE_FILES_TO_EXCLUDE = [".close-progress", ".close-progress.tmp", ".close-progress.done",
@@ -148,6 +149,7 @@ class OrchestratorContext:
     family_root: Path | None = None
     slot_num: str = ""
     mode: str = "end"
+    pipeline_mode: PipelineMode = PipelineMode.BRANCH
     last_output: dict[str, str] = field(default_factory=dict)
     landed_shas: dict[str, str] = field(default_factory=dict)
     expected_state: str = ""
@@ -180,34 +182,84 @@ class OrchestratorContext:
         return None
 
 
-@dataclass
-class StepDef:
-    name: str
-    phase: str
-    step_type: str
-    script_fn: Callable | None = None
-    skip_fn: Callable | None = None
-    action_context_fn: Callable | None = None
-    verify_fn: Callable | None = None
-    postcondition_fn: Callable | None = None
-    from_state: str | None = None
-    to_state: str | None = None
-    event: str | None = None
+# --- Pipeline mode constants ---
+
+M = PipelineMode
+NOT_MAIN = frozenset({M.BRANCH, M.SLOT, M.SYNC, M.CYCLE})
+NOT_SYNC = frozenset({M.BRANCH, M.SLOT, M.MAIN, M.CYCLE})
+TERMINAL = frozenset({M.BRANCH, M.SLOT, M.MAIN})
+SLOT_ONLY = frozenset({M.SLOT})
+CYCLE_ONLY = frozenset({M.CYCLE})
+SYNC_ONLY = frozenset({M.SYNC})
+MAIN_ONLY = frozenset({M.MAIN})
+BRANCH_SLOT = frozenset({M.BRANCH, M.SLOT})
 
 
-# --- Skip predicates ---
+# --- Pipeline mode determination ---
 
-def _skip_on_main(ctx: OrchestratorContext) -> bool:
-    return ctx.on_main
+def _all_covers_closed(covers: str, issue_repo: str) -> bool:
+    """Check if all covered issues are closed on GitHub."""
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    from plan_io import parse_covers
+    for num in parse_covers(covers):
+        try:
+            result = subprocess.run(
+                ["gh", "issue", "view", str(num), "--repo", issue_repo,
+                 "--json", "state", "--jq", ".state"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0 or result.stdout.strip() != "CLOSED":
+                return False
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return False
+    return True
 
 
-def _skip_not_main(ctx: OrchestratorContext) -> bool:
-    return not ctx.on_main
+def _is_cycle_mode(workspace: Path, covers: str, issue_repo: str) -> bool:
+    """Determine if this pipeline run is in cycle mode.
+
+    Cycle mode: .plan has uncompleted items AND not all covered issues
+    are already closed (closing all issues in cycle causes infinite loop).
+    """
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    try:
+        from plan_io import read_plan, has_uncompleted_items
+        ws_plan = workspace / ".plan"
+        state = read_plan(ws_plan)
+        if state is None or not has_uncompleted_items(state):
+            return False
+        if covers and issue_repo:
+            if _all_covers_closed(covers, issue_repo):
+                return False
+        return True
+    except Exception:
+        return False
 
 
-def _skip_not_slot(ctx: OrchestratorContext) -> bool:
-    return not ctx.in_slot
+def determine_pipeline_mode(
+    on_main: bool,
+    in_slot: bool,
+    mode: str,
+    workspace: Path,
+    covers: str,
+    issue_repo: str,
+) -> PipelineMode:
+    if mode == "sync":
+        return PipelineMode.SYNC
+    if _is_cycle_mode(workspace, covers, issue_repo):
+        return PipelineMode.CYCLE
+    if on_main:
+        return PipelineMode.MAIN
+    if in_slot:
+        return PipelineMode.SLOT
+    return PipelineMode.BRANCH
 
+
+# --- Skip predicates (state-based only; mode predicates replaced by StepDef.modes) ---
 
 def _skip_multi_repo_partial_close(ctx: OrchestratorContext) -> bool:
     """Skip archival when a multi-repo slot has repos with unlanded work."""
@@ -261,74 +313,6 @@ def _is_sweep_deselected(step_name: str):
         selected = _get_sweep_selected(ctx.progress)
         return step_name not in selected
     return check
-
-
-def _or_skip(*fns):
-    """Skip if ANY predicate returns True."""
-    def combined(ctx):
-        return any(fn(ctx) for fn in fns)
-    return combined
-
-
-def _skip_cycle_mode(ctx) -> bool:
-    """Skip terminal steps when .plan has remaining items (cycle mode).
-
-    Also returns False (don't skip terminal steps) when all covered
-    issues are already closed — even if uncompleted queue items exist,
-    cycling back to active on a closed issue causes an infinite loop.
-    """
-    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
-    if _project_dir not in sys.path:
-        sys.path.insert(0, _project_dir)
-    try:
-        from plan_io import read_plan, has_uncompleted_items, parse_covers
-        ws_plan = Path(ctx.workspace) / ".plan"
-        state = read_plan(ws_plan)
-        if state is None or not has_uncompleted_items(state):
-            return False
-        covers = state.fields.get("covers", "")
-        issue_repo = state.fields.get("issue-repo", "")
-        if covers and issue_repo:
-            if _all_covers_closed_from_plan(covers, issue_repo):
-                return False
-        return True
-    except Exception:
-        return False
-
-
-def _all_covers_closed_from_plan(covers: str, issue_repo: str) -> bool:
-    """Check if all covered issues are closed on GitHub."""
-    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
-    if _project_dir not in sys.path:
-        sys.path.insert(0, _project_dir)
-    from plan_io import parse_covers
-    for num in parse_covers(covers):
-        try:
-            result = subprocess.run(
-                ["gh", "issue", "view", str(num), "--repo", issue_repo,
-                 "--json", "state", "--jq", ".state"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0 or result.stdout.strip() != "CLOSED":
-                return False
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return False
-    return True
-
-
-def _skip_not_cycle_mode(ctx) -> bool:
-    """Skip cycle step when in terminal mode."""
-    return not _skip_cycle_mode(ctx)
-
-
-def _skip_sync_mode(ctx) -> bool:
-    """Skip terminal steps when in sync mode (land without closing)."""
-    return ctx.mode == "sync"
-
-
-def _skip_not_sync_mode(ctx) -> bool:
-    """Skip sync step when in end mode."""
-    return ctx.mode != "sync"
 
 
 # --- Script paths ---
@@ -941,9 +925,7 @@ def _loose_ends_context(ctx):
 
 
 def _skip_no_queue_remaining(ctx) -> bool:
-    """Skip queue_decision when .plan has no remaining items or mode is sync."""
-    if ctx.mode == "sync":
-        return True
+    """Skip queue_decision when .plan has no remaining items."""
     ws_plan = ctx.workspace / ".plan"
     if not ws_plan.exists():
         return True
@@ -1136,6 +1118,7 @@ STEPS: list[StepDef] = [
 
     # --- queue continuation decision ---
     StepDef("queue_decision", "closing:review", "judgment",
+            modes=NOT_SYNC,
             skip_fn=_skip_no_queue_remaining,
             action_context_fn=_queue_decision_context),
     StepDef("fork_next_branch", "closing:review", "mechanical",
@@ -1160,21 +1143,22 @@ STEPS: list[StepDef] = [
     StepDef("trajectory", "closing:promoted", "judgment",
             action_context_fn=lambda ctx: {"COVERS": ctx.covers, "OWNER_REPO": ctx.issue_repo}),
     StepDef("rebase", "closing:promoted", "mechanical",
-            skip_fn=_skip_on_main,
+            modes=NOT_MAIN,
             script_fn=_rebase_script,
             postcondition_fn=rebase_postcondition),
     StepDef("report_rebase", "closing:promoted", "mechanical",
-            skip_fn=_skip_on_main,
+            modes=NOT_MAIN,
             script_fn=_report_rebase_script),
     StepDef("squash", "closing:promoted", "judgment",
-            skip_fn=_or_skip(_skip_on_main, _skip_empty_branch),
+            modes=NOT_MAIN,
+            skip_fn=_skip_empty_branch,
             action_context_fn=lambda ctx: {"REPOS": ctx.project.name},
             verify_fn=_verify_squash),
     StepDef("report_squash", "closing:promoted", "mechanical",
-            skip_fn=_skip_on_main,
+            modes=NOT_MAIN,
             script_fn=_report_squash_script),
     StepDef("write_marker", "closing:promoted", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode),
+            modes=SLOT_ONLY,
             script_fn=_write_marker_script,
             postcondition_fn=write_marker_postcondition),
     StepDef("land", "closing:promoted", "mechanical",
@@ -1187,92 +1171,94 @@ STEPS: list[StepDef] = [
     StepDef("merge_pass", "closing:pushed", "lifecycle",
             from_state="closing:pushed", to_state="closing:merged", event="merge_pass"),
     StepDef("cycle_pass", "closing:merged", "lifecycle",
-            skip_fn=_skip_not_cycle_mode,
+            modes=CYCLE_ONLY,
             from_state="closing:merged", to_state="active",
             event="issue_cycle"),
     StepDef("stamp_pass", "closing:merged", "lifecycle",
-            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
+            modes=TERMINAL,
             from_state="closing:merged", to_state="closing:stamped", event="stamp_pass"),
 
     # --- closing:stamped ---
     StepDef("write_landed", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode),
+            modes=SLOT_ONLY,
             script_fn=_write_landed_script,
             postcondition_fn=landed_marker_postcondition),
     StepDef("verify", "closing:stamped", "mechanical",
-            skip_fn=_skip_sync_mode,
+            modes=NOT_SYNC,
             script_fn=_verify_script),
     StepDef("report_verify", "closing:stamped", "mechanical",
-            skip_fn=_skip_sync_mode,
+            modes=NOT_SYNC,
             script_fn=_report_verify_script),
     StepDef("close_issues", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_no_covers, _skip_sync_mode),
+            modes=NOT_SYNC,
+            skip_fn=_skip_no_covers,
             script_fn=_close_issues_script,
             postcondition_fn=issues_closed_postcondition),
     StepDef("report_close_issues", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_no_covers, _skip_sync_mode),
+            modes=NOT_SYNC,
+            skip_fn=_skip_no_covers,
             script_fn=_report_close_issues_script),
     StepDef("upstream_push", "closing:stamped", "mechanical",
             skip_fn=_skip_no_upstream,
             script_fn=_upstream_push_script,
             postcondition_fn=push_postcondition),
     StepDef("archive_slot", "closing:stamped", "judgment",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode,
-                             _skip_multi_repo_partial_close),
+            modes=SLOT_ONLY,
+            skip_fn=_skip_multi_repo_partial_close,
             action_context_fn=_archive_slot_context),
     StepDef("report_archive", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_cycle_mode, _skip_sync_mode,
-                             _skip_multi_repo_partial_close),
+            modes=SLOT_ONLY,
+            skip_fn=_skip_multi_repo_partial_close,
             script_fn=_report_archive_script),
     StepDef("elevate_plan", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_not_slot, _skip_sync_mode),
+            modes=SLOT_ONLY,
             script_fn=_elevate_plan_script),
     StepDef("checkout_main", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode, _skip_sync_mode),
+            modes=BRANCH_SLOT,
             script_fn=_checkout_main_script,
             postcondition_fn=checkout_main_postcondition),
     StepDef("cleanup_stack", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode, _skip_sync_mode),
+            modes=BRANCH_SLOT,
             script_fn=_cleanup_stack_script),
     StepDef("cleanup", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
+            modes=TERMINAL,
             script_fn=_cleanup_scaffold_script,
             postcondition_fn=cleanup_scaffold_postcondition),
     StepDef("report_scaffold", "closing:stamped", "mechanical",
-            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
+            modes=TERMINAL,
             script_fn=_report_scaffold_script),
     StepDef("checkout_fork", "closing:stamped", "mechanical",
             skip_fn=_skip_checkout_fork,
             script_fn=_checkout_fork_script,
             postcondition_fn=checkout_fork_postcondition),
     StepDef("arc42_scan", "closing:stamped", "judgment",
-            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
+            modes=TERMINAL,
             action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"}),
     StepDef("session_rename", "closing:stamped", "judgment",
-            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
+            modes=TERMINAL,
             action_context_fn=lambda ctx: {"CONTEXT": "session_rename"}),
     StepDef("garden_feedback", "closing:stamped", "judgment",
-            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
+            modes=TERMINAL,
             action_context_fn=lambda ctx: {"CONTEXT": "garden_feedback"}),
     StepDef("notes", "closing:stamped", "judgment",
-            skip_fn=_or_skip(_skip_cycle_mode, _skip_sync_mode),
+            modes=TERMINAL,
             action_context_fn=lambda ctx: {"CONTEXT": "notes"}),
 
     # --- lifecycle: stamped -> idle/drained/active(sync) ---
     StepDef("sync_pass", "closing:stamped", "lifecycle",
-            skip_fn=_skip_not_sync_mode,
+            modes=SYNC_ONLY,
             from_state="closing:stamped", to_state="active", event="sync_pass"),
 
-    # --- continuation promotion (runs in both sync and end modes) ---
+    # --- continuation promotion (runs in all modes) ---
     StepDef("promote_plan_next", "closing:stamped", "mechanical",
             script_fn=_promote_plan_next_script,
             postcondition_fn=promote_plan_next_postcondition),
 
     StepDef("cleanup_pass", "closing:stamped", "lifecycle",
-            skip_fn=_or_skip(_skip_on_main, _skip_cycle_mode, _skip_sync_mode),
+            modes=BRANCH_SLOT,
             from_state="closing:stamped", to_state="idle", event="cleanup_pass"),
     StepDef("cleanup_main", "closing:stamped", "lifecycle",
-            skip_fn=_or_skip(_skip_not_main, _skip_cycle_mode, _skip_sync_mode),
+            modes=MAIN_ONLY,
             from_state="closing:stamped", to_state="drained", event="cleanup_main"),
 
     # --- post-close ---
@@ -1483,6 +1469,11 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     progress = _phase_skip(progress, phase_skip_state, workspace,
                            slot_repos=slot_repos or None)
 
+    p_mode = determine_pipeline_mode(
+        on_main=on_main, in_slot=in_slot, mode=mode,
+        workspace=workspace, covers=covers, issue_repo=issue_repo,
+    )
+
     ctx = OrchestratorContext(
         workspace=workspace, project=project, branch=branch,
         base_branch=base_branch, meta_state=meta_state,
@@ -1491,7 +1482,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         dry_run=dry_run, call_log=[],
         plan_path=plan_path, slot_path=slot_path,
         family_root=family_root, slot_num=slot_num,
-        mode=mode,
+        mode=mode, pipeline_mode=p_mode,
         expected_state=meta_state,
         slot_repos=slot_repos,
         repos=repos,

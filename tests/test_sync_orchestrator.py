@@ -11,45 +11,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 from work_end_orchestrator import (
     OrchestratorContext,
     STEPS,
-    _skip_sync_mode,
-    _skip_not_sync_mode,
+    SYNC_ONLY,
+    TERMINAL,
+    NOT_SYNC,
 )
-
-
-def _make_ctx(mode: str = "end", **overrides) -> OrchestratorContext:
-    defaults = dict(
-        workspace=Path("/tmp/ws"),
-        project=Path("/tmp/proj"),
-        branch="test-branch",
-        base_branch="main",
-        meta_state="closing:stamped",
-        on_main=False,
-        in_slot=False,
-        covers="1",
-        issue_repo="test/repo",
-        progress={},
-        mode=mode,
-    )
-    defaults.update(overrides)
-    return OrchestratorContext(**defaults)
-
-
-class TestSyncSkipPredicates:
-    def test_skip_sync_mode_true_when_sync(self):
-        ctx = _make_ctx(mode="sync")
-        assert _skip_sync_mode(ctx) is True
-
-    def test_skip_sync_mode_false_when_end(self):
-        ctx = _make_ctx(mode="end")
-        assert _skip_sync_mode(ctx) is False
-
-    def test_skip_not_sync_mode_true_when_end(self):
-        ctx = _make_ctx(mode="end")
-        assert _skip_not_sync_mode(ctx) is True
-
-    def test_skip_not_sync_mode_false_when_sync(self):
-        ctx = _make_ctx(mode="sync")
-        assert _skip_not_sync_mode(ctx) is False
+from shared_steps import PipelineMode
 
 
 class TestSyncPassStepExists:
@@ -64,19 +30,19 @@ class TestSyncPassStepExists:
         assert step.to_state == "active"
         assert step.event == "sync_pass"
 
-    def test_sync_pass_skipped_when_not_sync(self):
+    def test_sync_pass_only_in_sync_mode(self):
         step = next(s for s in STEPS if s.name == "sync_pass")
-        ctx = _make_ctx(mode="end")
-        assert step.skip_fn(ctx) is True
+        assert step.modes == SYNC_ONLY
 
-    def test_sync_pass_not_skipped_when_sync(self):
+    def test_sync_pass_excluded_from_end_mode(self):
         step = next(s for s in STEPS if s.name == "sync_pass")
-        ctx = _make_ctx(mode="sync")
-        assert step.skip_fn(ctx) is False
+        assert PipelineMode.BRANCH not in step.modes
+        assert PipelineMode.SLOT not in step.modes
+        assert PipelineMode.MAIN not in step.modes
 
 
-class TestSyncModeSkipsTerminalSteps:
-    """In sync mode, stamp/archive/checkout/cleanup steps are skipped."""
+class TestSyncModeExcludesTerminalSteps:
+    """In sync mode, terminal steps are excluded via modes (not skip_fn)."""
 
     TERMINAL_STEPS = [
         "stamp_pass", "archive_slot", "report_archive",
@@ -84,44 +50,38 @@ class TestSyncModeSkipsTerminalSteps:
         "cleanup_pass", "cleanup_main",
     ]
 
-    def test_terminal_steps_skipped_in_sync(self):
-        ctx = _make_ctx(mode="sync")
+    def test_terminal_steps_exclude_sync(self):
         for step_name in self.TERMINAL_STEPS:
             step = next((s for s in STEPS if s.name == step_name), None)
-            if step and step.skip_fn:
-                assert step.skip_fn(ctx) is True, (
-                    f"Step '{step_name}' should be skipped in sync mode"
+            if step:
+                assert PipelineMode.SYNC not in step.modes, (
+                    f"Step '{step_name}' should exclude SYNC mode"
                 )
 
 
-class TestSyncModeSkipsSessionEndSteps:
-    """In sync mode, session-end judgment steps are skipped."""
+class TestSyncModeExcludesSessionEndSteps:
+    """In sync mode, session-end judgment steps are excluded via modes."""
 
     SESSION_END_STEPS = [
         "arc42_scan", "session_rename", "garden_feedback", "notes",
         "report_scaffold",
     ]
 
-    def test_session_end_steps_skipped_in_sync(self):
-        ctx = _make_ctx(mode="sync")
+    def test_session_end_steps_exclude_sync(self):
         for step_name in self.SESSION_END_STEPS:
             step = next((s for s in STEPS if s.name == step_name), None)
-            if step and step.skip_fn:
-                assert step.skip_fn(ctx) is True, (
-                    f"Step '{step_name}' should be skipped in sync mode"
+            if step:
+                assert PipelineMode.SYNC not in step.modes, (
+                    f"Step '{step_name}' should exclude SYNC mode"
                 )
 
 
 class TestEndModeUnchanged:
     """End mode behavior must not change."""
 
-    def test_stamp_pass_not_skipped_in_end_mode_no_cycle(self):
-        ctx = _make_ctx(mode="end")
+    def test_stamp_pass_includes_terminal_modes(self):
         step = next(s for s in STEPS if s.name == "stamp_pass")
-        # _skip_cycle_mode checks .plan which doesn't exist here → returns False
-        assert step.skip_fn(ctx) is False
-
-    def test_sync_pass_skipped_in_end_mode(self):
-        ctx = _make_ctx(mode="end")
-        step = next(s for s in STEPS if s.name == "sync_pass")
-        assert step.skip_fn(ctx) is True
+        assert step.modes == TERMINAL
+        assert PipelineMode.BRANCH in step.modes
+        assert PipelineMode.SLOT in step.modes
+        assert PipelineMode.MAIN in step.modes
