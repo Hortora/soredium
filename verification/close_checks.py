@@ -179,6 +179,18 @@ def check_branch_stamp(
     return _verify_sha_on_ref(repo_path, sha, base)
 
 
+def _find_landing_sha_from_stamp(repo_path: Path, branch: str) -> str | None:
+    result = git(repo_path, "log", "-5", "--format=%s", branch)
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.strip().splitlines():
+        if line.startswith("chore: branch closed") and "landed as " in line:
+            m = re.search(r"landed as ([0-9a-f]+)", line)
+            if m:
+                return m.group(1)
+    return None
+
+
 def check_branch_merged(repo_path: Path, branch: str, base: str = "main") -> list[Finding]:
     result = git(repo_path, "log", "--oneline", f"{base}..{branch}")
     if result.returncode != 0:
@@ -205,6 +217,16 @@ def check_branch_merged(repo_path: Path, branch: str, base: str = "main") -> lis
     ancestor = git(repo_path, "merge-base", "--is-ancestor", f"{branch}~1", base)
     if ancestor.returncode == 0:
         return []
+    landing_sha = _find_landing_sha_from_stamp(repo_path, branch)
+    if landing_sha:
+        on_main = git(repo_path, "merge-base", "--is-ancestor", landing_sha, base)
+        if on_main.returncode == 0:
+            return []
+    pre_stamp_tree = git(repo_path, "rev-parse", f"{branch}~1^{{tree}}")
+    if pre_stamp_tree.returncode == 0:
+        found = _find_tree_on_ref(repo_path, pre_stamp_tree.stdout.strip(), base)
+        if found:
+            return []
     return [Finding("ERROR", "branch-not-merged",
                      f"branch content not on {base} (tree mismatch)")]
 

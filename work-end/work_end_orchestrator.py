@@ -19,7 +19,7 @@ Usage:
         [covers=<csv>] [issue_repo=<repo>] [in_slot=<yes|no>] \
         [slot_path=<path>] [on_main=<yes|no>] \
         [plan_path=<path>] [family_root=<path>] [slot_num=<N>] \
-        [sweep_selected=<csv>] [skip_step=<name>] \
+        [sweep_selected=<csv>] [skip_step=<name>] [skip_user_input_steps=yes] \
         [abort=yes] [conflict_resolved=yes] [dry_run=yes]
 """
 import json
@@ -1101,7 +1101,8 @@ STEPS: list[StepDef] = [
             action_context_fn=_forcing_function_context,
             verify_fn=_verify_forcing_function),
     StepDef("sweep_config", "closing:review", "judgment",
-            action_context_fn=lambda ctx: {"ITEMS": _sweep_defaults()}),
+            action_context_fn=lambda ctx: {"ITEMS": _sweep_defaults(),
+                                           "COMPLETE_WITH": "sweep_selected=<comma-separated-list>"}),
     StepDef("forage", "closing:review", "judgment",
             skip_fn=_is_sweep_deselected("forage")),
     StepDef("protocol", "closing:review", "judgment",
@@ -1392,6 +1393,10 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         last = read_close_progress(workspace).get("last_yielded", "")
         if last == step_name:
             update_close_progress(workspace, "last_yielded", "")
+
+    if args.get("skip_user_input_steps") == "yes":
+        for ui_step in CLOSE_USER_INPUT_STEPS:
+            update_close_progress(workspace, ui_step, "done")
 
     if args.get("skip_step"):
         err = validate_skip(workspace, args["skip_step"])
@@ -1860,6 +1865,8 @@ def _final_gate(ctx: OrchestratorContext) -> dict[str, str] | None:
         "VERIFIED": "no",
         "FAILURES": failure_str,
         "ATTEMPT": str(attempt),
+        "MAX_ATTEMPTS": str(MAX_FINAL_GATE_ATTEMPTS),
+        "FORCE_DONE_HINT": "force_done=verify",
         "REASON": "final-gate: landing must be verified before close completes",
     }
 
