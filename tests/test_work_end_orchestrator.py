@@ -3419,3 +3419,105 @@ class TestFinalGateRetryLimit:
         from close_progress import read_close_progress
         progress = read_close_progress(tmp_path)
         assert progress.get("_final_gate_attempt") == "1"
+
+
+class TestArchiveSlotPeerRepoCheck:
+    """archive_slot must check ALL repos in the slot before offering (#438)."""
+
+    def _init_repo(self, path, branch=None):
+        """Create a git repo; optionally check out a feature branch with a commit."""
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "T"], capture_output=True)
+        (path / "README.md").write_text("init\n")
+        subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-m", "init"], capture_output=True)
+        if branch:
+            subprocess.run(["git", "-C", str(path), "checkout", "-b", branch], capture_output=True)
+            (path / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+            subprocess.run(["git", "-C", str(path), "commit", "-m", "feature"], capture_output=True)
+
+    def _make_ctx(self, tmp_path, slot_path, repos=None, base_branch="main"):
+        from work_end_orchestrator import OrchestratorContext
+        from progress import Progress
+        return OrchestratorContext(
+            workspace=tmp_path,
+            project=slot_path / "neocortex",
+            branch="issue-500-some-work",
+            base_branch=base_branch,
+            meta_state="closing:stamped",
+            on_main=False,
+            in_slot=True,
+            covers="500",
+            issue_repo="Hortora/test",
+            progress=Progress(),
+            slot_path=slot_path,
+            repos=repos or [],
+        )
+
+    def test_skips_archive_when_peer_repo_on_feature_branch(self, tmp_path):
+        """Archive is skipped when another repo in the slot is on a feature branch."""
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        self._init_repo(slot_path / "neocortex")
+        self._init_repo(slot_path / "examples", branch="issue-115-drive-expression-gap")
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- neocortex (primary)\n- examples\n## State\nstate: active\n"
+        )
+
+        from work_end_orchestrator import _skip_multi_repo_partial_close
+        ctx = self._make_ctx(tmp_path, slot_path)
+        assert _skip_multi_repo_partial_close(ctx) is True
+
+    def test_allows_archive_when_all_repos_on_main(self, tmp_path):
+        """Archive is offered when all repos in the slot are on main."""
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        self._init_repo(slot_path / "neocortex")
+        self._init_repo(slot_path / "examples")
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- neocortex (primary)\n- examples\n## State\nstate: active\n"
+        )
+
+        from work_end_orchestrator import _skip_multi_repo_partial_close
+        ctx = self._make_ctx(tmp_path, slot_path)
+        assert _skip_multi_repo_partial_close(ctx) is False
+
+    def test_skips_archive_when_peer_has_plan(self, tmp_path):
+        """Archive is skipped when a peer repo's workspace has a .plan file."""
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        self._init_repo(slot_path / "neocortex")
+        self._init_repo(slot_path / "examples")
+        ws_path = slot_path / "examples-workspace"
+        ws_path.mkdir()
+        (ws_path / ".workspace").touch()
+        self._init_repo(ws_path)
+        (ws_path / ".plan").write_text("# Work Plan\n## State\nstate: active\n")
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- neocortex (primary)\n- examples\n## State\nstate: active\n"
+        )
+
+        from work_end_orchestrator import _skip_multi_repo_partial_close
+        ctx = self._make_ctx(tmp_path, slot_path)
+        assert _skip_multi_repo_partial_close(ctx) is True
+
+    def test_not_slot_returns_false(self, tmp_path):
+        """Non-slot context always returns False (no archive to skip)."""
+        from work_end_orchestrator import OrchestratorContext, _skip_multi_repo_partial_close
+        from progress import Progress
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:stamped",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+        )
+        assert _skip_multi_repo_partial_close(ctx) is False

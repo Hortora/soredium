@@ -263,14 +263,36 @@ def determine_pipeline_mode(
 # --- Skip predicates (state-based only; mode predicates replaced by StepDef.modes) ---
 
 def _skip_multi_repo_partial_close(ctx: OrchestratorContext) -> bool:
-    """Skip archival when a multi-repo slot has repos with unlanded work."""
-    if not ctx.in_slot or len(ctx.repos) <= 1:
+    """Skip archival when any repo in the slot has active work.
+
+    Checks two things:
+    1. Repos classified for the closing branch that haven't landed yet
+    2. Any repo in the slot directory on a non-base branch (active work
+       on a different branch than the one being closed)
+    3. Any workspace directory with a .plan file (queued work)
+    """
+    if not ctx.in_slot:
         return False
-    from repo_state import RepoDisposition
-    for r in ctx.repos:
-        if r.disposition == RepoDisposition.HAS_WORK:
-            if ctx.progress.get(f"land:{r.name}") not in ("done", "skipped", "skipped_error"):
-                return True
+    if len(ctx.repos) > 1:
+        from repo_state import RepoDisposition
+        for r in ctx.repos:
+            if r.disposition == RepoDisposition.HAS_WORK:
+                if ctx.progress.get(f"land:{r.name}") not in ("done", "skipped", "skipped_error"):
+                    return True
+    if ctx.slot_path and ctx.slot_path.is_dir():
+        from git_util import git
+        for entry in sorted(ctx.slot_path.iterdir()):
+            if not entry.is_dir() or not (entry / ".git").exists():
+                continue
+            if (entry / ".workspace").exists():
+                if (entry / ".plan").exists():
+                    return True
+                continue
+            result = git(entry, "rev-parse", "--abbrev-ref", "HEAD")
+            if result.returncode == 0:
+                current_branch = result.stdout.strip()
+                if current_branch and current_branch != ctx.base_branch:
+                    return True
     return False
 
 
