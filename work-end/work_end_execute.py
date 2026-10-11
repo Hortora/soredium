@@ -198,6 +198,9 @@ def cmd_promote(opts: dict[str, str]) -> int:
     progress = read_progress(progress_path)
 
     if progress.get("default") == "promoted":
+        stamp = Path(workspace) / ".artifacts-promoted"
+        if not stamp.exists():
+            stamp.touch()
         print("PROMOTED=yes")
         print("SKIPPED=already promoted")
         return 0
