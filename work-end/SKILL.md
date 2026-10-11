@@ -85,6 +85,7 @@ python3 work-end/work_end_orchestrator.py \
     [on_main=$ON_MAIN] [plan_path=$PLAN_PATH] \
     [family_root=$FAMILY_ROOT] [slot_num=$SLOT_NUM] \
     [sweep_selected=<CSV>] [skip_step=<NAME>] \
+    [skip_user_input_steps=yes] \
     [step_done=<NAME> produced=<N>] \
     [abort=yes] [conflict_resolved=yes]
 ```
@@ -117,6 +118,11 @@ Read the ACTION, dispatch:
 | `user_input` | Read `handlers/user_input.md`, dispatch by CONTEXT |
 | `error` | Report to user. STOP. |
 | `complete` | Step 4 |
+
+**Batch skip for post-close user_input steps:** When the sweep was
+skipped entirely (`sweep_selected=`), pass `skip_user_input_steps=yes`
+on the next invocation. This marks `arc42_scan`, `session_rename`,
+`garden_feedback`, `notes` as done in one call instead of 4 round-trips.
 
 ## Step 4 — Summary and Audit
 
