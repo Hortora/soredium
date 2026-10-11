@@ -202,12 +202,15 @@ def check_branch_merged(repo_path: Path, branch: str, base: str = "main") -> lis
     if unmerged:
         return [Finding("ERROR", "branch-not-merged",
                          f"UNMERGED: {len(unmerged)} commits not on {base}")]
-    branch_tree = git(repo_path, "rev-parse", f"{branch}~1^{{tree}}")
     main_tree = git(repo_path, "rev-parse", f"{base}^{{tree}}")
-    if branch_tree.returncode != 0 or main_tree.returncode != 0:
+    if main_tree.returncode != 0:
         return [Finding("ERROR", "branch-not-merged",
                          "cannot resolve tree SHAs for content verification")]
-    if branch_tree.stdout.strip() == main_tree.stdout.strip():
+    tip_tree = git(repo_path, "rev-parse", f"{branch}^{{tree}}")
+    if tip_tree.returncode == 0 and tip_tree.stdout.strip() == main_tree.stdout.strip():
+        return []
+    pre_stamp_tree = git(repo_path, "rev-parse", f"{branch}~1^{{tree}}")
+    if pre_stamp_tree.returncode == 0 and pre_stamp_tree.stdout.strip() == main_tree.stdout.strip():
         return []
     diff_result = git(repo_path, "diff", "--name-only", f"{base}..{branch}")
     if diff_result.returncode == 0 and diff_result.stdout.strip():
@@ -221,11 +224,6 @@ def check_branch_merged(repo_path: Path, branch: str, base: str = "main") -> lis
     if landing_sha:
         on_main = git(repo_path, "merge-base", "--is-ancestor", landing_sha, base)
         if on_main.returncode == 0:
-            return []
-    pre_stamp_tree = git(repo_path, "rev-parse", f"{branch}~1^{{tree}}")
-    if pre_stamp_tree.returncode == 0:
-        found = _find_tree_on_ref(repo_path, pre_stamp_tree.stdout.strip(), base)
-        if found:
             return []
     return [Finding("ERROR", "branch-not-merged",
                      f"branch content not on {base} (tree mismatch)")]

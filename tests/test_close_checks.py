@@ -274,6 +274,26 @@ class TestCheckBranchMerged:
         findings = check_branch_merged(repo, "feature")
         assert findings == []
 
+    def test_squashed_branch_ff_merged(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _git(repo, "checkout", "-b", "feature")
+        (repo / "a.txt").write_text("a\n")
+        _git(repo, "add", "a.txt")
+        _git(repo, "commit", "-m", "feat: first")
+        (repo / "b.txt").write_text("b\n")
+        _git(repo, "add", "b.txt")
+        _git(repo, "commit", "-m", "feat: second")
+        _git(repo, "reset", "--soft", "HEAD~2")
+        _git(repo, "commit", "-m", "feat: squashed")
+        sha = _git(repo, "rev-parse", "HEAD")
+        _git(repo, "checkout", "main")
+        _git(repo, "merge", "feature", "--ff-only")
+        _git(repo, "checkout", "feature")
+        _git(repo, "commit", "--allow-empty",
+             "-m", f"chore: branch closed — landed as {sha[:7]} on main")
+        findings = check_branch_merged(repo, "feature")
+        assert findings == []
+
     def test_branch_not_found(self, tmp_path):
         repo = _init_repo(tmp_path / "repo")
         findings = check_branch_merged(repo, "nonexistent")
