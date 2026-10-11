@@ -18,9 +18,12 @@ from git_util import git as _canonical_git  # noqa: E402
 
 
 class Finding(NamedTuple):
-    severity: str  # ERROR, WARN, INFO
+    severity: str  # ERROR, WARN, INFO, N/A
     category: str
     message: str
+
+
+NOT_APPLICABLE = "N/A"
 
 
 def git(repo_path, *args: str) -> subprocess.CompletedProcess:
