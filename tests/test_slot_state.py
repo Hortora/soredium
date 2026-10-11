@@ -17,15 +17,15 @@ from slot_state import (
     current_state,
     transition,
 )
-from slot_metadata import write_slot_md, parse_slot_md, set_slot_state
+from slot_io import write_slot, parse_slot, set_slot_state
 
 
 def _make_slot(tmp_path: Path, slot_num: int = 1,
                state: str = "active") -> Path:
     slot_dir = tmp_path / "slots" / str(slot_num)
     slot_dir.mkdir(parents=True)
-    write_slot_md(
-        slot_dir, slot_num, ["engine"],
+    write_slot(
+        slot_dir, slot_number=slot_num, repos=["engine"],
         branch="issue-42-test", issue="42",
         issue_repo="org/repo", covers="42",
         context="test slot",
@@ -157,11 +157,10 @@ class TestTransitionTable:
 
 class TestSlotFileIntegration:
 
-    def test_write_slot_md_creates_state_field(self, tmp_path):
+    def test_write_slot_creates_state_field(self, tmp_path):
         slot_dir = _make_slot(tmp_path)
-        info = parse_slot_md(slot_dir)
-        assert info["state"] == "active"
-        assert info["status"] == "active"  # legacy alias
+        info = parse_slot(slot_dir)
+        assert info.state == "active"
 
     def test_transition_updates_slot_file(self, tmp_path):
         slot_dir = _make_slot(tmp_path)
@@ -172,11 +171,11 @@ class TestSlotFileIntegration:
     def test_transition_preserves_other_fields(self, tmp_path):
         slot_dir = _make_slot(tmp_path)
         transition(slot_dir, "ready")
-        info = parse_slot_md(slot_dir)
-        assert info["issue"] == "42"
-        assert info["issue_repo"] == "org/repo"
-        assert info["repos"] == ["engine"]
-        assert info["state"] == "ready"
+        info = parse_slot(slot_dir)
+        assert info.issue == "42"
+        assert info.issue_repo == "org/repo"
+        assert info.repos == ["engine"]
+        assert info.state == "ready"
 
 
 class TestAuditState:
@@ -200,8 +199,8 @@ class TestAuditState:
         family_root = tmp_path
         attic_dir = tmp_path / "slots" / "attic" / "1"
         attic_dir.mkdir(parents=True)
-        write_slot_md(
-            attic_dir, 1, ["engine"],
+        write_slot(
+            attic_dir, slot_number=1, repos=["engine"],
             branch="test", issue="1",
             issue_repo="org/repo", covers="1",
             context="test",

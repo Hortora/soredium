@@ -192,6 +192,12 @@ After handling a judgment step, call work.py again with the same args
 plus `step_done=<step_name>` and any values the handler produced.
 Repeat until `ACTION=complete`.
 
+**Cross-repo re-invocation:** When a handler produces `SWITCH_REPO=<name>`,
+the active project has changed. Before calling work.py again:
+1. Re-run `python3 project/ctx.py` to get updated KEY=VALUE context
+2. Rebuild the work.py arguments from the new context
+3. Continue the pipeline with the updated project/workspace paths
+
 ---
 
 ## Close / Sync (work-end orchestrator)

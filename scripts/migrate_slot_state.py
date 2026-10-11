@@ -21,13 +21,17 @@ _slot_mgr = Path(__file__).resolve().parent.parent / "work-slot"
 if _slot_mgr.exists():
     sys.path.insert(0, str(_slot_mgr))
 
+_project = Path(__file__).resolve().parent.parent / "project"
+if _project.exists():
+    sys.path.insert(0, str(_project))
+
 try:
     import worklog as _wl
 except ImportError:
     _wl = None
 
 try:
-    from slot_metadata import set_slot_state
+    from slot_io import set_slot_state
 except ImportError:
     set_slot_state = None
 

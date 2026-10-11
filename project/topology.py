@@ -232,6 +232,30 @@ def resolve(cwd: str | None = None) -> Topology:
     slot_dir, primary_repo = _detect_slot(project)
     if slot_dir:
         layout: Literal["single", "dual", "slot"] = "slot"
+        from slot_io import read_active_repo, parse_slot
+        active_repo = read_active_repo(slot_dir)
+        if active_repo:
+            slot_info = parse_slot(slot_dir)
+            if slot_info and active_repo in slot_info.repos:
+                active_path = slot_dir / active_repo
+                if active_path.is_dir():
+                    project = active_path.resolve()
+                    wksp_sym = active_path / "wksp"
+                    if wksp_sym.is_symlink() and wksp_sym.exists():
+                        workspace = wksp_sym.resolve()
+                    else:
+                        workspace = project
+                    proj_git_root_str = _git_root(project)
+                    if proj_git_root_str:
+                        git_root = Path(proj_git_root_str).resolve()
+                    if workspace != project:
+                        ws_root_str = _git_root(workspace)
+                        workspace_root = Path(ws_root_str).resolve() if ws_root_str else workspace
+                    else:
+                        workspace_root = workspace
+            else:
+                import sys as _sys
+                print(f"WARN: .slot-active names unknown repo '{active_repo}'", file=_sys.stderr)
     elif workspace != project:
         layout = "dual"
     else:

@@ -142,7 +142,7 @@ class OrchestratorContext:
     in_slot: bool
     covers: str
     issue_repo: str
-    progress: dict[str, str]
+    progress: Progress
     dry_run: bool = False
     call_log: list = field(default_factory=list)
     plan_path: Path | None = None
@@ -1457,13 +1457,14 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         rec("stale-progress-reset", meta_state=meta_state,
             progress_keys=",".join(progress.keys()))
         delete_close_progress(workspace)
-        progress = {}
+        progress = Progress()
     elif progress:
-        progress, corrections = _reconcile(workspace, project, progress, meta_state)
+        reconciled, corrections = _reconcile(workspace, project, progress, meta_state)
         if corrections:
             rec("reconciliation-correction", meta_state=meta_state,
                 corrected_steps=",".join(corrections))
-            write_close_progress(workspace, progress)
+            write_close_progress(workspace, reconciled)
+            progress = Progress.from_dict(reconciled)
 
     _slot_info = _parse_slot(slot_path) if in_slot and slot_path else None
     slot_repos = _slot_info.repos if _slot_info else []

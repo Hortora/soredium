@@ -15,7 +15,7 @@ scripts_dir = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(scripts_dir))
 
 import slot_query
-import slot_metadata
+import slot_io
 import slot_core
 from slot_test_helpers import init_repo, init_repo_with_workspace
 
@@ -177,9 +177,9 @@ class TestListSlotsIsolation:
         slot_dir = tmp_path / "slots" / "1"
         slot_dir.mkdir(parents=True)
         init_repo(slot_dir / "engine")
-        slot_metadata.write_slot_md(
-            slot_dir, 1, ["engine"], "test-branch", "42",
-            "Org/repo", "42", "test",
+        slot_io.write_slot(
+            slot_dir, slot_number=1, repos=["engine"], branch="test-branch",
+            issue="42", issue_repo="Org/repo", covers="42", context="test",
             isolation_type="isx", isx_instance="test-inst",
             isx_template="tpl-java",
         )
@@ -190,9 +190,9 @@ class TestListSlotsIsolation:
         slot_dir = tmp_path / "slots" / "1"
         slot_dir.mkdir(parents=True)
         init_repo(slot_dir / "engine")
-        slot_metadata.write_slot_md(
-            slot_dir, 1, ["engine"], "test-branch", "42",
-            "Org/repo", "42", "test",
+        slot_io.write_slot(
+            slot_dir, slot_number=1, repos=["engine"], branch="test-branch",
+            issue="42", issue_repo="Org/repo", covers="42", context="test",
         )
         slots = slot_query.list_slots(tmp_path)
         assert slots[0]["isolation"] == "none"

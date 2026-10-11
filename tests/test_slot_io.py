@@ -374,3 +374,45 @@ class TestWriteLanded:
         )
         info = parse_landed(tmp_path)
         assert info.failed == "platform"
+
+
+class TestActiveRepo:
+    def test_read_returns_none_when_missing(self, tmp_path):
+        from slot_io import read_active_repo
+        assert read_active_repo(tmp_path) is None
+
+    def test_read_returns_repo_name(self, tmp_path):
+        (tmp_path / ".slot-active").write_text("neocortex\n")
+        from slot_io import read_active_repo
+        assert read_active_repo(tmp_path) == "neocortex"
+
+    def test_read_strips_whitespace(self, tmp_path):
+        (tmp_path / ".slot-active").write_text("  neocortex  \n")
+        from slot_io import read_active_repo
+        assert read_active_repo(tmp_path) == "neocortex"
+
+    def test_read_returns_none_for_empty_file(self, tmp_path):
+        (tmp_path / ".slot-active").write_text("")
+        from slot_io import read_active_repo
+        assert read_active_repo(tmp_path) is None
+
+    def test_write_creates_file(self, tmp_path):
+        from slot_io import write_active_repo, read_active_repo
+        write_active_repo(tmp_path, "neocortex")
+        assert read_active_repo(tmp_path) == "neocortex"
+
+    def test_write_overwrites_existing(self, tmp_path):
+        (tmp_path / ".slot-active").write_text("old-repo\n")
+        from slot_io import write_active_repo, read_active_repo
+        write_active_repo(tmp_path, "new-repo")
+        assert read_active_repo(tmp_path) == "new-repo"
+
+    def test_clear_removes_file(self, tmp_path):
+        (tmp_path / ".slot-active").write_text("neocortex\n")
+        from slot_io import clear_active_repo, read_active_repo
+        clear_active_repo(tmp_path)
+        assert read_active_repo(tmp_path) is None
+
+    def test_clear_noop_when_missing(self, tmp_path):
+        from slot_io import clear_active_repo
+        clear_active_repo(tmp_path)

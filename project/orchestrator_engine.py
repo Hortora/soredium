@@ -228,6 +228,7 @@ def run_loop(
         steps = [s for s in steps if pipeline_mode in s.modes]
 
     active_step_names = {s.name for s in steps}
+    step_by_name = {s.name: s for s in steps}
 
     for step in steps:
         if step.skip_fn and step.skip_fn(ctx):
@@ -237,7 +238,10 @@ def run_loop(
             unmet = [r for r in step.requires
                      if r in active_step_names
                      and not ctx.done(r)
-                     and not _per_repo_done(ctx, r)]
+                     and not _per_repo_done(ctx, r)
+                     and not (r in step_by_name
+                              and step_by_name[r].skip_fn
+                              and step_by_name[r].skip_fn(ctx))]
             if unmet:
                 return {
                     "ACTION": "error",

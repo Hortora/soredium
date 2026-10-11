@@ -95,6 +95,60 @@ class TestTopologyResolve:
         assert topo.slot_dir == slot_dir
         assert topo.primary_repo == "engine"
 
+    def test_slot_active_overrides_project(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "110"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 110\n\n## Repos\n- engine (primary)\n- neocortex\n"
+        )
+        engine = init_repo(slot_dir / "engine")
+        neocortex = init_repo(slot_dir / "neocortex")
+        neo_wksp = init_repo(slot_dir / "work-neocortex")
+        (neocortex / "wksp").symlink_to("../work-neocortex")
+        (slot_dir / ".slot-active").write_text("neocortex\n")
+
+        topo = _resolve(str(engine))
+        assert topo.layout == "slot"
+        assert topo.project == neocortex.resolve()
+        assert topo.workspace == neo_wksp.resolve()
+
+    def test_no_slot_active_uses_cwd_repo(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "110"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 110\n\n## Repos\n- engine (primary)\n- neocortex\n"
+        )
+        engine = init_repo(slot_dir / "engine")
+        init_repo(slot_dir / "neocortex")
+        topo = _resolve(str(engine))
+        assert topo.layout == "slot"
+        assert topo.project == engine.resolve()
+
+    def test_slot_active_unknown_repo_falls_back(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "110"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 110\n\n## Repos\n- engine (primary)\n"
+        )
+        engine = init_repo(slot_dir / "engine")
+        (slot_dir / ".slot-active").write_text("nonexistent\n")
+        topo = _resolve(str(engine))
+        assert topo.layout == "slot"
+        assert topo.project == engine.resolve()
+
+    def test_slot_active_no_wksp_symlink(self, tmp_path):
+        slot_dir = tmp_path / "slots" / "110"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 110\n\n## Repos\n- engine (primary)\n- neocortex\n"
+        )
+        engine = init_repo(slot_dir / "engine")
+        neocortex = init_repo(slot_dir / "neocortex")
+        (slot_dir / ".slot-active").write_text("neocortex\n")
+        topo = _resolve(str(engine))
+        assert topo.project == neocortex.resolve()
+        assert topo.workspace == neocortex.resolve()
+
     def test_no_slot_without_dot_slot_file(self, tmp_path):
         """Substring /slots/ in path is not enough — .slot file required."""
         slot_dir = tmp_path / "slots" / "110"

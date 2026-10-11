@@ -22,7 +22,7 @@ if str(_project_dir) not in sys.path:
 
 from orchestrator_engine import run_loop, run_script
 from shared_steps import StepDef, OrchestratorContextBase
-from work_progress import read_progress, update_progress, delete_progress
+from work_progress import update_progress, delete_progress
 from conflict_resolution import make_rebase_error_handler
 
 VALID_COMMANDS = {"start", "continue", "pause", "resume", "next", "find"}
@@ -416,6 +416,8 @@ def main() -> int:
         print(f"ERROR=pipeline_not_implemented:{command}")
         return 1
 
+    from progress import Progress
+
     if args.get("step_done"):
         from orchestrator_engine import apply_step_done
         steps = PIPELINES[command]
@@ -427,7 +429,7 @@ def main() -> int:
             for k, v in err.items():
                 print(f"{k}={v}")
             return 1
-        ctx.progress = read_progress(ctx.workspace)
+        ctx.progress = Progress.load(ctx.workspace)
 
     if args.get("skip_step"):
         from orchestrator_engine import validate_skip
@@ -436,7 +438,7 @@ def main() -> int:
             for k, v in err.items():
                 print(f"{k}={v}")
             return 1
-        ctx.progress = read_progress(ctx.workspace)
+        ctx.progress = Progress.load(ctx.workspace)
 
     if ctx.in_slot and ctx.slot_path and command in ("start", "continue"):
         _write_slot_occupant(ctx.slot_path)

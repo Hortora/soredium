@@ -20,6 +20,7 @@ import slot_manager
 import slot_core
 import slot_workspace
 import slot_metadata
+import slot_io
 import slot_git
 import slot_claude
 import slot_isx
@@ -382,10 +383,10 @@ class TestCreateSlotIsx:
                 context="test", isx=True, isx_template="tpl-java",
             )
         slot_dir = family / "slots" / str(result["slot_number"])
-        info = slot_metadata.parse_slot_md(slot_dir)
-        assert info["isolation_type"] == "isx"
-        assert info["isx_template"] == "tpl-java"
-        assert info["isx_instance"] == "issue-42-fix"
+        info = slot_io.parse_slot(slot_dir)
+        assert info.isolation_type == "isx"
+        assert info.isx_template == "tpl-java"
+        assert info.isx_instance == "issue-42-fix"
 
     @patch("slot_lifecycle.run_cmd")
     def test_create_non_isx_unchanged(self, mock_cmd, tmp_path):
@@ -400,8 +401,8 @@ class TestCreateSlotIsx:
             context="test",
         )
         slot_dir = family / "slots" / str(result["slot_number"])
-        info = slot_metadata.parse_slot_md(slot_dir)
-        assert info["isolation_type"] == ""
+        info = slot_io.parse_slot(slot_dir)
+        assert info.isolation_type == ""
 
     @patch("slot_lifecycle.run_cmd")
     def test_create_isx_slot_isx_branch_fails(self, mock_cmd, tmp_path, capsys):
@@ -499,9 +500,9 @@ class TestAddRepoIsx:
         slot_dir.mkdir(parents=True)
         init_repo(slot_dir / "engine")
         init_repo(family / "iot")
-        slot_metadata.write_slot_md(
-            slot_dir, 1, ["engine"], "test-branch", "42",
-            "Org/repo", "42", "test",
+        slot_io.write_slot(
+            slot_dir, slot_number=1, repos=["engine"], branch="test-branch",
+            issue="42", issue_repo="Org/repo", covers="42", context="test",
             isolation_type="isx", isx_instance="test-inst",
             isx_template="tpl-java",
         )
@@ -519,9 +520,9 @@ class TestAddRepoIsx:
         slot_dir.mkdir(parents=True)
         init_repo(slot_dir / "engine")
         init_repo(family / "iot")
-        slot_metadata.write_slot_md(
-            slot_dir, 1, ["engine"], "test-branch", "42",
-            "Org/repo", "42", "test",
+        slot_io.write_slot(
+            slot_dir, slot_number=1, repos=["engine"], branch="test-branch",
+            issue="42", issue_repo="Org/repo", covers="42", context="test",
         )
         mock_cmd.return_value = (0, "", "")
         slot_lifecycle.add_repo(family, 1, "iot", "test-branch")
@@ -537,9 +538,9 @@ class TestRemoveSlotIsx:
         slot_dir = family / "slots" / "1"
         slot_dir.mkdir(parents=True)
         init_repo(slot_dir / "engine")
-        slot_metadata.write_slot_md(
-            slot_dir, 1, ["engine"], "test-branch", "42",
-            "Org/repo", "42", "test",
+        slot_io.write_slot(
+            slot_dir, slot_number=1, repos=["engine"], branch="test-branch",
+            issue="42", issue_repo="Org/repo", covers="42", context="test",
             isolation_type="isx", isx_instance="test-inst",
             isx_template="tpl-java",
         )
@@ -1873,9 +1874,9 @@ class TestAddRepoWorkspaceRemotes:
         ws_iot = init_repo(tmp_path / "public" / "casehub" / "iot")
         (repo_b / "wksp").symlink_to(ws_iot)
 
-        slot_metadata.write_slot_md(
-            slot_dir, 1, ["engine"], "test-branch", "42",
-            "Org/repo", "42", "test",
+        slot_io.write_slot(
+            slot_dir, slot_number=1, repos=["engine"], branch="test-branch",
+            issue="42", issue_repo="Org/repo", covers="42", context="test",
         )
 
         mock_cmd.return_value = (0, "", "")

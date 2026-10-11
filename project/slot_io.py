@@ -184,6 +184,24 @@ def parse_landed(slot_dir: Path) -> LandedInfo | None:
     )
 
 
+def read_active_repo(slot_dir: Path) -> str | None:
+    active_file = slot_dir / ".slot-active"
+    if not active_file.exists():
+        return None
+    name = active_file.read_text().strip()
+    return name if name else None
+
+
+def write_active_repo(slot_dir: Path, repo_name: str) -> None:
+    (slot_dir / ".slot-active").write_text(repo_name + "\n")
+
+
+def clear_active_repo(slot_dir: Path) -> None:
+    active_file = slot_dir / ".slot-active"
+    if active_file.exists():
+        active_file.unlink()
+
+
 def discover_repos(slot_dir: Path) -> list[str]:
     repos = []
     for entry in sorted(slot_dir.iterdir()):
