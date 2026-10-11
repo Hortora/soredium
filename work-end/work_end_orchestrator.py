@@ -1483,12 +1483,14 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         slot_path=slot_path if in_slot else None,
     )
 
-    phase_skip_state = meta_state
     if plan_path and plan_path.exists():
         from close_progress import _read_plan_state, LIFECYCLE_PHASE_ORDER
         actual = _read_plan_state(plan_path)
         if actual and actual in LIFECYCLE_PHASE_ORDER:
-            phase_skip_state = actual
+            if actual != meta_state:
+                rec("meta-state-corrected", passed=meta_state, disk=actual)
+                meta_state = actual
+    phase_skip_state = meta_state
     progress = _phase_skip(progress, phase_skip_state, workspace,
                            slot_repos=slot_repos or None)
 
