@@ -104,3 +104,20 @@ class TestVerifyBranch:
         captured = capsys.readouterr()
         assert "VERIFIED=no" in captured.out
         assert result is False
+
+    def test_structured_failure_output(self, tmp_path, capsys):
+        """Verify outputs FAILURE_N= lines for each failing check (#439)."""
+        project = _init_repo_with_remote(tmp_path / "proj-parent", "project")
+        workspace = _init_repo_with_remote(tmp_path / "ws-parent", "workspace")
+        _git(project, "checkout", "-b", "feature")
+        (project / "work.txt").write_text("work\n")
+        _git(project, "add", "work.txt")
+        _git(project, "commit", "-m", "feat: unmerged")
+        _git(workspace, "checkout", "-b", "feature")
+        _git(workspace, "commit", "--allow-empty", "-m", "feat: ws")
+        verify(project, "feature", workspace)
+        captured = capsys.readouterr()
+        assert "FAILURE_1=" in captured.out
+        failure_lines = [l for l in captured.out.splitlines() if l.startswith("FAILURE_")]
+        assert len(failure_lines) >= 1
+        assert "project_merged" in failure_lines[0]

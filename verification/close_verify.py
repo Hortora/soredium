@@ -135,6 +135,12 @@ def verify(
         print("VERIFIED=yes")
     else:
         print("VERIFIED=no")
+        fail_idx = 0
+        for name, findings in all_checks:
+            for f in findings:
+                if f.severity == "ERROR":
+                    fail_idx += 1
+                    print(f"FAILURE_{fail_idx}={name}: {f.message}")
     if blocking_fail:
         print("BLOCKING_FAIL=yes")
         print(f"BLOCKING_DETAIL={'; '.join(blocking_details)}")
