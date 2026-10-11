@@ -1800,6 +1800,15 @@ def _close_per_repo_judgment(step: StepDef, ctx: OrchestratorContext) -> dict[st
     """Per-repo fan-out for slot-mode judgment steps."""
     if step.name not in PER_REPO_SWEEP_STEPS or not ctx.in_slot or not ctx.slot_repos:
         return None
+    if ctx.repos:
+        from repo_state import RepoDisposition
+        changed_repos = {r.name for r in ctx.repos
+                         if r.disposition == RepoDisposition.HAS_WORK}
+        for repo_name in ctx.slot_repos:
+            step_key = f"{step.name}:{repo_name}"
+            if repo_name not in changed_repos:
+                if ctx.progress.get(step_key) not in ("done", "skipped", "skipped_error"):
+                    update_close_progress(ctx.workspace, step_key, "done")
     if ctx.per_repo_done(step.name):
         return {}
     repo = ctx.next_repo_for(step.name)

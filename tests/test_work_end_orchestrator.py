@@ -3521,3 +3521,114 @@ class TestArchiveSlotPeerRepoCheck:
             progress=Progress(),
         )
         assert _skip_multi_repo_partial_close(ctx) is False
+
+
+class TestSweepSkipsUnchangedRepos:
+    """Sweep steps only run for repos with changes on the branch (#437)."""
+
+    def _init_repo(self, path, branch=None):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "T"], capture_output=True)
+        (path / "README.md").write_text("init\n")
+        subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-m", "init"], capture_output=True)
+        if branch:
+            subprocess.run(["git", "-C", str(path), "checkout", "-b", branch], capture_output=True)
+            (path / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+            subprocess.run(["git", "-C", str(path), "commit", "-m", "feature"], capture_output=True)
+
+    def test_sweep_auto_marks_unchanged_repos_done(self, tmp_path):
+        """Repos with no changes get auto-marked done for sweep steps."""
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        branch = "issue-500-test"
+        self._init_repo(slot_path / "neocortex", branch=branch)
+        self._init_repo(slot_path / "examples")
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- neocortex (primary)\n- examples\n## State\nstate: active\n"
+        )
+
+        from repo_state import classify_repos
+        repos = classify_repos(
+            project=slot_path / "neocortex",
+            workspace=tmp_path,
+            branch=branch,
+            base_branch="main",
+            slot_path=slot_path,
+        )
+
+        from work_end_orchestrator import OrchestratorContext, _close_per_repo_judgment
+        from shared_steps import StepDef, PipelineMode
+        from progress import Progress
+        progress = Progress()
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=slot_path / "neocortex",
+            branch=branch,
+            base_branch="main",
+            meta_state="closing:review",
+            on_main=False,
+            in_slot=True,
+            covers="500",
+            issue_repo="Hortora/test",
+            progress=progress,
+            slot_path=slot_path,
+            slot_repos=["neocortex", "examples"],
+            repos=repos,
+        )
+
+        step = StepDef("protocol", "closing:review", "judgment",
+                        modes=frozenset({PipelineMode.SLOT}))
+        result = _close_per_repo_judgment(step, ctx)
+
+        from close_progress import read_close_progress
+        cp = read_close_progress(tmp_path)
+        assert cp.get("protocol:examples") == "done", "Unchanged repo should be auto-marked done"
+        assert cp.get("protocol:neocortex") != "done", "Changed repo should NOT be auto-marked"
+
+    def test_sweep_runs_for_repo_with_changes(self, tmp_path):
+        """Repos with changes still get their sweep steps yielded."""
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        branch = "issue-500-test"
+        self._init_repo(slot_path / "neocortex", branch=branch)
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- neocortex (primary)\n## State\nstate: active\n"
+        )
+
+        from repo_state import classify_repos
+        repos = classify_repos(
+            project=slot_path / "neocortex",
+            workspace=tmp_path,
+            branch=branch,
+            base_branch="main",
+            slot_path=slot_path,
+        )
+
+        from work_end_orchestrator import OrchestratorContext, _close_per_repo_judgment
+        from shared_steps import StepDef, PipelineMode
+        from progress import Progress
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=slot_path / "neocortex",
+            branch=branch,
+            base_branch="main",
+            meta_state="closing:review",
+            on_main=False,
+            in_slot=True,
+            covers="500",
+            issue_repo="Hortora/test",
+            progress=Progress(),
+            slot_path=slot_path,
+            slot_repos=["neocortex"],
+            repos=repos,
+        )
+
+        step = StepDef("protocol", "closing:review", "judgment",
+                        modes=frozenset({PipelineMode.SLOT}))
+        result = _close_per_repo_judgment(step, ctx)
+        assert result is not None
+        assert result.get("ACTION") == "protocol:neocortex"
