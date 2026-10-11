@@ -13,6 +13,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable
 
+from progress import Progress
+
 
 class PipelineMode(Enum):
     BRANCH = "branch"
@@ -40,6 +42,7 @@ class StepDef:
     event: str | None = None
     modes: frozenset[PipelineMode] = field(default_factory=lambda: ALL_MODES)
     requires: tuple[str, ...] = ()
+    staleness_relevant: bool = True
 
 
 @dataclass
@@ -52,7 +55,7 @@ class OrchestratorContextBase:
     in_slot: bool
     covers: str
     issue_repo: str
-    progress: dict[str, str]
+    progress: Progress = field(default_factory=Progress)
     dry_run: bool = False
     call_log: list = field(default_factory=list)
     plan_path: Path | None = None
@@ -64,7 +67,7 @@ class OrchestratorContextBase:
     repos: list = field(default_factory=list)
 
     def done(self, step: str) -> bool:
-        return self.progress.get(step) in ("done", "skipped", "skipped_error")
+        return self.progress.is_done(step)
 
 
 SWEEP_STEPS = ["forage", "protocol", "update_claude_md", "impl_doc_sync", "adr", "write_content"]
@@ -111,10 +114,9 @@ def get_sweep_selected(progress: dict[str, str], key: str = "sweep_selected") ->
 
 
 def yield_judgment(step: str, workspace: Path,
-                   progress: dict[str, str],
+                   progress,
                    context: dict[str, str]) -> dict[str, str]:
-    attempt_key = f"{step}_attempt"
-    attempt = int(progress.get(attempt_key, "0")) + 1
+    attempt = progress.get_attempt(step) + 1
 
     if attempt > MAX_JUDGMENT_RETRIES:
         return {
@@ -126,15 +128,14 @@ def yield_judgment(step: str, workspace: Path,
         }
 
     from work_progress import update_progress as update_close_progress
-    update_close_progress(workspace, attempt_key, str(attempt))
+    update_close_progress(workspace, f"{step}_attempt", str(attempt))
     result = {"ACTION": step}
     result.update(context)
     return result
 
 
 def yield_user_input(step_name: str, ctx, context: dict[str, str]) -> dict[str, str]:
-    attempt_key = f"{step_name}_attempt"
-    attempt = int(ctx.progress.get(attempt_key, "0")) + 1
+    attempt = ctx.progress.get_attempt(step_name) + 1
     if attempt > MAX_JUDGMENT_RETRIES:
         return {
             "ACTION": "user_input",
@@ -144,7 +145,7 @@ def yield_user_input(step_name: str, ctx, context: dict[str, str]) -> dict[str, 
             "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
         }
     from work_progress import update_progress as update_close_progress
-    update_close_progress(ctx.workspace, attempt_key, str(attempt))
+    update_close_progress(ctx.workspace, f"{step_name}_attempt", str(attempt))
     return {"ACTION": "user_input", **context}
 
 

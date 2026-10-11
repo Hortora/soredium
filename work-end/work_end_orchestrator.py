@@ -39,6 +39,7 @@ from close_progress import (
     is_stale,
 )
 from shared_steps import StepDef, PipelineMode, ALL_MODES
+from progress import Progress
 
 CLOSE_LOG_FILE = ".close-log.jsonl"
 CLOSE_FILES_TO_EXCLUDE = [".close-progress", ".close-progress.tmp", ".close-progress.done",
@@ -1435,12 +1436,12 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         update_close_progress(workspace, "sweep_config", "done")
         update_close_progress(workspace, "sweep_selected", selected)
 
-    progress = read_close_progress(workspace)
+    progress = Progress.load(workspace)
 
     if progress and progress.get("_branch") and progress["_branch"] != branch:
         rec("branch-mismatch-reset", stale_branch=progress["_branch"])
         delete_close_progress(workspace)
-        progress = {}
+        progress = Progress()
 
     if not progress.get("_branch") and branch:
         update_close_progress(workspace, "_branch", branch)
@@ -1719,7 +1720,11 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
                 ctx.steps_executed.append(f"{step_key}:ERROR:classified")
             else:
                 attempt_key = f"{step_key}_mechanical_attempt"
-                attempt = int(ctx.progress.get(attempt_key, "0")) + 1
+                raw_attempt = ctx.progress.get(attempt_key, "0")
+                try:
+                    attempt = int(raw_attempt) + 1
+                except (ValueError, TypeError):
+                    attempt = 1
                 update_close_progress(ctx.workspace, attempt_key, str(attempt))
                 ctx.steps_executed.append(f"{step_key}:ERROR:{attempt}")
                 if retryable_failure is None:
@@ -1821,7 +1826,11 @@ def _final_gate(ctx: OrchestratorContext) -> dict[str, str] | None:
     if cmd is None:
         return None
 
-    attempt = int(ctx.progress.get("_final_gate_attempt", "0")) + 1
+    raw_gate = ctx.progress.get("_final_gate_attempt", "0")
+    try:
+        attempt = int(raw_gate) + 1
+    except (ValueError, TypeError):
+        attempt = 1
     update_close_progress(ctx.workspace, "_final_gate_attempt", str(attempt))
 
     result = _run_script(cmd, ctx.workspace, dry_run=False, call_log=ctx.call_log)
@@ -1890,7 +1899,11 @@ def _build_close_step_outcomes(progress: dict[str, str]) -> dict:
                       "arc42_scan", "trajectory", "session_rename"]:
         status = progress.get(step_name)
         if status == "done":
-            produced = int(progress.get(f"{step_name}_produced", "0"))
+            raw_produced = progress.get(f"{step_name}_produced", "0")
+            try:
+                produced = int(raw_produced)
+            except (ValueError, TypeError):
+                produced = 0
             outcomes[step_name] = {"ran": True, "produced": produced}
         elif status == "skipped":
             outcomes[step_name] = {"ran": False, "skipped": True}

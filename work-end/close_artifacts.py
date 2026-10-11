@@ -222,7 +222,10 @@ def main() -> int:
         if covers_arg:
             proj_args.append(covers_arg)
         rc, out = run_script("artifact_promote.py", proj_args)
-        project_promoted_total += int(out.get("PROMOTED", "0"))
+        try:
+            project_promoted_total += int(out.get("PROMOTED", "0"))
+        except (ValueError, TypeError):
+            pass
         if rc != 0:
             failures.append(f"project promotion: {out.get('ERROR', 'unknown')}")
         elif out.get("PROMOTED", "0") == "0":
@@ -241,7 +244,10 @@ def main() -> int:
         if covers_arg:
             docs_args.append(covers_arg)
         rc, out = run_script("artifact_promote.py", docs_args)
-        project_promoted_total += int(out.get("PROMOTED", "0"))
+        try:
+            project_promoted_total += int(out.get("PROMOTED", "0"))
+        except (ValueError, TypeError):
+            pass
         if rc != 0:
             failures.append(f"project docs promotion: {out.get('ERROR', 'unknown')}")
         elif out.get("PROMOTED", "0") == "0":

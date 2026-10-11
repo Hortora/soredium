@@ -67,7 +67,8 @@ def parse_args(argv: list[str]) -> dict[str, str]:
 def build_context(args: dict[str, str]) -> WorkContext:
     ws = Path(args.get("workspace", "."))
     proj = Path(args.get("project", "."))
-    progress = read_progress(ws)
+    from progress import Progress
+    progress = Progress.load(ws)
     from repo_state import classify_repos as _classify_repos
     repos = _classify_repos(
         project=proj,
@@ -131,7 +132,10 @@ PAUSE_STEPS: list[StepDef] = [
 # ---------------------------------------------------------------------------
 
 def _skip_single_stack(ctx) -> bool:
-    stack_depth = int(ctx.progress.get("stack_depth", "0"))
+    try:
+        stack_depth = int(ctx.progress.get("stack_depth", "0"))
+    except (ValueError, TypeError):
+        stack_depth = 0
     return stack_depth <= 1
 
 

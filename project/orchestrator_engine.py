@@ -37,13 +37,7 @@ def validate_requires(steps: list[StepDef]) -> None:
 
 def _per_repo_done(ctx, step_name: str) -> bool:
     """Check if a step completed via per-repo fan-out (step:repo keys)."""
-    prefix = f"{step_name}:"
-    repo_keys = [k for k in ctx.progress if k.startswith(prefix)
-                 and not k.endswith("_attempt") and not k.endswith("_produced")]
-    if not repo_keys:
-        return False
-    done_states = ("done", "skipped", "skipped_error")
-    return all(ctx.progress[k] in done_states for k in repo_keys)
+    return ctx.progress.is_per_repo_done(step_name)
 
 
 def _mark_done(ctx, step_name: str, status: str = "done") -> None:
@@ -104,10 +98,9 @@ def log_call(workspace: Path, mode: str, result: dict[str, str],
 
 
 def _yield_judgment(step_name: str, workspace: Path,
-                    progress: dict[str, str],
+                    progress,
                     context: dict[str, str]) -> dict[str, str]:
-    attempt_key = f"{step_name}_attempt"
-    attempt = int(progress.get(attempt_key, "0")) + 1
+    attempt = progress.get_attempt(step_name) + 1
 
     if attempt > MAX_JUDGMENT_RETRIES:
         update_close_progress(workspace, "last_yielded", step_name)
@@ -119,7 +112,7 @@ def _yield_judgment(step_name: str, workspace: Path,
             "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
         }
 
-    update_close_progress(workspace, attempt_key, str(attempt))
+    update_close_progress(workspace, f"{step_name}_attempt", str(attempt))
     update_close_progress(workspace, "last_yielded", step_name)
     result = {"ACTION": step_name,
               "COMPLETE_WITH": f"step_done={step_name} produced=N"}
@@ -128,10 +121,9 @@ def _yield_judgment(step_name: str, workspace: Path,
 
 
 def _yield_user_input(step_name: str, workspace: Path,
-                      progress: dict[str, str],
+                      progress,
                       context: dict[str, str]) -> dict[str, str]:
-    attempt_key = f"{step_name}_attempt"
-    attempt = int(progress.get(attempt_key, "0")) + 1
+    attempt = progress.get_attempt(step_name) + 1
     if attempt > MAX_JUDGMENT_RETRIES:
         update_close_progress(workspace, "last_yielded", step_name)
         return {
@@ -141,7 +133,7 @@ def _yield_user_input(step_name: str, workspace: Path,
             "ATTEMPTS": str(MAX_JUDGMENT_RETRIES),
             "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
         }
-    update_close_progress(workspace, attempt_key, str(attempt))
+    update_close_progress(workspace, f"{step_name}_attempt", str(attempt))
     update_close_progress(workspace, "last_yielded", step_name)
     return {"ACTION": "user_input", "STEP": step_name,
             "COMPLETE_WITH": f"step_done={step_name}", **context}
@@ -271,7 +263,11 @@ def run_loop(
                 continue
 
             attempt_key = f"{step.name}_mechanical_attempt"
-            attempt = int(ctx.progress.get(attempt_key, "0"))
+            raw = ctx.progress.get(attempt_key, "0")
+            try:
+                attempt = int(raw)
+            except (ValueError, TypeError):
+                attempt = 0
 
             if execute_mechanical_fn:
                 result = execute_mechanical_fn(step, ctx)

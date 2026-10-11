@@ -161,10 +161,23 @@ def _branch_landed_on_main(project: Path, branch: str) -> bool:
     return False
 
 
+STALENESS_EXCLUDED_NAMES = frozenset({"last_yielded", "sweep_selected"})
+
+
+def _is_staleness_excluded_by_name(step: str) -> bool:
+    return (step.startswith("_") or step.startswith("report_")
+            or step in STALENESS_EXCLUDED_NAMES)
+
+
+def staleness_excluded_from_steps(step_defs: list) -> frozenset[str]:
+    return frozenset(s.name for s in step_defs if not s.staleness_relevant)
+
+
 def is_stale(progress: dict[str, str], meta_state: str,
              plan_path: Path | None = None,
              project: Path | None = None,
-             branch: str = "") -> bool:
+             branch: str = "",
+             excluded_steps: frozenset[str] | None = None) -> bool:
     if not progress:
         return False
     if plan_path and plan_path.exists():
@@ -179,8 +192,9 @@ def is_stale(progress: dict[str, str], meta_state: str,
         base_step = step.split("_attempt")[0] if "_attempt" in step else step
         if ":" in base_step:
             base_step = base_step.split(":")[0]
-        if (base_step.startswith("_") or base_step.startswith("report_")
-                or base_step in ("last_yielded", "sweep_selected")):
+        if excluded_steps and base_step in excluded_steps:
+            continue
+        if _is_staleness_excluded_by_name(base_step):
             continue
         phase = STEP_TO_PHASE.get(base_step, "closing:review")
         if phase in LIFECYCLE_PHASE_ORDER:
