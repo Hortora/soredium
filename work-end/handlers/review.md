@@ -76,9 +76,12 @@ Mark done with `step_done=loose_ends produced=N`.
 
 ## forcing_function (HARD GATE)
 
-Read all open findings from `$WORKSPACE/.audit/findings.jsonl` via
-`read_findings` from `project/findings.py`. OPEN_FINDINGS tells you
-how many are open. Present grouped by category:
+Read findings from `$WORKSPACE/.audit/findings.jsonl` via
+`read_findings` from `project/findings.py`. Filter to findings where
+`branch` matches BRANCH from the action context. OPEN_FINDINGS is the
+branch-scoped count — do NOT use `gh issue list` or any other source.
+
+Present only this branch's open findings, grouped by category:
 
 ```
 Open findings — N items require resolution before branch close

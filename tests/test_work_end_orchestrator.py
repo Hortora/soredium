@@ -3632,3 +3632,60 @@ class TestSweepSkipsUnchangedRepos:
         result = _close_per_repo_judgment(step, ctx)
         assert result is not None
         assert result.get("ACTION") == "protocol:neocortex"
+
+
+class TestForcingFunctionBranchScope:
+    """Forcing function context includes BRANCH for scoping (#440)."""
+
+    def test_context_includes_branch(self):
+        from work_end_orchestrator import _forcing_function_context, OrchestratorContext
+        from progress import Progress
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            ctx = OrchestratorContext(
+                workspace=ws,
+                project=ws / "project",
+                branch="issue-440-test",
+                base_branch="main",
+                meta_state="closing:review",
+                on_main=False,
+                in_slot=False,
+                covers="",
+                issue_repo="",
+                progress=Progress(),
+            )
+            result = _forcing_function_context(ctx)
+            assert result["BRANCH"] == "issue-440-test"
+            assert result["OPEN_FINDINGS"] == "0"
+
+    def test_counts_only_branch_findings(self):
+        from work_end_orchestrator import _forcing_function_context, OrchestratorContext
+        from progress import Progress
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            audit = ws / ".audit"
+            audit.mkdir()
+            (audit / "findings.jsonl").write_text(
+                '{"status":"open","branch":"issue-440-test","detail":"mine"}\n'
+                '{"status":"open","branch":"other-branch","detail":"theirs"}\n'
+                '{"status":"resolved","branch":"issue-440-test","detail":"fixed"}\n'
+            )
+            ctx = OrchestratorContext(
+                workspace=ws,
+                project=ws / "project",
+                branch="issue-440-test",
+                base_branch="main",
+                meta_state="closing:review",
+                on_main=False,
+                in_slot=False,
+                covers="",
+                issue_repo="",
+                progress=Progress(),
+            )
+            result = _forcing_function_context(ctx)
+            assert result["OPEN_FINDINGS"] == "1"
+            assert result["OTHER_BRANCH_FINDINGS"] == "1"

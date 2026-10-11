@@ -265,7 +265,7 @@ def determine_pipeline_mode(
 def _skip_multi_repo_partial_close(ctx: OrchestratorContext) -> bool:
     """Skip archival when any repo in the slot has active work.
 
-    Checks two things:
+    Checks three things:
     1. Repos classified for the closing branch that haven't landed yet
     2. Any repo in the slot directory on a non-base branch (active work
        on a different branch than the one being closed)
@@ -1044,7 +1044,8 @@ def _forcing_function_context(ctx):
                         other_count += 1
             except (json.JSONDecodeError, ValueError):
                 pass
-    result = {"CONTEXT": "forcing_function", "OPEN_FINDINGS": str(count)}
+    result = {"CONTEXT": "forcing_function", "OPEN_FINDINGS": str(count),
+              "BRANCH": branch}
     if other_count:
         result["OTHER_BRANCH_FINDINGS"] = str(other_count)
     return result
@@ -1809,6 +1810,7 @@ def _close_per_repo_judgment(step: StepDef, ctx: OrchestratorContext) -> dict[st
             if repo_name not in changed_repos:
                 if ctx.progress.get(step_key) not in ("done", "skipped", "skipped_error"):
                     update_close_progress(ctx.workspace, step_key, "done")
+                    ctx.progress.set(step_key, "done")
     if ctx.per_repo_done(step.name):
         return {}
     repo = ctx.next_repo_for(step.name)
