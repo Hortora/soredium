@@ -338,7 +338,9 @@ def run_loop(
 
         if step.step_type == "lifecycle":
             if handle_lifecycle:
-                handle_lifecycle(step, ctx)
+                lc_result = handle_lifecycle(step, ctx)
+                if lc_result and lc_result.get("ACTION") == "error":
+                    return lc_result
             _mark_done(ctx, step.name)
             ctx.steps_executed.append(step.name)
             continue

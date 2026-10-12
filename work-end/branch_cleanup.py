@@ -58,7 +58,12 @@ def _plan_has_remaining(plan_path: Path) -> bool:
 
 
 def _reset_plan_state(plan_path: Path) -> None:
-    """Reset .plan state from closing:* to active via lifecycle transition."""
+    """Reset .plan state from closing:* to active via lifecycle transition.
+
+    No longer called from cleanup_scaffold — plan state management is
+    handled by cleanup_pass in the orchestrator (#442). Kept for external
+    callers that may still need it.
+    """
     if not plan_path.exists():
         return
     _project_dir = str(Path(__file__).resolve().parent.parent / "project")
@@ -72,8 +77,8 @@ def _reset_plan_state(plan_path: Path) -> None:
         )
         try:
             commit_transition(plan_path, result)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"WARN=reset_plan_state_failed: {e}")
 
 
 def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
@@ -88,7 +93,6 @@ def cleanup_scaffold(workspace: str, params: dict[str, str]) -> int:
     plan_path = ws / ".plan"
     preserve_plan = _plan_has_remaining(plan_path)
     if preserve_plan:
-        _reset_plan_state(plan_path)
         print(f"PLAN_PRESERVED=yes")
 
     files_to_remove = []

@@ -788,7 +788,7 @@ def _build_evidence(event, ctx):
 def _fire_lifecycle(step, ctx):
     ctx.expected_state = step.to_state
     if not ctx.plan_path:
-        return
+        return None
     evidence = _build_evidence(step.event, ctx)
     cmd = [
         sys.executable, str(LIFECYCLE_SCRIPT),
@@ -799,7 +799,18 @@ def _fire_lifecycle(step, ctx):
     ]
     if evidence:
         cmd.append(f"evidence={json.dumps(evidence)}")
-    _run_script(cmd, ctx.workspace, dry_run=ctx.dry_run, call_log=ctx.call_log)
+    result = _run_script(cmd, ctx.workspace, dry_run=ctx.dry_run, call_log=ctx.call_log)
+    if result.get("ERROR"):
+        return {
+            "ACTION": "error",
+            "ERROR": f"LIFECYCLE_TRANSITION_FAILED",
+            "STEP": step.name,
+            "FROM_STATE": step.from_state,
+            "TO_STATE": step.to_state,
+            "EVENT": step.event,
+            "DETAIL": result.get("ERROR", "") + ": " + result.get("DETAIL", result.get("ERROR_DETAIL", "")),
+        }
+    return None
 
 
 # --- Reconciliation ---
@@ -995,6 +1006,43 @@ def _queue_decision_context(ctx):
         "REMAINING": str(remaining),
         "NEXT_TITLE": next_title,
     }
+
+
+def _has_remaining_queue_items(ctx) -> bool:
+    """Check if the .plan has uncompleted queue items."""
+    ws_plan = ctx.workspace / ".plan"
+    if not ws_plan.exists():
+        return False
+    _proj_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _proj_dir not in sys.path:
+        sys.path.insert(0, _proj_dir)
+    try:
+        from plan_io import read_plan, has_uncompleted_items
+        state = read_plan(ws_plan)
+        if state is None:
+            return False
+        return has_uncompleted_items(state)
+    except Exception:
+        return False
+
+
+def _skip_cleanup_pass_when_remaining(ctx) -> bool:
+    """Skip cleanup_pass (→ idle) when plan has remaining items."""
+    return _has_remaining_queue_items(ctx)
+
+
+def _skip_cleanup_cycle_when_empty(ctx) -> bool:
+    """Skip cleanup_cycle (→ active) when plan has NO remaining items."""
+    return not _has_remaining_queue_items(ctx)
+
+
+def _advance_queue_script(ctx):
+    """Advance .plan queue to next item when remaining items exist."""
+    ws_plan = ctx.workspace / ".plan"
+    if not ws_plan.exists():
+        return None
+    plan_mgr = Path(__file__).resolve().parent.parent / "work-slot" / "plan_manager.py"
+    return [sys.executable, str(plan_mgr), "advance", str(ws_plan)]
 
 
 def _skip_fork_next(ctx) -> bool:
@@ -1299,8 +1347,17 @@ STEPS: list[StepDef] = [
             script_fn=_promote_plan_next_script,
             postcondition_fn=promote_plan_next_postcondition),
 
+    StepDef("advance_queue", "closing:stamped", "mechanical",
+            modes=BRANCH_SLOT,
+            skip_fn=_skip_cleanup_cycle_when_empty,
+            script_fn=_advance_queue_script),
+    StepDef("cleanup_cycle", "closing:stamped", "lifecycle",
+            modes=BRANCH_SLOT,
+            skip_fn=_skip_cleanup_cycle_when_empty,
+            from_state="closing:stamped", to_state="active", event="issue_cycle"),
     StepDef("cleanup_pass", "closing:stamped", "lifecycle",
             modes=BRANCH_SLOT,
+            skip_fn=_skip_cleanup_pass_when_remaining,
             from_state="closing:stamped", to_state="idle", event="cleanup_pass"),
     StepDef("cleanup_main", "closing:stamped", "lifecycle",
             modes=MAIN_ONLY,

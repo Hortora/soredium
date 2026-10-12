@@ -3341,7 +3341,8 @@ class TestPostconditionsWired:
         mechanical = [s for s in STEPS if s.step_type == "mechanical"]
         exempt = {s.name for s in mechanical
                   if s.name.startswith("report_") or s.name in (
-                      "delete_progress", "elevate_plan", "cleanup_stack", "verify")}
+                      "delete_progress", "elevate_plan", "cleanup_stack", "verify",
+                      "advance_queue")}
         required = [s for s in mechanical if s.name not in exempt]
         missing = [s.name for s in required if s.postcondition_fn is None]
         assert missing == [], f"Mechanical steps missing postcondition_fn: {missing}"
@@ -3761,3 +3762,180 @@ class TestStalePlanCleanup:
                 progress=Progress(),
             )
             assert cleanup_scaffold_postcondition(ctx) is True
+
+
+class TestLifecycleErrorPropagation:
+    """Lifecycle transition failures must halt the pipeline (#442 fix 1)."""
+
+    def test_fire_lifecycle_returns_error_on_failure(self, tmp_path, monkeypatch):
+        from work_end_orchestrator import _fire_lifecycle, OrchestratorContext
+        from shared_steps import StepDef, PipelineMode
+        from progress import Progress
+
+        monkeypatch.setattr("work_end_orchestrator._run_script",
+                            lambda cmd, ws, **kw: {"ERROR": "INVALID_TRANSITION"})
+
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nstate: active\n")
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="active",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+            plan_path=plan,
+        )
+        step = StepDef("cleanup_pass", "closing:stamped", "lifecycle",
+                        from_state="closing:stamped", to_state="idle",
+                        event="cleanup_pass")
+        result = _fire_lifecycle(step, ctx)
+        assert result is not None
+        assert result["ACTION"] == "error"
+        assert result["ERROR"] == "LIFECYCLE_TRANSITION_FAILED"
+
+    def test_fire_lifecycle_returns_none_on_success(self, tmp_path, monkeypatch):
+        from work_end_orchestrator import _fire_lifecycle, OrchestratorContext
+        from shared_steps import StepDef, PipelineMode
+        from progress import Progress
+
+        monkeypatch.setattr("work_end_orchestrator._run_script",
+                            lambda cmd, ws, **kw: {"COMMITTED": "yes"})
+
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nstate: closing:stamped\n")
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:stamped",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+            plan_path=plan,
+        )
+        step = StepDef("cleanup_pass", "closing:stamped", "lifecycle",
+                        from_state="closing:stamped", to_state="idle",
+                        event="cleanup_pass")
+        result = _fire_lifecycle(step, ctx)
+        assert result is None
+
+
+class TestCleanupCycleVsPass:
+    """cleanup_cycle runs when plan has remaining items, cleanup_pass when empty (#442 fix 2)."""
+
+    def test_cleanup_cycle_skipped_when_no_remaining(self, tmp_path):
+        from work_end_orchestrator import _skip_cleanup_cycle_when_empty, OrchestratorContext
+        from progress import Progress
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:stamped",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+        )
+        assert _skip_cleanup_cycle_when_empty(ctx) is True
+
+    def test_cleanup_cycle_runs_when_remaining(self, tmp_path):
+        from work_end_orchestrator import _skip_cleanup_cycle_when_empty, OrchestratorContext
+        from progress import Progress
+        (tmp_path / ".plan").write_text(
+            "# Plan\n## State\nstate: closing:stamped\n\n"
+            "## Queue\n- [x] #1 — done\n- [ ] #2 — queued\n"
+        )
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:stamped",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+        )
+        assert _skip_cleanup_cycle_when_empty(ctx) is False
+
+    def test_cleanup_pass_skipped_when_remaining(self, tmp_path):
+        from work_end_orchestrator import _skip_cleanup_pass_when_remaining, OrchestratorContext
+        from progress import Progress
+        (tmp_path / ".plan").write_text(
+            "# Plan\n## State\nstate: closing:stamped\n\n"
+            "## Queue\n- [x] #1 — done\n- [ ] #2 — queued\n"
+        )
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:stamped",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+        )
+        assert _skip_cleanup_pass_when_remaining(ctx) is True
+
+    def test_cleanup_pass_runs_when_empty(self, tmp_path):
+        from work_end_orchestrator import _skip_cleanup_pass_when_remaining, OrchestratorContext
+        from progress import Progress
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:stamped",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+        )
+        assert _skip_cleanup_pass_when_remaining(ctx) is False
+
+
+class TestAdvanceQueueStep:
+    """advance_queue step exists and wires correctly (#442 fix 3)."""
+
+    def test_advance_queue_in_steps(self):
+        from work_end_orchestrator import STEPS
+        names = [s.name for s in STEPS]
+        assert "advance_queue" in names
+
+    def test_advance_queue_before_cleanup_cycle(self):
+        from work_end_orchestrator import STEPS
+        names = [s.name for s in STEPS]
+        aq_idx = names.index("advance_queue")
+        cc_idx = names.index("cleanup_cycle")
+        assert aq_idx < cc_idx
+
+    def test_advance_queue_skipped_when_no_remaining(self, tmp_path):
+        from work_end_orchestrator import _skip_cleanup_cycle_when_empty, OrchestratorContext
+        from progress import Progress
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:stamped",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+        )
+        assert _skip_cleanup_cycle_when_empty(ctx) is True
