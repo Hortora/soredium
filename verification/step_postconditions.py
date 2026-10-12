@@ -179,4 +179,17 @@ def cleanup_scaffold_postcondition(ctx) -> bool:
     ws = ctx.workspace
     scaffold = ["JOURNAL.md", ".execute-progress", ".land-ledger.jsonl",
                 ".artifacts-promoted"]
-    return not any((ws / f).exists() for f in scaffold)
+    if any((ws / f).exists() for f in scaffold):
+        return False
+    plan = ws / ".plan"
+    if plan.exists():
+        try:
+            content = plan.read_text()
+            for line in content.splitlines():
+                if line.strip().startswith("state:"):
+                    state = line.split(":", 1)[1].strip()
+                    if state.startswith("closing:") or state == "idle":
+                        return False
+        except OSError:
+            pass
+    return True

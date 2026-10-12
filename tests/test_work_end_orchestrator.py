@@ -1513,12 +1513,13 @@ class TestEvidenceChecks:
         check = EVIDENCE_CHECKS["cleanup"]
         assert check(tmp_path, tmp_path / "project") is False
 
-    def test_cleanup_check_passes_when_plan_exists(self, tmp_path):
+    def test_cleanup_check_fails_when_journal_exists(self, tmp_path):
+        """Cleanup check fails when JOURNAL.md still present, even with .plan."""
         from work_end_orchestrator import EVIDENCE_CHECKS
         (tmp_path / "JOURNAL.md").write_text("# Journal\n")
         (tmp_path / ".plan").write_text("state: drained\n")
         check = EVIDENCE_CHECKS["cleanup"]
-        assert check(tmp_path, tmp_path / "project") is True
+        assert check(tmp_path, tmp_path / "project") is False
 
 
 class TestAbortExtended:
@@ -3689,3 +3690,74 @@ class TestForcingFunctionBranchScope:
             result = _forcing_function_context(ctx)
             assert result["OPEN_FINDINGS"] == "1"
             assert result["OTHER_BRANCH_FINDINGS"] == "1"
+
+
+class TestStalePlanCleanup:
+    """Stale .plan must be removed after branch close (#441)."""
+
+    def test_cleanup_close_artifacts_removes_plan(self, tmp_path):
+        """_cleanup_close_artifacts removes .plan as a safety net."""
+        (tmp_path / ".plan").write_text("# Plan\n## State\nstate: closing:stamped\n")
+        (tmp_path / ".close-progress").write_text("cleanup=done\n")
+        from work_end_orchestrator import _cleanup_close_artifacts
+        _cleanup_close_artifacts(tmp_path)
+        assert not (tmp_path / ".plan").exists()
+        assert not (tmp_path / ".close-progress").exists()
+
+    def test_cleanup_close_artifacts_removes_squash_plans(self, tmp_path):
+        """_cleanup_close_artifacts removes .squash-plan-*.json files."""
+        (tmp_path / ".squash-plan-soredium.json").write_text('{"verified": true}')
+        (tmp_path / ".squash-plan-engine.json").write_text('{"verified": true}')
+        from work_end_orchestrator import _cleanup_close_artifacts
+        _cleanup_close_artifacts(tmp_path)
+        assert not list(tmp_path.glob(".squash-plan-*.json"))
+
+    def test_cleanup_postcondition_fails_with_stale_plan(self):
+        """cleanup_scaffold_postcondition fails when .plan has a terminal state."""
+        import tempfile
+        from pathlib import Path
+        from verification.step_postconditions import cleanup_scaffold_postcondition
+        from progress import Progress
+        from work_end_orchestrator import OrchestratorContext
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            (ws / ".plan").write_text("# Plan\n## State\nstate: closing:stamped\n")
+            ctx = OrchestratorContext(
+                workspace=ws,
+                project=ws / "project",
+                branch="issue-test",
+                base_branch="main",
+                meta_state="closing:stamped",
+                on_main=False,
+                in_slot=False,
+                covers="",
+                issue_repo="",
+                progress=Progress(),
+            )
+            assert cleanup_scaffold_postcondition(ctx) is False
+
+    def test_cleanup_postcondition_allows_active_plan(self):
+        """cleanup_scaffold_postcondition passes when .plan has remaining items."""
+        import tempfile
+        from pathlib import Path
+        from verification.step_postconditions import cleanup_scaffold_postcondition
+        from progress import Progress
+        from work_end_orchestrator import OrchestratorContext
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            (ws / ".plan").write_text(
+                "# Plan\n## State\nstate: active\n\n## Queue\n- [ ] Issue #2\n"
+            )
+            ctx = OrchestratorContext(
+                workspace=ws,
+                project=ws / "project",
+                branch="issue-test",
+                base_branch="main",
+                meta_state="closing:stamped",
+                on_main=False,
+                in_slot=False,
+                covers="",
+                issue_repo="",
+                progress=Progress(),
+            )
+            assert cleanup_scaffold_postcondition(ctx) is True

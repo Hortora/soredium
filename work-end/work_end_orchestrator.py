@@ -679,6 +679,11 @@ def _cleanup_close_artifacts(workspace: Path) -> None:
         p = workspace / name
         if p.exists():
             p.unlink()
+    plan = workspace / ".plan"
+    if plan.exists():
+        plan.unlink()
+    for squash_plan in workspace.glob(".squash-plan-*.json"):
+        squash_plan.unlink()
 
 
 # --- Main-mode special cases ---
@@ -830,7 +835,7 @@ EVIDENCE_CHECKS: dict[str, Callable] = {
     "rebase": _check_rebase,
     "close_issues": lambda ws, proj: True,
     "verify": lambda ws, proj: True,
-    "cleanup": lambda ws, proj: not (ws / "JOURNAL.md").exists() or (ws / ".plan").exists(),
+    "cleanup": lambda ws, proj: not (ws / "JOURNAL.md").exists(),
     "checkout_main": _check_checkout_main,
     "cleanup_stack": _check_cleanup_stack,
     "promote": lambda ws, proj: True,
