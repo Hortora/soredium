@@ -437,7 +437,18 @@ def _close_issues_script(ctx):
             _slot_dir = Path(__file__).parent.parent / "work-slot"
             if str(_slot_dir) not in sys.path:
                 sys.path.insert(0, str(_slot_dir))
-            from plan_manager import get_completed_epic_parents
+            from plan_manager import get_completed_epic_parents, parse_plan
+
+            tree = parse_plan(ctx.plan_path)
+            closable = set()
+            for item in tree.queue:
+                if item.ref and (item.completed or item.active):
+                    closable.add(item.ref.number)
+
+            if closable:
+                all_covers = set(parse_covers(covers))
+                covers = ",".join(str(n) for n in sorted(all_covers & closable))
+
             epic_parents = get_completed_epic_parents(ctx.plan_path)
             if epic_parents:
                 existing = set(parse_covers(covers))
