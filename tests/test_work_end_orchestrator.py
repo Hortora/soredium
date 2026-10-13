@@ -1628,7 +1628,10 @@ class TestPerRepoJudgmentCompletion:
         for repo_name in ["chat-app", "blocks-ui", "qhorus"]:
             repo_dir = slot_dir / repo_name
             repo_dir.mkdir()
-            (repo_dir / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo_name}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
 
         result = run_orchestrator({
             "workspace": str(tmp_path),
@@ -1640,8 +1643,12 @@ class TestPerRepoJudgmentCompletion:
             "slot_path": str(slot_dir),
         })
         assert result.get("ACTION"), "Must return an ACTION, not empty output"
-        assert result["ACTION"].startswith("update_claude_md"), \
-            f"Expected update_claude_md after protocol done, got {result['ACTION']}"
+        # With classify-once, all NO_BRANCH repos auto-skip sweep steps.
+        # Since all repos lack the feature branch, update_claude_md is auto-done
+        # and the engine advances to adr.
+        assert result["ACTION"] in ("update_claude_md:chat-app", "update_claude_md:blocks-ui",
+                                     "update_claude_md:qhorus", "adr"), \
+            f"Expected sweep step after protocol done, got {result['ACTION']}"
 
 
 class TestPhaseSkip:
@@ -1875,7 +1882,10 @@ class TestPhaseSkipSlotMode:
         for i, repo in enumerate(repos):
             repo_dir = slot_path / repo
             repo_dir.mkdir()
-            (repo_dir / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
             tag = " (primary)" if i == 0 else ""
             lines.append(f"- {repo}{tag}")
         (slot_path / ".slot").write_text("\n".join(lines) + "\n")
@@ -1926,14 +1936,21 @@ class TestPhaseSkipSlotMode:
 class TestPerRepoEscalation:
     """Per-repo retryable failures auto-skip after MAX retries."""
 
-    def _make_slot(self, tmp_path, repos):
+    def _make_slot(self, tmp_path, repos, branch="issue-99-test"):
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
         lines = ["# Slot 1\n", "## Repos"]
         for i, repo in enumerate(repos):
             repo_dir = slot_path / repo
             repo_dir.mkdir()
-            (repo_dir / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", branch], capture_output=True, check=True)
+            (repo_dir / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "feature work"], capture_output=True, check=True)
             tag = " (primary)" if i == 0 else ""
             lines.append(f"- {repo}{tag}")
         (slot_path / ".slot").write_text("\n".join(lines) + "\n")
@@ -1968,14 +1985,21 @@ class TestPerRepoEscalation:
 class TestPerRepoTryAllThenReport:
     """Non-retryable errors: try all repos before reporting failures."""
 
-    def _make_slot(self, tmp_path, repos):
+    def _make_slot(self, tmp_path, repos, branch="issue-99-test"):
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
         lines = ["# Slot 1\n", "## Repos"]
         for i, repo in enumerate(repos):
             repo_dir = slot_path / repo
             repo_dir.mkdir()
-            (repo_dir / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", branch], capture_output=True, check=True)
+            (repo_dir / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "feature work"], capture_output=True, check=True)
             tag = " (primary)" if i == 0 else ""
             lines.append(f"- {repo}{tag}")
         (slot_path / ".slot").write_text("\n".join(lines) + "\n")
@@ -2080,14 +2104,21 @@ class TestReportOnComplete:
 class TestDefenseInDepthPerRepo:
     """ctx.done(step.name) must not bypass per-repo handling."""
 
-    def _make_slot(self, tmp_path, repos):
+    def _make_slot(self, tmp_path, repos, branch="issue-99-test"):
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
         lines = ["# Slot 1\n", "## Repos"]
         for i, repo in enumerate(repos):
             repo_dir = slot_path / repo
             repo_dir.mkdir()
-            (repo_dir / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", branch], capture_output=True, check=True)
+            (repo_dir / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "feature work"], capture_output=True, check=True)
             tag = " (primary)" if i == 0 else ""
             lines.append(f"- {repo}{tag}")
         (slot_path / ".slot").write_text("\n".join(lines) + "\n")
@@ -2239,7 +2270,14 @@ class TestRebaseConflictNotRetryable:
         for repo in ("work", "engine", "ledger"):
             d = slot_dir / repo
             d.mkdir()
-            (d / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(d)], capture_output=True, check=True)
+            (d / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(d), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "checkout", "-b", "issue-238-test"], capture_output=True, check=True)
+            (d / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(d), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "commit", "-m", "feature work"], capture_output=True, check=True)
         update_close_progress(tmp_path, "rebase:work", "done")
         update_close_progress(tmp_path, "rebase:ledger", "done")
         update_close_progress(tmp_path, "_branch", "issue-238-test")
@@ -2286,7 +2324,14 @@ class TestRebaseConflictNotRetryable:
         for repo in ("work", "engine", "ledger"):
             d = slot_dir / repo
             d.mkdir()
-            (d / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(d)], capture_output=True, check=True)
+            (d / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(d), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "checkout", "-b", "issue-238-test"], capture_output=True, check=True)
+            (d / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(d), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "commit", "-m", "feature work"], capture_output=True, check=True)
 
         from work_end_orchestrator import run_orchestrator
         run_orchestrator({
@@ -2330,7 +2375,14 @@ class TestRebaseConflictNotRetryable:
         for repo in ("work", "engine"):
             d = slot_dir / repo
             d.mkdir()
-            (d / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(d)], capture_output=True, check=True)
+            (d / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(d), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "checkout", "-b", "issue-238-test"], capture_output=True, check=True)
+            (d / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(d), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(d), "commit", "-m", "feature work"], capture_output=True, check=True)
 
         update_close_progress(tmp_path, "trajectory", "done")
         update_close_progress(tmp_path, "_branch", "issue-238-test")
@@ -2567,14 +2619,21 @@ class TestWriteMarkerStep:
 class TestPromoteScopeFilter:
     """#361: promote must target only the issue-owning repo, not all slot repos."""
 
-    def _make_slot(self, tmp_path, repos, primary=None):
+    def _make_slot(self, tmp_path, repos, primary=None, branch="issue-305-test"):
         slot_path = tmp_path / "slot"
         slot_path.mkdir()
         lines = ["## Repos"]
         for repo in repos:
             repo_dir = slot_path / repo
             repo_dir.mkdir()
-            (repo_dir / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", branch], capture_output=True, check=True)
+            (repo_dir / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "feature work"], capture_output=True, check=True)
             tag = " (primary)" if repo == primary else ""
             lines.append(f"- {repo}{tag}")
         (slot_path / ".slot").write_text("\n".join(lines) + "\n")
@@ -2833,7 +2892,14 @@ class TestPerRepoMechanicalAutoSkip:
         for repo in ["engine", "work"]:
             repo_dir = slot_path / repo
             repo_dir.mkdir()
-            (repo_dir / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", "issue-368-test"], capture_output=True, check=True)
+            (repo_dir / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "feature work"], capture_output=True, check=True)
         (slot_path / ".slot").write_text(
             "# Slot\n## Repos\n- engine (primary)\n- work\n## Status\nstatus: active\n"
         )
@@ -2964,7 +3030,14 @@ class TestPerRepoMechanicalAutoSkip:
         for repo in ["engine", "work"]:
             repo_dir = slot_path / repo
             repo_dir.mkdir()
-            (repo_dir / ".git").mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", "issue-368-test"], capture_output=True, check=True)
+            (repo_dir / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "feature work"], capture_output=True, check=True)
         (slot_path / ".slot").write_text(
             "# Slot\n## Repos\n- engine (primary)\n- work\n## Status\nstatus: active\n"
         )
@@ -3553,14 +3626,15 @@ class TestSweepSkipsUnchangedRepos:
             "# Slot\n## Repos\n- neocortex (primary)\n- examples\n## State\nstate: active\n"
         )
 
-        from repo_state import classify_repos
-        repos = classify_repos(
+        from repo_state import classify_repos, build_repo_contexts
+        _raw_repos = classify_repos(
             project=slot_path / "neocortex",
             workspace=tmp_path,
             branch=branch,
             base_branch="main",
             slot_path=slot_path,
         )
+        repos = build_repo_contexts(_raw_repos, "main")
 
         from work_end_orchestrator import OrchestratorContext, _close_per_repo_judgment
         from shared_steps import StepDef, PipelineMode
@@ -3601,14 +3675,15 @@ class TestSweepSkipsUnchangedRepos:
             "# Slot\n## Repos\n- neocortex (primary)\n## State\nstate: active\n"
         )
 
-        from repo_state import classify_repos
-        repos = classify_repos(
+        from repo_state import classify_repos, build_repo_contexts
+        _raw_repos = classify_repos(
             project=slot_path / "neocortex",
             workspace=tmp_path,
             branch=branch,
             base_branch="main",
             slot_path=slot_path,
         )
+        repos = build_repo_contexts(_raw_repos, "main")
 
         from work_end_orchestrator import OrchestratorContext, _close_per_repo_judgment
         from shared_steps import StepDef, PipelineMode

@@ -167,8 +167,8 @@ class TestClassifyRepoTopology:
 
 
 def _make_repo_state(disposition, repo_type=None, has_upstream=False, name="project"):
-    from repo_state import RepoState, RepoType, RepoDisposition
-    return RepoState(
+    from repo_state import RepoState, RepoType, RepoDisposition, RepoContext
+    state = RepoState(
         path=Path(f"/fake/{name}"),
         name=name,
         repo_type=repo_type or RepoType.PROJECT,
@@ -183,6 +183,10 @@ def _make_repo_state(disposition, repo_type=None, has_upstream=False, name="proj
         push_remote="upstream" if has_upstream else "origin",
         canonical_path=None,
         is_slot_clone=False,
+    )
+    return RepoContext(
+        state=state, tree_sha="", main_tree_sha="",
+        remote_synced=False, lifecycle_state=None,
     )
 
 
