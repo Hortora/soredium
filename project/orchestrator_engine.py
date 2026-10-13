@@ -331,12 +331,13 @@ def run_loop(
                     ctx.steps_executed.append(f"{step.name}:verify_skip")
                     continue
                 if v.result == VerifyResult.UNKNOWN:
-                    attempt += 1
-                    update_close_progress(ctx.workspace, attempt_key, str(attempt))
-                    if attempt >= MAX_MECHANICAL_RETRIES:
-                        return _yield_unknown_escalation(step.name, v)
-                    if not step.idempotent:
-                        return _make_unknown_retry_result(step.name, attempt, v)
+                    if attempt > 0:
+                        attempt += 1
+                        update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                        if attempt >= MAX_MECHANICAL_RETRIES:
+                            return _yield_unknown_escalation(step.name, v)
+                        if not step.idempotent:
+                            return _make_unknown_retry_result(step.name, attempt, v)
 
             if execute_mechanical_fn:
                 result = execute_mechanical_fn(step, ctx)

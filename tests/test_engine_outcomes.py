@@ -78,7 +78,28 @@ class TestOutcomeFnPreCheck:
         assert result["CONTEXT"] == "unknown_verification"
         assert result["CHECK"] == "check"
 
-    def test_unknown_non_idempotent_yields_without_execution(self, tmp_path):
+    def test_unknown_non_idempotent_first_attempt_executes(self, tmp_path):
+        (tmp_path / ".close-progress").write_text("")
+        call_count = 0
+
+        def outcome_first_unknown_then_pass(ctx):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return Verification("check", VerifyResult.UNKNOWN,
+                                    {"reason": "no_sha_yet"}, "repo")
+            return Verification("check", VerifyResult.PASS, {}, "repo")
+
+        step = StepDef("my_step", "phase", "mechanical",
+                       outcome_fn=outcome_first_unknown_then_pass,
+                       idempotent=False)
+        ctx = _make_ctx(tmp_path)
+        result = run_loop([step], ctx,
+                          execute_mechanical_fn=lambda s, c: {})
+        assert result.get("ACTION") == "complete"
+        assert "my_step" in ctx.steps_executed
+
+    def test_unknown_non_idempotent_retry_yields_without_execution(self, tmp_path):
         (tmp_path / ".close-progress").write_text("")
         v = Verification("check", VerifyResult.UNKNOWN,
                          {"reason": "propagating"}, "repo")
@@ -88,6 +109,7 @@ class TestOutcomeFnPreCheck:
                        script_fn=lambda ctx: executed.append(1) or {},
                        idempotent=False)
         ctx = _make_ctx(tmp_path)
+        ctx.progress.get.return_value = "1"
         result = run_loop([step], ctx)
         assert result["ACTION"] == "error"
         assert result["ERROR"] == "unknown_verification"
