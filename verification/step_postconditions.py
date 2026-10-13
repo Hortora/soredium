@@ -122,7 +122,26 @@ def issues_closed_postcondition(ctx) -> bool:
     if _project_dir not in sys.path:
         sys.path.insert(0, _project_dir)
     from plan_io import parse_covers
-    for issue_num in parse_covers(ctx.covers):
+
+    closable = set(parse_covers(ctx.covers))
+    plan_path = getattr(ctx, 'plan_path', None)
+    if plan_path and plan_path.exists():
+        try:
+            _slot_dir = str(Path(__file__).resolve().parent.parent / "work-slot")
+            if _slot_dir not in sys.path:
+                sys.path.insert(0, _slot_dir)
+            from plan_manager import parse_plan
+            tree = parse_plan(plan_path)
+            queue_closable = set()
+            for item in tree.queue:
+                if item.ref and (item.completed or item.active):
+                    queue_closable.add(item.ref.number)
+            if queue_closable:
+                closable = closable & queue_closable
+        except Exception:
+            pass
+
+    for issue_num in closable:
         result = subprocess.run(
             ["gh", "issue", "view", str(issue_num), "--repo", ctx.issue_repo,
              "--json", "state", "--jq", ".state"],
