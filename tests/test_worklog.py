@@ -1103,3 +1103,92 @@ class TestCheckActiveWork:
         assert len(result) == 1
         assert result[0]["branch"] == "issue-10-batch"
         conn.close()
+
+
+class TestFailLoudEmission:
+    """Event emission must propagate errors, not swallow them."""
+
+    def test_log_transition_propagates_db_errors(self, tmp_path):
+        conn = sqlite3.connect(":memory:")
+        with pytest.raises(sqlite3.OperationalError):
+            worklog.log_transition(conn, "started", work_item_id=1, repo_path="/fake")
+
+    def test_update_work_item_state_propagates_db_errors(self, tmp_path):
+        conn = sqlite3.connect(":memory:")
+        with pytest.raises(sqlite3.OperationalError):
+            worklog.update_work_item_state(conn, 999, "active")
+
+    def test_connect_sets_busy_timeout(self, tmp_path):
+        db = tmp_path / "test.db"
+        conn = worklog.connect(str(db))
+        timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert timeout == 5000
+        conn.close()
+
+
+class TestGetLifecycleState:
+    """get_lifecycle_state returns the latest to_state from events."""
+
+    def test_returns_latest_state(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        wid = worklog.record_work_start(
+            conn, "issue-42-feat", str(tmp_path / "repo"),
+            issue_number=42, issue_repo="org/repo",
+        )
+        worklog.log_transition(
+            conn, "start", work_item_id=wid, repo_path=str(tmp_path / "repo"),
+            metadata={"from": "idle", "to": "active"},
+        )
+        worklog.log_transition(
+            conn, "review", work_item_id=wid, repo_path=str(tmp_path / "repo"),
+            metadata={"from": "active", "to": "closing:review"},
+        )
+        state = worklog.get_lifecycle_state(conn, wid, repo_path=str(tmp_path / "repo"))
+        assert state == "closing:review"
+        conn.close()
+
+    def test_returns_none_when_no_events(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        state = worklog.get_lifecycle_state(conn, 999)
+        assert state is None
+        conn.close()
+
+    def test_filters_by_repo(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        wid = worklog.record_work_start(
+            conn, "issue-42-feat", str(tmp_path / "repo-a"),
+            issue_number=42, issue_repo="org/repo",
+        )
+        worklog.log_transition(
+            conn, "start", work_item_id=wid, repo_path=str(tmp_path / "repo-a"),
+            metadata={"from": "idle", "to": "active"},
+        )
+        worklog.log_transition(
+            conn, "land", work_item_id=wid, repo_path=str(tmp_path / "repo-b"),
+            metadata={"from": "idle", "to": "closing:pushed"},
+        )
+        assert worklog.get_lifecycle_state(conn, wid, repo_path=str(tmp_path / "repo-a")) == "active"
+        assert worklog.get_lifecycle_state(conn, wid, repo_path=str(tmp_path / "repo-b")) == "closing:pushed"
+        conn.close()
+
+    def test_returns_latest_without_repo_filter(self, tmp_path):
+        db = tmp_path / "worklog.db"
+        conn = worklog.connect(str(db))
+        wid = worklog.record_work_start(
+            conn, "issue-42-feat", str(tmp_path / "repo"),
+            issue_number=42, issue_repo="org/repo",
+        )
+        worklog.log_transition(
+            conn, "start", work_item_id=wid, repo_path=str(tmp_path / "repo"),
+            metadata={"from": "idle", "to": "active"},
+        )
+        worklog.log_transition(
+            conn, "push", work_item_id=wid, repo_path=str(tmp_path / "repo"),
+            metadata={"from": "active", "to": "closing:pushed"},
+        )
+        state = worklog.get_lifecycle_state(conn, wid)
+        assert state == "closing:pushed"
+        conn.close()

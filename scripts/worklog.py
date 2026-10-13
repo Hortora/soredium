@@ -168,6 +168,7 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.row_factory = sqlite3.Row
     _migrate(conn)
     return conn
@@ -686,7 +687,6 @@ def record_issue_complete(conn: sqlite3.Connection, branch: str,
 # --- Lifecycle integration ---
 
 
-@safe
 def update_work_item_state(conn: sqlite3.Connection, work_item_id: int,
                            new_state: str) -> None:
     """Update work item state. Sets ended_at when state is 'ended'."""
@@ -703,7 +703,6 @@ def update_work_item_state(conn: sqlite3.Connection, work_item_id: int,
     conn.commit()
 
 
-@safe
 def log_transition(conn: sqlite3.Connection, event_name: str,
                    work_item_id: int | None = None,
                    repo_path: str | None = None,
@@ -712,6 +711,29 @@ def log_transition(conn: sqlite3.Connection, event_name: str,
     _log_event(conn, event_name, work_item_id=work_item_id,
                repo_path=repo_path, metadata=metadata)
     conn.commit()
+
+
+def get_lifecycle_state(conn: sqlite3.Connection, work_item_id: int,
+                        repo_path: str | None = None) -> str | None:
+    """Query most recent lifecycle state from events for a work item.
+
+    Returns the to_state from the latest event's metadata, or None if
+    no events exist for the given work_item_id + optional repo_path."""
+    if repo_path:
+        row = conn.execute(
+            "SELECT json_extract(metadata, '$.to') FROM events "
+            "WHERE work_item_id = ? AND repo_path = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (work_item_id, repo_path),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT json_extract(metadata, '$.to') FROM events "
+            "WHERE work_item_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (work_item_id,),
+        ).fetchone()
+    return row[0] if row else None
 
 
 @safe

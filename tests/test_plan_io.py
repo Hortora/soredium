@@ -319,3 +319,100 @@ class TestRemovePlan:
     def test_nonexistent_is_noop(self, tmp_path):
         from plan_io import remove_plan
         remove_plan(tmp_path / "nonexistent")
+
+
+class TestUpdateLifecycleFields:
+    def test_updates_state_preserves_queue(self, tmp_path):
+        from plan_io import update_lifecycle_fields, read_plan
+        plan = _make_plan(tmp_path, (
+            "## State\n"
+            "state: active\n"
+            "branch: issue-42-feature\n"
+            "covers: 42\n"
+            "\n"
+            "## Queue\n"
+            "- [x] hortora/soredium#42 — implement widget ← active\n"
+            "- [ ] hortora/soredium#43 — add tests\n"
+        ))
+        update_lifecycle_fields(plan, state="closing:review")
+        content = plan.read_text()
+        assert "state: closing:review" in content
+        assert "branch: issue-42-feature" in content
+        state = read_plan(plan)
+        assert len(state.queue_items) == 2
+
+    def test_adds_evidence_era(self, tmp_path):
+        from plan_io import update_lifecycle_fields
+        plan = _make_plan(tmp_path, (
+            "## State\n"
+            "state: active\n"
+            "branch: issue-42-feature\n"
+        ))
+        update_lifecycle_fields(plan, state="closing:review", evidence_era=True)
+        content = plan.read_text()
+        assert "state: closing:review" in content
+        assert "evidence-era: true" in content
+
+    def test_only_updates_lifecycle_fields(self, tmp_path):
+        from plan_io import update_lifecycle_fields
+        plan = _make_plan(tmp_path, (
+            "## State\n"
+            "state: active\n"
+            "branch: issue-42-feature\n"
+            "design-repo: casehubio/platform\n"
+            "flyway-next-v: V042\n"
+            "\n"
+            "## Deferred\n"
+            "- S: refactor the widget\n"
+        ))
+        update_lifecycle_fields(plan, state="closing:verified")
+        content = plan.read_text()
+        assert "state: closing:verified" in content
+        assert "design-repo: casehubio/platform" in content
+        assert "flyway-next-v: V042" in content
+        assert "## Deferred" in content
+        assert "refactor the widget" in content
+
+
+class TestCopyPlan:
+    def test_copies_content(self, tmp_path):
+        from plan_io import copy_plan
+        src = tmp_path / "src.plan"
+        dst = tmp_path / "dst.plan"
+        content = "## State\nstate: active\nbranch: test\n\n## Queue\n- [ ] hortora/soredium#42 — work\n"
+        src.write_text(content)
+        copy_plan(src, dst)
+        assert dst.read_text() == content
+        assert not (tmp_path / "dst.plan.tmp").exists()
+
+    def test_overwrites_existing_dst(self, tmp_path):
+        from plan_io import copy_plan
+        src = tmp_path / "src.plan"
+        dst = tmp_path / "dst.plan"
+        src.write_text("## State\nstate: new\n")
+        dst.write_text("## State\nstate: old\n")
+        copy_plan(src, dst)
+        assert "state: new" in dst.read_text()
+
+
+class TestWritePlan:
+    def test_writes_valid_content(self, tmp_path):
+        from plan_io import write_plan
+        plan = tmp_path / ".plan"
+        content = "## State\nstate: scaffolded\nbranch: test\n\n## Queue\n(empty)\n"
+        write_plan(plan, content)
+        assert plan.read_text() == content
+
+    def test_rejects_content_without_state_section(self, tmp_path):
+        from plan_io import write_plan
+        plan = tmp_path / ".plan"
+        with pytest.raises(ValueError, match="missing ## State"):
+            write_plan(plan, "# Bad Plan\nno state section\n")
+
+    def test_atomic_write(self, tmp_path):
+        from plan_io import write_plan
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nstate: old\n")
+        write_plan(plan, "## State\nstate: new\n")
+        assert "state: new" in plan.read_text()
+        assert not (tmp_path / ".plan.tmp").exists()

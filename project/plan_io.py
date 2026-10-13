@@ -195,6 +195,34 @@ def write_fields(plan_path: Path, updates: dict[str, str]) -> None:
     tmp.replace(plan_path)
 
 
+def copy_plan(src: Path, dst: Path) -> None:
+    """Copy a .plan file from src to dst atomically."""
+    import shutil
+    tmp = dst.with_suffix(".plan.tmp")
+    shutil.copy2(src, tmp)
+    tmp.replace(dst)
+
+
+def write_plan(plan_path: Path, content: str) -> None:
+    """Write complete .plan content atomically. Validates ## State section exists."""
+    if "## State" not in content:
+        raise ValueError("Invalid .plan content: missing ## State section")
+    tmp = plan_path.with_suffix(".plan.tmp")
+    tmp.write_text(content)
+    tmp.replace(plan_path)
+
+
+def update_lifecycle_fields(plan_path: Path, state: str,
+                            evidence_era: bool = False) -> None:
+    """Update lifecycle state fields in .plan from authoritative source.
+
+    Preserves queue sections, deferred items, and non-lifecycle fields."""
+    updates: dict[str, str] = {"state": state}
+    if evidence_era:
+        updates["evidence-era"] = "true"
+    write_fields(plan_path, updates)
+
+
 def remove_plan(plan_path: Path) -> None:
     if plan_path.exists():
         plan_path.unlink()
