@@ -20,6 +20,11 @@ from typing import Callable
 from work_progress import update_progress as update_close_progress
 from shared_steps import StepDef, MAX_JUDGMENT_RETRIES, MAX_MECHANICAL_RETRIES
 
+_repo_root = str(Path(__file__).resolve().parent.parent)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+from verification.outcomes import VerifyResult
+
 
 def validate_requires(steps: list[StepDef]) -> None:
     step_names = {s.name for s in steps}
@@ -179,6 +184,45 @@ def apply_step_done(workspace: Path, step: str, produced: str | None = None,
         update_close_progress(workspace, f"{step}_produced", produced)
 
 
+def _yield_unknown_escalation(step_name: str, verification) -> dict[str, str]:
+    return {
+        "ACTION": "user_input",
+        "CONTEXT": "unknown_verification",
+        "STEP": step_name,
+        "CHECK": verification.check,
+        "RESULT": "unknown",
+        "EVIDENCE": json.dumps(verification.evidence),
+        "REASON": f"Verification '{verification.check}' returned UNKNOWN "
+                  f"after {MAX_MECHANICAL_RETRIES} retries",
+    }
+
+
+def _make_verify_fail_result(step_name: str, attempt: int,
+                              verification) -> dict[str, str]:
+    return {
+        "ACTION": "error",
+        "ERROR": "verify_failed",
+        "STEP": step_name,
+        "RETRY": str(attempt),
+        "CHECK": verification.check,
+        "EVIDENCE": json.dumps(verification.evidence),
+        "REASON": f"Verification '{verification.check}' returned FAIL",
+    }
+
+
+def _make_unknown_retry_result(step_name: str, attempt: int,
+                                verification) -> dict[str, str]:
+    return {
+        "ACTION": "error",
+        "ERROR": "unknown_verification",
+        "STEP": step_name,
+        "RETRY": str(attempt),
+        "CHECK": verification.check,
+        "EVIDENCE": json.dumps(verification.evidence),
+        "REASON": f"Verification '{verification.check}' returned UNKNOWN — retrying",
+    }
+
+
 def _make_error_result(step_key: str, attempt: int,
                        result: dict[str, str]) -> dict[str, str]:
     if attempt >= 3:
@@ -273,17 +317,26 @@ def run_loop(
             if ctx.done(step.name):
                 continue
 
-            if step.postcondition_fn and step.postcondition_fn(ctx):
-                _mark_done(ctx, step.name)
-                ctx.steps_executed.append(f"{step.name}:postcondition_skip")
-                continue
-
             attempt_key = f"{step.name}_mechanical_attempt"
             raw = ctx.progress.get(attempt_key, "0")
             try:
                 attempt = int(raw)
             except (ValueError, TypeError):
                 attempt = 0
+
+            if step.outcome_fn:
+                v = step.outcome_fn(ctx)
+                if v.result == VerifyResult.PASS:
+                    _mark_done(ctx, step.name)
+                    ctx.steps_executed.append(f"{step.name}:verify_skip")
+                    continue
+                if v.result == VerifyResult.UNKNOWN:
+                    attempt += 1
+                    update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                    if attempt >= MAX_MECHANICAL_RETRIES:
+                        return _yield_unknown_escalation(step.name, v)
+                    if not step.idempotent:
+                        return _make_unknown_retry_result(step.name, attempt, v)
 
             if execute_mechanical_fn:
                 result = execute_mechanical_fn(step, ctx)
@@ -309,21 +362,26 @@ def run_loop(
             if on_step_done:
                 on_step_done(step, ctx, result or {})
 
-            if step.postcondition_fn and not step.postcondition_fn(ctx):
-                attempt += 1
-                update_close_progress(ctx.workspace, attempt_key, str(attempt))
-                if attempt >= MAX_MECHANICAL_RETRIES:
-                    _mark_done(ctx, step.name, "skipped_error")
-                    ctx.steps_executed.append(f"{step.name}:POSTCONDITION_FAIL:skipped")
+            if step.outcome_fn:
+                v = step.outcome_fn(ctx)
+                if v.result == VerifyResult.PASS:
+                    _mark_done(ctx, step.name)
+                    ctx.steps_executed.append(step.name)
                     continue
-                ctx.steps_executed.append(f"{step.name}:POSTCONDITION_FAIL:{attempt}")
-                return {
-                    "ACTION": "error",
-                    "ERROR": "postcondition_failed",
-                    "STEP": step.name,
-                    "RETRY": str(attempt),
-                    "REASON": f"Step '{step.name}' executed but postcondition not met",
-                }
+                if v.result == VerifyResult.FAIL:
+                    attempt += 1
+                    update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                    if attempt >= MAX_MECHANICAL_RETRIES:
+                        _mark_done(ctx, step.name, "skipped_error")
+                        ctx.steps_executed.append(f"{step.name}:VERIFY_FAIL:skipped")
+                        continue
+                    return _make_verify_fail_result(step.name, attempt, v)
+                if v.result == VerifyResult.UNKNOWN:
+                    attempt += 1
+                    update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                    if attempt >= MAX_MECHANICAL_RETRIES:
+                        return _yield_unknown_escalation(step.name, v)
+                    return _make_unknown_retry_result(step.name, attempt, v)
             _mark_done(ctx, step.name)
             ctx.steps_executed.append(step.name)
             continue

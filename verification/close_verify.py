@@ -9,20 +9,18 @@ from pathlib import Path
 
 from verification import Finding
 from verification.close_checks import (
-    check_branch_merged,
-    check_branch_stamp,
     check_canonical_sync,
-    check_issues_closed,
     check_landed_completeness,
-    check_landed_marker,
-    check_main_pushed,
     check_no_open_findings,
     check_no_stale_scaffold,
-    check_on_main,
-    check_artifacts_promoted,
     check_slot_archive_status,
-    check_slot_marker,
     resolve_canonical_repos,
+)
+from verification.outcomes import (
+    verification_to_findings,
+    verify_branch_stamped, verify_push, verify_checkout_main,
+    verify_artifacts_promoted, verify_issues_closed,
+    verify_landed_marker, verify_slot_phase_complete,
 )
 
 BLOCKING_CATEGORIES = {
@@ -31,30 +29,34 @@ BLOCKING_CATEGORIES = {
 }
 
 
+def _v(name: str, verification) -> tuple[str, list[Finding]]:
+    return (name, verification_to_findings(verification))
+
+
 def _run_branch_checks(
     project: Path, workspace: Path, branch: str, base: str,
     covers: list[int] | None, issue_repo: str, on_main: bool,
 ) -> list[tuple[str, list[Finding]]]:
     checks: list[tuple[str, list[Finding]]] = []
     if on_main:
-        checks.append(("project_pushed", check_main_pushed(project, base)))
-        checks.append(("workspace_pushed", check_main_pushed(workspace, base)))
+        checks.append(_v("project_pushed", verify_push(project, base)))
+        checks.append(_v("workspace_pushed", verify_push(workspace, base)))
         checks.append(("no_open_findings", check_no_open_findings(workspace)))
         checks.append(("no_stale_scaffold", check_no_stale_scaffold(workspace)))
     else:
-        checks.append(("project_merged", check_branch_merged(project, branch, base)))
-        checks.append(("project_stamped", check_branch_stamp(project, branch, base)))
-        checks.append(("project_pushed", check_main_pushed(project, base)))
-        checks.append(("workspace_merged", check_branch_merged(workspace, branch, base)))
-        checks.append(("workspace_stamped", check_branch_stamp(workspace, branch, base, verify_sha=False)))
-        checks.append(("workspace_pushed", check_main_pushed(workspace, base)))
-        checks.append(("project_on_main", check_on_main(project)))
-        checks.append(("workspace_on_main", check_on_main(workspace)))
-        checks.append(("artifacts_promoted", check_artifacts_promoted(workspace, on_main)))
+        checks.append(_v("project_stamped", verify_branch_stamped(project, branch, base)))
+        checks.append(_v("project_pushed", verify_push(project, base)))
+        checks.append(_v("workspace_stamped", verify_branch_stamped(workspace, branch, base)))
+        checks.append(_v("workspace_pushed", verify_push(workspace, base)))
+        checks.append(_v("on_main", verify_checkout_main(project, workspace)))
+        checks.append(_v("artifacts_promoted",
+                         verify_artifacts_promoted(workspace, project, branch, base)))
         checks.append(("no_open_findings", check_no_open_findings(workspace)))
         checks.append(("no_stale_scaffold", check_no_stale_scaffold(workspace)))
     if covers and issue_repo:
-        checks.append(("issues_closed", check_issues_closed(issue_repo, covers)))
+        covers_str = ",".join(str(c) for c in covers)
+        checks.append(_v("issues_closed",
+                         verify_issues_closed(issue_repo, covers_str)))
     return checks
 
 
@@ -64,19 +66,20 @@ def _run_slot_checks(
     canonical_repos: dict[str, str] | None,
 ) -> list[tuple[str, list[Finding]]]:
     checks: list[tuple[str, list[Finding]]] = []
-    checks.append(("landed_marker", check_landed_marker(slot_dir)))
+    checks.append(_v("landed_marker", verify_landed_marker(slot_dir)))
     checks.append(("landed_completeness",
                     check_landed_completeness(slot_dir, repos=covers_repos, branch=branch)))
-    checks.append(("phase_a_marker", check_slot_marker(slot_dir, ".phase-a-complete")))
+    checks.append(_v("phase_a_marker",
+                      verify_slot_phase_complete(slot_dir, ".phase-a-complete")))
     if canonical_repos:
         for repo_name, orig_path in canonical_repos.items():
             checks.append((
                 f"canonical_sync_{repo_name}",
                 check_canonical_sync(slot_dir, repo_name, Path(orig_path), branch=branch, base=base),
             ))
-            checks.append((
+            checks.append(_v(
                 f"canonical_pushed_{repo_name}",
-                check_main_pushed(Path(orig_path), base),
+                verify_push(Path(orig_path), base),
             ))
     slot_num = slot_dir.name
     attic = str(slot_dir.parent / "attic" / slot_num)
@@ -90,7 +93,7 @@ def _is_blocking(check_name: str, findings: list[Finding]) -> bool:
     has_error = any(f.severity == "ERROR" for f in findings)
     if not has_error:
         return False
-    if check_name in ("landed_completeness", "project_merged", "project_stamped"):
+    if check_name in ("landed_completeness", "project_stamped"):
         return True
     if check_name.startswith("canonical_sync_"):
         return True

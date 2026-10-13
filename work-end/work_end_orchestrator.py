@@ -86,19 +86,12 @@ MECHANICAL_STEPS = None  # populated after STEPS is defined
 _verification_dir = str(Path(__file__).resolve().parent.parent / "verification")
 if _verification_dir not in sys.path:
     sys.path.insert(0, _verification_dir)
-from step_postconditions import (
-    rebase_postcondition,
-    push_postcondition,
-    promote_postcondition,
-    landed_marker_postcondition,
-    checkout_main_postcondition,
-    write_marker_postcondition,
-    cleanup_scaffold_postcondition,
-    issues_closed_postcondition,
-    promote_plan_next_postcondition,
-    content_landed_postcondition,
-    fork_next_postcondition,
-    checkout_fork_postcondition,
+from verification.outcomes import (
+    verify_content_landed, verify_push, compose_verifications,
+    verify_rebase, verify_artifacts_promoted, verify_issues_closed,
+    verify_checkout_main, verify_landed_marker, verify_slot_phase_complete,
+    verify_fork_next, verify_checkout_fork, verify_cleanup_scaffold,
+    verify_promote_plan_next,
 )
 
 _lib = Path.home() / ".claude" / "lib"
@@ -1202,7 +1195,7 @@ STEPS: list[StepDef] = [
             requires=("queue_decision",),
             skip_fn=_skip_fork_next,
             script_fn=_fork_next_script,
-            postcondition_fn=fork_next_postcondition),
+            outcome_fn=lambda ctx: verify_fork_next(ctx.workspace, ctx.progress)),
 
     # --- lifecycle: review -> verified ---
     StepDef("review_pass", "closing:review", "lifecycle",
@@ -1211,7 +1204,10 @@ STEPS: list[StepDef] = [
     # --- closing:verified ---
     StepDef("promote", "closing:verified", "mechanical",
             script_fn=_promote_script,
-            postcondition_fn=promote_postcondition),
+            outcome_fn=lambda ctx: verify_artifacts_promoted(
+                getattr(ctx, "current_repo_workspace", None) or ctx.workspace,
+                getattr(ctx, "current_repo_project", None) or ctx.project,
+                ctx.branch, ctx.base_branch)),
     StepDef("report_promote", "closing:verified", "mechanical",
             requires=("promote",),
             script_fn=_report_promote_script),
@@ -1224,7 +1220,9 @@ STEPS: list[StepDef] = [
     StepDef("rebase", "closing:promoted", "mechanical",
             modes=NOT_MAIN,
             script_fn=_rebase_script,
-            postcondition_fn=rebase_postcondition),
+            outcome_fn=lambda ctx: verify_rebase(
+                getattr(ctx, "current_repo_project", None) or ctx.project,
+                ctx.branch, ctx.base_branch)),
     StepDef("report_rebase", "closing:promoted", "mechanical",
             modes=NOT_MAIN,
             requires=("rebase",),
@@ -1244,11 +1242,20 @@ STEPS: list[StepDef] = [
             modes=SLOT_ONLY,
             requires=("squash",),
             script_fn=_write_marker_script,
-            postcondition_fn=write_marker_postcondition),
+            outcome_fn=lambda ctx: verify_slot_phase_complete(ctx.slot_path, ".phase-a-complete")),
     StepDef("land", "closing:promoted", "mechanical",
             requires=("squash",),
             script_fn=_land_script,
-            postcondition_fn=lambda ctx: push_postcondition(ctx) and content_landed_postcondition(ctx)),
+            outcome_fn=lambda ctx: compose_verifications("land",
+                verify_push(
+                    getattr(ctx, "current_repo_project", None) or ctx.project,
+                    ctx.base_branch),
+                verify_content_landed(
+                    getattr(ctx, "current_repo_project", None) or ctx.project,
+                    ctx.landed_shas.get(
+                        (getattr(ctx, "current_repo_project", None) or ctx.project).name, ""),
+                    ctx.base_branch)),
+            idempotent=False),
     StepDef("report_land", "closing:promoted", "mechanical",
             requires=("land",),
             script_fn=_report_land_script),
@@ -1269,7 +1276,7 @@ STEPS: list[StepDef] = [
     StepDef("write_landed", "closing:stamped", "mechanical",
             modes=SLOT_ONLY,
             script_fn=_write_landed_script,
-            postcondition_fn=landed_marker_postcondition),
+            outcome_fn=lambda ctx: verify_landed_marker(ctx.slot_path)),
     StepDef("verify", "closing:stamped", "mechanical",
             modes=NOT_SYNC,
             script_fn=_verify_script),
@@ -1282,7 +1289,7 @@ STEPS: list[StepDef] = [
             requires=("verify",),
             skip_fn=_skip_no_covers,
             script_fn=_close_issues_script,
-            postcondition_fn=issues_closed_postcondition),
+            outcome_fn=lambda ctx: verify_issues_closed(ctx.issue_repo, ctx.covers, ctx.plan_path)),
     StepDef("report_close_issues", "closing:stamped", "mechanical",
             modes=NOT_SYNC,
             requires=("close_issues",),
@@ -1291,7 +1298,9 @@ STEPS: list[StepDef] = [
     StepDef("upstream_push", "closing:stamped", "mechanical",
             skip_fn=_skip_no_upstream,
             script_fn=_upstream_push_script,
-            postcondition_fn=push_postcondition),
+            outcome_fn=lambda ctx: verify_push(
+                getattr(ctx, "current_repo_project", None) or ctx.project,
+                ctx.base_branch)),
     StepDef("archive_slot", "closing:stamped", "judgment",
             modes=SLOT_ONLY,
             skip_fn=_skip_multi_repo_partial_close,
@@ -1307,14 +1316,14 @@ STEPS: list[StepDef] = [
     StepDef("checkout_main", "closing:stamped", "mechanical",
             modes=BRANCH_SLOT,
             script_fn=_checkout_main_script,
-            postcondition_fn=checkout_main_postcondition),
+            outcome_fn=lambda ctx: verify_checkout_main(ctx.project, ctx.workspace)),
     StepDef("cleanup_stack", "closing:stamped", "mechanical",
             modes=BRANCH_SLOT,
             script_fn=_cleanup_stack_script),
     StepDef("cleanup", "closing:stamped", "mechanical",
             modes=TERMINAL,
             script_fn=_cleanup_scaffold_script,
-            postcondition_fn=cleanup_scaffold_postcondition),
+            outcome_fn=lambda ctx: verify_cleanup_scaffold(ctx.workspace)),
     StepDef("report_scaffold", "closing:stamped", "mechanical",
             modes=TERMINAL,
             requires=("cleanup",),
@@ -1323,7 +1332,7 @@ STEPS: list[StepDef] = [
             requires=("checkout_main",),
             skip_fn=_skip_checkout_fork,
             script_fn=_checkout_fork_script,
-            postcondition_fn=checkout_fork_postcondition),
+            outcome_fn=lambda ctx: verify_checkout_fork(ctx.workspace, ctx.progress)),
     StepDef("arc42_scan", "closing:stamped", "judgment",
             modes=TERMINAL,
             action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"}),
@@ -1345,7 +1354,7 @@ STEPS: list[StepDef] = [
     # --- continuation promotion (runs in all modes) ---
     StepDef("promote_plan_next", "closing:stamped", "mechanical",
             script_fn=_promote_plan_next_script,
-            postcondition_fn=promote_plan_next_postcondition),
+            outcome_fn=lambda ctx: verify_promote_plan_next(ctx.workspace)),
 
     StepDef("advance_queue", "closing:stamped", "mechanical",
             modes=BRANCH_SLOT,
