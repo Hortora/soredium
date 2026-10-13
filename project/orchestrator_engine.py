@@ -231,6 +231,18 @@ def run_loop(
     step_by_name = {s.name: s for s in steps}
 
     for step in steps:
+        from shared_steps import ALL_DISPOSITIONS
+        if step.dispositions != ALL_DISPOSITIONS and hasattr(ctx, 'repos') and ctx.repos:
+            has_matching = any(
+                r.state.disposition in step.dispositions
+                for r in ctx.repos
+                if r.state.repo_type in step.disposition_repo_types
+            )
+            if not has_matching:
+                _mark_done(ctx, step.name, "skipped")
+                ctx.steps_executed.append(f"{step.name}:disposition_skip")
+                continue
+
         if step.skip_fn and step.skip_fn(ctx):
             continue
 

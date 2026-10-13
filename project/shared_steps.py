@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from progress import Progress
+from repo_state import RepoDisposition, RepoType
 
 
 class PipelineMode(Enum):
@@ -25,6 +26,8 @@ class PipelineMode(Enum):
 
 
 ALL_MODES = frozenset(PipelineMode)
+ALL_DISPOSITIONS = frozenset(RepoDisposition)
+ALL_REPO_TYPES = frozenset(RepoType)
 
 
 @dataclass
@@ -41,6 +44,8 @@ class StepDef:
     to_state: str | None = None
     event: str | None = None
     modes: frozenset[PipelineMode] = field(default_factory=lambda: ALL_MODES)
+    dispositions: frozenset[RepoDisposition] = field(default_factory=lambda: ALL_DISPOSITIONS)
+    disposition_repo_types: frozenset[RepoType] = field(default_factory=lambda: ALL_REPO_TYPES)
     requires: tuple[str, ...] = ()
     staleness_relevant: bool = True
 
