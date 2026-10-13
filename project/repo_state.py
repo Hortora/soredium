@@ -149,7 +149,17 @@ def classify_repos(
         from slot_io import parse_slot
         info = parse_slot(slot_path)
         if info is None:
-            return []
+            repos = []
+            if slot_path.is_dir():
+                for entry in sorted(slot_path.iterdir()):
+                    if not entry.is_dir() or not (entry / ".git").exists():
+                        continue
+                    if (entry / ".workspace").exists():
+                        continue
+                    state = classify_repo(entry, branch, base_branch, RepoType.CLONE)
+                    if state is not None:
+                        repos.append(state)
+            return repos
         repos = []
         for name in info.repos:
             repo_dir = slot_path / name
