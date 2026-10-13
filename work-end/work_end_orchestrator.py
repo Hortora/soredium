@@ -38,7 +38,8 @@ from close_progress import (
     delete_close_progress,
     is_stale,
 )
-from shared_steps import StepDef, PipelineMode, ALL_MODES
+from shared_steps import StepDef, PipelineMode, ALL_MODES, ALL_DISPOSITIONS, ALL_REPO_TYPES
+from repo_state import RepoDisposition, RepoType
 from progress import Progress
 
 CLOSE_LOG_FILE = ".close-log.jsonl"
@@ -274,7 +275,6 @@ def _skip_multi_repo_partial_close(ctx: OrchestratorContext) -> bool:
     if not ctx.in_slot:
         return False
     if len(ctx.repos) > 1:
-        from repo_state import RepoDisposition
         for r in ctx.repos:
             if r.state.disposition == RepoDisposition.HAS_WORK:
                 if ctx.progress.get(f"land:{r.state.name}") not in ("done", "skipped", "skipped_error"):
@@ -303,30 +303,12 @@ def _skip_no_covers(ctx: OrchestratorContext) -> bool:
 def _skip_no_upstream(ctx: OrchestratorContext) -> bool:
     if not ctx.repos:
         return True
-    from repo_state import RepoType
     return not any(r.state.has_upstream for r in ctx.repos if r.state.repo_type == RepoType.PROJECT)
 
 
 def _upstream_push_script(ctx):
     return [sys.executable, str(WORK_END_DIR / "upstream_push.py"),
             f"project={ctx.project}", f"base_branch={ctx.base_branch}"]
-
-
-def _skip_empty_branch(ctx) -> bool:
-    """Skip review/audit steps when branch has no code changes."""
-    if ctx.on_main:
-        return False
-    if not ctx.repos:
-        return False
-    from repo_state import RepoDisposition, RepoType
-    project_repos = [r for r in ctx.repos if r.state.repo_type == RepoType.PROJECT]
-    if not project_repos:
-        return False
-    return all(
-        r.state.disposition in (RepoDisposition.NO_BRANCH, RepoDisposition.EMPTY_BRANCH,
-                                RepoDisposition.ALREADY_LANDED)
-        for r in project_repos
-    )
 
 
 def _is_sweep_deselected(step_name: str):
@@ -1148,31 +1130,38 @@ STEPS: list[StepDef] = [
     StepDef("report_init", "closing:review", "mechanical",
             script_fn=_report_init_script),
     StepDef("code_review", "closing:review", "judgment",
-            skip_fn=_skip_empty_branch,
+            dispositions=frozenset({RepoDisposition.HAS_WORK}),
+            disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=_diff_range_context,
             verify_fn=_verify_produced_required),
     StepDef("branch_audit_conformance", "closing:review", "judgment",
-            skip_fn=_skip_empty_branch,
+            dispositions=frozenset({RepoDisposition.HAS_WORK}),
+            disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=_dimension_context("conformance"),
             verify_fn=_verify_produced_required),
     StepDef("branch_audit_coherence", "closing:review", "judgment",
-            skip_fn=_skip_empty_branch,
+            dispositions=frozenset({RepoDisposition.HAS_WORK}),
+            disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=_dimension_context("coherence"),
             verify_fn=_verify_produced_required),
     StepDef("branch_audit_structure", "closing:review", "judgment",
-            skip_fn=_skip_empty_branch,
+            dispositions=frozenset({RepoDisposition.HAS_WORK}),
+            disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=_dimension_context("structure"),
             verify_fn=_verify_produced_required),
     StepDef("branch_audit_robustness", "closing:review", "judgment",
-            skip_fn=_skip_empty_branch,
+            dispositions=frozenset({RepoDisposition.HAS_WORK}),
+            disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=_dimension_context("robustness"),
             verify_fn=_verify_produced_required),
     StepDef("loose_ends", "closing:review", "judgment",
-            skip_fn=_skip_empty_branch,
+            dispositions=frozenset({RepoDisposition.HAS_WORK}),
+            disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=_loose_ends_context,
             verify_fn=_verify_produced_required),
     StepDef("forcing_function", "closing:review", "judgment",
-            skip_fn=_skip_empty_branch,
+            dispositions=frozenset({RepoDisposition.HAS_WORK}),
+            disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=_forcing_function_context,
             verify_fn=_verify_forcing_function),
     StepDef("sweep_config", "closing:review", "judgment",
@@ -1232,7 +1221,8 @@ STEPS: list[StepDef] = [
     StepDef("squash", "closing:promoted", "judgment",
             modes=NOT_MAIN,
             requires=("rebase",),
-            skip_fn=_skip_empty_branch,
+            dispositions=frozenset({RepoDisposition.HAS_WORK}),
+            disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=lambda ctx: {"REPOS": ctx.project.name},
             verify_fn=_verify_squash),
     StepDef("report_squash", "closing:promoted", "mechanical",
@@ -1752,8 +1742,6 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
     if ctx.per_repo_done(step.name):
         return {}
 
-    from repo_state import RepoDisposition
-
     failures: dict[str, dict[str, str]] = {}
     retryable_failure: tuple[str, int, dict[str, str]] | None = None
 
@@ -1844,7 +1832,6 @@ def _close_per_repo_judgment(step: StepDef, ctx: OrchestratorContext) -> dict[st
     if step.name not in PER_REPO_SWEEP_STEPS or not ctx.in_slot or not ctx.slot_repos:
         return None
     if ctx.repos:
-        from repo_state import RepoDisposition
         changed_repos = {r.state.name for r in ctx.repos
                          if r.state.disposition == RepoDisposition.HAS_WORK}
         for repo_name in ctx.slot_repos:

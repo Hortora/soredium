@@ -194,35 +194,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
 
 
 class TestSkipPredicates:
-    def test_skip_empty_branch_with_no_branch(self):
-        from repo_state import RepoDisposition
-        from work_end_orchestrator import _skip_empty_branch
-
-        ctx = MagicMock()
-        ctx.on_main = False
-        ctx.repos = [_make_repo_state(RepoDisposition.NO_BRANCH)]
-
-        assert _skip_empty_branch(ctx) is True
-
-    def test_skip_empty_branch_with_work(self):
-        from repo_state import RepoDisposition
-        from work_end_orchestrator import _skip_empty_branch
-
-        ctx = MagicMock()
-        ctx.on_main = False
-        ctx.repos = [_make_repo_state(RepoDisposition.HAS_WORK)]
-
-        assert _skip_empty_branch(ctx) is False
-
-    def test_skip_empty_branch_on_main(self):
-        from repo_state import RepoDisposition
-        from work_end_orchestrator import _skip_empty_branch
-
-        ctx = MagicMock()
-        ctx.on_main = True
-        ctx.repos = [_make_repo_state(RepoDisposition.NO_BRANCH)]
-
-        assert _skip_empty_branch(ctx) is False
+    def test_skip_empty_branch_replaced_by_dispositions(self):
+        """_skip_empty_branch no longer exists — replaced by StepDef.dispositions."""
+        import work_end_orchestrator
+        assert not hasattr(work_end_orchestrator, "_skip_empty_branch")
 
     def test_skip_no_upstream_without(self):
         from repo_state import RepoDisposition

@@ -141,3 +141,32 @@ def test_default_dispositions_never_filter(tmp_path):
 
     result = run_loop([step], ctx)
     assert result.get("ACTION") == "promote"
+
+
+def test_review_steps_have_disposition_declarations():
+    _workend_dir = str(Path(__file__).resolve().parent.parent / "work-end")
+    if _workend_dir not in sys.path:
+        sys.path.insert(0, _workend_dir)
+    from work_end_orchestrator import STEPS
+
+    review_names = {
+        "code_review", "branch_audit_conformance",
+        "branch_audit_coherence", "branch_audit_structure",
+        "branch_audit_robustness",
+    }
+    for step in STEPS:
+        if step.name in review_names:
+            assert RepoDisposition.HAS_WORK in step.dispositions, (
+                f"{step.name} should declare dispositions={{HAS_WORK}}"
+            )
+            assert RepoType.PROJECT in step.disposition_repo_types, (
+                f"{step.name} should filter by PROJECT repo type"
+            )
+
+
+def test_skip_empty_branch_removed():
+    _workend_dir = str(Path(__file__).resolve().parent.parent / "work-end")
+    if _workend_dir not in sys.path:
+        sys.path.insert(0, _workend_dir)
+    import work_end_orchestrator
+    assert not hasattr(work_end_orchestrator, "_skip_empty_branch")
