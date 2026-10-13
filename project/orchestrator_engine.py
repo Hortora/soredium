@@ -230,8 +230,8 @@ def run_loop(
     active_step_names = {s.name for s in steps}
     step_by_name = {s.name: s for s in steps}
 
+    from shared_steps import ALL_DISPOSITIONS
     for step in steps:
-        from shared_steps import ALL_DISPOSITIONS
         if step.dispositions != ALL_DISPOSITIONS and hasattr(ctx, 'repos') and ctx.repos:
             has_matching = any(
                 r.state.disposition in step.dispositions

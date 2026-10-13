@@ -10,7 +10,17 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+import sys as _sys
+
 from git_util import git
+
+
+def _get_lifecycle_state(conn, work_item_id):
+    _lib = str(Path.home() / ".claude" / "lib")
+    if _lib not in _sys.path:
+        _sys.path.insert(0, _lib)
+    import worklog
+    return worklog.get_lifecycle_state(conn, work_item_id)
 
 
 class RepoType(Enum):
@@ -213,12 +223,7 @@ def build_repo_context(
     lifecycle_state = None
     if conn is not None and work_item_id is not None:
         try:
-            import sys as _sys
-            _lib = str(Path.home() / ".claude" / "lib")
-            if _lib not in _sys.path:
-                _sys.path.insert(0, _lib)
-            import worklog
-            lifecycle_state = worklog.get_lifecycle_state(conn, work_item_id)
+            lifecycle_state = _get_lifecycle_state(conn, work_item_id)
         except Exception:
             pass
 
