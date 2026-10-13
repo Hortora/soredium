@@ -110,7 +110,7 @@ try:
     import worklog as _wl
 except ImportError:
     _wl = None
-from plan_io import parse_covers
+from plan_io import copy_plan, parse_covers, remove_plan
 from slot_io import parse_slot as _parse_slot
 
 
@@ -553,7 +553,7 @@ def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
         state = read_plan(ws_plan)
         if state is None or not has_uncompleted_items(state):
             if slot_plan.exists() and not ctx.dry_run:
-                slot_plan.unlink()
+                remove_plan(slot_plan)
             return {"ELEVATED": "no", "REASON": "queue_drained"}
     except Exception:
         return {"ELEVATED": "no", "REASON": "parse_error"}
@@ -570,7 +570,7 @@ def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
                 commit_transition(ws_plan, result)
             except Exception:
                 pass
-        _shutil.copy2(ws_plan, slot_plan)
+        copy_plan(ws_plan, slot_plan)
     elif ctx.call_log is not None:
         ctx.call_log.append(["(internal)", "elevate_plan", str(slot_plan)])
 
@@ -597,8 +597,8 @@ def _promote_plan_next_inline(ctx: OrchestratorContext) -> dict[str, str]:
     promoted = []
 
     if plan_next.exists():
-        _shutil.copy2(plan_next, ctx.workspace / ".plan")
-        plan_next.unlink()
+        copy_plan(plan_next, ctx.workspace / ".plan")
+        remove_plan(plan_next)
         subprocess.run(
             ["git", "-C", str(ctx.workspace), "add", ".plan"],
             capture_output=True, timeout=10,
@@ -680,8 +680,7 @@ def _cleanup_close_artifacts(workspace: Path) -> None:
         if p.exists():
             p.unlink()
     plan = workspace / ".plan"
-    if plan.exists():
-        plan.unlink()
+    remove_plan(plan)
     for squash_plan in workspace.glob(".squash-plan-*.json"):
         squash_plan.unlink()
 

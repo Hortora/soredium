@@ -17,9 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import sqlite3
 import subprocess as _sp
 
-from plan_io import read_field, write_field
+from plan_io import read_field, remove_plan, update_lifecycle_fields, write_field
 import sys
 from pathlib import Path
 from typing import Optional
@@ -288,20 +289,24 @@ def _emit_to_worklog(
     repo_path: str,
     metadata: Optional[dict],
 ) -> None:
-    """Best-effort worklog emission. Never blocks."""
+    """Emit lifecycle event to worklog DB.
+    Connection failures degrade gracefully (DB is local infrastructure).
+    Write failures within an established connection propagate."""
+    import os
+    scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import worklog
+
+    db_path = os.environ.get("WORKLOG_DB")
     try:
-        import os
-        scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        import worklog
-
-        db_path = os.environ.get("WORKLOG_DB")
         conn = worklog.connect(db_path) if db_path else worklog.connect()
-
+    except (OSError, sqlite3.OperationalError) as e:
+        print(f"WARN=worklog_unreachable detail={e}")
+        return
+    try:
         branch = _read_branch(plan_path)
         if not branch:
-            conn.close()
             return
 
         wid = worklog.find_work_item(conn, branch, repo_path)
@@ -323,9 +328,8 @@ def _emit_to_worklog(
             repo_path=repo_path,
             metadata=event_meta,
         )
+    finally:
         conn.close()
-    except Exception as e:
-        print(f"WARN=worklog_error detail={e}")
 
 
 # --- Evidence gating ---
@@ -388,32 +392,13 @@ def _read_evidence_era(plan_path: Path) -> bool:
 
 
 def _write_evidence_era(plan_path: Path) -> None:
-    """Mark the current closing sequence as evidence-era."""
+    """Mark the current closing sequence as evidence-era via plan_io."""
     if not plan_path.exists():
         return
     content = plan_path.read_text()
     if 'evidence-era: true' in content:
         return
-    lines = content.splitlines()
-    in_state = False
-    insert_idx = None
-    for i, line in enumerate(lines):
-        if line.strip() == '## State':
-            in_state = True
-            continue
-        if line.startswith('## '):
-            if in_state:
-                insert_idx = i
-                break
-            in_state = False
-            continue
-        if in_state and line.startswith('state:'):
-            insert_idx = i + 1
-    if insert_idx is not None:
-        lines.insert(insert_idx, 'evidence-era: true')
-        tmp_path = plan_path.parent / '.plan.tmp'
-        tmp_path.write_text('\n'.join(lines) + '\n')
-        tmp_path.replace(plan_path)
+    write_field(plan_path, 'evidence-era', 'true')
 
 
 def commit_transition(
@@ -473,8 +458,11 @@ def commit_transition(
     if repo_path:
         _emit_to_worklog(plan_path, result, repo_path, emit_metadata or None)
 
+    if result.new_state != 'idle' and plan_path.exists():
+        update_lifecycle_fields(plan_path, state=result.new_state)
+
     if result.new_state == 'idle' and result.from_state != 'idle':
-        plan_path.unlink(missing_ok=True)
+        remove_plan(plan_path)
 
 
 _DEFAULT_EXCLUDES = [

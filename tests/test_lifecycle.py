@@ -1417,3 +1417,117 @@ class TestIssueCycleTransition:
         _write_plan(meta, state="active", branch="issue-1-test")
         with pytest.raises(InvalidTransition):
             transition(meta, "issue_cycle")
+
+
+class TestPlanRegeneration:
+    """commit_transition regenerates .plan lifecycle fields after every transition."""
+
+    def test_regenerates_state_after_transition(self, tmp_path, monkeypatch):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+
+        calls = []
+        import plan_io as _plan_io
+        import lifecycle
+        original = _plan_io.update_lifecycle_fields
+
+        def tracking(path, state, evidence_era=False):
+            calls.append(state)
+            return original(path, state, evidence_era=evidence_era)
+
+        monkeypatch.setattr(lifecycle, "update_lifecycle_fields", tracking)
+
+        result = transition(plan, "work_pause")
+        commit_transition(plan, result)
+
+        assert "paused" in calls
+        assert read_state(plan) == "paused"
+
+    def test_preserves_queue_during_regeneration(self, tmp_path, monkeypatch):
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan — test\n\n"
+            "## State\n"
+            "branch: issue-42-foo\n"
+            "state: active\n"
+            "date: 2026-08-03\n\n"
+            "## Queue\n"
+            "- [ ] hortora/soredium#42 — implement widget ← active\n"
+            "- [ ] hortora/soredium#43 — add tests\n"
+        )
+
+        result = transition(plan, "work_pause")
+        commit_transition(plan, result)
+
+        content = plan.read_text()
+        assert "state: paused" in content
+        assert "#42" in content
+        assert "#43" in content
+
+    def test_no_regeneration_on_idle_transition(self, tmp_path, monkeypatch):
+        """Regeneration should not run when transitioning to idle (plan gets removed)."""
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:stamped")
+
+        calls = []
+        import plan_io as _plan_io
+        import lifecycle
+        original = _plan_io.update_lifecycle_fields
+
+        def tracking(path, state, evidence_era=False):
+            calls.append(state)
+            return original(path, state, evidence_era=evidence_era)
+
+        monkeypatch.setattr(lifecycle, "update_lifecycle_fields", tracking)
+
+        result = TransitionResult(
+            from_state="closing:stamped", new_state="idle", event="branch_close",
+        )
+        commit_transition(plan, result)
+
+        assert "idle" not in calls
+        assert not plan.exists()
+
+
+class TestBypassClosure:
+    """lifecycle.py must route .plan writes through plan_io, not direct manipulation."""
+
+    def test_write_evidence_era_uses_plan_io(self, tmp_path, monkeypatch):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="active")
+
+        calls = []
+        import lifecycle
+        original_write_field = lifecycle.write_field
+
+        def tracking_write_field(path, field_name, value):
+            calls.append((field_name, value))
+            return original_write_field(path, field_name, value)
+
+        monkeypatch.setattr(lifecycle, "write_field", tracking_write_field)
+        _write_evidence_era(plan)
+
+        assert ("evidence-era", "true") in calls
+        assert "evidence-era: true" in plan.read_text()
+
+    def test_commit_transition_to_idle_uses_plan_io_remove(self, tmp_path, monkeypatch):
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:stamped")
+
+        calls = []
+        import lifecycle
+        original_remove = lifecycle.remove_plan
+
+        def tracking_remove(path):
+            calls.append(str(path))
+            return original_remove(path)
+
+        monkeypatch.setattr(lifecycle, "remove_plan", tracking_remove)
+
+        result = TransitionResult(
+            from_state="closing:stamped", new_state="idle", event="branch_close",
+        )
+        commit_transition(plan, result)
+
+        assert len(calls) == 1
+        assert not plan.exists()

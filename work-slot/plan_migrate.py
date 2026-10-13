@@ -16,6 +16,10 @@ from pathlib import Path
 _slot_dir = str(Path(__file__).parent)
 if _slot_dir not in sys.path:
     sys.path.insert(0, _slot_dir)
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from plan_io import write_plan
 
 
 def _parse_meta(meta_path: Path) -> dict[str, str]:
@@ -161,7 +165,7 @@ def migrate_if_needed(design_dir: Path) -> bool:
         content = build_plan_content(
             meta.get("branch", "migrated"), items,
             meta.get("date", ""), state=meta)
-        plan_path.write_text(content)
+        write_plan(plan_path, content)
         epic_path.unlink()
     else:
         issue_repo = meta.get("issue-repo", "")
@@ -169,7 +173,7 @@ def migrate_if_needed(design_dir: Path) -> bool:
         content = build_plan_content(
             meta.get("branch", "migrated"), items,
             meta.get("date", ""), state=meta)
-        plan_path.write_text(content)
+        write_plan(plan_path, content)
 
     meta_path.unlink()
     return True

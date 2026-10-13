@@ -53,7 +53,7 @@ if _project_dir not in sys.path:
 _soredium_root = str(Path(__file__).resolve().parent.parent)
 if _soredium_root not in sys.path:
     sys.path.insert(0, _soredium_root)
-from plan_io import parse_covers
+from plan_io import parse_covers, write_field, write_plan
 
 
 REQUIRED = {"branch", "project-sha"}
@@ -86,13 +86,7 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
     if not force and plan_path.exists() and journal_path.exists():
         content = plan_path.read_text()
         if "## State" in content and "\nstate:" not in content:
-            lines = content.splitlines()
-            patched = []
-            for line in lines:
-                patched.append(line)
-                if line.strip() == "## State":
-                    patched.append("state: active")
-            plan_path.write_text("\n".join(patched) + "\n")
+            write_field(plan_path, "state", "active")
         return ScaffoldResult(
             plan_path=str(plan_path),
             journal_path=str(journal_path),
@@ -106,7 +100,7 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
         covers = issue
 
     if plan_content:
-        plan_path.write_text(plan_content)
+        write_plan(plan_path, plan_content)
     else:
         from plan_manager import build_plan_content, QueueItem, IssueRef
 
@@ -127,7 +121,7 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
                                title=f"Issue #{issue}", active=True)]
         else:
             items = []
-        plan_path.write_text(build_plan_content(branch, items, today, state=state))
+        write_plan(plan_path, build_plan_content(branch, items, today, state=state))
 
     journal_path.write_text(f"# Design Journal — {branch}\n")
 

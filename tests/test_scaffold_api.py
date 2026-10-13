@@ -65,10 +65,11 @@ def test_scaffold_force_overwrites():
 def test_scaffold_with_plan_content():
     with tempfile.TemporaryDirectory() as tmp:
         ws = Path(tmp)
+        content = "# Custom Plan\n\n## State\nstate: scaffolded\nbranch: issue-42\n\n## Queue\n(empty)\n"
         result = scaffold(ws, branch="issue-42", project_sha="abc123",
-                         plan_content="# Custom Plan\n")
+                         plan_content=content)
         plan = Path(result.plan_path)
-        assert plan.read_text() == "# Custom Plan\n"
+        assert plan.read_text() == content
 
 
 def test_scaffold_covers_defaults_to_issue():
@@ -121,3 +122,59 @@ def test_scaffold_result_has_no_meta_path():
         result = scaffold(ws, branch="issue-42", project_sha="abc123")
         assert not hasattr(result, 'meta_path')
         assert result.plan_path is not None
+
+
+class TestBypassClosure:
+    """scaffold must route .plan writes through plan_io."""
+
+    def test_new_plan_uses_plan_io_write_plan(self, monkeypatch):
+        import scaffold as _scaffold
+        calls = []
+        original_write_plan = _scaffold.write_plan
+
+        def tracking(path, content):
+            calls.append(str(path))
+            return original_write_plan(path, content)
+
+        monkeypatch.setattr(_scaffold, "write_plan", tracking)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            scaffold(ws, branch="issue-42", project_sha="abc123",
+                     issue="42", issue_repo="org/repo")
+            assert len(calls) == 1
+
+    def test_raw_content_uses_plan_io_write_plan(self, monkeypatch):
+        import scaffold as _scaffold
+        calls = []
+        original_write_plan = _scaffold.write_plan
+
+        def tracking(path, content):
+            calls.append(str(path))
+            return original_write_plan(path, content)
+
+        monkeypatch.setattr(_scaffold, "write_plan", tracking)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            scaffold(ws, branch="issue-42", project_sha="abc123",
+                     plan_content="## State\nstate: scaffolded\n\n## Queue\n")
+            assert len(calls) == 1
+
+    def test_state_patch_uses_plan_io_write_field(self, monkeypatch):
+        import scaffold as _scaffold
+        calls = []
+        original_write_field = _scaffold.write_field
+
+        def tracking(path, field, value):
+            calls.append((field, value))
+            return original_write_field(path, field, value)
+
+        monkeypatch.setattr(_scaffold, "write_field", tracking)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / ".plan").write_text("## State\nbranch: test\n\n## Queue\n")
+            (ws / "JOURNAL.md").write_text("# Journal\n")
+            scaffold(ws, branch="test", project_sha="abc123")
+            assert ("state", "active") in calls

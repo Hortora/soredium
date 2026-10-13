@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
 REPO_MAP = {
     "engine": "casehubio/engine",
@@ -169,7 +170,8 @@ def inject_issue_repo(plan_path: Path, repo: str) -> bool:
             new_lines.append(line)
 
     if injected:
-        plan_path.write_text("\n".join(new_lines))
+        from plan_io import write_plan
+        write_plan(plan_path, "\n".join(new_lines))
     return injected
 
 

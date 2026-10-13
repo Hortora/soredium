@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from plan_io import write_plan
+
 
 def _parse_meta(meta_path: Path) -> dict[str, str]:
     meta: dict[str, str] = {}
@@ -118,7 +120,7 @@ def migrate(root: Path) -> int:
         plan_content += f"\n## Queue\n{queue_line}\n"
 
     new_plan = meta_path.parent / ".plan"
-    new_plan.write_text(plan_content)
+    write_plan(new_plan, plan_content)
 
     _git_rm(meta_path)
 

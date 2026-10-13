@@ -410,9 +410,11 @@ def rewrite_plan(plan_path: Path, tree: PlanTree) -> None:
         deferred=tree.deferred,
         state=tree.state,
     )
-    tmp_path = plan_path.parent / '.plan.tmp'
-    tmp_path.write_text(content)
-    tmp_path.replace(plan_path)
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in _sys.path:
+        _sys.path.insert(0, _project_dir)
+    from plan_io import write_plan
+    write_plan(plan_path, content)
 
 
 def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
@@ -710,7 +712,11 @@ def create_main_plan(workspace_path: Path, items: list[dict],
             active=(i == 0),
         ))
     content = build_plan_content(project_name, queue_items, str(date.today()))
-    plan_path.write_text(content)
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in _sys.path:
+        _sys.path.insert(0, _project_dir)
+    from plan_io import write_plan
+    write_plan(plan_path, content)
     return plan_path
 
 
