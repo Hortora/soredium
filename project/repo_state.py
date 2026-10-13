@@ -166,3 +166,66 @@ def classify_repos(
         if state is not None:
             result.append(state)
     return result
+
+
+@dataclass(frozen=True)
+class RepoContext:
+    state: RepoState
+    tree_sha: str
+    main_tree_sha: str
+    remote_synced: bool
+    lifecycle_state: str | None
+
+
+def build_repo_context(
+    state: RepoState,
+    base_branch: str,
+    conn=None,
+    work_item_id: int | None = None,
+) -> RepoContext:
+    tree_sha = ""
+    if state.branch:
+        result = git(state.path, "rev-parse", f"{state.branch}^{{tree}}")
+        if result.returncode == 0:
+            tree_sha = result.stdout.strip()
+
+    main_result = git(state.path, "rev-parse", f"{base_branch}^{{tree}}")
+    main_tree_sha = main_result.stdout.strip() if main_result.returncode == 0 else ""
+
+    local_main = git(state.path, "rev-parse", base_branch)
+    origin_main = git(state.path, "rev-parse", f"origin/{base_branch}")
+    remote_synced = (
+        local_main.returncode == 0
+        and origin_main.returncode == 0
+        and local_main.stdout.strip() == origin_main.stdout.strip()
+    )
+
+    lifecycle_state = None
+    if conn is not None and work_item_id is not None:
+        try:
+            import sys as _sys
+            _lib = str(Path.home() / ".claude" / "lib")
+            if _lib not in _sys.path:
+                _sys.path.insert(0, _lib)
+            import worklog
+            lifecycle_state = worklog.get_lifecycle_state(conn, work_item_id)
+        except Exception:
+            pass
+
+    return RepoContext(
+        state=state,
+        tree_sha=tree_sha,
+        main_tree_sha=main_tree_sha,
+        remote_synced=remote_synced,
+        lifecycle_state=lifecycle_state,
+    )
+
+
+def build_repo_contexts(
+    repos: list[RepoState],
+    base_branch: str,
+    conn=None,
+    work_item_id: int | None = None,
+) -> list[RepoContext]:
+    return [build_repo_context(r, base_branch, conn, work_item_id)
+            for r in repos]
