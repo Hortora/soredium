@@ -211,6 +211,19 @@ def cleanup_stack(workspace: str, params: dict[str, str]) -> int:
     return 0
 
 
+def _abort_rebase_if_needed(repo_path: str) -> None:
+    rebase_dir = Path(repo_path) / ".git" / "rebase-merge"
+    rebase_apply = Path(repo_path) / ".git" / "rebase-apply"
+    if rebase_dir.exists() or rebase_apply.exists():
+        git(repo_path, "rebase", "--abort")
+
+
+def _safe_pull_rebase(repo_path: str, remote: str, branch: str = "main") -> None:
+    r = git(repo_path, "pull", "--rebase", remote, branch)
+    if r.returncode != 0:
+        _abort_rebase_if_needed(repo_path)
+
+
 def checkout_main(project: str, workspace: str) -> int:
     proj = Path(project)
     ws = Path(workspace)
@@ -224,10 +237,9 @@ def checkout_main(project: str, workspace: str) -> int:
         print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
         return 1
 
-    # Commit any dirty state before switching — the orchestrator modifies
-    # workspace files (.plan, .land-ledger.jsonl) during close, and uncommitted
-    # changes block git checkout.
     for repo_path, label in [(project, "project"), (workspace, "workspace")]:
+        _abort_rebase_if_needed(repo_path)
+
         status = subprocess.run(
             ["git", "-C", repo_path, "status", "--porcelain"],
             capture_output=True, text=True,
@@ -236,19 +248,23 @@ def checkout_main(project: str, workspace: str) -> int:
             git(repo_path, "add", "-A")
             git(repo_path, "commit", "-m", "chore: commit lifecycle state before branch switch")
 
-    # Checkout main in both repos
-    for repo_path, label in [(project, "project"), (workspace, "workspace")]:
         r = git(repo_path, "checkout", "main")
         if r.returncode != 0:
             print(f"ERROR=checkout_failed")
             print(f"ERROR_DETAIL=Failed to checkout main in {label}: {r.stderr.strip()}")
             return 1
 
-    # Pull --rebase from blessed remote (non-fatal if fails — no remote)
     fork_remote, blessed_remote = detect_topology(project)
     proj_remote = blessed_remote if blessed_remote else fork_remote or "origin"
-    git(project, "pull", "--rebase", proj_remote, "main")
-    git(workspace, "pull", "--rebase", "origin", "main")
+    _safe_pull_rebase(project, proj_remote)
+    _safe_pull_rebase(workspace, "origin")
+
+    for repo_path, label in [(project, "project"), (workspace, "workspace")]:
+        head = git(repo_path, "rev-parse", "--abbrev-ref", "HEAD")
+        if head.stdout.strip() != "main":
+            print(f"ERROR=not_on_main")
+            print(f"ERROR_DETAIL={label} HEAD is '{head.stdout.strip()}', expected 'main'")
+            return 1
 
     print("SWITCHED=yes")
     return 0
