@@ -16,7 +16,7 @@ from judgment import StepType
 
 
 def _disable_postconditions(monkeypatch):
-    """Disable postcondition checks on all STEPS for tests that mock _run_script.
+    """Disable verify_fn and outcome_fn on all STEPS for tests that mock _run_script.
 
     Tests that mock _run_script don't produce real side effects (no git repos,
     no .artifacts-promoted files), so postcondition checks always fail. This
@@ -24,8 +24,10 @@ def _disable_postconditions(monkeypatch):
     """
     from work_end_orchestrator import STEPS
     for step in STEPS:
-        if step.postcondition_fn is not None:
-            monkeypatch.setattr(step, "postcondition_fn", None)
+        if step.verify_fn is not None:
+            monkeypatch.setattr(step, "verify_fn", None)
+        if step.outcome_fn is not None:
+            monkeypatch.setattr(step, "outcome_fn", None)
 
 
 class TestRunScript:
@@ -267,7 +269,8 @@ class TestPostconditionVerification:
         audit.mkdir()
         finding = {"status": "open", "detail": "test bug", "check": "t", "branch": "issue-271-test"}
         (audit / "findings.jsonl").write_text(json.dumps(finding) + "\n")
-        result = self._run(tmp_path, step_done="forcing_function")
+        result = self._run(tmp_path, step_done="forcing_function",
+                           produced="0", evidence='{"open_findings": 0}')
         assert result["ERROR"] == "postcondition_failed"
         assert "open" in result["REASON"].lower()
 
@@ -313,7 +316,8 @@ class TestPostconditionVerification:
             {"status": "open", "detail": "current bug", "check": "t2", "branch": "issue-271-test"},
         ]
         (audit / "findings.jsonl").write_text("\n".join(json.dumps(f) for f in findings) + "\n")
-        result = self._run(tmp_path, step_done="forcing_function")
+        result = self._run(tmp_path, step_done="forcing_function",
+                           produced="0", evidence='{"open_findings": 0}')
         assert result["ERROR"] == "postcondition_failed"
         assert "1 open" in result["REASON"]
 
@@ -327,7 +331,8 @@ class TestPostconditionVerification:
         plan = tmp_path / ".squash-plan-project.json"
         plan.write_text(json.dumps({"commits": [], "groups": [], "verified": False}))
         result = self._run(tmp_path, step_done="squash",
-                           meta_state="closing:promoted")
+                           meta_state="closing:promoted", produced="1",
+                           evidence='{"verified": true}')
         assert result["ERROR"] == "postcondition_failed"
         assert "verified" in result["REASON"].lower()
 
@@ -421,7 +426,8 @@ class TestMainMode:
             "meta_state": "closing:promoted",
             "on_main": "yes",
         })
-        assert result["ACTION"] == "user_input" or result["ACTION"] == "complete"
+        assert result["ACTION"] in ("arc42_scan", "session_rename", "garden_feedback",
+                                      "notes", "complete")
 
 
 class TestAbort:
@@ -1051,30 +1057,22 @@ class TestIntegrationBranchMode:
         self._complete(tmp_path, "squash")
 
         result = self._call(tmp_path, meta_state="closing:stamped")
-        assert result["ACTION"] == "user_input"
-        assert result.get("CONTEXT") == "arc42_scan"
-        assert result.get("STEP") == "arc42_scan"
+        assert result["ACTION"] == "arc42_scan"
         actions_seen.append("arc42_scan")
         self._complete(tmp_path, "arc42_scan")
 
         result = self._call(tmp_path, meta_state="closing:stamped")
-        assert result["ACTION"] == "user_input"
-        assert result.get("CONTEXT") == "session_rename"
-        assert result.get("STEP") == "session_rename"
+        assert result["ACTION"] == "session_rename"
         actions_seen.append("session_rename")
         self._complete(tmp_path, "session_rename")
 
         result = self._call(tmp_path, meta_state="closing:stamped")
-        assert result["ACTION"] == "user_input"
-        assert result.get("CONTEXT") == "garden_feedback"
-        assert result.get("STEP") == "garden_feedback"
+        assert result["ACTION"] == "garden_feedback"
         actions_seen.append("garden_feedback")
         self._complete(tmp_path, "garden_feedback")
 
         result = self._call(tmp_path, meta_state="closing:stamped")
-        assert result["ACTION"] == "user_input"
-        assert result.get("CONTEXT") == "notes"
-        assert result.get("STEP") == "notes"
+        assert result["ACTION"] == "notes"
         actions_seen.append("notes")
         self._complete(tmp_path, "notes")
 
@@ -1175,8 +1173,7 @@ class TestIntegrationCrashRecovery:
         update_close_progress(tmp_path, "sweep_selected", "")
         result = self._call(tmp_path, meta_state="closing:stamped",
                             covers="271", issue_repo="Hortora/soredium")
-        assert result["ACTION"] == "user_input"
-        assert result.get("CONTEXT") == "session_rename"
+        assert result["ACTION"] == "session_rename"
 
     def test_progress_file_survives_atomic_write(self, tmp_path):
         """Verify .close-progress survives the atomic write pattern."""
@@ -3410,9 +3407,9 @@ class TestLandSkipWhenNoBranchCommits:
 
 
 class TestPostconditionsWired:
-    """Every mechanical step should have a postcondition_fn."""
+    """Every mechanical step should have an outcome_fn."""
 
-    def test_all_mechanical_steps_have_postcondition(self):
+    def test_all_mechanical_steps_have_outcome_fn(self):
         from work_end_orchestrator import STEPS
         mechanical = [s for s in STEPS if s.step_type == StepType.MECHANICAL]
         exempt = {s.name for s in mechanical
@@ -3420,8 +3417,8 @@ class TestPostconditionsWired:
                       "delete_progress", "elevate_plan", "cleanup_stack", "verify",
                       "advance_queue")}
         required = [s for s in mechanical if s.name not in exempt]
-        missing = [s.name for s in required if s.postcondition_fn is None]
-        assert missing == [], f"Mechanical steps missing postcondition_fn: {missing}"
+        missing = [s.name for s in required if s.outcome_fn is None]
+        assert missing == [], f"Mechanical steps missing outcome_fn: {missing}"
 
 
 class TestFinalGateRetryLimit:
@@ -3791,55 +3788,21 @@ class TestStalePlanCleanup:
         _cleanup_close_artifacts(tmp_path)
         assert not list(tmp_path.glob(".squash-plan-*.json"))
 
-    def test_cleanup_postcondition_fails_with_stale_plan(self):
-        """cleanup_scaffold_postcondition fails when .plan has a terminal state."""
-        import tempfile
-        from pathlib import Path
-        from verification.step_postconditions import cleanup_scaffold_postcondition
-        from progress import Progress
-        from work_end_orchestrator import OrchestratorContext
-        with tempfile.TemporaryDirectory() as d:
-            ws = Path(d)
-            (ws / ".plan").write_text("# Plan\n## State\nstate: closing:stamped\n")
-            ctx = OrchestratorContext(
-                workspace=ws,
-                project=ws / "project",
-                branch="issue-test",
-                base_branch="main",
-                meta_state="closing:stamped",
-                on_main=False,
-                in_slot=False,
-                covers="",
-                issue_repo="",
-                progress=Progress(),
-            )
-            assert cleanup_scaffold_postcondition(ctx) is False
+    def test_cleanup_postcondition_fails_with_stale_plan(self, tmp_path):
+        """verify_cleanup_scaffold fails when .plan has a terminal state."""
+        from verification.outcomes import verify_cleanup_scaffold, VerifyResult
+        (tmp_path / ".plan").write_text("# Plan\n## State\nstate: closing:stamped\n")
+        result = verify_cleanup_scaffold(tmp_path)
+        assert result.result == VerifyResult.FAIL
 
-    def test_cleanup_postcondition_allows_active_plan(self):
-        """cleanup_scaffold_postcondition passes when .plan has remaining items."""
-        import tempfile
-        from pathlib import Path
-        from verification.step_postconditions import cleanup_scaffold_postcondition
-        from progress import Progress
-        from work_end_orchestrator import OrchestratorContext
-        with tempfile.TemporaryDirectory() as d:
-            ws = Path(d)
-            (ws / ".plan").write_text(
-                "# Plan\n## State\nstate: active\n\n## Queue\n- [ ] Issue #2\n"
-            )
-            ctx = OrchestratorContext(
-                workspace=ws,
-                project=ws / "project",
-                branch="issue-test",
-                base_branch="main",
-                meta_state="closing:stamped",
-                on_main=False,
-                in_slot=False,
-                covers="",
-                issue_repo="",
-                progress=Progress(),
-            )
-            assert cleanup_scaffold_postcondition(ctx) is True
+    def test_cleanup_postcondition_allows_active_plan(self, tmp_path):
+        """verify_cleanup_scaffold passes when .plan has remaining items."""
+        from verification.outcomes import verify_cleanup_scaffold, VerifyResult
+        (tmp_path / ".plan").write_text(
+            "# Plan\n## State\nstate: active\n\n## Queue\n- [ ] Issue #2\n"
+        )
+        result = verify_cleanup_scaffold(tmp_path)
+        assert result.result == VerifyResult.PASS
 
 
 class TestLifecycleErrorPropagation:

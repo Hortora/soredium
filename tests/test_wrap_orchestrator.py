@@ -31,8 +31,7 @@ class TestWrapStepSequence:
             "branch": "issue-42-test",
             "dry_run": "yes",
         })
-        assert result.get("ACTION") == "user_input"
-        assert result.get("CONTEXT") == "epic_hygiene"
+        assert result.get("ACTION") == "epic_hygiene"
 
     def test_after_hygiene_returns_sweep_config(self, tmp_path):
         write_close_progress(tmp_path, {

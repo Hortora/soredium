@@ -8,6 +8,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
+from judgment import StepType
+
 
 class TestParseArgs:
     def test_parses_command_and_kv_args(self):
@@ -95,7 +97,7 @@ class TestPausePipeline:
     def test_pause_all_mechanical(self):
         from work import PIPELINES
         for step in PIPELINES["pause"]:
-            assert step.step_type == "mechanical", f"{step.name} should be mechanical"
+            assert step.step_type == StepType.MECHANICAL, f"{step.name} should be mechanical"
 
     def test_pause_dry_run_completes(self, tmp_path):
         from work import build_context, PIPELINES
@@ -134,7 +136,7 @@ class TestResumePipeline:
     def test_resume_has_judgment_steps(self):
         from work import PIPELINES
         steps = PIPELINES["resume"]
-        judgment = [s for s in steps if s.step_type == "judgment"]
+        judgment = [s for s in steps if s.step_type == StepType.JUDGMENT]
         names = [s.name for s in judgment]
         assert "stack_pick" in names
         assert "context_resume" in names
@@ -196,7 +198,7 @@ class TestStartPipeline:
 
     def test_start_judgment_steps(self):
         from work import PIPELINES
-        judgment = [s.name for s in PIPELINES["start"] if s.step_type == "judgment"]
+        judgment = [s.name for s in PIPELINES["start"] if s.step_type == StepType.JUDGMENT]
         assert "resolve_issue" in judgment
         assert "branch_name" in judgment
         assert "brainstorm_offer" in judgment
@@ -410,7 +412,7 @@ class TestAllPipelinesRegistered:
 
     def test_all_steps_have_valid_types(self):
         from work import PIPELINES
-        valid_types = {"mechanical", "judgment", "lifecycle"}
+        valid_types = {StepType.MECHANICAL, StepType.JUDGMENT, StepType.LIFECYCLE}
         for cmd, steps in PIPELINES.items():
             for step in steps:
                 assert step.step_type in valid_types, (
