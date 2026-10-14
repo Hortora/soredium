@@ -47,6 +47,7 @@ from shared_steps import (
     make_garden_feedback_step,
     make_notes_step,
 )
+from judgment import StepType
 
 
 @dataclass
@@ -95,31 +96,31 @@ WRAP_USER_INPUT_STEPS = {
 }
 
 WRAP_STEPS: list[StepDef] = [
-    StepDef("loose_ends", WRAP_PHASE, "mechanical",
+    StepDef("loose_ends", WRAP_PHASE, StepType.MECHANICAL,
             script_fn=_loose_ends_script),
-    StepDef("epic_hygiene", WRAP_PHASE, "judgment",
+    StepDef("epic_hygiene", WRAP_PHASE, StepType.JUDGMENT,
             action_context_fn=lambda ctx: {"CONTEXT": "epic_hygiene"}),
-    StepDef("wrap_sweep_config", WRAP_PHASE, "judgment",
+    StepDef("wrap_sweep_config", WRAP_PHASE, StepType.JUDGMENT,
             action_context_fn=lambda ctx: {"ITEMS": _wrap_sweep_defaults()}),
     make_forage_step(WRAP_PHASE, "wrap_sweep_selected"),
     make_protocol_step(WRAP_PHASE, "wrap_sweep_selected"),
     make_update_claude_md_step(WRAP_PHASE, "wrap_sweep_selected"),
-    StepDef("journal_entry", WRAP_PHASE, "judgment",
+    StepDef("journal_entry", WRAP_PHASE, StepType.JUDGMENT,
             skip_fn=_skip_no_plan,
             action_context_fn=lambda ctx: {"CONTEXT": "journal_entry"}),
-    StepDef("arc42_scan_wrap", WRAP_PHASE, "judgment",
+    StepDef("arc42_scan_wrap", WRAP_PHASE, StepType.JUDGMENT,
             skip_fn=_skip_no_arc42,
             action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"}),
     make_write_content_step(WRAP_PHASE, "wrap_sweep_selected"),
     make_garden_feedback_step(WRAP_PHASE),
     make_notes_step(WRAP_PHASE),
-    StepDef("handoff_write", WRAP_PHASE, "judgment",
+    StepDef("handoff_write", WRAP_PHASE, StepType.JUDGMENT,
             action_context_fn=lambda ctx: {"CONTEXT": "handoff_write"}),
-    StepDef("wip_commit", WRAP_PHASE, "mechanical",
+    StepDef("wip_commit", WRAP_PHASE, StepType.MECHANICAL,
             script_fn=_wip_commit_script),
 ]
 
-WRAP_MECHANICAL_STEPS = {s.name for s in WRAP_STEPS if s.step_type == "mechanical"}
+WRAP_MECHANICAL_STEPS = {s.name for s in WRAP_STEPS if s.step_type == StepType.MECHANICAL}
 
 
 def _record(event_type, branch, project, issue_repo, dry_run, **kwargs):

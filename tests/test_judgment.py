@@ -236,6 +236,38 @@ class TestValidateResponse:
         assert errors == []
 
 
+class TestStepTypeConverted:
+    """Verify all step definitions use StepType enum, not strings."""
+
+    def test_all_work_end_steps_use_enum(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from work_end_orchestrator import STEPS
+        from judgment import StepType
+        for step in STEPS:
+            assert isinstance(step.step_type, StepType), (
+                f"Step '{step.name}' uses {type(step.step_type).__name__}, not StepType"
+            )
+
+    def test_all_wrap_steps_use_enum(self):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "handover"))
+        from wrap_orchestrator import WRAP_STEPS
+        from judgment import StepType
+        for step in WRAP_STEPS:
+            assert isinstance(step.step_type, StepType), (
+                f"Step '{step.name}' uses {type(step.step_type).__name__}, not StepType"
+            )
+
+    def test_all_work_pipeline_steps_use_enum(self):
+        from work import PIPELINES
+        from judgment import StepType
+        for cmd, steps in PIPELINES.items():
+            for step in steps:
+                assert isinstance(step.step_type, StepType), (
+                    f"Step '{step.name}' in pipeline '{cmd}' uses "
+                    f"{type(step.step_type).__name__}, not StepType"
+                )
+
+
 def validate_response_dict(resp_dict: dict, schema: dict) -> list[str]:
     """Test helper — validate a raw dict against schema."""
     errors = []

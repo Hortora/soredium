@@ -22,6 +22,7 @@ if str(_project_dir) not in sys.path:
 
 from orchestrator_engine import run_loop, run_script
 from shared_steps import StepDef, OrchestratorContextBase
+from judgment import StepType
 from work_progress import update_progress, delete_progress
 from conflict_resolution import make_rebase_error_handler
 
@@ -110,15 +111,15 @@ def build_context(args: dict[str, str]) -> WorkContext:
 # ---------------------------------------------------------------------------
 
 PAUSE_STEPS: list[StepDef] = [
-    StepDef("wip_commit_project", "pause", "mechanical",
+    StepDef("wip_commit_project", "pause", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_PAUSE_DIR / "pause_exec.py"), "commit-wip",
                 str(ctx.project), f"message=WIP: pause {ctx.branch}"]),
-    StepDef("wip_commit_workspace", "pause", "mechanical",
+    StepDef("wip_commit_workspace", "pause", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_PAUSE_DIR / "pause_exec.py"), "commit-wip",
                 str(ctx.workspace), f"message=WIP: pause {ctx.branch}"]),
-    StepDef("push_and_stack", "pause", "mechanical",
+    StepDef("push_and_stack", "pause", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_PAUSE_DIR / "pause_exec.py"), "push-and-stack",
                 str(ctx.workspace), str(ctx.project),
@@ -140,30 +141,30 @@ def _skip_single_stack(ctx) -> bool:
 
 
 RESUME_STEPS: list[StepDef] = [
-    StepDef("stack_pick", "resume", "judgment",
+    StepDef("stack_pick", "resume", StepType.JUDGMENT,
             skip_fn=_skip_single_stack,
             action_context_fn=lambda ctx: {"CONTEXT": "stack_pick"}),
-    StepDef("pop_stack", "resume", "mechanical",
+    StepDef("pop_stack", "resume", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_project_dir / "stack.py"), "pop",
                 str(ctx.workspace / ".pause-stack"),
                 ctx.progress.get("selected_branch", ctx.branch)]),
-    StepDef("checkout_branches", "resume", "mechanical",
+    StepDef("checkout_branches", "resume", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_RESUME_DIR / "resume_exec.py"),
                 "checkout-branches",
                 str(ctx.project), str(ctx.workspace),
                 f"branch={ctx.progress.get('selected_branch', ctx.branch)}"]),
-    StepDef("rebase", "resume", "mechanical",
+    StepDef("rebase", "resume", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_RESUME_DIR / "resume_exec.py"), "rebase",
                 str(ctx.project), str(ctx.workspace),
                 f"base-branch={ctx.base_branch}"]),
-    StepDef("reset_wip", "resume", "mechanical",
+    StepDef("reset_wip", "resume", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_RESUME_DIR / "resume_exec.py"), "reset-wip",
                 str(ctx.project), str(ctx.workspace)]),
-    StepDef("context_resume", "resume", "judgment",
+    StepDef("context_resume", "resume", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {"CONTEXT": "load_context"}),
 ]
 
@@ -212,49 +213,49 @@ def _process_pending_archives_script(ctx):
 
 
 START_STEPS: list[StepDef] = [
-    StepDef("process_archive_requests", "start", "mechanical",
+    StepDef("process_archive_requests", "start", StepType.MECHANICAL,
             skip_fn=lambda ctx: not ctx.family_root,
             script_fn=_process_pending_archives_script),
-    StepDef("sync_main", "start", "mechanical",
+    StepDef("sync_main", "start", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_START_DIR / "branch_create.py"), "sync-main",
                 str(ctx.project), str(ctx.workspace),
                 f"base={ctx.base_branch}"]),
-    StepDef("resolve_issue", "start", "judgment",
+    StepDef("resolve_issue", "start", StepType.JUDGMENT,
             skip_fn=_skip_issue_resolved,
             action_context_fn=lambda ctx: {
                 "CONTEXT": "resolve_issue",
                 "OWNER_REPO": ctx.owner_repo}),
-    StepDef("stacked_pr_detect", "start", "mechanical",
+    StepDef("stacked_pr_detect", "start", StepType.MECHANICAL,
             skip_fn=lambda ctx: not ctx.issue_n),
-    StepDef("branch_name", "start", "judgment",
+    StepDef("branch_name", "start", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {
                 "CONTEXT": "branch_name",
                 "ISSUE_N": ctx.issue_n,
                 "ISSUE_TITLE": ctx.issue_title}),
-    StepDef("flyway_scan", "start", "mechanical",
+    StepDef("flyway_scan", "start", StepType.MECHANICAL,
             skip_fn=_skip_flyway_none,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_START_DIR / "flyway_scan.py"),
                 str(ctx.project), ctx.base_branch]),
-    StepDef("create_branches", "start", "mechanical",
+    StepDef("create_branches", "start", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_START_DIR / "branch_create.py"),
                 "create-branches",
                 str(ctx.project), str(ctx.workspace),
                 f"branch={ctx.branch}",
                 f"base={ctx.base_branch}"]),
-    StepDef("recover_plan", "start", "mechanical",
+    StepDef("recover_plan", "start", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_START_DIR / "recover_plan.py"),
                 f"workspace={ctx.workspace}",
                 f"project={ctx.project}",
                 f"branch={ctx.branch}"]),
-    StepDef("recover_plan_offer", "start", "judgment",
+    StepDef("recover_plan_offer", "start", StepType.JUDGMENT,
             skip_fn=lambda ctx: not (ctx.workspace / ".orphaned-plan").exists(),
             action_context_fn=_recover_plan_context),
-    StepDef("design_routing", "start", "mechanical"),
-    StepDef("scaffold", "start", "mechanical",
+    StepDef("design_routing", "start", StepType.MECHANICAL),
+    StepDef("scaffold", "start", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_START_DIR / "scaffold.py"),
                 str(ctx.workspace),
@@ -266,21 +267,21 @@ START_STEPS: list[StepDef] = [
                 f"covers={ctx.covers}",
                 f"flyway-next-v={ctx.flyway_next_v}",
                 f"design-repo={ctx.design_repo_key}"]),
-    StepDef("commit_scaffold", "start", "mechanical",
+    StepDef("commit_scaffold", "start", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_WORK_START_DIR / "branch_create.py"),
                 "commit-scaffold",
                 str(ctx.workspace), f"branch={ctx.branch}"]),
-    StepDef("platform_coherence", "start", "judgment",
+    StepDef("platform_coherence", "start", StepType.JUDGMENT,
             skip_fn=_skip_no_platform_doc,
             action_context_fn=lambda ctx: {"CONTEXT": "platform_coherence"}),
-    StepDef("check_protocols", "start", "judgment",
+    StepDef("check_protocols", "start", StepType.JUDGMENT,
             skip_fn=_skip_no_protocols,
             action_context_fn=lambda ctx: {"CONTEXT": "check_protocols"}),
-    StepDef("garden_search", "start", "mechanical"),
-    StepDef("load_specs", "start", "mechanical"),
-    StepDef("check_intellij", "start", "mechanical"),
-    StepDef("brainstorm_offer", "start", "judgment",
+    StepDef("garden_search", "start", StepType.MECHANICAL),
+    StepDef("load_specs", "start", StepType.MECHANICAL),
+    StepDef("check_intellij", "start", StepType.MECHANICAL),
+    StepDef("brainstorm_offer", "start", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {"CONTEXT": "brainstorm_offer"}),
 ]
 
@@ -294,19 +295,19 @@ def _skip_state_already_active(ctx) -> bool:
 
 
 CONTINUE_STEPS: list[StepDef] = [
-    StepDef("auto_resolve_transient", "continue", "mechanical",
+    StepDef("auto_resolve_transient", "continue", StepType.MECHANICAL,
             skip_fn=_skip_state_already_active),
-    StepDef("lifecycle_continue", "continue", "lifecycle",
+    StepDef("lifecycle_continue", "continue", StepType.LIFECYCLE,
             from_state="active", to_state="active", event="work_continue"),
-    StepDef("health_check", "continue", "mechanical",
+    StepDef("health_check", "continue", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_project_dir / "work_health.py"),
                 "--scope", "entry",
                 "--project", str(ctx.project),
                 "--workspace", str(ctx.workspace),
                 "--owner-repo", ctx.owner_repo] if ctx.owner_repo else None),
-    StepDef("load_specs", "continue", "mechanical"),
-    StepDef("load_context", "continue", "judgment",
+    StepDef("load_specs", "continue", StepType.MECHANICAL),
+    StepDef("load_context", "continue", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {
                 "CONTEXT": "load_context",
                 "META_STATE": ctx.meta_state,
@@ -324,15 +325,15 @@ def _skip_no_deferred(ctx) -> bool:
 
 
 NEXT_STEPS: list[StepDef] = [
-    StepDef("lifecycle_next", "next", "lifecycle",
+    StepDef("lifecycle_next", "next", StepType.LIFECYCLE,
             from_state="active", to_state="transitioning", event="work_next"),
-    StepDef("advance_issue", "next", "mechanical",
+    StepDef("advance_issue", "next", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_PLAN_MANAGER), "advance",
                 str(ctx.plan_path)] if ctx.plan_path else None),
-    StepDef("tick_github", "next", "mechanical"),
-    StepDef("context_refresh", "next", "mechanical"),
-    StepDef("deferred_check", "next", "judgment",
+    StepDef("tick_github", "next", StepType.MECHANICAL),
+    StepDef("context_refresh", "next", StepType.MECHANICAL),
+    StepDef("deferred_check", "next", StepType.JUDGMENT,
             skip_fn=_skip_no_deferred,
             action_context_fn=lambda ctx: {"CONTEXT": "deferred_check"}),
 ]
@@ -343,20 +344,20 @@ NEXT_STEPS: list[StepDef] = [
 # ---------------------------------------------------------------------------
 
 FIND_STEPS: list[StepDef] = [
-    StepDef("refresh_cache", "find", "mechanical",
+    StepDef("refresh_cache", "find", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_ENRICHMENT), "refresh",
                 "--repo", ctx.owner_repo] if ctx.owner_repo else None),
-    StepDef("query_recommendations", "find", "mechanical",
+    StepDef("query_recommendations", "find", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_ENRICHMENT), "what-next",
                 "--repo", ctx.owner_repo, "--mode", "general",
                 "--limit", "5"] if ctx.owner_repo else None),
-    StepDef("present_candidates", "find", "judgment",
+    StepDef("present_candidates", "find", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {
                 "CONTEXT": "present_candidates",
                 **ctx.last_output}),
-    StepDef("populate_queue", "find", "mechanical",
+    StepDef("populate_queue", "find", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_PLAN_MANAGER), "append",
                 str(ctx.plan_path),
@@ -421,7 +422,7 @@ def main() -> int:
     if args.get("step_done"):
         from orchestrator_engine import apply_step_done
         steps = PIPELINES[command]
-        mechanical = {s.name for s in steps if s.step_type == "mechanical"}
+        mechanical = {s.name for s in steps if s.step_type == StepType.MECHANICAL}
         err = apply_step_done(ctx.workspace, args["step_done"],
                               args.get("produced"),
                               mechanical_steps=mechanical)

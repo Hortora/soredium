@@ -19,6 +19,7 @@ from typing import Callable
 
 from work_progress import update_progress as update_close_progress
 from shared_steps import StepDef, MAX_JUDGMENT_RETRIES, MAX_MECHANICAL_RETRIES
+from judgment import StepType
 
 _repo_root = str(Path(__file__).resolve().parent.parent)
 if _repo_root not in sys.path:
@@ -306,7 +307,7 @@ def run_loop(
                     "REASON": f"Step '{step.name}' requires {unmet} to complete first",
                 }
 
-        if step.step_type == "mechanical":
+        if step.step_type == StepType.MECHANICAL:
             if per_repo_mechanical:
                 handled = per_repo_mechanical(step, ctx)
                 if handled is not None:
@@ -394,7 +395,7 @@ def run_loop(
         if ctx.done(step.name):
             continue
 
-        if step.step_type == "judgment":
+        if step.step_type == StepType.JUDGMENT:
             if per_repo_judgment:
                 handled = per_repo_judgment(step, ctx)
                 if handled is not None:
@@ -411,7 +412,7 @@ def run_loop(
             return _yield_judgment(step.name, ctx.workspace,
                                    ctx.progress, context)
 
-        if step.step_type == "lifecycle":
+        if step.step_type == StepType.LIFECYCLE:
             if handle_lifecycle:
                 lc_result = handle_lifecycle(step, ctx)
                 if lc_result and lc_result.get("ACTION") == "error":

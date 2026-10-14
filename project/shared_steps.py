@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable
 
+from judgment import StepType
 from progress import Progress
 from repo_state import RepoDisposition, RepoType
 
@@ -34,13 +35,17 @@ ALL_REPO_TYPES = frozenset(RepoType)
 class StepDef:
     name: str
     phase: str
-    step_type: str
+    step_type: StepType
     script_fn: Callable | None = None
     skip_fn: Callable | None = None
     action_context_fn: Callable | None = None
     verify_fn: Callable | None = None
     outcome_fn: Callable | None = None
     idempotent: bool = True
+    handler: str | None = None
+    response_schema: dict | None = None
+    skippable: bool = True
+    timeout_hint: str = "standard"
     from_state: str | None = None
     to_state: str | None = None
     event: str | None = None
@@ -156,17 +161,17 @@ def yield_user_input(step_name: str, ctx, context: dict[str, str]) -> dict[str, 
 
 
 def make_forage_step(phase: str, sweep_key: str = "sweep_selected") -> StepDef:
-    return StepDef("forage", phase, "judgment",
+    return StepDef("forage", phase, StepType.JUDGMENT,
                    skip_fn=_is_sweep_deselected("forage", sweep_key))
 
 
 def make_protocol_step(phase: str, sweep_key: str = "sweep_selected") -> StepDef:
-    return StepDef("protocol", phase, "judgment",
+    return StepDef("protocol", phase, StepType.JUDGMENT,
                    skip_fn=_is_sweep_deselected("protocol", sweep_key))
 
 
 def make_update_claude_md_step(phase: str, sweep_key: str = "sweep_selected") -> StepDef:
-    return StepDef("update_claude_md", phase, "judgment",
+    return StepDef("update_claude_md", phase, StepType.JUDGMENT,
                    skip_fn=_is_sweep_deselected("update_claude_md", sweep_key))
 
 
@@ -192,26 +197,26 @@ def _find_existing_diary(ctx) -> dict[str, str]:
 
 
 def make_write_content_step(phase: str, sweep_key: str = "sweep_selected") -> StepDef:
-    return StepDef("write_content", phase, "judgment",
+    return StepDef("write_content", phase, StepType.JUDGMENT,
                    skip_fn=_is_sweep_deselected("write_content", sweep_key),
                    action_context_fn=_find_existing_diary)
 
 
 def make_arc42_scan_step(phase: str) -> StepDef:
-    return StepDef("arc42_scan", phase, "judgment",
+    return StepDef("arc42_scan", phase, StepType.JUDGMENT,
                    action_context_fn=lambda ctx: {"CONTEXT": "arc42_scan"})
 
 
 def make_session_rename_step(phase: str) -> StepDef:
-    return StepDef("session_rename", phase, "judgment",
+    return StepDef("session_rename", phase, StepType.JUDGMENT,
                    action_context_fn=lambda ctx: {"CONTEXT": "session_rename"})
 
 
 def make_garden_feedback_step(phase: str) -> StepDef:
-    return StepDef("garden_feedback", phase, "judgment",
+    return StepDef("garden_feedback", phase, StepType.JUDGMENT,
                    action_context_fn=lambda ctx: {"CONTEXT": "garden_feedback"})
 
 
 def make_notes_step(phase: str) -> StepDef:
-    return StepDef("notes", phase, "judgment",
+    return StepDef("notes", phase, StepType.JUDGMENT,
                    action_context_fn=lambda ctx: {"CONTEXT": "notes"})

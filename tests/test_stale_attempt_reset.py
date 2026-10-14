@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
 from verification.outcomes import VerifyResult, Verification
 from shared_steps import StepDef, MAX_MECHANICAL_RETRIES
+from judgment import StepType
 from work_progress import read_progress
 from progress import Progress
 
@@ -57,7 +58,7 @@ class TestStaleCounterResetsOnReentry:
             return Verification("test_check", VerifyResult.UNKNOWN, {}, "")
 
         step = StepDef(
-            name="land", phase="test", step_type="mechanical",
+            name="land", phase="test", step_type=StepType.MECHANICAL,
             outcome_fn=outcome_fn,
             idempotent=False,
         )
@@ -86,7 +87,7 @@ class TestStaleCounterResetsOnReentry:
             return Verification("test_check", VerifyResult.UNKNOWN, {}, "")
 
         step = StepDef(
-            name="land", phase="test", step_type="mechanical",
+            name="land", phase="test", step_type=StepType.MECHANICAL,
             outcome_fn=outcome_fn,
             idempotent=False,
         )
@@ -109,7 +110,7 @@ class TestStaleCounterResetsOnReentry:
             return Verification("test_check", VerifyResult.UNKNOWN, {}, "")
 
         step = StepDef(
-            name="land", phase="test", step_type="mechanical",
+            name="land", phase="test", step_type=StepType.MECHANICAL,
             outcome_fn=outcome_fn,
             idempotent=False,
         )
@@ -133,7 +134,7 @@ class TestStaleCounterResetsOnReentry:
             return Verification("test_check", VerifyResult.PASS, {}, "")
 
         step = StepDef(
-            name="land", phase="test", step_type="mechanical",
+            name="land", phase="test", step_type=StepType.MECHANICAL,
             outcome_fn=outcome_fn,
         )
 
@@ -160,7 +161,7 @@ class TestStaleCounterResetsOnReentry:
             return Verification("test_check", VerifyResult.UNKNOWN, {}, "")
 
         step = StepDef(
-            name="land", phase="test", step_type="mechanical",
+            name="land", phase="test", step_type=StepType.MECHANICAL,
             outcome_fn=outcome_fn,
             idempotent=False,
         )
@@ -183,7 +184,7 @@ class TestStaleCounterResetsOnReentry:
         from orchestrator_engine import run_loop
 
         step = StepDef(
-            name="land", phase="test", step_type="mechanical",
+            name="land", phase="test", step_type=StepType.MECHANICAL,
             outcome_fn=lambda ctx: Verification("c", VerifyResult.UNKNOWN, {}, ""),
         )
 
