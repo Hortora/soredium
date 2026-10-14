@@ -420,16 +420,43 @@ def main() -> int:
     from progress import Progress
 
     if args.get("step_done"):
-        from orchestrator_engine import apply_step_done
+        from orchestrator_engine import apply_step_done, validate_skip
+        from judgment import parse_response, validate_response, Outcome, DEFAULT_JUDGMENT_SCHEMA
+        step_name = args["step_done"]
         steps = PIPELINES[command]
         mechanical = {s.name for s in steps if s.step_type == StepType.MECHANICAL}
-        err = apply_step_done(ctx.workspace, args["step_done"],
-                              args.get("produced"),
-                              mechanical_steps=mechanical)
-        if err:
-            for k, v in err.items():
-                print(f"{k}={v}")
+
+        try:
+            response = parse_response(args)
+        except ValueError as e:
+            print(f"ACTION=error\nERROR=invalid_outcome\nSTEP={step_name}\nDETAIL={e}")
             return 1
+
+        step_def = next((s for s in steps if s.name == step_name), None)
+        if step_def:
+            schema = step_def.response_schema or DEFAULT_JUDGMENT_SCHEMA
+            errors = validate_response(response, schema)
+            if errors:
+                print(f"ACTION=error\nERROR=schema_violation\nSTEP={step_name}\nDETAIL={'; '.join(errors)}")
+                return 1
+
+        if response.outcome == Outcome.SKIPPED:
+            err = validate_skip(ctx.workspace, step_name)
+            if err:
+                for k, v in err.items():
+                    print(f"{k}={v}")
+                return 1
+        elif response.outcome == Outcome.BLOCKED:
+            print(f"ACTION=error\nERROR=step_blocked\nSTEP={step_name}\nREASON={response.block_reason or 'no reason'}")
+            return 1
+        else:
+            err = apply_step_done(ctx.workspace, step_name,
+                                  args.get("produced"),
+                                  mechanical_steps=mechanical)
+            if err:
+                for k, v in err.items():
+                    print(f"{k}={v}")
+                return 1
         ctx.progress = Progress.load(ctx.workspace)
 
     if args.get("skip_step"):

@@ -332,6 +332,91 @@ class TestRunLoopAssemblesRequest:
         assert result["SKIPPABLE"] == "yes"
 
 
+class TestResponseValidationIntegration:
+    def test_invalid_outcome_returns_schema_violation(self, tmp_path):
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage")
+        update_close_progress(tmp_path, "_branch", "issue-test")
+        update_close_progress(tmp_path, "last_yielded", "forage")
+        (tmp_path / "project").mkdir(exist_ok=True)
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "step_done": "forage",
+            "outcome": "invalid_value",
+        })
+        assert result.get("ERROR") in ("schema_violation", "invalid_outcome")
+
+    def test_valid_outcome_accepted(self, tmp_path):
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage")
+        update_close_progress(tmp_path, "_branch", "issue-test")
+        update_close_progress(tmp_path, "last_yielded", "forage")
+        (tmp_path / "project").mkdir(exist_ok=True)
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "step_done": "forage",
+            "outcome": "completed",
+            "produced": "0",
+        })
+        assert result.get("ERROR") != "schema_violation"
+
+    def test_skip_via_outcome_skipped(self, tmp_path):
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage")
+        update_close_progress(tmp_path, "_branch", "issue-test")
+        update_close_progress(tmp_path, "last_yielded", "forage")
+        (tmp_path / "project").mkdir(exist_ok=True)
+        run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "step_done": "forage",
+            "outcome": "skipped",
+        })
+        progress = read_close_progress(tmp_path)
+        assert progress.get("forage") == "skipped"
+
+    def test_blocked_outcome_returns_error(self, tmp_path):
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "review", "done")
+        update_close_progress(tmp_path, "sweep_config", "done")
+        update_close_progress(tmp_path, "sweep_selected", "forage")
+        update_close_progress(tmp_path, "_branch", "issue-test")
+        update_close_progress(tmp_path, "last_yielded", "forage")
+        (tmp_path / "project").mkdir(exist_ok=True)
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-test",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "step_done": "forage",
+            "outcome": "blocked",
+            "block_reason": "garden not running",
+        })
+        assert result.get("ERROR") == "step_blocked"
+
+
 class TestStepTypeConverted:
     """Verify all step definitions use StepType enum, not strings."""
 

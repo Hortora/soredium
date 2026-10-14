@@ -1514,22 +1514,49 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
                 "STEP": "sweep_config",
                 "REASON": "Use sweep_selected= to complete sweep_config",
             }
+
+        from judgment import parse_response, validate_response, Outcome, DEFAULT_JUDGMENT_SCHEMA
+        try:
+            response = parse_response(args)
+        except ValueError as e:
+            rec("invalid-outcome", step=step_name, reason=str(e))
+            return {"ACTION": "error", "ERROR": "invalid_outcome",
+                    "STEP": step_name, "DETAIL": str(e)}
+
         step_def = next((s for s in STEPS if s.name == step_name), None)
-        if step_def and step_def.verify_fn:
-            verify_error = step_def.verify_fn(workspace, args.get("produced"), branch=branch)
-            if verify_error:
-                rec("postcondition-failed", step=step_name, reason=verify_error)
-                return {
-                    "ACTION": "error",
-                    "ERROR": "postcondition_failed",
-                    "STEP": step_name,
-                    "REASON": verify_error,
-                }
-        err = apply_step_done(workspace, args["step_done"], args.get("produced"),
-                              mechanical_steps=MECHANICAL_STEPS)
-        if err:
-            rec("invalid-step-done", step=args["step_done"], reason=err.get("REASON", ""))
-            return err
+        if step_def:
+            schema = step_def.response_schema or DEFAULT_JUDGMENT_SCHEMA
+            errors = validate_response(response, schema)
+            if errors:
+                rec("schema-violation", step=step_name, reason="; ".join(errors))
+                return {"ACTION": "error", "ERROR": "schema_violation",
+                        "STEP": step_name, "DETAIL": "; ".join(errors)}
+
+        if response.outcome == Outcome.SKIPPED:
+            err = validate_skip(workspace, step_name)
+            if err:
+                rec("invalid-skip", step=step_name, reason=err.get("REASON", ""))
+                return err
+        elif response.outcome == Outcome.BLOCKED:
+            rec("step-blocked", step=step_name, reason=response.block_reason or "")
+            return {"ACTION": "error", "ERROR": "step_blocked",
+                    "STEP": step_name, "REASON": response.block_reason or "no reason"}
+        else:
+            if step_def and step_def.verify_fn:
+                verify_error = step_def.verify_fn(workspace, args.get("produced"), branch=branch)
+                if verify_error:
+                    rec("postcondition-failed", step=step_name, reason=verify_error)
+                    return {
+                        "ACTION": "error",
+                        "ERROR": "postcondition_failed",
+                        "STEP": step_name,
+                        "REASON": verify_error,
+                    }
+            err = apply_step_done(workspace, args["step_done"], args.get("produced"),
+                                  mechanical_steps=MECHANICAL_STEPS)
+            if err:
+                rec("invalid-step-done", step=args["step_done"], reason=err.get("REASON", ""))
+                return err
 
     if args.get("sweep_selected") is not None:
         selected = args["sweep_selected"]
