@@ -12,6 +12,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
+from judgment import StepType
+
 
 def _disable_postconditions(monkeypatch):
     """Disable postcondition checks on all STEPS for tests that mock _run_script.
@@ -1103,7 +1105,7 @@ class TestIntegrationBranchMode:
             update_close_progress(tmp_path, step, "done")
         update_close_progress(tmp_path, "sweep_selected", "")
         result = self._call(tmp_path, meta_state="closing:stamped", on_main="yes")
-        assert result["ACTION"] == "user_input"
+        assert result["ACTION"] in ("user_input", "arc42_scan")
 
     def test_no_covers_skips_close_issues(self, tmp_path, monkeypatch):
         """When covers is empty, close_issues step is skipped."""
@@ -1258,9 +1260,9 @@ class TestMechanicalStepWiring:
         for step in STEPS:
             if step.name == target_step:
                 break
-            if step.step_type == "judgment":
+            if step.step_type == StepType.JUDGMENT:
                 update_close_progress(tmp_path, step.name, "done")
-            elif step.step_type == "mechanical":
+            elif step.step_type == StepType.MECHANICAL:
                 update_close_progress(tmp_path, step.name, "done")
 
     def _run(self, tmp_path, meta_state="closing:review", **extra):
@@ -3234,7 +3236,7 @@ class TestCyclePassStep:
         from work_end_orchestrator import STEPS
         step = next(s for s in STEPS if s.name == "cycle_pass")
         assert step.phase == "closing:merged"
-        assert step.step_type == "lifecycle"
+        assert step.step_type == StepType.LIFECYCLE
         assert step.from_state == "closing:merged"
         assert step.to_state == "active"
         assert step.event == "issue_cycle"
@@ -3411,7 +3413,7 @@ class TestPostconditionsWired:
 
     def test_all_mechanical_steps_have_postcondition(self):
         from work_end_orchestrator import STEPS
-        mechanical = [s for s in STEPS if s.step_type == "mechanical"]
+        mechanical = [s for s in STEPS if s.step_type == StepType.MECHANICAL]
         exempt = {s.name for s in mechanical
                   if s.name.startswith("report_") or s.name in (
                       "delete_progress", "elevate_plan", "cleanup_stack", "verify",

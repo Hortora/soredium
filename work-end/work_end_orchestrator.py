@@ -1871,7 +1871,16 @@ def _close_per_repo_judgment(step: StepDef, ctx: OrchestratorContext) -> dict[st
     if step.action_context_fn:
         context.update(step.action_context_fn(ctx))
     from orchestrator_engine import _yield_judgment
-    return _yield_judgment(f"{step.name}:{repo}", ctx.workspace, ctx.progress, context)
+    from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA
+    request = JudgmentRequest(
+        step=f"{step.name}:{repo}",
+        handler=step.handler,
+        context=context,
+        response_schema=step.response_schema or DEFAULT_JUDGMENT_SCHEMA,
+        skippable=step.skippable,
+        timeout_hint=step.timeout_hint,
+    )
+    return _yield_judgment(request, ctx.workspace, ctx.progress)
 
 
 def _parse_landed_shas(result: dict[str, str], ctx: OrchestratorContext) -> dict[str, str]:

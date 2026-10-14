@@ -103,9 +103,14 @@ def log_call(workspace: Path, mode: str, result: dict[str, str],
         pass
 
 
-def _yield_judgment(step_name: str, workspace: Path,
-                    progress,
-                    context: dict[str, str]) -> dict[str, str]:
+def _yield_judgment(request, workspace: Path,
+                    progress) -> dict[str, str]:
+    from judgment import JudgmentRequest, serialize_request
+    if isinstance(request, JudgmentRequest):
+        step_name = request.step
+    else:
+        step_name = request
+
     attempt = progress.get_attempt(step_name) + 1
 
     if attempt > MAX_JUDGMENT_RETRIES:
@@ -120,29 +125,12 @@ def _yield_judgment(step_name: str, workspace: Path,
 
     update_close_progress(workspace, f"{step_name}_attempt", str(attempt))
     update_close_progress(workspace, "last_yielded", step_name)
-    result = {"ACTION": step_name,
-              "COMPLETE_WITH": f"step_done={step_name} produced=N"}
-    result.update(context)
-    return result
 
+    if isinstance(request, JudgmentRequest):
+        return serialize_request(request)
 
-def _yield_user_input(step_name: str, workspace: Path,
-                      progress,
-                      context: dict[str, str]) -> dict[str, str]:
-    attempt = progress.get_attempt(step_name) + 1
-    if attempt > MAX_JUDGMENT_RETRIES:
-        update_close_progress(workspace, "last_yielded", step_name)
-        return {
-            "ACTION": "user_input",
-            "CONTEXT": "step_failed",
-            "STEP": step_name,
-            "ATTEMPTS": str(MAX_JUDGMENT_RETRIES),
-            "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
-        }
-    update_close_progress(workspace, f"{step_name}_attempt", str(attempt))
-    update_close_progress(workspace, "last_yielded", step_name)
-    return {"ACTION": "user_input", "STEP": step_name,
-            "COMPLETE_WITH": f"step_done={step_name}", **context}
+    return {"ACTION": step_name,
+            "COMPLETE_WITH": f"step_done={step_name} produced=N"}
 
 
 def validate_skip(workspace: Path, step: str) -> dict[str, str] | None:
@@ -407,10 +395,17 @@ def run_loop(
 
             context = step.action_context_fn(ctx) if step.action_context_fn else {}
             if step.name in user_input_steps:
-                return _yield_user_input(step.name, ctx.workspace,
-                                         ctx.progress, context)
-            return _yield_judgment(step.name, ctx.workspace,
-                                   ctx.progress, context)
+                context = {**context, "USER_INPUT": "yes"}
+            from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA
+            request = JudgmentRequest(
+                step=step.name,
+                handler=step.handler,
+                context=context,
+                response_schema=step.response_schema or DEFAULT_JUDGMENT_SCHEMA,
+                skippable=step.skippable,
+                timeout_hint=step.timeout_hint,
+            )
+            return _yield_judgment(request, ctx.workspace, ctx.progress)
 
         if step.step_type == StepType.LIFECYCLE:
             if handle_lifecycle:

@@ -124,29 +124,16 @@ def get_sweep_selected(progress: dict[str, str], key: str = "sweep_selected") ->
     return {s.strip() for s in raw.split(",") if s.strip()}
 
 
-def yield_judgment(step: str, workspace: Path,
-                   progress,
-                   context: dict[str, str]) -> dict[str, str]:
-    attempt = progress.get_attempt(step) + 1
+def yield_judgment(request, workspace: Path,
+                   progress) -> dict[str, str]:
+    from judgment import JudgmentRequest, serialize_request
+    if isinstance(request, JudgmentRequest):
+        step_name = request.step
+    else:
+        step_name = request
 
-    if attempt > MAX_JUDGMENT_RETRIES:
-        return {
-            "ACTION": "user_input",
-            "CONTEXT": "step_failed",
-            "STEP": step,
-            "ATTEMPTS": str(MAX_JUDGMENT_RETRIES),
-            "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
-        }
+    attempt = progress.get_attempt(step_name) + 1
 
-    from work_progress import update_progress as update_close_progress
-    update_close_progress(workspace, f"{step}_attempt", str(attempt))
-    result = {"ACTION": step}
-    result.update(context)
-    return result
-
-
-def yield_user_input(step_name: str, ctx, context: dict[str, str]) -> dict[str, str]:
-    attempt = ctx.progress.get_attempt(step_name) + 1
     if attempt > MAX_JUDGMENT_RETRIES:
         return {
             "ACTION": "user_input",
@@ -155,9 +142,14 @@ def yield_user_input(step_name: str, ctx, context: dict[str, str]) -> dict[str, 
             "ATTEMPTS": str(MAX_JUDGMENT_RETRIES),
             "REASON": f"Validation failed after {MAX_JUDGMENT_RETRIES} attempts",
         }
+
     from work_progress import update_progress as update_close_progress
-    update_close_progress(ctx.workspace, f"{step_name}_attempt", str(attempt))
-    return {"ACTION": "user_input", **context}
+    update_close_progress(workspace, f"{step_name}_attempt", str(attempt))
+
+    if isinstance(request, JudgmentRequest):
+        return serialize_request(request)
+
+    return {"ACTION": step_name}
 
 
 def make_forage_step(phase: str, sweep_key: str = "sweep_selected") -> StepDef:

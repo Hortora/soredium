@@ -236,6 +236,102 @@ class TestValidateResponse:
         assert errors == []
 
 
+class TestYieldJudgmentRequest:
+    def test_emits_handler_in_output(self, tmp_path):
+        from orchestrator_engine import _yield_judgment
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA
+        from progress import Progress
+
+        req = JudgmentRequest(
+            step="code_review",
+            handler="handlers/review.md",
+            context={"DIFF_RANGE": "main..feature"},
+            response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True,
+            timeout_hint="standard",
+        )
+        progress = Progress()
+        result = _yield_judgment(req, tmp_path, progress)
+        assert result["ACTION"] == "code_review"
+        assert result["HANDLER"] == "handlers/review.md"
+        assert result["SKIPPABLE"] == "yes"
+        assert "outcome=" in result["COMPLETE_WITH"]
+
+    def test_omits_handler_when_none(self, tmp_path):
+        from orchestrator_engine import _yield_judgment
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA
+        from progress import Progress
+
+        req = JudgmentRequest(
+            step="forage", handler=None,
+            context={}, response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True, timeout_hint="standard",
+        )
+        progress = Progress()
+        result = _yield_judgment(req, tmp_path, progress)
+        assert "HANDLER" not in result
+        assert result["ACTION"] == "forage"
+
+    def test_context_fields_included(self, tmp_path):
+        from orchestrator_engine import _yield_judgment
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA
+        from progress import Progress
+
+        req = JudgmentRequest(
+            step="code_review", handler=None,
+            context={"DIFF_RANGE": "main..feature", "DIMENSION": "conformance"},
+            response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True, timeout_hint="extended",
+        )
+        progress = Progress()
+        result = _yield_judgment(req, tmp_path, progress)
+        assert result["DIFF_RANGE"] == "main..feature"
+        assert result["DIMENSION"] == "conformance"
+        assert result["TIMEOUT_HINT"] == "extended"
+
+    def test_attempt_tracking_preserved(self, tmp_path):
+        from orchestrator_engine import _yield_judgment
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA
+        from progress import Progress
+        from work_progress import read_progress
+
+        req = JudgmentRequest(
+            step="review", handler=None,
+            context={}, response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True, timeout_hint="standard",
+        )
+        progress = Progress()
+        _yield_judgment(req, tmp_path, progress)
+        disk = read_progress(tmp_path)
+        assert disk.get("review_attempt") == "1"
+
+
+class TestRunLoopAssemblesRequest:
+    def test_judgment_step_yields_with_handler(self, tmp_path):
+        from orchestrator_engine import run_loop
+        from shared_steps import StepDef
+        from judgment import StepType
+        from progress import Progress
+
+        step = StepDef(
+            "test_step", "test", StepType.JUDGMENT,
+            handler="handlers/test.md",
+            action_context_fn=lambda ctx: {"KEY": "value"},
+        )
+        ctx_class = type("Ctx", (), {
+            "workspace": tmp_path, "project": tmp_path,
+            "progress": Progress(), "steps_executed": [],
+            "repos": [], "last_output": {},
+            "done": lambda self, s: self.progress.get(s) in ("done", "skipped", "skipped_error"),
+        })
+        ctx = ctx_class()
+        result = run_loop([step], ctx)
+        assert result["ACTION"] == "test_step"
+        assert result["HANDLER"] == "handlers/test.md"
+        assert result["KEY"] == "value"
+        assert result["SKIPPABLE"] == "yes"
+
+
 class TestStepTypeConverted:
     """Verify all step definitions use StepType enum, not strings."""
 
