@@ -469,15 +469,6 @@ def main() -> int:
                 return 1
         ctx.progress = Progress.load(ctx.workspace)
 
-    if args.get("skip_step"):
-        from orchestrator_engine import validate_skip
-        err = validate_skip(ctx.workspace, args["skip_step"])
-        if err:
-            for k, v in err.items():
-                print(f"{k}={v}")
-            return 1
-        ctx.progress = Progress.load(ctx.workspace)
-
     if ctx.in_slot and ctx.slot_path and command in ("start", "continue"):
         _write_slot_occupant(ctx.slot_path)
 

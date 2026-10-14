@@ -886,7 +886,7 @@ class TestStepDoneValidation:
 
 
 class TestSkipStep:
-    """skip_step= argument marks a step as skipped."""
+    """outcome=skipped marks a step as skipped via step_done=."""
 
     def _run(self, tmp_path, **extra):
         from work_end_orchestrator import run_orchestrator
@@ -900,17 +900,18 @@ class TestSkipStep:
         args.update(extra)
         return run_orchestrator(args)
 
-    def test_skip_step_marks_skipped(self, tmp_path):
+    def test_outcome_skipped_marks_skipped(self, tmp_path):
         from close_progress import update_close_progress, read_close_progress
         update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
         update_close_progress(tmp_path, "sweep_selected", "forage,write_content")
-        self._run(tmp_path, skip_step="forage")
+        update_close_progress(tmp_path, "last_yielded", "forage")
+        self._run(tmp_path, step_done="forage", outcome="skipped")
         progress = read_close_progress(tmp_path)
         assert progress.get("forage") == "skipped"
 
     def test_skip_matches_last_yielded(self, tmp_path):
-        """Skip succeeds when skip_step matches what was last yielded."""
+        """Skip succeeds when outcome=skipped matches what was last yielded."""
         from close_progress import update_close_progress, read_close_progress
         update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
@@ -919,13 +920,13 @@ class TestSkipStep:
         result = self._run(tmp_path)
         assert result["ACTION"] == "forage"
         # Skip forage — matches last_yielded
-        result = self._run(tmp_path, skip_step="forage")
+        result = self._run(tmp_path, step_done="forage", outcome="skipped")
         assert result.get("ERROR") != "invalid_skip"
         progress = read_close_progress(tmp_path)
         assert progress.get("forage") == "skipped"
 
     def test_skip_rejects_non_yielded_step(self, tmp_path):
-        """Skip fails when skip_step doesn't match last_yielded."""
+        """Skip fails when outcome=skipped doesn't match last_yielded."""
         from close_progress import update_close_progress
         update_close_progress(tmp_path, "review", "done")
         update_close_progress(tmp_path, "sweep_config", "done")
@@ -934,7 +935,7 @@ class TestSkipStep:
         result = self._run(tmp_path)
         assert result["ACTION"] == "forage"
         # Try to skip write_content — doesn't match last_yielded
-        result = self._run(tmp_path, skip_step="write_content")
+        result = self._run(tmp_path, step_done="write_content", outcome="skipped")
         assert result.get("ERROR") == "invalid_skip"
         assert result.get("LAST_YIELDED") == "forage"
 
@@ -948,10 +949,10 @@ class TestSkipStep:
         result = self._run(tmp_path)
         assert result["ACTION"] == "forage"
         # Skip forage — orchestrator yields protocol next (last_yielded=protocol)
-        result = self._run(tmp_path, skip_step="forage")
+        result = self._run(tmp_path, step_done="forage", outcome="skipped")
         assert result["ACTION"] == "protocol"
         # Try to skip write_content when protocol was just yielded — blocked
-        result = self._run(tmp_path, skip_step="write_content")
+        result = self._run(tmp_path, step_done="write_content", outcome="skipped")
         assert result.get("ERROR") == "invalid_skip"
         assert result.get("LAST_YIELDED") == "protocol"
 

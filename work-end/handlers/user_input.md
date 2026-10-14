@@ -64,13 +64,13 @@ Options: skip / retry / abort.
 
 <SKIP-ISOLATION>
 **Skipping is scoped to the failed step ONLY.** Each step is independent.
-The orchestrator validates `skip_step=` against the last yielded step.
+The orchestrator validates `outcome=skipped` against the last yielded step.
 
-**When you may pass skip_step:**
+**When you may pass `step_done=<STEP> outcome=skipped`:**
 - The orchestrator returned `CONTEXT=step_failed` for that specific STEP
 - The user explicitly asked to skip that specific step
 
-**When you may NOT pass skip_step:**
+**When you may NOT skip:**
 - A different step failed and you want to "skip the rest of the sweep"
 - You think the step is unnecessary based on session context
 - You want to save time or tokens

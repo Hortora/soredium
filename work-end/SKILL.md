@@ -84,7 +84,7 @@ python3 work-end/work_end_orchestrator.py \
     [in_slot=$IN_SLOT] [slot_path=$SLOT_PATH] \
     [on_main=$ON_MAIN] [plan_path=$PLAN_PATH] \
     [family_root=$FAMILY_ROOT] [slot_num=$SLOT_NUM] \
-    [sweep_selected=<CSV>] [skip_step=<NAME>] \
+    [sweep_selected=<CSV>] \
     [skip_user_input_steps=yes] \
     [step_done=<NAME> produced=<N>] \
     [abort=yes] [conflict_resolved=yes]

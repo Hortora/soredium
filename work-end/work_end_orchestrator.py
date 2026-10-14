@@ -1525,12 +1525,6 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         for ui_step in CLOSE_USER_INPUT_STEPS:
             update_close_progress(workspace, ui_step, "done")
 
-    if args.get("skip_step"):
-        err = validate_skip(workspace, args["skip_step"])
-        if err:
-            rec("invalid-skip", step=args["skip_step"], reason=err.get("REASON", ""))
-            return err
-
     if args.get("step_done"):
         step_name = args["step_done"]
         if step_name == "queue_decision" and args.get("produced") == "sync":

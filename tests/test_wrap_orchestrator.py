@@ -158,8 +158,9 @@ class TestWrapSkipStep:
         args.update(extra)
         return wo.run_orchestrator(args)
 
-    def test_skip_marks_step_done(self, tmp_path):
-        self._run(tmp_path, skip_step="loose_ends")
+    def test_outcome_skipped_marks_step_done(self, tmp_path):
+        write_close_progress(tmp_path, {"last_yielded": "loose_ends"})
+        self._run(tmp_path, step_done="loose_ends", outcome="skipped")
         progress = read_close_progress(tmp_path)
         assert progress.get("loose_ends") == "skipped"
 
@@ -175,7 +176,7 @@ class TestWrapSkipStep:
         result = self._run(tmp_path)
         assert result["ACTION"] == "forage"
         # Try to skip write_content — blocked
-        result = self._run(tmp_path, skip_step="write_content")
+        result = self._run(tmp_path, step_done="write_content", outcome="skipped")
         assert result.get("ERROR") == "invalid_skip"
         assert result.get("LAST_YIELDED") == "forage"
 
@@ -191,10 +192,10 @@ class TestWrapSkipStep:
         result = self._run(tmp_path)
         assert result["ACTION"] == "forage"
         # Skip forage — orchestrator yields protocol next
-        result = self._run(tmp_path, skip_step="forage")
+        result = self._run(tmp_path, step_done="forage", outcome="skipped")
         assert result["ACTION"] == "protocol"
         # Try to skip write_content when protocol was just yielded — blocked
-        result = self._run(tmp_path, skip_step="write_content")
+        result = self._run(tmp_path, step_done="write_content", outcome="skipped")
         assert result.get("ERROR") == "invalid_skip"
         assert result.get("LAST_YIELDED") == "protocol"
 

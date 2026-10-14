@@ -353,7 +353,7 @@ class TestStepDoneHandling:
         captured = capsys.readouterr()
         assert "invalid_step_done" in captured.out
 
-    def test_skip_step_marks_step_skipped(self, tmp_path):
+    def test_outcome_skipped_marks_step_skipped(self, tmp_path):
         from work import main
         from work_progress import update_progress, read_progress
         import sys as _sys
@@ -369,7 +369,7 @@ class TestStepDoneHandling:
                       "on_main=no", "in_slot=no", "covers=42",
                       "issue_repo=Org/repo", "meta_state=active",
                       "issue_n=42",
-                      "skip_step=brainstorm_offer"]
+                      "step_done=brainstorm_offer", "outcome=skipped"]
         try:
             main()
         finally:

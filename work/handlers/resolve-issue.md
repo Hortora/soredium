@@ -21,5 +21,5 @@ The pipeline needs an issue number to create a branch.
 
 If the user explicitly skips issue creation, call with:
 ```
-skip_step=resolve_issue
+step_done=resolve_issue outcome=skipped
 ```

@@ -17,6 +17,6 @@ Multiple paused branches on the stack. Show a picker.
    ```
 5. If user picks "new", skip remaining resume steps:
    ```
-   skip_step=stack_pick
+   step_done=stack_pick outcome=skipped
    ```
    Then route to work-start.

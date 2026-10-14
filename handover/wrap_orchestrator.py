@@ -10,8 +10,7 @@ Usage:
         workspace=<path> project=<path> branch=<name> \
         [covers=<csv>] [issue_repo=<repo>] \
         [plan_path=<path>] [has_arc42=<yes|no>] [has_plan=<yes|no>] \
-        [sweep_selected=<csv>] [skip_step=<name>] \
-        [dry_run=yes]
+        [sweep_selected=<csv>] [dry_run=yes]
 """
 
 import sys
@@ -21,7 +20,7 @@ from pathlib import Path
 _work_end = Path(__file__).resolve().parent.parent / "work-end"
 sys.path.insert(0, str(_work_end))
 
-from close_progress import read_close_progress, update_close_progress
+from close_progress import update_close_progress
 from orchestrator_engine import run_loop, log_call, validate_skip, apply_step_done
 
 _lib = Path.home() / ".claude" / "lib"
@@ -48,6 +47,7 @@ from shared_steps import (
     make_notes_step,
 )
 from judgment import StepType
+from progress import Progress
 
 
 @dataclass
@@ -163,12 +163,6 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
 
     rec = lambda evt, **kw: _record(evt, branch, project, issue_repo, dry_run, **kw)
 
-    if args.get("skip_step"):
-        err = validate_skip(workspace, args["skip_step"])
-        if err:
-            rec("invalid-skip", step=args["skip_step"], reason=err.get("REASON", ""))
-            return err
-
     if args.get("step_done"):
         step_name = args["step_done"]
         if step_name == "wrap_sweep_config":
@@ -217,7 +211,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         update_close_progress(workspace, "wrap_sweep_config", "done")
         update_close_progress(workspace, "wrap_sweep_selected", selected)
 
-    progress = read_close_progress(workspace)
+    progress = Progress.load(workspace)
 
     ctx = WrapContext(
         workspace=workspace, project=project, branch=branch,
