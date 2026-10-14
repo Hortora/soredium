@@ -1,0 +1,250 @@
+"""Tests for typed LLM interface — JudgmentRequest/Response protocol (#451)."""
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+
+
+class TestStepType:
+    def test_mechanical_value(self):
+        from judgment import StepType
+        assert StepType.MECHANICAL.value == "mechanical"
+
+    def test_judgment_value(self):
+        from judgment import StepType
+        assert StepType.JUDGMENT.value == "judgment"
+
+    def test_lifecycle_value(self):
+        from judgment import StepType
+        assert StepType.LIFECYCLE.value == "lifecycle"
+
+    def test_from_string(self):
+        from judgment import StepType
+        assert StepType("mechanical") == StepType.MECHANICAL
+
+    def test_invalid_raises(self):
+        from judgment import StepType
+        with pytest.raises(ValueError):
+            StepType("invalid")
+
+
+class TestOutcome:
+    def test_completed_value(self):
+        from judgment import Outcome
+        assert Outcome.COMPLETED.value == "completed"
+
+    def test_skipped_value(self):
+        from judgment import Outcome
+        assert Outcome.SKIPPED.value == "skipped"
+
+    def test_blocked_value(self):
+        from judgment import Outcome
+        assert Outcome.BLOCKED.value == "blocked"
+
+    def test_from_string(self):
+        from judgment import Outcome
+        assert Outcome("skipped") == Outcome.SKIPPED
+
+
+class TestJudgmentRequest:
+    def test_frozen_dataclass(self):
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA
+        req = JudgmentRequest(
+            step="code_review",
+            handler="handlers/review.md",
+            context={"DIFF_RANGE": "main..feature"},
+            response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True,
+            timeout_hint="standard",
+        )
+        assert req.step == "code_review"
+        assert req.handler == "handlers/review.md"
+        with pytest.raises(AttributeError):
+            req.step = "other"
+
+    def test_none_handler(self):
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA
+        req = JudgmentRequest(
+            step="forage", handler=None,
+            context={}, response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True, timeout_hint="standard",
+        )
+        assert req.handler is None
+
+
+class TestJudgmentResponse:
+    def test_completed_response(self):
+        from judgment import JudgmentResponse, Outcome
+        resp = JudgmentResponse(
+            step="code_review",
+            outcome=Outcome.COMPLETED,
+            produced=3,
+            evidence={"findings": 3},
+            block_reason=None,
+        )
+        assert resp.outcome == Outcome.COMPLETED
+        assert resp.produced == 3
+
+    def test_blocked_response(self):
+        from judgment import JudgmentResponse, Outcome
+        resp = JudgmentResponse(
+            step="squash",
+            outcome=Outcome.BLOCKED,
+            produced=0,
+            evidence={},
+            block_reason="merge conflict",
+        )
+        assert resp.block_reason == "merge conflict"
+
+
+class TestSerializeRequest:
+    def test_round_trip_basic_fields(self):
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA, serialize_request
+        req = JudgmentRequest(
+            step="code_review",
+            handler="handlers/review.md",
+            context={"DIFF_RANGE": "main..feature"},
+            response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True,
+            timeout_hint="standard",
+        )
+        result = serialize_request(req)
+        assert result["ACTION"] == "code_review"
+        assert result["HANDLER"] == "handlers/review.md"
+        assert result["DIFF_RANGE"] == "main..feature"
+        assert result["SKIPPABLE"] == "yes"
+        assert result["TIMEOUT_HINT"] == "standard"
+        assert "step_done=code_review" in result["COMPLETE_WITH"]
+        assert "outcome=" in result["COMPLETE_WITH"]
+
+    def test_none_handler_omitted(self):
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA, serialize_request
+        req = JudgmentRequest(
+            step="forage", handler=None,
+            context={}, response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True, timeout_hint="standard",
+        )
+        result = serialize_request(req)
+        assert "HANDLER" not in result
+
+    def test_schema_serialized_as_json(self):
+        from judgment import JudgmentRequest, DEFAULT_JUDGMENT_SCHEMA, serialize_request
+        req = JudgmentRequest(
+            step="review", handler=None,
+            context={}, response_schema=DEFAULT_JUDGMENT_SCHEMA,
+            skippable=True, timeout_hint="standard",
+        )
+        result = serialize_request(req)
+        parsed = json.loads(result["SCHEMA"])
+        assert parsed["type"] == "object"
+        assert "step" in parsed["properties"]
+
+
+class TestParseResponse:
+    def test_parse_completed(self):
+        from judgment import parse_response, Outcome
+        args = {"step_done": "code_review", "produced": "3", "outcome": "completed"}
+        resp = parse_response(args)
+        assert resp.step == "code_review"
+        assert resp.outcome == Outcome.COMPLETED
+        assert resp.produced == 3
+
+    def test_parse_defaults_outcome_completed(self):
+        from judgment import parse_response, Outcome
+        args = {"step_done": "code_review", "produced": "2"}
+        resp = parse_response(args)
+        assert resp.outcome == Outcome.COMPLETED
+
+    def test_parse_skipped(self):
+        from judgment import parse_response, Outcome
+        args = {"step_done": "forage", "outcome": "skipped"}
+        resp = parse_response(args)
+        assert resp.outcome == Outcome.SKIPPED
+        assert resp.produced == 0
+
+    def test_parse_blocked(self):
+        from judgment import parse_response, Outcome
+        args = {"step_done": "squash", "outcome": "blocked",
+                "block_reason": "merge conflict"}
+        resp = parse_response(args)
+        assert resp.outcome == Outcome.BLOCKED
+        assert resp.block_reason == "merge conflict"
+
+    def test_parse_evidence_json(self):
+        from judgment import parse_response
+        args = {"step_done": "review", "produced": "1",
+                "evidence": '{"findings": 1}'}
+        resp = parse_response(args)
+        assert resp.evidence == {"findings": 1}
+
+    def test_parse_invalid_outcome_raises(self):
+        from judgment import parse_response
+        args = {"step_done": "review", "outcome": "invalid"}
+        with pytest.raises(ValueError):
+            parse_response(args)
+
+    def test_parse_missing_produced_defaults_zero(self):
+        from judgment import parse_response
+        args = {"step_done": "forage", "outcome": "completed"}
+        resp = parse_response(args)
+        assert resp.produced == 0
+
+    def test_parse_malformed_evidence_defaults_empty(self):
+        from judgment import parse_response
+        args = {"step_done": "review", "evidence": "not-json"}
+        resp = parse_response(args)
+        assert resp.evidence == {}
+
+
+class TestValidateResponse:
+    def test_valid_default_schema(self):
+        from judgment import JudgmentResponse, Outcome, DEFAULT_JUDGMENT_SCHEMA, validate_response
+        resp = JudgmentResponse("review", Outcome.COMPLETED, 0, {}, None)
+        errors = validate_response(resp, DEFAULT_JUDGMENT_SCHEMA)
+        assert errors == []
+
+    def test_invalid_outcome_rejected(self):
+        from judgment import validate_response, DEFAULT_JUDGMENT_SCHEMA
+        resp_dict = {"step": "review", "outcome": "invalid", "produced": 0}
+        errors = validate_response_dict(resp_dict, DEFAULT_JUDGMENT_SCHEMA)
+        assert any("outcome" in e for e in errors)
+
+    def test_negative_produced_rejected(self):
+        from judgment import JudgmentResponse, Outcome, DEFAULT_JUDGMENT_SCHEMA, validate_response
+        resp = JudgmentResponse("review", Outcome.COMPLETED, -1, {}, None)
+        errors = validate_response(resp, DEFAULT_JUDGMENT_SCHEMA)
+        assert any("produced" in e for e in errors)
+
+    def test_custom_schema_validates(self):
+        from judgment import JudgmentResponse, Outcome, validate_response
+        schema = {
+            "type": "object",
+            "properties": {
+                "step": {"type": "string"},
+                "outcome": {"type": "string", "enum": ["completed", "skipped", "blocked"]},
+                "produced": {"type": "integer", "minimum": 0},
+            },
+            "required": ["step", "outcome", "produced"],
+        }
+        resp = JudgmentResponse("squash", Outcome.COMPLETED, 1, {}, None)
+        errors = validate_response(resp, schema)
+        assert errors == []
+
+
+def validate_response_dict(resp_dict: dict, schema: dict) -> list[str]:
+    """Test helper — validate a raw dict against schema."""
+    errors = []
+    required = schema.get("required", [])
+    for field in required:
+        if field not in resp_dict:
+            errors.append(f"missing required field: {field}")
+    props = schema.get("properties", {})
+    if "outcome" in props and "enum" in props["outcome"]:
+        if resp_dict.get("outcome") not in props["outcome"]["enum"]:
+            errors.append(f"invalid outcome: {resp_dict.get('outcome')}")
+    return errors
