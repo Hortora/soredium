@@ -143,7 +143,8 @@ def _skip_single_stack(ctx) -> bool:
 RESUME_STEPS: list[StepDef] = [
     StepDef("stack_pick", "resume", StepType.JUDGMENT,
             skip_fn=_skip_single_stack,
-            action_context_fn=lambda ctx: {"CONTEXT": "stack_pick"}),
+            action_context_fn=lambda ctx: {"CONTEXT": "stack_pick"},
+            handler="handlers/stack-pick.md"),
     StepDef("pop_stack", "resume", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_project_dir / "stack.py"), "pop",
@@ -225,14 +226,16 @@ START_STEPS: list[StepDef] = [
             skip_fn=_skip_issue_resolved,
             action_context_fn=lambda ctx: {
                 "CONTEXT": "resolve_issue",
-                "OWNER_REPO": ctx.owner_repo}),
+                "OWNER_REPO": ctx.owner_repo},
+            handler="handlers/resolve-issue.md"),
     StepDef("stacked_pr_detect", "start", StepType.MECHANICAL,
             skip_fn=lambda ctx: not ctx.issue_n),
     StepDef("branch_name", "start", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {
                 "CONTEXT": "branch_name",
                 "ISSUE_N": ctx.issue_n,
-                "ISSUE_TITLE": ctx.issue_title}),
+                "ISSUE_TITLE": ctx.issue_title},
+            handler="handlers/branch-name.md"),
     StepDef("flyway_scan", "start", StepType.MECHANICAL,
             skip_fn=_skip_flyway_none,
             script_fn=lambda ctx: [
@@ -253,7 +256,8 @@ START_STEPS: list[StepDef] = [
                 f"branch={ctx.branch}"]),
     StepDef("recover_plan_offer", "start", StepType.JUDGMENT,
             skip_fn=lambda ctx: not (ctx.workspace / ".orphaned-plan").exists(),
-            action_context_fn=_recover_plan_context),
+            action_context_fn=_recover_plan_context,
+            handler="handlers/recover-plan-offer.md"),
     StepDef("design_routing", "start", StepType.MECHANICAL),
     StepDef("scaffold", "start", StepType.MECHANICAL,
             script_fn=lambda ctx: [
@@ -274,15 +278,18 @@ START_STEPS: list[StepDef] = [
                 str(ctx.workspace), f"branch={ctx.branch}"]),
     StepDef("platform_coherence", "start", StepType.JUDGMENT,
             skip_fn=_skip_no_platform_doc,
-            action_context_fn=lambda ctx: {"CONTEXT": "platform_coherence"}),
+            action_context_fn=lambda ctx: {"CONTEXT": "platform_coherence"},
+            handler="handlers/platform-coherence.md"),
     StepDef("check_protocols", "start", StepType.JUDGMENT,
             skip_fn=_skip_no_protocols,
-            action_context_fn=lambda ctx: {"CONTEXT": "check_protocols"}),
+            action_context_fn=lambda ctx: {"CONTEXT": "check_protocols"},
+            handler="handlers/check-protocols.md"),
     StepDef("garden_search", "start", StepType.MECHANICAL),
     StepDef("load_specs", "start", StepType.MECHANICAL),
     StepDef("check_intellij", "start", StepType.MECHANICAL),
     StepDef("brainstorm_offer", "start", StepType.JUDGMENT,
-            action_context_fn=lambda ctx: {"CONTEXT": "brainstorm_offer"}),
+            action_context_fn=lambda ctx: {"CONTEXT": "brainstorm_offer"},
+            handler="handlers/brainstorm-offer.md"),
 ]
 
 
@@ -312,7 +319,8 @@ CONTINUE_STEPS: list[StepDef] = [
                 "CONTEXT": "load_context",
                 "META_STATE": ctx.meta_state,
                 "HAS_HANDOFF": "yes" if ctx.has_handoff else "no",
-                "HANDOFF_PATH": str(ctx.handoff_path) if ctx.handoff_path else ""}),
+                "HANDOFF_PATH": str(ctx.handoff_path) if ctx.handoff_path else ""},
+            handler="handlers/load-context.md"),
 ]
 
 
@@ -335,7 +343,8 @@ NEXT_STEPS: list[StepDef] = [
     StepDef("context_refresh", "next", StepType.MECHANICAL),
     StepDef("deferred_check", "next", StepType.JUDGMENT,
             skip_fn=_skip_no_deferred,
-            action_context_fn=lambda ctx: {"CONTEXT": "deferred_check"}),
+            action_context_fn=lambda ctx: {"CONTEXT": "deferred_check"},
+            handler="handlers/deferred-check.md"),
 ]
 
 
@@ -356,7 +365,8 @@ FIND_STEPS: list[StepDef] = [
     StepDef("present_candidates", "find", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {
                 "CONTEXT": "present_candidates",
-                **ctx.last_output}),
+                **ctx.last_output},
+            handler="handlers/present-candidates.md"),
     StepDef("populate_queue", "find", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_PLAN_MANAGER), "append",

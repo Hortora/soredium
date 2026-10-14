@@ -43,6 +43,18 @@ class JudgmentResponse:
     block_reason: str | None
 
 
+PRODUCED_REQUIRED_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "step": {"type": "string"},
+        "outcome": {"type": "string", "enum": ["completed", "skipped", "blocked"]},
+        "produced": {"type": "integer", "minimum": 0},
+        "evidence": {"type": "object"},
+        "block_reason": {"type": ["string", "null"]},
+    },
+    "required": ["step", "outcome", "produced"],
+}
+
 DEFAULT_JUDGMENT_SCHEMA = {
     "type": "object",
     "properties": {

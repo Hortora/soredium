@@ -9,6 +9,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
 
+from judgment import StepType
+
 
 class TestStepType:
     def test_mechanical_value(self):
@@ -415,6 +417,33 @@ class TestResponseValidationIntegration:
             "block_reason": "garden not running",
         })
         assert result.get("ERROR") == "step_blocked"
+
+
+class TestHandlerMetadata:
+    def test_work_end_handlers_exist(self):
+        from work_end_orchestrator import STEPS
+        handler_root = Path(__file__).parent.parent / "work-end"
+        for step in STEPS:
+            if step.step_type == StepType.JUDGMENT and step.handler:
+                path = handler_root / step.handler
+                assert path.exists(), f"Handler for '{step.name}' not found: {path}"
+
+    def test_work_handlers_exist(self):
+        from work import PIPELINES
+        handler_root = Path(__file__).parent.parent / "work"
+        for cmd, steps in PIPELINES.items():
+            for step in steps:
+                if step.step_type == StepType.JUDGMENT and step.handler:
+                    path = handler_root / step.handler
+                    assert path.exists(), f"Handler for '{step.name}' not found: {path}"
+
+    def test_steps_with_verify_fn_have_schema(self):
+        from work_end_orchestrator import STEPS
+        for step in STEPS:
+            if step.step_type == StepType.JUDGMENT and step.verify_fn:
+                assert step.response_schema is not None, (
+                    f"Step '{step.name}' has verify_fn but no response_schema"
+                )
 
 
 class TestStepTypeConverted:
