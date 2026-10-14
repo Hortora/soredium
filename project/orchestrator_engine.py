@@ -324,6 +324,10 @@ def run_loop(
             except (ValueError, TypeError):
                 attempt = 0
 
+            if attempt >= MAX_MECHANICAL_RETRIES:
+                attempt = 0
+                update_close_progress(ctx.workspace, attempt_key, "0")
+
             if step.outcome_fn:
                 v = step.outcome_fn(ctx)
                 if v.result == VerifyResult.PASS:
