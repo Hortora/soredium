@@ -188,8 +188,18 @@ Read `ACTION=` from output. Dispatch:
 | `error` | Read ERROR= and STEP=. Diagnose and retry. |
 | `user_input` | A judgment step failed repeatedly. Ask the user. |
 
+**Note:** The orchestrator output includes `HANDLER=<path>` when a
+handler file exists. Read from `HANDLER=` first; fall back to this
+table for steps without a handler.
+
 After handling a judgment step, call work.py again with the same args
-plus `step_done=<step_name>` and any values the handler produced.
+plus:
+```
+step_done=<step_name> outcome=completed produced=N
+```
+Or to skip: `step_done=<step_name> outcome=skipped`
+Or if blocked: `step_done=<step_name> outcome=blocked block_reason="..."`
+
 Repeat until `ACTION=complete`.
 
 **Cross-repo re-invocation:** When a handler produces `SWITCH_REPO=<name>`,
