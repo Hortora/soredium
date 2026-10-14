@@ -478,6 +478,64 @@ class TestStepTypeConverted:
                 )
 
 
+class TestDifferentiatedSchemas:
+    def test_default_schema_does_not_require_produced(self):
+        from judgment import JudgmentResponse, Outcome, DEFAULT_JUDGMENT_SCHEMA, validate_response
+        resp = JudgmentResponse("forage", Outcome.COMPLETED, 0, {}, None)
+        errors = validate_response(resp, DEFAULT_JUDGMENT_SCHEMA)
+        assert errors == []
+
+    def test_produced_required_schema_requires_produced(self):
+        from judgment import PRODUCED_REQUIRED_SCHEMA
+        assert "produced" in PRODUCED_REQUIRED_SCHEMA["required"]
+
+    def test_default_schema_omits_produced_from_required(self):
+        from judgment import DEFAULT_JUDGMENT_SCHEMA
+        assert "produced" not in DEFAULT_JUDGMENT_SCHEMA["required"]
+
+    def test_forcing_function_schema_requires_evidence_open_findings(self):
+        from judgment import JudgmentResponse, Outcome, FORCING_FUNCTION_SCHEMA, validate_response
+        resp = JudgmentResponse("forcing_function", Outcome.COMPLETED, 0, {}, None)
+        errors = validate_response(resp, FORCING_FUNCTION_SCHEMA)
+        assert any("open_findings" in e for e in errors)
+
+    def test_forcing_function_schema_accepts_valid_evidence(self):
+        from judgment import JudgmentResponse, Outcome, FORCING_FUNCTION_SCHEMA, validate_response
+        resp = JudgmentResponse("forcing_function", Outcome.COMPLETED, 0, {"open_findings": 0}, None)
+        errors = validate_response(resp, FORCING_FUNCTION_SCHEMA)
+        assert errors == []
+
+    def test_forcing_function_schema_rejects_wrong_type(self):
+        from judgment import JudgmentResponse, Outcome, FORCING_FUNCTION_SCHEMA, validate_response
+        resp = JudgmentResponse("forcing_function", Outcome.COMPLETED, 0, {"open_findings": "none"}, None)
+        errors = validate_response(resp, FORCING_FUNCTION_SCHEMA)
+        assert any("integer" in e for e in errors)
+
+    def test_squash_schema_requires_evidence_verified(self):
+        from judgment import JudgmentResponse, Outcome, SQUASH_SCHEMA, validate_response
+        resp = JudgmentResponse("squash", Outcome.COMPLETED, 1, {}, None)
+        errors = validate_response(resp, SQUASH_SCHEMA)
+        assert any("verified" in e for e in errors)
+
+    def test_squash_schema_accepts_valid_evidence(self):
+        from judgment import JudgmentResponse, Outcome, SQUASH_SCHEMA, validate_response
+        resp = JudgmentResponse("squash", Outcome.COMPLETED, 1, {"verified": True}, None)
+        errors = validate_response(resp, SQUASH_SCHEMA)
+        assert errors == []
+
+    def test_squash_schema_rejects_wrong_type(self):
+        from judgment import JudgmentResponse, Outcome, SQUASH_SCHEMA, validate_response
+        resp = JudgmentResponse("squash", Outcome.COMPLETED, 1, {"verified": "yes"}, None)
+        errors = validate_response(resp, SQUASH_SCHEMA)
+        assert any("boolean" in e for e in errors)
+
+    def test_evidence_validation_skipped_when_not_completed(self):
+        from judgment import JudgmentResponse, Outcome, FORCING_FUNCTION_SCHEMA, validate_response
+        resp = JudgmentResponse("forcing_function", Outcome.SKIPPED, 0, {}, None)
+        errors = validate_response(resp, FORCING_FUNCTION_SCHEMA)
+        assert not any("open_findings" in e for e in errors)
+
+
 def validate_response_dict(resp_dict: dict, schema: dict) -> list[str]:
     """Test helper — validate a raw dict against schema."""
     errors = []

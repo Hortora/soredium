@@ -40,7 +40,7 @@ from close_progress import (
 )
 from shared_steps import StepDef, PipelineMode, ALL_MODES, ALL_DISPOSITIONS, ALL_REPO_TYPES
 from repo_state import RepoDisposition, RepoType
-from judgment import StepType, PRODUCED_REQUIRED_SCHEMA
+from judgment import StepType, PRODUCED_REQUIRED_SCHEMA, FORCING_FUNCTION_SCHEMA, SQUASH_SCHEMA
 from progress import Progress
 
 CLOSE_LOG_FILE = ".close-log.jsonl"
@@ -1187,7 +1187,7 @@ STEPS: list[StepDef] = [
             action_context_fn=_forcing_function_context,
             verify_fn=_verify_forcing_function,
             handler="handlers/review.md",
-            response_schema=PRODUCED_REQUIRED_SCHEMA),
+            response_schema=FORCING_FUNCTION_SCHEMA),
     StepDef("sweep_config", "closing:review", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {"ITEMS": _sweep_defaults(),
                                            "COMPLETE_WITH": "sweep_selected=<comma-separated-list>"},
@@ -1257,7 +1257,7 @@ STEPS: list[StepDef] = [
             disposition_repo_types=frozenset({RepoType.PROJECT}),
             action_context_fn=lambda ctx: {"REPOS": ctx.project.name},
             verify_fn=_verify_squash,
-            response_schema=PRODUCED_REQUIRED_SCHEMA),
+            response_schema=SQUASH_SCHEMA),
     StepDef("report_squash", "closing:promoted", StepType.MECHANICAL,
             modes=NOT_MAIN,
             requires=("squash",),

@@ -43,6 +43,18 @@ class JudgmentResponse:
     block_reason: str | None
 
 
+DEFAULT_JUDGMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "step": {"type": "string"},
+        "outcome": {"type": "string", "enum": ["completed", "skipped", "blocked"]},
+        "produced": {"type": "integer", "minimum": 0},
+        "evidence": {"type": "object"},
+        "block_reason": {"type": ["string", "null"]},
+    },
+    "required": ["step", "outcome"],
+}
+
 PRODUCED_REQUIRED_SCHEMA = {
     "type": "object",
     "properties": {
@@ -55,17 +67,42 @@ PRODUCED_REQUIRED_SCHEMA = {
     "required": ["step", "outcome", "produced"],
 }
 
-DEFAULT_JUDGMENT_SCHEMA = {
+FORCING_FUNCTION_SCHEMA = {
     "type": "object",
     "properties": {
         "step": {"type": "string"},
         "outcome": {"type": "string", "enum": ["completed", "skipped", "blocked"]},
         "produced": {"type": "integer", "minimum": 0},
-        "evidence": {"type": "object"},
+        "evidence": {
+            "type": "object",
+            "properties": {
+                "open_findings": {"type": "integer", "minimum": 0},
+            },
+            "required": ["open_findings"],
+        },
         "block_reason": {"type": ["string", "null"]},
     },
-    "required": ["step", "outcome", "produced"],
+    "required": ["step", "outcome", "produced", "evidence"],
 }
+
+SQUASH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "step": {"type": "string"},
+        "outcome": {"type": "string", "enum": ["completed", "skipped", "blocked"]},
+        "produced": {"type": "integer", "minimum": 0},
+        "evidence": {
+            "type": "object",
+            "properties": {
+                "verified": {"type": "boolean"},
+            },
+            "required": ["verified"],
+        },
+        "block_reason": {"type": ["string", "null"]},
+    },
+    "required": ["step", "outcome", "produced", "evidence"],
+}
+
 
 
 def serialize_request(request: JudgmentRequest) -> dict[str, str]:
@@ -123,4 +160,31 @@ def validate_response(response: JudgmentResponse, schema: dict) -> list[str]:
             errors.append(f"produced must be integer, got {type(p).__name__}")
         elif "minimum" in props["produced"] and p < props["produced"]["minimum"]:
             errors.append(f"produced must be >= {props['produced']['minimum']}")
+    if "evidence" in props and response.outcome == Outcome.COMPLETED:
+        ev_schema = props["evidence"]
+        ev_required = ev_schema.get("required", [])
+        ev_props = ev_schema.get("properties", {})
+        evidence = resp_dict.get("evidence", {})
+        for field in ev_required:
+            if field not in evidence:
+                errors.append(f"missing required evidence field: {field}")
+            elif field in ev_props:
+                expected = ev_props[field]
+                val = evidence[field]
+                if "type" in expected and not _type_matches(val, expected["type"]):
+                    errors.append(f"evidence.{field} must be {expected['type']}, got {type(val).__name__}")
+                if "minimum" in expected and isinstance(val, (int, float)) and val < expected["minimum"]:
+                    errors.append(f"evidence.{field} must be >= {expected['minimum']}")
     return errors
+
+
+def _type_matches(value, expected_type: str) -> bool:
+    if expected_type == "integer":
+        return isinstance(value, int)
+    if expected_type == "boolean":
+        return isinstance(value, bool)
+    if expected_type == "string":
+        return isinstance(value, str)
+    if expected_type == "object":
+        return isinstance(value, dict)
+    return True
