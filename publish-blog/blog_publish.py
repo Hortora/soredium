@@ -161,6 +161,58 @@ def remove_source(source_repo: str, files_csv: str) -> None:
     print(f"REMOVED={removed_count}", flush=True)
 
 
+def check_present_fn(entry_path: str, dest_dir: str) -> bool:
+    src = Path(entry_path)
+    dest = Path(dest_dir) / src.name
+    return dest.exists()
+
+
+def check_present(entry_path: str, dest_dir: str) -> None:
+    present = check_present_fn(entry_path, dest_dir)
+    print(f"PRESENT={'yes' if present else 'no'}", flush=True)
+
+
+def verify_parity_fn(routing_yaml: str) -> list[dict]:
+    import yaml
+    config = yaml.safe_load(Path(routing_yaml).read_text())
+    destinations = config.get("destinations", {})
+    defaults = config.get("defaults", {}).get("destinations", [])
+    if len(defaults) < 2:
+        return []
+    dest_entries: dict[str, set[str]] = {}
+    for name in defaults:
+        dest_config = destinations.get(name, {})
+        dest_path = Path(dest_config.get("path", "")).expanduser()
+        subdir = dest_config.get("subdir", "")
+        full_path = dest_path / subdir if subdir else dest_path
+        if full_path.is_dir():
+            dest_entries[name] = {f.name for f in full_path.iterdir()
+                                  if f.is_file() and f.suffix == ".md"}
+        else:
+            dest_entries[name] = set()
+    all_entries = set()
+    for entries in dest_entries.values():
+        all_entries |= entries
+    missing = []
+    for entry in sorted(all_entries):
+        for name in defaults:
+            if entry not in dest_entries.get(name, set()):
+                missing.append({"entry": entry, "missing_dest": name})
+    return missing
+
+
+def verify_parity(routing_yaml: str) -> None:
+    missing = verify_parity_fn(routing_yaml)
+    if not missing:
+        print("PARITY=yes", flush=True)
+        print("MISSING_COUNT=0", flush=True)
+        return
+    print("PARITY=no", flush=True)
+    print(f"MISSING_COUNT={len(missing)}", flush=True)
+    for i, m in enumerate(missing, 1):
+        print(f"MISSING_{i}={m['entry']} dest={m['missing_dest']}", flush=True)
+
+
 def main() -> None:
     """Main entry point."""
     if len(sys.argv) < 2:
@@ -213,6 +265,18 @@ def main() -> None:
 
         files_csv = files_arg[6:]  # Strip "files="
         remove_source(source_repo, files_csv)
+
+    elif subcommand == "check-present":
+        if len(sys.argv) != 4:
+            print("Usage: check-present <entry-path> <dest-dir>", file=sys.stderr)
+            sys.exit(1)
+        check_present(sys.argv[2], sys.argv[3])
+
+    elif subcommand == "verify-parity":
+        if len(sys.argv) != 3:
+            print("Usage: verify-parity <routing-yaml>", file=sys.stderr)
+            sys.exit(1)
+        verify_parity(sys.argv[2])
 
     else:
         print(f"ERROR: Unknown subcommand '{subcommand}'", file=sys.stderr)

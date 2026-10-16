@@ -268,3 +268,90 @@ def test_remove_source_invalid_format():
 
         assert result.returncode == 1
         assert "must be files=" in result.stderr
+
+
+# --- check-present tests ---
+
+import sys
+sys.path.insert(0, str(SCRIPT.parent))
+
+
+class TestCheckPresent:
+    def test_present_when_file_exists(self, tmp_path):
+        from blog_publish import check_present_fn
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "entry.md").write_text("content")
+        assert check_present_fn(str(tmp_path / "entry.md"), str(dest)) is True
+
+    def test_absent_when_file_missing(self, tmp_path):
+        from blog_publish import check_present_fn
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        assert check_present_fn(str(tmp_path / "entry.md"), str(dest)) is False
+
+
+class TestVerifyParity:
+    def test_detects_missing_entry_at_destination(self, tmp_path):
+        import yaml
+        from blog_publish import verify_parity_fn
+        dest_a = tmp_path / "dest-a"
+        dest_a.mkdir()
+        dest_b = tmp_path / "dest-b"
+        dest_b.mkdir()
+        (dest_a / "entry.md").write_text("content")
+        routing = {
+            "version": 1,
+            "destinations": {
+                "a": {"path": str(dest_a)},
+                "b": {"path": str(dest_b)},
+            },
+            "defaults": {"destinations": ["a", "b"]},
+            "rules": [],
+        }
+        routing_path = tmp_path / "routing.yaml"
+        routing_path.write_text(yaml.dump(routing))
+        missing = verify_parity_fn(str(routing_path))
+        assert len(missing) == 1
+        assert missing[0]["entry"] == "entry.md"
+        assert missing[0]["missing_dest"] == "b"
+
+    def test_parity_ok_when_all_present(self, tmp_path):
+        import yaml
+        from blog_publish import verify_parity_fn
+        dest_a = tmp_path / "dest-a"
+        dest_a.mkdir()
+        dest_b = tmp_path / "dest-b"
+        dest_b.mkdir()
+        (dest_a / "entry.md").write_text("content")
+        (dest_b / "entry.md").write_text("content")
+        routing = {
+            "version": 1,
+            "destinations": {
+                "a": {"path": str(dest_a)},
+                "b": {"path": str(dest_b)},
+            },
+            "defaults": {"destinations": ["a", "b"]},
+            "rules": [],
+        }
+        routing_path = tmp_path / "routing.yaml"
+        routing_path.write_text(yaml.dump(routing))
+        missing = verify_parity_fn(str(routing_path))
+        assert missing == []
+
+    def test_single_destination_always_parity(self, tmp_path):
+        import yaml
+        from blog_publish import verify_parity_fn
+        dest_a = tmp_path / "dest-a"
+        dest_a.mkdir()
+        (dest_a / "entry.md").write_text("content")
+        routing = {
+            "version": 1,
+            "destinations": {"a": {"path": str(dest_a)}},
+            "defaults": {"destinations": ["a"]},
+            "rules": [],
+        }
+        routing_path = tmp_path / "routing.yaml"
+        routing_path.write_text(yaml.dump(routing))
+        missing = verify_parity_fn(str(routing_path))
+        assert missing == []
