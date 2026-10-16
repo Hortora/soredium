@@ -279,7 +279,7 @@ def _skip_multi_repo_partial_close(ctx: OrchestratorContext) -> bool:
             if not entry.is_dir() or not (entry / ".git").exists():
                 continue
             if (entry / ".workspace").exists():
-                if (entry / ".plan").exists():
+                if (entry / ".plan").exists() and entry.resolve() != ctx.workspace.resolve():
                     return True
                 continue
             result = git(entry, "rev-parse", "--abbrev-ref", "HEAD")

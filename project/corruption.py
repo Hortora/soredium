@@ -171,6 +171,36 @@ def check_plan_branch_stale(plan_path: Path) -> Optional[Finding]:
     )
 
 
+def check_zombie_slot(
+    slot_path: Path | None, base_branch: str,
+) -> Optional[Finding]:
+    if not slot_path or not slot_path.is_dir():
+        return None
+    slot_file = slot_path / ".slot"
+    if not slot_file.exists():
+        return None
+    all_on_main = True
+    has_repos = False
+    for entry in sorted(slot_path.iterdir()):
+        if not entry.is_dir() or not (entry / ".git").exists():
+            continue
+        if (entry / ".workspace").exists():
+            continue
+        has_repos = True
+        branch_out, _ = _git(entry, "rev-parse", "--abbrev-ref", "HEAD")
+        if branch_out.strip() != base_branch:
+            all_on_main = False
+            break
+    if not has_repos or not all_on_main:
+        return None
+    return Finding(
+        scenario="S16_ZOMBIE_SLOT",
+        severity="warning",
+        detail="slot is active but all repos are on main — likely missed archival",
+        actions=["archive_slot", "ignore"],
+    )
+
+
 def check_branch_exists(plan_path: Path, project: Path) -> Optional[Finding]:
     if not plan_path.exists():
         return None

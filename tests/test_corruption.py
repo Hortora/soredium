@@ -880,3 +880,50 @@ class TestS15PlanBranchStale:
         from corruption import check_plan_branch_stale
         finding = check_plan_branch_stale(plan)
         assert finding is None
+
+
+class TestS16ZombieSlot:
+    def _init_git(self, path, branch="main"):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "-b", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_detects_zombie_slot(self, tmp_path):
+        """S16: slot is active but all repos are on main."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("repos:\n  - engine\n")
+        self._init_git(slot / "engine", branch="main")
+        from corruption import check_zombie_slot
+        finding = check_zombie_slot(slot, "main")
+        assert finding is not None
+        assert finding.scenario == "S16_ZOMBIE_SLOT"
+        assert "archive_slot" in finding.actions
+
+    def test_no_finding_when_branch_active(self, tmp_path):
+        """No S16 when a repo still has an active branch."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("repos:\n  - engine\n")
+        self._init_git(slot / "engine", branch="main")
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "-b", "issue-42-feat"], capture_output=True)
+        from corruption import check_zombie_slot
+        finding = check_zombie_slot(slot, "main")
+        assert finding is None
+
+    def test_no_finding_without_slot_file(self, tmp_path):
+        """No S16 when .slot file doesn't exist."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        from corruption import check_zombie_slot
+        finding = check_zombie_slot(slot, "main")
+        assert finding is None
+
+    def test_no_finding_when_none(self):
+        """No S16 when slot_path is None."""
+        from corruption import check_zombie_slot
+        finding = check_zombie_slot(None, "main")
+        assert finding is None
