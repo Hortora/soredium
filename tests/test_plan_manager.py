@@ -526,6 +526,33 @@ class TestAdvance:
             plan_manager.advance_issue(tmp_path / "nope.plan")
 
 
+class TestAdvanceClearsBranch:
+    def test_advance_clears_branch_field(self, tmp_path):
+        """advance() should clear the branch field so the next session creates a new branch."""
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan\n\n## State\nbranch: issue-100-old\nstate: active\n"
+            "issue-repo: Org/repo\ncovers: 100\n\n## Queue\n"
+            "- [ ] org/repo#100 — Old issue ← active\n"
+            "- [ ] org/repo#101 — Next issue\n"
+        )
+        plan_manager.advance(plan)
+        from plan_io import read_field
+        assert read_field(plan, "branch") == ""
+
+    def test_advance_does_not_clear_branch_on_epic_complete(self, tmp_path):
+        """When the queue is exhausted, branch field doesn't matter."""
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "# Work Plan\n\n## State\nbranch: issue-100-old\nstate: active\n"
+            "issue-repo: Org/repo\ncovers: 100\n\n## Queue\n"
+            "- [ ] org/repo#100 — Last issue ← active\n"
+        )
+        plan_manager.advance(plan)
+        from plan_io import read_field
+        assert read_field(plan, "branch") == "issue-100-old"
+
+
 class TestDetectEpic:
     def test_detects_epic(self):
         body = "## Scope\n- [ ] #108 — Add weight\n- [ ] #109 — Update scoring\n"

@@ -10,14 +10,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
 
-def _write_plan(path: Path, state: str = "active", branch: str = "issue-42-foo", **extra):
+def _write_plan(path: Path, state: str = "active", branch: str = "issue-42-foo",
+                queue: str | None = None, **extra):
     defaults = {"date": "2026-08-20", "issue-repo": "Hortora/soredium", "covers": "42"}
     defaults.update(extra)
     lines = ["# Work Plan — test", "", "## State",
              f"branch: {branch}", f"state: {state}"]
     for k, v in defaults.items():
         lines.append(f"{k}: {v}")
-    lines.extend(["", "## Queue", "- [ ] #42 — Fix foo ← active", ""])
+    queue_line = queue if queue else "- [ ] #42 — Fix foo ← active"
+    lines.extend(["", "## Queue", queue_line, ""])
     path.write_text("\n".join(lines))
 
 
@@ -834,3 +836,47 @@ class TestS14MissingPlan:
         )
         scenarios = {f.scenario for f in findings}
         assert "S14_MISSING_PLAN" not in scenarios
+
+
+class TestS15PlanBranchStale:
+    def test_detects_stale_branch_after_advance(self, tmp_path):
+        """S15: plan has active state but branch doesn't match active issue."""
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-100-old",
+                    queue="- [x] hortora/soredium#100 — Old issue\n- [ ] hortora/soredium#101 — Next issue ← active",
+                    covers="100")
+        from corruption import check_plan_branch_stale
+        finding = check_plan_branch_stale(plan)
+        assert finding is not None
+        assert finding.scenario == "S15_PLAN_BRANCH_STALE"
+        assert "clear_branch" in finding.actions
+
+    def test_no_finding_when_branch_matches(self, tmp_path):
+        """No S15 when branch matches active issue."""
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-101-next",
+                    queue="- [ ] hortora/soredium#101 — Next issue ← active",
+                    covers="101")
+        from corruption import check_plan_branch_stale
+        finding = check_plan_branch_stale(plan)
+        assert finding is None
+
+    def test_no_finding_when_branch_empty(self, tmp_path):
+        """No S15 when branch is already empty (advance() cleared it)."""
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="",
+                    queue="- [ ] hortora/soredium#101 — Next issue ← active",
+                    covers="101")
+        from corruption import check_plan_branch_stale
+        finding = check_plan_branch_stale(plan)
+        assert finding is None
+
+    def test_no_finding_when_not_active(self, tmp_path):
+        """No S15 when state is not active."""
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:review", branch="issue-100-old",
+                    queue="- [ ] hortora/soredium#101 — Next issue ← active",
+                    covers="100")
+        from corruption import check_plan_branch_stale
+        finding = check_plan_branch_stale(plan)
+        assert finding is None

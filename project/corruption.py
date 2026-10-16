@@ -138,6 +138,39 @@ def check_stale_plan_on_main(
     )
 
 
+def check_plan_branch_stale(plan_path: Path) -> Optional[Finding]:
+    if not plan_path.exists():
+        return None
+    plan_state = read_field(plan_path, "state")
+    if plan_state != "active":
+        return None
+    plan_branch = read_field(plan_path, "branch")
+    if not plan_branch:
+        return None
+    import re
+    branch_match = re.search(r'issue-(\d+)', plan_branch)
+    if not branch_match:
+        return None
+    branch_issue = int(branch_match.group(1))
+    state = read_plan(plan_path)
+    if not state:
+        return None
+    active_issue = None
+    for item in state.queue_items:
+        if item.active:
+            active_issue = item.number
+            break
+    if active_issue is None or active_issue == branch_issue:
+        return None
+    return Finding(
+        scenario="S15_PLAN_BRANCH_STALE",
+        severity="warning",
+        detail=(f".plan branch '{plan_branch}' references issue #{branch_issue} "
+                f"but active queue issue is #{active_issue}"),
+        actions=["clear_branch", "switch_to_main"],
+    )
+
+
 def check_branch_exists(plan_path: Path, project: Path) -> Optional[Finding]:
     if not plan_path.exists():
         return None
@@ -483,6 +516,10 @@ def diagnose(
             s6 = check_branch_exists(plan_path, project)
             if s6:
                 findings.append(s6)
+
+        s15 = check_plan_branch_stale(plan_path)
+        if s15:
+            findings.append(s15)
 
         s4 = check_closing_postconditions(meta_state, plan_path, project, workspace, base_branch)
         if s4:

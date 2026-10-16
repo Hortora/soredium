@@ -569,6 +569,8 @@ def advance(plan_path: Path,
     has_deferred = epic_complete and len(tree.deferred) > 0
 
     tree.current_issue = next_leaf.ref if next_leaf else None
+    if next_leaf:
+        tree.state["branch"] = ""
     rewrite_plan(plan_path, tree)
 
     if repo_path:
