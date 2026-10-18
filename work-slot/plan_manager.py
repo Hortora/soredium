@@ -1276,7 +1276,10 @@ def main() -> int:
         return 0
 
     elif command == "detect":
-        ws = plan_path.parent.parent if plan_path.parent.name == "design" else plan_path.parent
+        if plan_path.is_dir():
+            ws = plan_path
+        else:
+            ws = plan_path.parent.parent if plan_path.parent.name == "design" else plan_path.parent
         result = detect(ws)
         if result:
             for k, v in result.items():

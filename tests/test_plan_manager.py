@@ -1,6 +1,7 @@
 """Tests for plan_manager — .plan tree parser, writer, flatten, detect, worklog emission."""
 
 import pytest
+import subprocess
 import sys
 import unittest.mock
 from pathlib import Path
@@ -686,6 +687,30 @@ class TestDetectRootLevelPlan:
         result = plan_manager.detect(tmp_path)
         assert result is not None
         assert result["active_issue"] == "test/repo#42", "root .plan should take precedence"
+
+
+class TestDetectCLI:
+    def test_detect_cli_with_directory_arg(self, tmp_path):
+        """plan_manager.py detect <workspace-dir> should find .plan in that directory."""
+        (tmp_path / ".plan").write_text(SINGLE_ISSUE_PLAN)
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-slot" / "plan_manager.py"),
+             "detect", str(tmp_path)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "HAS_PLAN=True" in result.stdout
+        assert "PLAN_PATH=" in result.stdout
+
+    def test_detect_cli_with_missing_plan(self, tmp_path):
+        """plan_manager.py detect <empty-dir> should report HAS_PLAN=no."""
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-slot" / "plan_manager.py"),
+             "detect", str(tmp_path)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "HAS_PLAN=no" in result.stdout
 
 
 class TestDetectSlotMode:
