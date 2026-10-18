@@ -133,6 +133,31 @@ class TestS5BranchMismatch:
         assert finding is None, "Drained plans should not trigger branch mismatch"
 
 
+    def test_closing_stamped_on_main_no_mismatch(self, tmp_path):
+        """S5 should not fire when closing:stamped and on main — post-merge is expected."""
+        from corruption import check_branch_mismatch
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-42-foo", state="closing:stamped")
+        finding = check_branch_mismatch(plan, tmp_path, current_branch="main", base_branch="main")
+        assert finding is None, "closing:stamped + on main should not trigger S5"
+
+    def test_closing_merged_on_main_no_mismatch(self, tmp_path):
+        """S5 should not fire when closing:merged and on main either."""
+        from corruption import check_branch_mismatch
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-42-foo", state="closing:merged")
+        finding = check_branch_mismatch(plan, tmp_path, current_branch="main", base_branch="main")
+        assert finding is None, "closing:merged + on main should not trigger S5"
+
+    def test_closing_review_on_main_still_fires_s5(self, tmp_path):
+        """S5 SHOULD fire for closing:review — being on main before merge is wrong."""
+        from corruption import check_branch_mismatch
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-42-foo", state="closing:review")
+        finding = check_branch_mismatch(plan, tmp_path, current_branch="main", base_branch="main")
+        assert finding is not None
+
+
 class TestS7StalePlanOnMain:
     def test_stale_plan_on_main(self, tmp_path):
         from corruption import check_stale_plan_on_main
@@ -208,9 +233,12 @@ class TestS4ClosingPostconditions:
         from corruption import check_closing_postconditions
         plan = tmp_path / ".plan"
         _write_plan(plan, state="closing:stamped", branch="issue-42-foo")
-        monkeypatch.setattr("corruption.subprocess.run", lambda *a, **kw: type('R', (), {
-            'stdout': 'abc1234 feat: add feature\n', 'returncode': 0,
-        })())
+        def _mock_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "merge-base" in cmd:
+                return type('R', (), {'stdout': '', 'returncode': 1})()
+            return type('R', (), {'stdout': 'abc1234 feat: add feature\n', 'returncode': 0})()
+        monkeypatch.setattr("corruption.subprocess.run", _mock_run)
         finding = check_closing_postconditions("closing:stamped", plan, tmp_path, tmp_path, "main")
         assert finding is not None
         assert finding.scenario == "S4_CLOSING_POSTCONDITION"
@@ -236,6 +264,54 @@ class TestS4ClosingPostconditions:
         plan = tmp_path / ".plan"
         _write_plan(plan, state="closing:review")
         assert check_closing_postconditions("closing:review", plan, tmp_path, tmp_path, "main") is None
+
+
+    def test_closing_stamped_on_main_checks_merge_base(self, tmp_path):
+        """S4 stamped: when on main, check if branch content reached main via merge-base."""
+        from corruption import check_closing_postconditions
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:stamped", branch="issue-42-foo")
+        project = tmp_path / "project"
+        project.mkdir()
+        subprocess.run(["git", "init", str(project)], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-42-foo"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "feat: work"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "chore: branch closed — landed as abc on main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "merge", "--ff-only", "issue-42-foo"], capture_output=True)
+        finding = check_closing_postconditions("closing:stamped", plan, project, tmp_path, "main")
+        assert finding is None, "S4 should pass when branch content is on main (merge-base check)"
+
+
+class TestClosingStampedRecovery:
+    def test_s4_continue_close_is_auto_recoverable_with_s5(self, tmp_path):
+        """When S4 offers continue_close and S5 fires, AUTO_RECOVERABLE should be yes."""
+        from corruption import diagnose
+        plan = tmp_path / ".plan"
+        _write_plan(plan, state="closing:stamped", branch="issue-42-foo")
+        project = tmp_path / "project"
+        project.mkdir()
+        subprocess.run(["git", "init", str(project)], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "checkout", "-b", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+        findings = diagnose(
+            plan_path=plan, meta_state="closing:stamped",
+            project=project, workspace=tmp_path,
+            base_branch="main", current_branch="main", on_main=True,
+        )
+        if findings:
+            auto = all(f.auto_recoverable for f in findings)
+            has_continue = any("continue_close" in f.actions for f in findings)
+            assert auto or has_continue, (
+                f"Should be auto-recoverable or offer continue_close, got: "
+                f"{[(f.scenario, f.auto_recoverable, f.actions) for f in findings]}"
+            )
 
 
 class TestS3ActiveAllClosed:

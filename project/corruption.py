@@ -99,6 +99,8 @@ def check_branch_mismatch(
     plan_state = read_field(plan_path, "state")
     if plan_state == "drained":
         return None
+    if plan_state in ("closing:stamped", "closing:merged") and current_branch == base_branch:
+        return None
     plan_branch = read_field(plan_path, "branch")
     if not plan_branch:
         return None
@@ -276,7 +278,17 @@ def check_closing_postconditions(
                      if not line.split(" ", 1)[-1].startswith("chore: branch closed")]
         failed = bool(non_stamp)
     elif sub == "stamped":
-        failed = not stdout.startswith("chore: branch closed")
+        if stdout.startswith("chore: branch closed"):
+            failed = False
+        elif plan_branch:
+            ancestor = subprocess.run(
+                ["git", "-C", str(project), "merge-base", "--is-ancestor",
+                 plan_branch, base_branch],
+                capture_output=True, text=True, timeout=10,
+            )
+            failed = ancestor.returncode != 0
+        else:
+            failed = True
 
     if not failed:
         return None
