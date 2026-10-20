@@ -144,6 +144,34 @@ class TestIdempotency:
 # Defaults
 # ---------------------------------------------------------------------------
 
+class TestStalePlanReplacement:
+
+    def test_stale_plan_replaced_when_issue_changes(self, tmp_path):
+        """When .plan exists but covers a different issue, scaffold should replace it."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        run(ws, *required_args(branch="issue-42-old", issue="42", covers="42"))
+        plan = ws / ".plan"
+        assert "42" in plan.read_text()
+        result = run(ws, *required_args(branch="issue-99-new", issue="99", covers="99"))
+        out = parse(result)
+        assert out["CREATED"] == "yes"
+        content = plan.read_text()
+        assert "covers: 99" in content
+
+    def test_same_issue_plan_not_replaced(self, tmp_path):
+        """When .plan exists and covers the same issue, don't replace."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        run(ws, *required_args(branch="issue-42-old", issue="42", covers="42"))
+        plan = ws / ".plan"
+        plan.write_text(plan.read_text() + "\n# custom note\n")
+        result = run(ws, *required_args(branch="issue-42-continued", issue="42", covers="42"))
+        out = parse(result)
+        assert out["CREATED"] == "no"
+        assert "custom note" in plan.read_text()
+
+
 class TestDefaults:
 
     def test_flyway_defaults_to_unknown(self, tmp_path):

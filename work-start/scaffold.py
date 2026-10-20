@@ -85,13 +85,25 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
 
     if not force and plan_path.exists() and journal_path.exists():
         content = plan_path.read_text()
-        if "## State" in content and "\nstate:" not in content:
-            write_field(plan_path, "state", "active")
-        return ScaffoldResult(
-            plan_path=str(plan_path),
-            journal_path=str(journal_path),
-            created=False,
-        )
+        plan_covers = ""
+        plan_branch_field = ""
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("covers:"):
+                plan_covers = stripped.split(":", 1)[1].strip()
+            elif stripped.startswith("branch:"):
+                plan_branch_field = stripped.split(":", 1)[1].strip()
+        stale = False
+        if covers and plan_covers and covers != plan_covers:
+            stale = True
+        if not stale:
+            if "## State" in content and "\nstate:" not in content:
+                write_field(plan_path, "state", "active")
+            return ScaffoldResult(
+                plan_path=str(plan_path),
+                journal_path=str(journal_path),
+                created=False,
+            )
 
     if today is None:
         today = date.today().isoformat()

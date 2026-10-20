@@ -825,26 +825,6 @@ def land_batch(
             print("STAGE=rebase STATUS=fail")
             return result
 
-    # Step 2.5: Strip lifecycle files from DIRECT workspace branches before
-    # merge (#326). These files are branch-scoped state that must never
-    # reach main. Stripping from the branch before merge (not after) means
-    # the merge result is clean regardless of merge strategy.
-    for desc in active:
-        if not desc.is_workspace or desc.transport != Transport.DIRECT:
-            continue
-        _git(desc.repo_path, "checkout", branch)
-        _git(desc.repo_path, "add", "-A")
-        status = _git(desc.repo_path, "status", "--porcelain")
-        if status.returncode == 0 and status.stdout.strip():
-            _git(desc.repo_path, "commit", "-m",
-                 "chore: commit pending workspace state before close")
-        to_strip = [f for f in LIFECYCLE_FILES if (desc.repo_path / f).exists()]
-        if to_strip:
-            _git(desc.repo_path, "rm", "--ignore-unmatch", "--", *to_strip)
-            _git(desc.repo_path, "commit", "-m",
-                 "chore: strip lifecycle files before close")
-            print(f"LIFECYCLE_STRIP={desc.repo_path.name} removed={len(to_strip)}")
-
     # Step 3: Merge + Push (skip TWO_HOP workspace — slot clones are stamp only)
     print("STAGE=push")
     failed_repos: list[str] = []
@@ -895,6 +875,23 @@ def land_batch(
         print("STAGE=verify_content STATUS=fail")
         return result
     print("STAGE=verify_content STATUS=pass")
+
+    # Step 3c: Strip lifecycle files from DIRECT workspace branches after
+    # merge succeeds (#466). Moved from before merge to after — if merge
+    # fails, the branch retains lifecycle files for retry. cleanup_scaffold
+    # removes any that reached main.
+    for desc in active:
+        if not desc.is_workspace or desc.transport != Transport.DIRECT:
+            continue
+        if desc.repo_path.name in failed_repos:
+            continue
+        _git(desc.repo_path, "checkout", branch)
+        to_strip = [f for f in LIFECYCLE_FILES if (desc.repo_path / f).exists()]
+        if to_strip:
+            _git(desc.repo_path, "rm", "--ignore-unmatch", "--", *to_strip)
+            _git(desc.repo_path, "commit", "-m",
+                 "chore: strip lifecycle files before close")
+            print(f"LIFECYCLE_STRIP={desc.repo_path.name} removed={len(to_strip)}")
 
     # Step 4: Stamp feature branches — skip repos with remaining queue items
     print("STAGE=stamp")

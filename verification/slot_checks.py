@@ -153,8 +153,8 @@ def check_plan_branch_matches_slot(plan_path: Path, slot_branch: str) -> list[Fi
             plan_branch = line.split(":", 1)[1].strip()
             if slot_branch and plan_branch != slot_branch:
                 findings.append(Finding(
-                    "ERROR", "stale-plan",
-                    f".plan is for {plan_branch}, slot is {slot_branch}",
+                    "WARN", "stale-plan",
+                    f".plan is for {plan_branch}, slot is {slot_branch} — will be replaced",
                 ))
             break
     return findings
