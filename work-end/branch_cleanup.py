@@ -224,7 +224,25 @@ def _safe_pull_rebase(repo_path: str, remote: str, branch: str = "main") -> None
         _abort_rebase_if_needed(repo_path)
 
 
-def checkout_main(project: str, workspace: str) -> int:
+def _collect_slot_repos(slot_path: str, project: str, workspace: str) -> list[tuple[str, str]]:
+    """Build the full list of repos to checkout in slot mode."""
+    seen = {str(Path(project).resolve()), str(Path(workspace).resolve())}
+    repos = [(project, "project"), (workspace, "workspace")]
+    slot = Path(slot_path)
+    if not slot.is_dir():
+        return repos
+    for entry in sorted(slot.iterdir()):
+        if not entry.is_dir() or not (entry / ".git").exists():
+            continue
+        resolved = str(entry.resolve())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        repos.append((str(entry), entry.name))
+    return repos
+
+
+def checkout_main(project: str, workspace: str, slot_path: str = "") -> int:
     proj = Path(project)
     ws = Path(workspace)
 
@@ -237,7 +255,10 @@ def checkout_main(project: str, workspace: str) -> int:
         print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
         return 1
 
-    for repo_path, label in [(project, "project"), (workspace, "workspace")]:
+    repos = _collect_slot_repos(slot_path, project, workspace) if slot_path else [(project, "project"), (workspace, "workspace")]
+
+    failures = []
+    for repo_path, label in repos:
         _abort_rebase_if_needed(repo_path)
 
         status = subprocess.run(
@@ -250,23 +271,27 @@ def checkout_main(project: str, workspace: str) -> int:
 
         r = git(repo_path, "checkout", "main")
         if r.returncode != 0:
-            print(f"ERROR=checkout_failed")
-            print(f"ERROR_DETAIL=Failed to checkout main in {label}: {r.stderr.strip()}")
-            return 1
+            failures.append(f"{label}: {r.stderr.strip()}")
+
+    if failures:
+        print("ERROR=checkout_failed")
+        print(f"ERROR_DETAIL=Failed to checkout main in: {'; '.join(failures)}")
+        return 1
 
     fork_remote, blessed_remote = detect_topology(project)
     proj_remote = blessed_remote if blessed_remote else fork_remote or "origin"
     _safe_pull_rebase(project, proj_remote)
     _safe_pull_rebase(workspace, "origin")
 
-    for repo_path, label in [(project, "project"), (workspace, "workspace")]:
+    for repo_path, label in repos:
         head = git(repo_path, "rev-parse", "--abbrev-ref", "HEAD")
         if head.stdout.strip() != "main":
             print(f"ERROR=not_on_main")
             print(f"ERROR_DETAIL={label} HEAD is '{head.stdout.strip()}', expected 'main'")
             return 1
 
-    print("SWITCHED=yes")
+    print(f"SWITCHED=yes")
+    print(f"REPOS_SWITCHED={len(repos)}")
     return 0
 
 
@@ -296,7 +321,7 @@ def wip_commit(project: str, workspace: str) -> int:
 SUBCOMMANDS = {
     "cleanup-scaffold": lambda args: cleanup_scaffold(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "cleanup-stack": lambda args: cleanup_stack(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
-    "checkout-main": lambda args: checkout_main(args[0], args[1]) if len(args) >= 2 else _usage(),
+    "checkout-main": lambda args: checkout_main(args[0], args[1], slot_path=parse_args(args[2:]).get("slot_path", "")) if len(args) >= 2 else _usage(),
     "wip-commit": lambda args: wip_commit(args[0], args[1]) if len(args) >= 2 else _usage(),
 }
 

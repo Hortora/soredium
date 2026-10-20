@@ -300,3 +300,70 @@ class TestCleanupScaffoldPlanGuard:
         assert result == 0
         assert not (ws / "JOURNAL.md").exists()
         assert not (ws / ".close-progress").exists()
+
+
+def _git(repo: Path, *args: str) -> str:
+    r = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True, text=True,
+    )
+    return r.stdout.strip()
+
+
+class TestCheckoutMainSlotMode:
+    def test_slot_checkout_switches_all_repos(self, tmp_path):
+        """In slot mode, checkout_main should switch all repos in the slot to main."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        engine = init_repo(slot / "engine")
+        ops = init_repo(slot / "ops")
+        ws = init_repo(slot / "workspace")
+        (ws / ".workspace").touch()
+        _git(ws, "add", ".workspace")
+        _git(ws, "commit", "-m", "add workspace marker")
+
+        for repo in [engine, ops, ws]:
+            _git(repo, "checkout", "-b", "issue-42-feat")
+            _git(repo, "commit", "--allow-empty", "-m", "work")
+
+        result = checkout_main(str(engine), str(ws), slot_path=str(slot))
+        assert result == 0
+
+        for repo, label in [(engine, "engine"), (ops, "ops"), (ws, "workspace")]:
+            branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+            assert branch == "main", f"{label} should be on main, got {branch}"
+
+    def test_slot_checkout_handles_dirty_sibling_repos(self, tmp_path):
+        """Sibling repos with dirty state should be committed before checkout."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        engine = init_repo(slot / "engine")
+        ops = init_repo(slot / "ops")
+        ws = init_repo(slot / "workspace")
+        (ws / ".workspace").touch()
+        _git(ws, "add", ".workspace")
+        _git(ws, "commit", "-m", "add workspace marker")
+
+        for repo in [engine, ops, ws]:
+            _git(repo, "checkout", "-b", "issue-42-feat")
+
+        (ops / "dirty.txt").write_text("uncommitted")
+
+        result = checkout_main(str(engine), str(ws), slot_path=str(slot))
+        assert result == 0
+
+        branch = _git(ops, "rev-parse", "--abbrev-ref", "HEAD")
+        assert branch == "main"
+
+    def test_non_slot_mode_unchanged(self, tmp_path):
+        """Without slot_path, checkout_main should work as before."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+
+        _git(project, "checkout", "-b", "feature")
+        _git(workspace, "checkout", "-b", "feature")
+
+        result = checkout_main(str(project), str(workspace))
+        assert result == 0
+        assert _git(project, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+        assert _git(workspace, "rev-parse", "--abbrev-ref", "HEAD") == "main"

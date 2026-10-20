@@ -626,8 +626,11 @@ def _promote_plan_next_script(ctx):
 
 
 def _checkout_main_script(ctx):
-    return [sys.executable, str(CLEANUP_SCRIPT),
-            "checkout-main", str(ctx.project), str(ctx.workspace)]
+    cmd = [sys.executable, str(CLEANUP_SCRIPT),
+           "checkout-main", str(ctx.project), str(ctx.workspace)]
+    if ctx.in_slot and ctx.slot_path:
+        cmd.append(f"slot_path={ctx.slot_path}")
+    return cmd
 
 
 def _cleanup_stack_script(ctx):
