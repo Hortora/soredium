@@ -34,7 +34,7 @@ if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
 
 from common import detect_topology, parse_args
-from git_util import git
+from git_util import git, collect_slot_repos
 
 # Path to remove_from_stack.py — resolve relative to this script's location
 REMOVE_FROM_STACK = Path(__file__).parent.parent / "project" / "remove_from_stack.py"
@@ -224,24 +224,6 @@ def _safe_pull_rebase(repo_path: str, remote: str, branch: str = "main") -> None
         _abort_rebase_if_needed(repo_path)
 
 
-def _collect_slot_repos(slot_path: str, project: str, workspace: str) -> list[tuple[str, str]]:
-    """Build the full list of repos to checkout in slot mode."""
-    seen = {str(Path(project).resolve()), str(Path(workspace).resolve())}
-    repos = [(project, "project"), (workspace, "workspace")]
-    slot = Path(slot_path)
-    if not slot.is_dir():
-        return repos
-    for entry in sorted(slot.iterdir()):
-        if not entry.is_dir() or not (entry / ".git").exists():
-            continue
-        resolved = str(entry.resolve())
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        repos.append((str(entry), entry.name))
-    return repos
-
-
 def checkout_main(project: str, workspace: str, slot_path: str = "") -> int:
     proj = Path(project)
     ws = Path(workspace)
@@ -255,7 +237,7 @@ def checkout_main(project: str, workspace: str, slot_path: str = "") -> int:
         print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
         return 1
 
-    repos = _collect_slot_repos(slot_path, project, workspace) if slot_path else [(project, "project"), (workspace, "workspace")]
+    repos = collect_slot_repos(slot_path, project, workspace) if slot_path else [(project, "project"), (workspace, "workspace")]
 
     failures = []
     for repo_path, label in repos:

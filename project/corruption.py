@@ -203,6 +203,38 @@ def check_zombie_slot(
     )
 
 
+def check_slot_branch_divergence(
+    slot_path: Path | None, current_branch: str, base_branch: str,
+) -> Optional[Finding]:
+    if not slot_path or not slot_path.is_dir():
+        return None
+    slot_file = slot_path / ".slot"
+    if not slot_file.exists():
+        return None
+    diverged = []
+    for entry in sorted(slot_path.iterdir()):
+        if not entry.is_dir() or not (entry / ".git").exists():
+            continue
+        branch_out, rc = _git(entry, "rev-parse", "--abbrev-ref", "HEAD")
+        if rc != 0:
+            continue
+        repo_branch = branch_out.strip()
+        if repo_branch != current_branch and repo_branch != base_branch:
+            diverged.append(f"{entry.name}={repo_branch}")
+        elif repo_branch == base_branch and current_branch != base_branch:
+            diverged.append(f"{entry.name}={repo_branch}")
+    if not diverged:
+        return None
+    return Finding(
+        scenario="S17_SLOT_BRANCH_DIVERGENCE",
+        severity="warning",
+        detail=f"slot repos not in sync — expected '{current_branch}', diverged: {', '.join(diverged)}",
+        actions=["sync_slot_branches", "ignore"],
+        auto_recoverable=True,
+        auto_action="sync_slot_branches",
+    )
+
+
 def check_branch_exists(plan_path: Path, project: Path) -> Optional[Finding]:
     if not plan_path.exists():
         return None

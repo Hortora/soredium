@@ -137,12 +137,12 @@ def reset_wip_typed(project: str, workspace: str) -> ResumeResetResult:
 # CLI entry points
 # ---------------------------------------------------------------------------
 
-def checkout_branches(project: str, workspace: str, branch: str) -> int:
-    """Checkout branch in both repos and verify."""
+def checkout_branches(project: str, workspace: str, branch: str,
+                      slot_path: str = "") -> int:
+    """Checkout branch in all repos (project, workspace, and slot siblings)."""
     project_path = Path(project)
     workspace_path = Path(workspace)
 
-    # Verify branch exists in both repos
     exit_code, _, _ = run(
         ["git", "rev-parse", "--verify", branch], cwd=project_path, check=False
     )
@@ -157,11 +157,23 @@ def checkout_branches(project: str, workspace: str, branch: str) -> int:
         print("ERROR=branch_not_found")
         return 1
 
-    # Checkout in both repos
     run(["git", "checkout", branch], cwd=project_path)
     run(["git", "checkout", branch], cwd=workspace_path)
 
-    # Verify both are on the same branch
+    if slot_path:
+        _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+        if _project_dir not in sys.path:
+            sys.path.insert(0, _project_dir)
+        from git_util import collect_slot_repos
+        for repo_path, label in collect_slot_repos(slot_path, project, workspace):
+            if repo_path in (project, workspace):
+                continue
+            exit_code, _, _ = run(
+                ["git", "rev-parse", "--verify", branch], cwd=repo_path, check=False
+            )
+            if exit_code == 0:
+                run(["git", "checkout", branch], cwd=repo_path, check=False)
+
     _, project_branch, _ = run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=project_path
     )
@@ -328,7 +340,9 @@ def main() -> int:
             return 1
 
         branch = branch_arg.split("=", 1)[1]
-        return checkout_branches(project, workspace, branch)
+        kv = {a.split("=", 1)[0]: a.split("=", 1)[1] for a in sys.argv[5:] if "=" in a}
+        slot = kv.get("slot_path", "")
+        return checkout_branches(project, workspace, branch, slot_path=slot)
 
     elif cmd == "rebase":
         if len(sys.argv) != 5:

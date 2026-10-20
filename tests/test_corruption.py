@@ -1003,3 +1003,56 @@ class TestS16ZombieSlot:
         from corruption import check_zombie_slot
         finding = check_zombie_slot(None, "main")
         assert finding is None
+
+
+class TestS17SlotBranchDivergence:
+    def _init_git(self, path, branch="main"):
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(path)], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "checkout", "-b", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "--allow-empty", "-m", "init"], capture_output=True)
+
+    def test_detects_diverged_repo(self, tmp_path):
+        """S17: one repo on feature branch, sibling on main."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("repos:\n  - engine\n  - ops\n")
+        self._init_git(slot / "engine", branch="main")
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "-b", "issue-42-feat"], capture_output=True)
+        self._init_git(slot / "ops", branch="main")
+        from corruption import check_slot_branch_divergence
+        finding = check_slot_branch_divergence(slot, "issue-42-feat", "main")
+        assert finding is not None
+        assert finding.scenario == "S17_SLOT_BRANCH_DIVERGENCE"
+        assert "ops=main" in finding.detail
+        assert finding.auto_recoverable is True
+
+    def test_no_finding_when_all_in_sync(self, tmp_path):
+        """No S17 when all repos on the same branch."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("repos:\n  - engine\n  - ops\n")
+        self._init_git(slot / "engine", branch="main")
+        subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "-b", "issue-42-feat"], capture_output=True)
+        self._init_git(slot / "ops", branch="main")
+        subprocess.run(["git", "-C", str(slot / "ops"), "checkout", "-b", "issue-42-feat"], capture_output=True)
+        from corruption import check_slot_branch_divergence
+        finding = check_slot_branch_divergence(slot, "issue-42-feat", "main")
+        assert finding is None
+
+    def test_no_finding_when_not_slot(self):
+        """No S17 when slot_path is None."""
+        from corruption import check_slot_branch_divergence
+        assert check_slot_branch_divergence(None, "main", "main") is None
+
+    def test_all_on_main_is_ok(self, tmp_path):
+        """No S17 when all repos on main and current_branch is main."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("repos:\n  - engine\n")
+        self._init_git(slot / "engine", branch="main")
+        from corruption import check_slot_branch_divergence
+        finding = check_slot_branch_divergence(slot, "main", "main")
+        assert finding is None

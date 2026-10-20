@@ -171,6 +171,21 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
     else:
         stack_workspace = workspace
 
+    # WIP-commit sibling repos in slot mode
+    if slot_dir is not None:
+        _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+        if _project_dir not in sys.path:
+            sys.path.insert(0, _project_dir)
+        from git_util import collect_slot_repos
+        for repo_path, label in collect_slot_repos(str(slot_dir), project, workspace):
+            if repo_path in (project, workspace):
+                continue
+            ok, status_out = run_git(repo_path, "status", "--short")
+            if ok and status_out.strip():
+                run_git(repo_path, "add", "-A")
+                run_git(repo_path, "commit", "-m", f"WIP: pause {branch}")
+                print(f"SIBLING_COMMITTED={label}")
+
     # Push project branch (non-fatal)
     # In slot mode, origin is a local path — do two-hop push
     original_project = _resolve_clone_origin(project)

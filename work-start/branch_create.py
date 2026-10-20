@@ -63,8 +63,9 @@ class CreateResult:
 
 
 def create_branches_typed(project: str, workspace: str, branch: str,
-                          base: str | None = None) -> CreateResult:
-    """Create branches in project and workspace atomically. Returns typed result."""
+                          base: str | None = None,
+                          slot_path: str = "") -> CreateResult:
+    """Create branches in project and workspace (and slot siblings) atomically."""
     if base:
         ok, err = run_git(project, "checkout", "-b", branch, base)
     else:
@@ -78,6 +79,16 @@ def create_branches_typed(project: str, workspace: str, branch: str,
         run_git(project, "checkout", "-")
         run_git(project, "branch", "-D", branch)
         return CreateResult(branch, False, False, f"workspace_branch_failed:{err}")
+
+    if slot_path:
+        _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+        if _project_dir not in sys.path:
+            sys.path.insert(0, _project_dir)
+        from git_util import collect_slot_repos
+        for repo_path, label in collect_slot_repos(slot_path, project, workspace):
+            if repo_path in (project, workspace):
+                continue
+            run_git(repo_path, "checkout", "-b", branch)
 
     _slot_reentry_cleanup(Path(project).parent)
     return CreateResult(branch, True, True)
@@ -177,9 +188,10 @@ def _slot_reentry_cleanup(slot_dir: Path) -> None:
 # CLI entry points (print KEY=value output)
 # ---------------------------------------------------------------------------
 
-def create_branches(project: str, workspace: str, branch: str, base: str | None) -> int:
-    """Create branches in project and workspace atomically."""
-    result = create_branches_typed(project, workspace, branch, base)
+def create_branches(project: str, workspace: str, branch: str, base: str | None,
+                    slot_path: str = "") -> int:
+    """Create branches in project, workspace, and slot siblings atomically."""
+    result = create_branches_typed(project, workspace, branch, base, slot_path)
     if result.error:
         print(f"ERROR={result.error}")
         return 1
@@ -544,7 +556,8 @@ def main() -> int:
             print("ERROR=missing_branch")
             return 1
         base = kv.get("base") or None
-        return create_branches(project, workspace, branch, base)
+        slot = kv.get("slot_path", "")
+        return create_branches(project, workspace, branch, base, slot_path=slot)
 
     elif cmd == "commit-scaffold":
         if len(sys.argv) < 3:
