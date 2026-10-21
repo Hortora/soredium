@@ -1204,7 +1204,7 @@ def main() -> int:
     if command not in ("detect",) and plan_path.exists() and _is_slot_file(plan_path):
         print(f"ERROR=slot_file_rejected", file=_sys.stderr)
         print(f"ERROR_DETAIL='{plan_path.name}' is a .slot file, not a .plan. "
-              f"Use slot_metadata.set_slot_state() or slot_state.transition() instead.",
+              f"Use slot_state.transition() instead.",
               file=_sys.stderr)
         return 1
 
