@@ -325,12 +325,16 @@ def run_loop(
                     continue
                 if v.result == VerifyResult.UNKNOWN:
                     if attempt > 0:
-                        attempt += 1
-                        update_close_progress(ctx.workspace, attempt_key, str(attempt))
-                        if attempt >= MAX_MECHANICAL_RETRIES:
-                            return _yield_unknown_escalation(step.name, v)
-                        if not step.idempotent:
-                            return _make_unknown_retry_result(step.name, attempt, v)
+                        exec_ok = ctx.progress.get(f"_exec_ok:{step.name}") == "yes"
+                        if not exec_ok and not step.idempotent:
+                            pass
+                        else:
+                            attempt += 1
+                            update_close_progress(ctx.workspace, attempt_key, str(attempt))
+                            if attempt >= MAX_MECHANICAL_RETRIES:
+                                return _yield_unknown_escalation(step.name, v)
+                            if not step.idempotent:
+                                return _make_unknown_retry_result(step.name, attempt, v)
 
             if execute_mechanical_fn:
                 result = execute_mechanical_fn(step, ctx)
@@ -353,6 +357,9 @@ def run_loop(
                 return _make_error_result(step.name, attempt, result)
 
             ctx.last_output = result or {}
+            exec_key = f"_exec_ok:{step.name}"
+            update_close_progress(ctx.workspace, exec_key, "yes")
+            ctx.progress[exec_key] = "yes"
             if on_step_done:
                 on_step_done(step, ctx, result or {})
 
