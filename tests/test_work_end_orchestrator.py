@@ -3980,3 +3980,57 @@ class TestAdvanceQueueStep:
             progress=Progress(),
         )
         assert _skip_cleanup_cycle_when_empty(ctx) is True
+
+
+class TestLifecycleSkipWhenPast:
+    """_fire_lifecycle skips transitions when .plan is already past
+    the target state (#469)."""
+
+    def test_skips_review_pass_when_plan_already_promoted(self, tmp_path):
+        from work_end_orchestrator import _fire_lifecycle, OrchestratorContext, STEPS
+        from progress import Progress
+
+        plan = tmp_path / ".plan"
+        plan.write_text("state: closing:promoted\n---\n")
+
+        step = next(s for s in STEPS if s.name == "review_pass")
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:review",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+            plan_path=plan,
+        )
+        result = _fire_lifecycle(step, ctx)
+        assert result is None
+        assert ctx.expected_state == "closing:verified"
+
+    def test_fires_transition_when_plan_at_from_state(self, tmp_path):
+        from work_end_orchestrator import _fire_lifecycle, OrchestratorContext, STEPS
+        from progress import Progress
+
+        plan = tmp_path / ".plan"
+        plan.write_text("state: closing:review\n---\n")
+
+        step = next(s for s in STEPS if s.name == "review_pass")
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:review",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+            plan_path=plan,
+        )
+        result = _fire_lifecycle(step, ctx)
+        assert result is None

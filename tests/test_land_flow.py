@@ -1186,3 +1186,56 @@ class TestLandBatchSkipStamp:
         result = land_batch([desc], branch, tmp_path / ".progress")
 
         assert result.repos[0].stamped, "No skip_stamp arg should stamp all repos"
+
+
+# ---------------------------------------------------------------------------
+# Already-merged detection after squash (#469)
+# ---------------------------------------------------------------------------
+
+
+class TestAlreadyMergedContentIdentical:
+    def test_detects_content_identical_branch(self, tmp_path):
+        """After squash+merge, branch ancestry may differ from main but
+        source content is identical. land_batch should detect this."""
+        from land_flow import RepoDescriptor, Transport, land_batch
+
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-99-squash"
+        _add_feature(repo, branch, "feature.py")
+
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True)
+
+        subprocess.run(["git", "-C", str(repo), "checkout", branch], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "reset", "--soft", "HEAD~1"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "squashed: feature"],
+                        capture_output=True, check=True)
+
+        desc = RepoDescriptor(
+            repo_path=repo, canonical_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = land_batch([desc], branch, tmp_path / ".progress")
+
+        assert result.success
+        assert any(s.merged and s.pushed for s in result.repos)
+
+    def test_does_not_false_positive_when_content_differs(self, tmp_path):
+        """Branch with different content from main should NOT be detected
+        as already merged."""
+        from land_flow import RepoDescriptor, Transport, land_batch
+
+        repo = _init_repo(tmp_path / "project")
+        branch = "issue-99-real"
+        _add_feature(repo, branch, "new_feature.py")
+
+        desc = RepoDescriptor(
+            repo_path=repo, canonical_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = land_batch([desc], branch, tmp_path / ".progress")
+
+        assert result.success
+        assert result.repos[0].merged
+        assert result.repos[0].landed_sha

@@ -486,6 +486,17 @@ def _merge_and_push_direct(
 
     co = _git(desc.repo_path, "checkout", desc.base_branch)
     if co.returncode != 0:
+        diff = _git(desc.repo_path, "diff", "--stat",
+                    desc.base_branch, branch,
+                    "--", *[f"*{ext}" for ext in SOURCE_EXTENSIONS])
+        if diff.returncode == 0 and not diff.stdout.strip():
+            sha = _git(desc.repo_path, "rev-parse", desc.base_branch)
+            status.landed_sha = sha.stdout.strip() if sha.returncode == 0 else ""
+            status.merged = True
+            status.pushed = True
+            _write_progress(progress_file, key, "pushed")
+            print(f"CHECKOUT_RECOVER={desc.repo_path.name} content_already_on_{desc.base_branch}")
+            return status
         status.error = "checkout_failed"
         return status
 
@@ -741,17 +752,28 @@ def land_batch(
 
     landed_shas: dict[str, str] = {}
 
-    # Step 1b: Already-merged detection. When the user resolves a conflict
-    # manually (merges to main, pushes), the branch HEAD is already an ancestor
-    # of main. Skip rebase+merge for these repos and go straight to stamp.
+    # Step 1b: Already-merged detection. Two checks:
+    # (a) Branch HEAD is an ancestor of main (manual merge, ff-merge replay).
+    # (b) No source-file diff between branch and main (squash already landed).
     already_merged: list[RepoDescriptor] = []
     for desc in list(active):
         if desc.is_workspace:
             continue
+        merged = False
+        method = "ancestry"
         is_ancestor = _git(
             desc.repo_path, "merge-base", "--is-ancestor", branch, desc.base_branch,
         )
         if is_ancestor.returncode == 0:
+            merged = True
+        else:
+            diff = _git(desc.repo_path, "diff", "--stat",
+                        desc.base_branch, branch,
+                        "--", *[f"*{ext}" for ext in SOURCE_EXTENSIONS])
+            if diff.returncode == 0 and not diff.stdout.strip():
+                merged = True
+                method = "content_identical"
+        if merged:
             sha = _git(desc.repo_path, "rev-parse", desc.base_branch)
             landed_sha = sha.stdout.strip() if sha.returncode == 0 else "unknown"
             landed_shas[desc.repo_path.name] = landed_sha
@@ -760,7 +782,7 @@ def land_batch(
                 landed_sha=landed_sha,
             ))
             already_merged.append(desc)
-            print(f"ALREADY_MERGED={desc.repo_path.name} sha={landed_sha[:12]}")
+            print(f"ALREADY_MERGED={desc.repo_path.name} sha={landed_sha[:12]} method={method}")
     for desc in already_merged:
         active.remove(desc)
 

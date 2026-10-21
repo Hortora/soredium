@@ -778,6 +778,15 @@ def _fire_lifecycle(step, ctx):
     ctx.expected_state = step.to_state
     if not ctx.plan_path:
         return None
+
+    from close_progress import _read_plan_state, LIFECYCLE_PHASE_ORDER
+    actual = _read_plan_state(ctx.plan_path)
+    if actual and actual in LIFECYCLE_PHASE_ORDER and step.to_state in LIFECYCLE_PHASE_ORDER:
+        actual_idx = LIFECYCLE_PHASE_ORDER.index(actual)
+        target_idx = LIFECYCLE_PHASE_ORDER.index(step.to_state)
+        if actual_idx >= target_idx:
+            return None
+
     evidence = _build_evidence(step.event, ctx)
     cmd = [
         sys.executable, str(LIFECYCLE_SCRIPT),
