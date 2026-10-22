@@ -223,11 +223,20 @@ def commit_scaffold(workspace: str, branch: str) -> int:
         print(f"ERROR_DETAIL=workspace is on '{current_branch}', expected '{branch}'")
         return 1
 
-    files_to_add = [".plan", "JOURNAL.md"]
-    ok, _ = run_git(workspace, "add", *files_to_add)
-    if not ok:
-        print("ERROR=add_failed")
-        return 1
+    files_to_add = [f for f in [".plan", "JOURNAL.md", ".work-progress"]
+                    if (Path(workspace) / f).exists()]
+    if files_to_add:
+        ok, _ = run_git(workspace, "add", *files_to_add)
+        if not ok:
+            print("ERROR=add_failed")
+            return 1
+
+    status_ok, status_out = run_git(workspace, "diff", "--cached", "--quiet")
+    if status_ok:
+        print("COMMITTED=no_changes")
+        push_ok, _ = run_git(workspace, "push", "-u", "origin", branch)
+        print(f"PUSHED={'yes' if push_ok else 'no'}")
+        return 0
 
     commit_msg = f"init({branch}): scaffold workspace branch"
     ok, _ = run_git(workspace, "commit", "-m", commit_msg)

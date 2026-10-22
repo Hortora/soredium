@@ -99,6 +99,8 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
         if not stale:
             if "## State" in content and "\nstate:" not in content:
                 write_field(plan_path, "state", "active")
+            if plan_branch_field != branch:
+                write_field(plan_path, "branch", branch)
             return ScaffoldResult(
                 plan_path=str(plan_path),
                 journal_path=str(journal_path),

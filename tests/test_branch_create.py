@@ -212,8 +212,9 @@ def test_commit_scaffold_includes_plan_file(workspace_repo):
     assert ".plan" in show
 
 
-def test_commit_scaffold_no_design_dir(workspace_repo):
-    """commit-scaffold fails if design/ files don't exist."""
+def test_commit_scaffold_no_scaffold_files(workspace_repo):
+    """commit-scaffold returns success with no_changes when scaffold files
+    don't exist — nothing to commit is a no-op, not an error (#471)."""
     ws = workspace_repo
     subprocess.run(["git", "-C", str(ws), "checkout", "-b", "issue-6-nodir"],
                     check=True, capture_output=True)
@@ -223,8 +224,8 @@ def test_commit_scaffold_no_design_dir(workspace_repo):
          "branch=issue-6-nodir"],
         capture_output=True, text=True,
     )
-    assert result.returncode == 1
-    assert "ERROR=" in result.stdout
+    assert result.returncode == 0
+    assert "COMMITTED=no_changes" in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -723,3 +724,52 @@ class TestSlotReentryCleanup:
         captured = capsys.readouterr()
         assert "SLOT_REENTRY=yes PREV_STATE=landed" in captured.out
         assert captured.out.count("CLEARED_STALE=") == 7
+
+
+class TestCommitScaffoldNothingToCommit:
+    """commit_scaffold handles 'nothing to commit' gracefully (#471)."""
+
+    def test_returns_success_when_nothing_to_commit(self, tmp_path):
+        """When scaffold files are already committed, return success."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        subprocess.run(["git", "init"], cwd=ws, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=ws, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=ws, capture_output=True)
+        subprocess.run(["git", "branch", "-M", "main"], cwd=ws, capture_output=True)
+        (ws / ".plan").write_text("branch: test-branch\nstate: active\n")
+        (ws / "JOURNAL.md").write_text("# Journal\n")
+        subprocess.run(["git", "add", "."], cwd=ws, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=ws, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", "-b", "test-branch"], cwd=ws, check=True, capture_output=True)
+
+        result = subprocess.run(
+            [sys.executable, str(BRANCH_CREATE), "commit-scaffold",
+             str(ws), "branch=test-branch"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "COMMITTED=no_changes" in result.stdout
+
+    def test_commits_when_files_modified(self, tmp_path):
+        """When scaffold files are modified, commit them normally."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        subprocess.run(["git", "init"], cwd=ws, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=ws, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=ws, capture_output=True)
+        subprocess.run(["git", "branch", "-M", "main"], cwd=ws, capture_output=True)
+        (ws / "README.md").write_text("# WS\n")
+        subprocess.run(["git", "add", "."], cwd=ws, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=ws, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", "-b", "test-branch"], cwd=ws, check=True, capture_output=True)
+        (ws / ".plan").write_text("branch: test-branch\nstate: active\n")
+        (ws / "JOURNAL.md").write_text("# Journal\n")
+
+        result = subprocess.run(
+            [sys.executable, str(BRANCH_CREATE), "commit-scaffold",
+             str(ws), "branch=test-branch"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "COMMITTED=yes" in result.stdout

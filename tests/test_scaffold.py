@@ -359,3 +359,36 @@ class TestDuplicateWorkGate:
         assert result.returncode == 1
         out = parse(result)
         assert out.get("DUPLICATE") == "yes"
+
+
+class TestBranchFieldUpdate:
+    """scaffold updates .plan branch field when reusing an existing plan
+    on a new branch (#471)."""
+
+    def test_updates_branch_field_on_existing_plan(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        run(ws, *required_args(branch="old-branch", issue="42", covers="42"))
+        plan = ws / ".plan"
+        assert "branch: old-branch" in plan.read_text()
+        run(ws, *required_args(branch="new-branch", issue="42", covers="42"))
+        content = plan.read_text()
+        assert "branch: new-branch" in content
+        assert "branch: old-branch" not in content
+
+    def test_preserves_other_fields_when_updating_branch(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        run(ws, *required_args(branch="old-branch", issue="42", covers="42"))
+        run(ws, *required_args(branch="new-branch", issue="42", covers="42"))
+        content = (ws / ".plan").read_text()
+        assert "covers:" in content
+        assert "state:" in content
+
+    def test_no_update_when_branch_matches(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        run(ws, *required_args(branch="same-branch", issue="42", covers="42"))
+        original = (ws / ".plan").read_text()
+        run(ws, *required_args(branch="same-branch", issue="42", covers="42"))
+        assert (ws / ".plan").read_text() == original
