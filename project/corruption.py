@@ -97,7 +97,7 @@ def check_branch_mismatch(
     if not plan_path.exists():
         return None
     plan_state = read_field(plan_path, "state")
-    if plan_state == "drained":
+    if plan_state in ("drained", "scaffolded"):
         return None
     if plan_state in ("closing:stamped", "closing:merged") and current_branch == base_branch:
         return None
@@ -128,7 +128,7 @@ def check_stale_plan_on_main(
     plan_branch = read_field(plan_path, "branch")
     if not plan_branch or plan_branch == base_branch:
         return None
-    if meta_state in ("drained", "closing:stamped"):
+    if meta_state in ("drained", "closing:stamped", "scaffolded"):
         return None
     return Finding(
         scenario="S7_STALE_PLAN_ON_MAIN",
@@ -242,6 +242,9 @@ def check_slot_branch_divergence(
 
 def check_branch_exists(plan_path: Path, project: Path) -> Optional[Finding]:
     if not plan_path.exists():
+        return None
+    plan_state = read_field(plan_path, "state")
+    if plan_state == "scaffolded":
         return None
     plan_branch = read_field(plan_path, "branch")
     if not plan_branch:

@@ -199,6 +199,18 @@ class TestS7StalePlanOnMain:
         _write_plan(plan, branch="issue-42-foo")
         assert check_stale_plan_on_main(plan, meta_state="active", base_branch="main", on_main=False) is None
 
+    def test_scaffolded_plan_on_main_is_not_stale(self, tmp_path):
+        """A scaffolded plan on main is the expected state between sessions —
+        the branch hasn't been created yet. S7 must not auto-delete it."""
+        from corruption import check_stale_plan_on_main
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-661-consolidation", state="scaffolded")
+        finding = check_stale_plan_on_main(plan, meta_state="scaffolded", base_branch="main", on_main=True)
+        assert finding is None, (
+            "Scaffolded plan on main should not be flagged as stale — "
+            "the branch is supposed to not exist yet"
+        )
+
 
 class TestS6BranchNotExist:
     def test_missing_branch_returns_error(self, tmp_path, monkeypatch):
@@ -226,6 +238,21 @@ class TestS6BranchNotExist:
     def test_no_plan_returns_none(self, tmp_path):
         from corruption import check_branch_exists
         assert check_branch_exists(tmp_path / ".plan", tmp_path) is None
+
+    def test_scaffolded_plan_with_missing_branch_is_expected(self, tmp_path, monkeypatch):
+        """A scaffolded plan references a branch that doesn't exist yet —
+        that's the intended state. S6 must not auto-delete it."""
+        from corruption import check_branch_exists
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-661-consolidation", state="scaffolded")
+        monkeypatch.setattr("corruption.subprocess.run", lambda *a, **kw: type('R', (), {
+            'stdout': '', 'returncode': 0,
+        })())
+        finding = check_branch_exists(plan, tmp_path)
+        assert finding is None, (
+            "Scaffolded plan with non-existent branch is expected — "
+            "work-start creates the branch"
+        )
 
 
 class TestS4ClosingPostconditions:
@@ -675,6 +702,27 @@ class TestDiagnose:
         assert "S1_MISSING_STATE" in scenarios
         assert "S7_STALE_PLAN_ON_MAIN" in scenarios
 
+
+    def test_scaffolded_plan_on_main_survives_diagnose(self, tmp_path, monkeypatch):
+        """Integration test: a scaffolded plan on main with a non-existent branch
+        must produce zero findings. This is the exact scenario that was deleting
+        plans between sessions."""
+        from corruption import diagnose
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-661-consolidation", state="scaffolded")
+        monkeypatch.setattr("corruption.subprocess.run", lambda *a, **kw: type('R', (), {
+            'stdout': '', 'returncode': 0,
+        })())
+        findings = diagnose(
+            plan_path=plan, meta_state="scaffolded",
+            project=tmp_path, workspace=tmp_path,
+            base_branch="main", current_branch="main", on_main=True,
+        )
+        destructive = [f for f in findings if "remove_plan" in f.actions]
+        assert len(destructive) == 0, (
+            f"Scaffolded plan on main must not be auto-deleted. "
+            f"Got destructive findings: {[(f.scenario, f.actions) for f in destructive]}"
+        )
 
     def test_s7_subsumes_s5_on_main_with_stale_plan(self, tmp_path, monkeypatch):
         """S5+S7 both fire for stale plan on main — S7 should suppress S5
