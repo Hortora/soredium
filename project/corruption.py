@@ -164,6 +164,11 @@ def check_plan_branch_stale(plan_path: Path) -> Optional[Finding]:
             break
     if active_issue is None or active_issue == branch_issue:
         return None
+    covers_str = read_field(plan_path, "covers")
+    if covers_str:
+        covers = parse_covers(covers_str)
+        if active_issue in covers:
+            return None
     return Finding(
         scenario="S15_PLAN_BRANCH_STALE",
         severity="warning",

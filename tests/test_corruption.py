@@ -957,6 +957,33 @@ class TestS15PlanBranchStale:
         finding = check_plan_branch_stale(plan)
         assert finding is None
 
+    def test_no_finding_when_active_issue_in_covers(self, tmp_path):
+        """No S15 when branch references umbrella issue but active issue is in covers list."""
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-650-elastic-session-scheduler",
+                    queue=("- [x] casehubio/platform#652 — Done\n"
+                           "- [x] casehubio/neocortex#640 — Done\n"
+                           "- [ ] casehubio/neocortex#653 — Active ← active"),
+                    covers="650,652,653")
+        from corruption import check_plan_branch_stale
+        finding = check_plan_branch_stale(plan)
+        assert finding is None, (
+            "S15 should not fire when active issue (#653) is in the covers list "
+            "(branch covers 650,652,653)"
+        )
+
+    def test_still_detects_stale_when_active_not_in_covers(self, tmp_path):
+        """S15 still fires when active issue is NOT in covers list."""
+        plan = tmp_path / ".plan"
+        _write_plan(plan, branch="issue-100-old",
+                    queue=("- [x] hortora/soredium#100 — Old\n"
+                           "- [ ] hortora/soredium#999 — Unrelated ← active"),
+                    covers="100,101,102")
+        from corruption import check_plan_branch_stale
+        finding = check_plan_branch_stale(plan)
+        assert finding is not None
+        assert finding.scenario == "S15_PLAN_BRANCH_STALE"
+
 
 class TestS16ZombieSlot:
     def _init_git(self, path, branch="main"):
