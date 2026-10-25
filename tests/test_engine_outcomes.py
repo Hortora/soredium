@@ -211,3 +211,33 @@ class TestExecOkMarker:
                  execute_mechanical_fn=lambda s, c: {})
         reloaded = Progress.load(tmp_path)
         assert reloaded.get("_exec_ok:my_step") == "yes"
+
+
+class TestDoneStepSkipping:
+    """Steps marked done are skipped by the engine."""
+
+    def test_done_step_with_outcome_fn_skips(self, tmp_path):
+        """When a step is marked done (legitimately), it should skip."""
+        (tmp_path / ".work-progress").write_text("my_step=done\n")
+        executed = []
+
+        step = StepDef("my_step", "phase", StepType.MECHANICAL,
+                       outcome_fn=lambda ctx: Verification(
+                           "check", VerifyResult.PASS, {}, "repo"))
+        ctx = _make_ctx(tmp_path)
+        result = run_loop([step], ctx,
+                          execute_mechanical_fn=lambda s, c: executed.append(1) or {})
+        assert result.get("ACTION") == "complete"
+        assert len(executed) == 0
+
+    def test_done_step_without_outcome_fn_skips(self, tmp_path):
+        """Steps without outcome_fn should still skip when done."""
+        (tmp_path / ".work-progress").write_text("my_step=done\n")
+        executed = []
+
+        step = StepDef("my_step", "phase", StepType.MECHANICAL)
+        ctx = _make_ctx(tmp_path)
+        result = run_loop([step], ctx,
+                          execute_mechanical_fn=lambda s, c: executed.append(1) or {})
+        assert result.get("ACTION") == "complete"
+        assert len(executed) == 0

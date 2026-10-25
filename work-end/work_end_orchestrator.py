@@ -881,8 +881,11 @@ def _phase_skip(progress: dict[str, str], meta_state: str,
     meta_idx = LIFECYCLE_PHASE_ORDER.index(meta_state)
     if meta_idx == 0:
         return progress
+    _NEVER_PHASE_SKIP = {"checkout_main", "cleanup", "cleanup_stack"}
     filled = False
     for step_def in STEPS:
+        if step_def.name in _NEVER_PHASE_SKIP:
+            continue
         step_phase = STEP_TO_PHASE.get(step_def.name)
         if not step_phase or step_phase not in LIFECYCLE_PHASE_ORDER:
             continue
