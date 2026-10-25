@@ -4034,3 +4034,36 @@ class TestLifecycleSkipWhenPast:
         )
         result = _fire_lifecycle(step, ctx)
         assert result is None
+
+
+class TestMainModeNotCycle:
+    """on_main=yes must use MAIN mode, never CYCLE (#445)."""
+
+    def test_on_main_returns_main_mode_even_with_uncompleted_plan(self, tmp_path):
+        from work_end_orchestrator import determine_pipeline_mode
+        plan = tmp_path / ".plan"
+        plan.write_text("branch: main\nstate: active\ncovers: 42\n---\n- [ ] #42 open item\n")
+        mode = determine_pipeline_mode(
+            on_main=True, in_slot=False, mode="end",
+            workspace=tmp_path, covers="42", issue_repo="Org/repo",
+        )
+        from shared_steps import PipelineMode
+        assert mode == PipelineMode.MAIN
+
+    def test_on_branch_without_plan_returns_branch(self, tmp_path):
+        from work_end_orchestrator import determine_pipeline_mode
+        mode = determine_pipeline_mode(
+            on_main=False, in_slot=False, mode="end",
+            workspace=tmp_path, covers="42", issue_repo="Org/repo",
+        )
+        from shared_steps import PipelineMode
+        assert mode == PipelineMode.BRANCH
+
+    def test_main_mode_excludes_rebase_squash(self):
+        from work_end_orchestrator import STEPS
+        from shared_steps import PipelineMode
+        main_steps = {s.name for s in STEPS if PipelineMode.MAIN in s.modes}
+        assert "rebase" not in main_steps
+        assert "squash" not in main_steps
+        assert "report_rebase" not in main_steps
+        assert "report_squash" not in main_steps

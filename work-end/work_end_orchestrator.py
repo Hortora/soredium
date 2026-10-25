@@ -246,10 +246,10 @@ def determine_pipeline_mode(
 ) -> PipelineMode:
     if mode == "sync":
         return PipelineMode.SYNC
-    if _is_cycle_mode(workspace, covers, issue_repo):
-        return PipelineMode.CYCLE
     if on_main:
         return PipelineMode.MAIN
+    if _is_cycle_mode(workspace, covers, issue_repo):
+        return PipelineMode.CYCLE
     if in_slot:
         return PipelineMode.SLOT
     return PipelineMode.BRANCH
@@ -681,7 +681,11 @@ def _push_main_mode(ctx):
     if ctx.dry_run:
         if ctx.call_log is not None:
             ctx.call_log.append(["(internal)", "push_main_mode", f"project={ctx.project}", f"workspace={ctx.workspace}"])
-        return {"PUSHED": "yes", "LANDED_SHA": "dry_run"}
+        sha = subprocess.run(
+            ["git", "-C", str(ctx.project), "rev-parse", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip() or "0" * 40
+        return {"PUSHED": "yes", "LANDED_SHA": sha}
     for repo_path in [ctx.project, ctx.workspace]:
         proc = subprocess.run(
             ["git", "-C", str(repo_path), "push", "origin", "main", "--no-verify"],
