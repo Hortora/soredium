@@ -434,6 +434,83 @@ class TestS3ActiveAllClosed:
         assert finding.scenario == "S3_ACTIVE_ALL_CLOSED"
 
 
+    def test_qualified_covers_checked_against_github(self, tmp_path, monkeypatch):
+        """#475: parse_covers() silently dropped qualified refs like Org/repo#42."""
+        from corruption import check_active_all_closed
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-42-foo", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: Hortora/soredium#42,Hortora/soredium#43", "",
+            "## Queue",
+            "- [x] Hortora/soredium#42 — Fix foo",
+            "- [x] Hortora/soredium#43 — Fix bar",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        calls = []
+        def mock_run(*args, **kwargs):
+            calls.append(args[0] if args else kwargs.get("args"))
+            return type('R', (), {'stdout': 'OPEN\n', 'returncode': 0})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        finding = check_active_all_closed(plan, "active", owner_repo="Hortora/soredium")
+        assert finding is None, "OPEN issues should prevent S3 from firing"
+        assert len(calls) >= 1, "Should have called gh issue view for qualified refs"
+
+    def test_qualified_covers_all_closed_fires(self, tmp_path, monkeypatch):
+        """#475: S3 should fire when all qualified-ref issues are CLOSED."""
+        from corruption import check_active_all_closed
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-42-foo", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: Hortora/soredium#42", "",
+            "## Queue",
+            "- [x] Hortora/soredium#42 — Fix foo",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        def mock_run(*args, **kwargs):
+            return type('R', (), {'stdout': 'CLOSED\n', 'returncode': 0})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        finding = check_active_all_closed(plan, "active", owner_repo="Hortora/soredium")
+        assert finding is not None
+        assert finding.scenario == "S3_ACTIVE_ALL_CLOSED"
+
+    def test_qualified_covers_uses_per_ref_repo(self, tmp_path, monkeypatch):
+        """#475: each ref's repo should be passed to gh issue view."""
+        from corruption import check_active_all_closed
+        plan = tmp_path / ".plan"
+        lines = [
+            "# Work Plan — test", "", "## State",
+            "branch: issue-42-foo", "state: active",
+            "date: 2026-08-20", "issue-repo: Hortora/soredium",
+            "covers: Hortora/soredium#42,OtherOrg/other#99", "",
+            "## Queue",
+            "- [x] Hortora/soredium#42 — Fix foo",
+            "- [x] OtherOrg/other#99 — Fix bar",
+            "",
+        ]
+        plan.write_text("\n".join(lines))
+
+        repos_seen = []
+        def mock_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args")
+            repos_seen.append(cmd[5])
+            return type('R', (), {'stdout': 'CLOSED\n', 'returncode': 0})()
+
+        monkeypatch.setattr("corruption.subprocess.run", mock_run)
+        check_active_all_closed(plan, "active", owner_repo="Hortora/soredium")
+        assert "Hortora/soredium" in repos_seen
+        assert "OtherOrg/other" in repos_seen
+
+
 class TestS8QueueConsistency:
     def test_skipped_without_owner_repo(self, tmp_path):
         from corruption import check_queue_consistency

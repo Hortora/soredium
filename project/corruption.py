@@ -19,7 +19,7 @@ if str(_project_dir) not in sys.path:
     sys.path.insert(0, str(_project_dir))
 
 from lifecycle import VALID_STATES
-from plan_io import read_plan, read_field, parse_covers, has_uncompleted_items
+from plan_io import read_plan, read_field, parse_covers, parse_covers_qualified, has_uncompleted_items
 
 
 @dataclass
@@ -354,13 +354,16 @@ def check_active_all_closed(
     covers = read_field(plan_path, "covers")
     if not covers:
         return None
-    issue_repo = read_field(plan_path, "issue-repo") or owner_repo
-    issue_nums = parse_covers(covers)
+    default_repo = read_field(plan_path, "issue-repo") or owner_repo
+    refs = parse_covers_qualified(covers)
+    if not refs:
+        return None
     all_closed = True
-    for num in issue_nums:
+    for ref in refs:
+        repo = ref.repo or default_repo
         try:
             result = subprocess.run(
-                ["gh", "issue", "view", str(num), "--repo", issue_repo,
+                ["gh", "issue", "view", str(ref.number), "--repo", repo,
                  "--json", "state", "--jq", ".state"],
                 capture_output=True, text=True, timeout=5,
             )
