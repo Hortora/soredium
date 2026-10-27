@@ -767,6 +767,7 @@ Claude:
 - ✅ `validate_structure.py` — File organization
 - ✅ `validate_project_types.py` — Project type list consistency
 - ✅ `validate_blog_frontmatter.py` — Blog post frontmatter (layout, title, date, type fields)
+- ✅ `validate_plan_bypass.py` — Static analysis: .plan bypass writers outside canonical `plan_io.py`
 
 **PUSH Tier (<30s budget):**
 - ✅ `validate_flowcharts.py` — Mermaid syntax via mmdc (puppeteer, too slow for COMMIT), semantic labels
