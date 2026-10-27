@@ -244,12 +244,15 @@ def checkout_main(project: str, workspace: str, slot_path: str = "") -> int:
         _abort_rebase_if_needed(repo_path)
 
         status = subprocess.run(
-            ["git", "-C", repo_path, "status", "--porcelain"],
+            ["git", "-C", repo_path, "status", "--porcelain", "-u"],
             capture_output=True, text=True,
         )
         if status.stdout.strip():
-            git(repo_path, "add", "-A")
-            git(repo_path, "commit", "-m", "chore: commit lifecycle state before branch switch")
+            stash = git(repo_path, "stash", "-u", "-m", "work-end: stash before checkout main")
+            if stash.returncode != 0:
+                git(repo_path, "add", "-A")
+                git(repo_path, "commit", "--allow-empty", "-m",
+                    "chore: commit lifecycle state before branch switch")
 
         r = git(repo_path, "checkout", "main")
         if r.returncode != 0:

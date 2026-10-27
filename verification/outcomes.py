@@ -232,15 +232,19 @@ def verify_issues_closed(issue_repo: str, covers: str,
                         {"method": "all_closed", "count": len(closable)}, "")
 
 
-def verify_checkout_main(project: Path, workspace: Path) -> Verification:
-    for repo in [project, workspace]:
+def verify_checkout_main(project: Path, workspace: Path,
+                         extra_repos: list[Path] | None = None) -> Verification:
+    repos = [project, workspace] + (extra_repos or [])
+    for repo in repos:
+        if not repo.is_dir():
+            continue
         result = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
         if result.returncode != 0 or result.stdout.strip() != "main":
             branch = result.stdout.strip() if result.returncode == 0 else "unknown"
             return Verification("checkout_main", VerifyResult.FAIL,
                                 {"repo": repo.name, "branch": branch}, repo.name)
     return Verification("checkout_main", VerifyResult.PASS,
-                        {"method": "both_on_main"}, "")
+                        {"method": "all_on_main", "count": len(repos)}, "")
 
 
 def verify_landed_marker(slot_path: Path) -> Verification:

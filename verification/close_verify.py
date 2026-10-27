@@ -36,6 +36,7 @@ def _v(name: str, verification) -> tuple[str, list[Finding]]:
 def _run_branch_checks(
     project: Path, workspace: Path, branch: str, base: str,
     covers: list[int] | None, issue_repo: str, on_main: bool,
+    extra_repos: list[Path] | None = None,
 ) -> list[tuple[str, list[Finding]]]:
     checks: list[tuple[str, list[Finding]]] = []
     if on_main:
@@ -48,7 +49,8 @@ def _run_branch_checks(
         checks.append(_v("project_pushed", verify_push(project, base)))
         checks.append(_v("workspace_stamped", verify_branch_stamped(workspace, branch, base)))
         checks.append(_v("workspace_pushed", verify_push(workspace, base)))
-        checks.append(_v("on_main", verify_checkout_main(project, workspace)))
+        checks.append(_v("on_main", verify_checkout_main(project, workspace,
+                                                          extra_repos=extra_repos)))
         checks.append(_v("artifacts_promoted",
                          verify_artifacts_promoted(workspace, project, branch, base)))
         checks.append(("no_open_findings", check_no_open_findings(workspace)))
@@ -109,8 +111,16 @@ def verify(
     on_main: bool = False,
     covers_repos: set[str] | None = None,
 ) -> bool:
+    extra_repos: list[Path] = []
+    if slot_dir and slot_dir.is_dir():
+        seen = {project.resolve(), workspace.resolve()}
+        for entry in sorted(slot_dir.iterdir()):
+            if entry.is_dir() and (entry / ".git").exists() and entry.resolve() not in seen:
+                seen.add(entry.resolve())
+                extra_repos.append(entry)
     all_checks = _run_branch_checks(
-        project, workspace, branch, base, covers, issue_repo, on_main)
+        project, workspace, branch, base, covers, issue_repo, on_main,
+        extra_repos=extra_repos or None)
     if slot_dir:
         all_checks.extend(_run_slot_checks(
             slot_dir, branch, base, covers_repos, canonical_repos))

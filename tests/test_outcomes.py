@@ -262,6 +262,40 @@ class TestVerifyCheckoutMain:
             assert result.result == VerifyResult.FAIL
 
 
+    def test_extra_repos_all_on_main(self, tmp_path):
+        """#476: extra slot repos should be checked."""
+        peer = tmp_path / "peer"
+        peer.mkdir()
+        with patch("verification.outcomes._git") as mock_git:
+            mock_git.return_value = MagicMock(returncode=0, stdout="main\n")
+            result = verify_checkout_main(tmp_path, tmp_path, extra_repos=[peer])
+            assert result.result == VerifyResult.PASS
+            assert result.evidence.get("count") == 3
+
+    def test_extra_repo_on_feature_branch(self, tmp_path):
+        """#476: peer repo on feature branch should fail verification."""
+        peer = tmp_path / "peer"
+        peer.mkdir()
+        calls = []
+        def mock_git_fn(repo, *args):
+            calls.append(repo)
+            if repo == peer:
+                return MagicMock(returncode=0, stdout="feature\n")
+            return MagicMock(returncode=0, stdout="main\n")
+        with patch("verification.outcomes._git", side_effect=mock_git_fn):
+            result = verify_checkout_main(tmp_path, tmp_path, extra_repos=[peer])
+            assert result.result == VerifyResult.FAIL
+            assert result.evidence.get("repo") == "peer"
+
+    def test_extra_repo_nonexistent_skipped(self, tmp_path):
+        """#476: non-existent extra repos should be skipped."""
+        missing = tmp_path / "missing"
+        with patch("verification.outcomes._git") as mock_git:
+            mock_git.return_value = MagicMock(returncode=0, stdout="main\n")
+            result = verify_checkout_main(tmp_path, tmp_path, extra_repos=[missing])
+            assert result.result == VerifyResult.PASS
+
+
 class TestVerifyLandedMarker:
     def test_pass(self, tmp_path):
         (tmp_path / ".landed").write_text("landed_shas=repo:abc123\n")

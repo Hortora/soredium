@@ -625,6 +625,21 @@ def _promote_plan_next_script(ctx):
     return None
 
 
+def _slot_repo_paths(ctx) -> list[Path]:
+    if not ctx.in_slot or not ctx.slot_path or not ctx.slot_path.is_dir():
+        return []
+    seen = {ctx.project.resolve(), ctx.workspace.resolve()}
+    extras = []
+    for entry in sorted(ctx.slot_path.iterdir()):
+        if not entry.is_dir() or not (entry / ".git").exists():
+            continue
+        if entry.resolve() in seen:
+            continue
+        seen.add(entry.resolve())
+        extras.append(entry)
+    return extras
+
+
 def _checkout_main_script(ctx):
     cmd = [sys.executable, str(CLEANUP_SCRIPT),
            "checkout-main", str(ctx.project), str(ctx.workspace)]
@@ -1360,7 +1375,8 @@ STEPS: list[StepDef] = [
     StepDef("checkout_main", "closing:stamped", StepType.MECHANICAL,
             modes=BRANCH_SLOT,
             script_fn=_checkout_main_script,
-            outcome_fn=lambda ctx: verify_checkout_main(ctx.project, ctx.workspace)),
+            outcome_fn=lambda ctx: verify_checkout_main(ctx.project, ctx.workspace,
+                                                        _slot_repo_paths(ctx))),
     StepDef("cleanup_stack", "closing:stamped", StepType.MECHANICAL,
             modes=BRANCH_SLOT,
             script_fn=_cleanup_stack_script),
