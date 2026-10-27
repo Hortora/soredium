@@ -797,6 +797,8 @@ def _fire_lifecycle(step, ctx):
     ctx.expected_state = step.to_state
     if not ctx.plan_path:
         return None
+    if not ctx.plan_path.exists():
+        return None
 
     from close_progress import _read_plan_state, LIFECYCLE_PHASE_ORDER
     actual = _read_plan_state(ctx.plan_path)
@@ -805,6 +807,10 @@ def _fire_lifecycle(step, ctx):
         target_idx = LIFECYCLE_PHASE_ORDER.index(step.to_state)
         if actual_idx >= target_idx:
             return None
+    if actual and actual != step.from_state:
+        if actual in LIFECYCLE_PHASE_ORDER and step.from_state in LIFECYCLE_PHASE_ORDER:
+            if LIFECYCLE_PHASE_ORDER.index(actual) > LIFECYCLE_PHASE_ORDER.index(step.from_state):
+                return None
 
     evidence = _build_evidence(step.event, ctx)
     cmd = [
@@ -818,6 +824,12 @@ def _fire_lifecycle(step, ctx):
         cmd.append(f"evidence={json.dumps(evidence)}")
     result = _run_script(cmd, ctx.workspace, dry_run=ctx.dry_run, call_log=ctx.call_log)
     if result.get("ERROR"):
+        err_detail = result.get("ERROR", "") + ": " + result.get("DETAIL", result.get("ERROR_DETAIL", ""))
+        if "CONCURRENT_MODIFICATION" in err_detail:
+            refreshed = _read_plan_state(ctx.plan_path)
+            if refreshed in LIFECYCLE_PHASE_ORDER and step.to_state in LIFECYCLE_PHASE_ORDER:
+                if LIFECYCLE_PHASE_ORDER.index(refreshed) >= LIFECYCLE_PHASE_ORDER.index(step.to_state):
+                    return None
         return {
             "ACTION": "error",
             "ERROR": f"LIFECYCLE_TRANSITION_FAILED",
@@ -825,7 +837,7 @@ def _fire_lifecycle(step, ctx):
             "FROM_STATE": step.from_state,
             "TO_STATE": step.to_state,
             "EVENT": step.event,
-            "DETAIL": result.get("ERROR", "") + ": " + result.get("DETAIL", result.get("ERROR_DETAIL", "")),
+            "DETAIL": err_detail,
         }
     return None
 

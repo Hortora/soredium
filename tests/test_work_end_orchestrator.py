@@ -3869,6 +3869,99 @@ class TestLifecycleErrorPropagation:
         assert result is None
 
 
+    def test_fire_lifecycle_skips_when_state_already_past_target(self, tmp_path, monkeypatch):
+        """#477: when .plan is at closing:merged, review_pass should be skipped."""
+        from work_end_orchestrator import _fire_lifecycle, OrchestratorContext
+        from shared_steps import StepDef
+        from progress import Progress
+
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nstate: closing:merged\n")
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:merged",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+            plan_path=plan,
+        )
+        step = StepDef("review_pass", "closing:review", "lifecycle",
+                        from_state="closing:review", to_state="closing:verified",
+                        event="review_pass")
+        result = _fire_lifecycle(step, ctx)
+        assert result is None, "Should skip when actual state is past target"
+
+    def test_fire_lifecycle_skips_on_concurrent_modification(self, tmp_path, monkeypatch):
+        """#477: CONCURRENT_MODIFICATION with state already past target should not error."""
+        from work_end_orchestrator import _fire_lifecycle, OrchestratorContext
+        from shared_steps import StepDef
+        from progress import Progress
+
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nstate: closing:review\n")
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:review",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+            plan_path=plan,
+        )
+        step = StepDef("review_pass", "closing:review", "lifecycle",
+                        from_state="closing:review", to_state="closing:verified",
+                        event="review_pass")
+
+        def mock_run_script(cmd, ws, **kw):
+            plan.write_text("## State\nstate: closing:merged\n")
+            return {"ERROR": "CONCURRENT_MODIFICATION", "DETAIL": "state mismatch"}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", mock_run_script)
+        result = _fire_lifecycle(step, ctx)
+        assert result is None, "Should recover when state advanced past target during transition"
+
+    def test_fire_lifecycle_skips_when_from_state_stale(self, tmp_path, monkeypatch):
+        """#477: when actual state is past from_state, skip without calling lifecycle.py."""
+        from work_end_orchestrator import _fire_lifecycle, OrchestratorContext
+        from shared_steps import StepDef
+        from progress import Progress
+
+        calls = []
+        monkeypatch.setattr("work_end_orchestrator._run_script",
+                            lambda cmd, ws, **kw: (calls.append(cmd), {})[1])
+
+        plan = tmp_path / ".plan"
+        plan.write_text("## State\nstate: closing:promoted\n")
+        ctx = OrchestratorContext(
+            workspace=tmp_path,
+            project=tmp_path / "project",
+            branch="issue-test",
+            base_branch="main",
+            meta_state="closing:promoted",
+            on_main=False,
+            in_slot=False,
+            covers="",
+            issue_repo="",
+            progress=Progress(),
+            plan_path=plan,
+        )
+        step = StepDef("review_pass", "closing:review", "lifecycle",
+                        from_state="closing:review", to_state="closing:verified",
+                        event="review_pass")
+        result = _fire_lifecycle(step, ctx)
+        assert result is None
+        assert len(calls) == 0, "Should not call lifecycle.py when from_state is stale"
+
+
 class TestCleanupCycleVsPass:
     """cleanup_cycle runs when plan has remaining items, cleanup_pass when empty (#442 fix 2)."""
 
