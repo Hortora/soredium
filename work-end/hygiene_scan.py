@@ -34,19 +34,57 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from common import parse_args, subdir_prefix  # noqa: E402
 
 
-def check_unpublished_blogs(workspace: str, blog_dest: str) -> list[str]:
-    blog_dir = Path(workspace) / "blog"
-    if not blog_dir.is_dir() or not blog_dest:
+def check_unpublished_blogs(workspace: str, blog_dest: str,
+                            project: str = "") -> list[str]:
+    source_dirs = [Path(workspace) / "blog"]
+    if project:
+        proj_blog = Path(project) / "docs" / "blog"
+        if proj_blog.is_dir():
+            source_dirs.append(proj_blog)
+
+    dest_paths = _resolve_all_blog_dests(blog_dest)
+    if not dest_paths:
         return []
 
-    dest_path = Path(blog_dest).expanduser()
-    unpublished = []
-    for f in blog_dir.iterdir():
-        if f.name == "INDEX.md" or not f.name.endswith(".md"):
+    all_entries: set[str] = set()
+    for src in source_dirs:
+        if not src.is_dir():
             continue
-        if not (dest_path / f.name).exists():
-            unpublished.append(f.name)
-    return sorted(unpublished)
+        for f in src.iterdir():
+            if f.name == "INDEX.md" or not f.name.endswith(".md"):
+                continue
+            all_entries.add(f.name)
+
+    unpublished = []
+    for entry in sorted(all_entries):
+        for dest in dest_paths:
+            if not (dest / entry).exists():
+                unpublished.append(f"{entry} (missing from {dest.name})")
+                break
+    return unpublished
+
+
+def _resolve_all_blog_dests(blog_dest: str) -> list[Path]:
+    routing_path = Path.home() / ".claude" / "blog-routing.yaml"
+    if routing_path.exists():
+        try:
+            import yaml
+            cfg = yaml.safe_load(routing_path.read_text())
+            dest_keys = cfg.get("defaults", {}).get("destinations", [])
+            paths = []
+            for key in dest_keys:
+                if key in cfg.get("destinations", {}):
+                    dc = cfg["destinations"][key]
+                    import os
+                    p = Path(os.path.expanduser(dc["path"] + dc.get("subdir", ""))).resolve()
+                    paths.append(p)
+            if paths:
+                return paths
+        except Exception:
+            pass
+    if blog_dest:
+        return [Path(blog_dest).expanduser()]
+    return []
 
 
 def list_workspace_branches(workspace: str, skip_branch: str) -> list[str]:
@@ -212,7 +250,7 @@ def main() -> int:
 
     branches = list_workspace_branches(workspace, branch)
 
-    unpublished_blogs = check_unpublished_blogs(workspace, blog_dest)
+    unpublished_blogs = check_unpublished_blogs(workspace, blog_dest, project=project)
     stale_branches = check_stale_branches(workspace, branches, project=project)
     unrecovered = check_unrecovered_artifacts(workspace, project, branches, routing)
     unstamped = check_unstamped_branches(workspace, project, branches, single_repo)

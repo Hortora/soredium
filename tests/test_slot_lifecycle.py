@@ -827,8 +827,8 @@ class TestArchiveSlot:
         captured = capsys.readouterr()
         assert "ERROR=occupant_pid_alive" not in captured.out
 
-    def test_force_overrides_occupant_pid(self, tmp_path, monkeypatch, capsys):
-        """#362: --force bypasses the occupant PID guard with a warning."""
+    def test_force_does_not_override_occupant_pid(self, tmp_path, monkeypatch, capsys):
+        """#447: --force must not bypass the active PID guard."""
         family = tmp_path / "family"
         slot_dir = family / "slots" / "1"
         slot_dir.mkdir(parents=True)
@@ -846,10 +846,11 @@ class TestArchiveSlot:
         (fake_home / ".claude" / "projects").mkdir(parents=True)
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
 
-        slot_lifecycle.archive_slot(family, 1, force=True)
+        with pytest.raises(SystemExit):
+            slot_lifecycle.archive_slot(family, 1, force=True)
         captured = capsys.readouterr()
-        assert "WARN=occupant_pid_overridden" in captured.out
-        assert not slot_dir.exists()
+        assert "ERROR=occupant_pid_alive" in captured.out
+        assert slot_dir.exists(), "Slot should NOT be archived when PID is alive"
 
 
 class TestResolveCanonicalRepoClone:

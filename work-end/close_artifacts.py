@@ -281,7 +281,7 @@ def main() -> int:
     else:
         results["issues_closed"] = "0"
 
-    # Publish blog
+    # Publish blog to all routing destinations
     if artifacts["blog"]:
         first_blog = artifacts["blog"][0]
         blog_dir = scan_source / Path(first_blog).parent
@@ -289,44 +289,53 @@ def main() -> int:
         unpublished = [x for x in out.get("UNPUBLISHED", "").split(",") if x.strip()]
         results["blog_published"] = str(len(unpublished))
         results["blog_dest"] = out.get("BLOG_DEST", "")
-        blog_repo = out.get("BLOG_REPO", "")
-        blog_subdir = out.get("BLOG_SUBDIR", "")
 
-        if unpublished and blog_repo:
+        dest_count = int(out.get("DEST_COUNT", "1"))
+        committed_repos: set[str] = set()
+        for i in range(dest_count):
+            dest_repo = out.get(f"DEST_{i}_REPO", "")
+            dest_unpub = [x for x in out.get(f"DEST_{i}_UNPUBLISHED", "").split(",") if x.strip()]
+            if not dest_unpub or not dest_repo or dest_repo in committed_repos:
+                continue
+            committed_repos.add(dest_repo)
+            dest_path = Path(out.get(f"DEST_{i}_PATH", ""))
+            dest_subdir = dest_path.name if dest_path else ""
+
             blog_branch_rc = subprocess.run(
-                ["git", "-C", blog_repo, "branch", "--show-current"],
+                ["git", "-C", dest_repo, "branch", "--show-current"],
                 capture_output=True, text=True,
             )
             blog_branch = blog_branch_rc.stdout.strip() if blog_branch_rc.returncode == 0 else ""
             if blog_branch and blog_branch != "main":
                 switch_rc = subprocess.run(
-                    ["git", "-C", blog_repo, "checkout", "main"],
+                    ["git", "-C", dest_repo, "checkout", "main"],
                     capture_output=True,
                 )
                 if switch_rc.returncode != 0:
-                    failures.append(f"blog dest not on main ({blog_branch}), checkout failed")
+                    failures.append(f"blog dest {i} not on main ({blog_branch}), checkout failed")
+                    continue
 
             add_rc = subprocess.run(
-                ["git", "-C", blog_repo, "add", f"{blog_subdir}/"],
+                ["git", "-C", dest_repo, "add", f"{dest_subdir}/"],
                 capture_output=True,
             )
             if add_rc.returncode != 0:
-                failures.append("blog git add failed")
+                failures.append(f"blog git add failed for dest {i}")
             else:
                 commit_rc = subprocess.run(
-                    ["git", "-C", blog_repo, "commit", "-m",
+                    ["git", "-C", dest_repo, "commit", "-m",
                      f"chore: publish blog entries from {branch}"],
                     capture_output=True,
                 )
                 if commit_rc.returncode != 0 and b"nothing to commit" not in commit_rc.stderr and b"nothing to commit" not in commit_rc.stdout:
-                    failures.append("blog commit failed")
+                    failures.append(f"blog commit failed for dest {i}")
                 else:
                     push_rc = subprocess.run(
-                        ["git", "-C", blog_repo, "push"],
+                        ["git", "-C", dest_repo, "push"],
                         capture_output=True,
                     )
                     if push_rc.returncode != 0:
-                        failures.append("blog push failed")
+                        failures.append(f"blog push failed for dest {i}")
 
         if rc != 0:
             failures.append(f"blog publish: {out.get('ERROR', 'unknown')}")

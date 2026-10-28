@@ -800,14 +800,11 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     from slot_claude import find_active_sessions, check_occupant_pid
     alive, occupant_pid = check_occupant_pid(slot_dir)
     if alive:
-        if not force:
-            print(f"OCCUPANT_PID={occupant_pid}")
-            print(f"ERROR=occupant_pid_alive slot={slot_num}")
-            print(f"ERROR_DETAIL=session PID {occupant_pid} is still running in this slot")
-            print("HINT=the occupying session may have run /clear — PID is alive but lsof missed it")
-            sys.exit(1)
-        else:
-            print(f"WARN=occupant_pid_overridden slot={slot_num} pid={occupant_pid}")
+        print(f"OCCUPANT_PID={occupant_pid}")
+        print(f"ERROR=occupant_pid_alive slot={slot_num}")
+        print(f"ERROR_DETAIL=session PID {occupant_pid} is still running in this slot")
+        print("HINT=wait for the session to end, or verify the PID is stale before retrying")
+        sys.exit(1)
 
     active_plan = _has_active_plan(slot_dir)
     if active_plan and not force:

@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 """
-Resolve blog destination from ~/.claude/blog-routing.yaml and publish
-unpublished entries from the workspace blog directory.
+Resolve blog destinations from ~/.claude/blog-routing.yaml and publish
+unpublished entries from the workspace blog directory to ALL destinations.
 
 Usage: python3 ~/.claude/skills/work-end/blog_dest.py <workspace_blog_dir> <branch_name>
 
 Outputs:
-  BLOG_DEST=/resolved/path/to/destination
-  BLOG_REPO=/resolved/path/to/git/repo
-  BLOG_SUBDIR=subdir-name
-  UNPUBLISHED=entry1.md,entry2.md   (comma-separated, empty if none)
+  BLOG_DEST=<path>            (first destination, for backward compat)
+  BLOG_REPO=<path>            (first destination repo)
+  BLOG_SUBDIR=<subdir>        (first destination subdir)
+  DEST_COUNT=<N>              (total destinations)
+  DEST_N_PATH=<path>          (per-destination path)
+  DEST_N_UNPUBLISHED=<csv>    (per-destination unpublished entries)
+  UNPUBLISHED=<csv>           (union of all unpublished, for backward compat)
 
-Copies unpublished entries to the destination directory.
-Caller is responsible for git add / commit / push.
+Copies unpublished entries to each destination directory.
+Caller is responsible for git add / commit / push per destination repo.
 """
 import sys
 import os
-import re
 import shutil
 from pathlib import Path
 
@@ -41,35 +43,48 @@ if not routing_path.exists():
     sys.exit(1)
 
 cfg = yaml.safe_load(routing_path.read_text())
-dest_key = cfg.get("defaults", {}).get("destinations", [None])[0]
-if not dest_key:
-    print("ERROR: no default destination in blog-routing.yaml", file=sys.stderr)
+dest_keys = cfg.get("defaults", {}).get("destinations", [])
+if not dest_keys:
+    print("ERROR: no default destinations in blog-routing.yaml", file=sys.stderr)
     sys.exit(1)
 
-dest_cfg = cfg["destinations"][dest_key]
-dest_path = Path(os.path.expanduser(dest_cfg["path"] + dest_cfg.get("subdir", ""))).resolve()
-blog_repo = dest_path.parent
-blog_subdir = dest_path.name
-
-print(f"BLOG_DEST={dest_path}")
-print(f"BLOG_REPO={blog_repo}")
-print(f"BLOG_SUBDIR={blog_subdir}")
-
-# Find entries in workspace blog not yet in destination
 ws_entries = sorted(p.name for p in workspace_blog.glob("*.md") if p.name != "INDEX.md") if workspace_blog.exists() else []
-dest_entries = set(p.name for p in dest_path.glob("*")) if dest_path.exists() else set()
+all_unpublished: set[str] = set()
 
-unpublished = [e for e in ws_entries if e not in dest_entries]
+for i, dest_key in enumerate(dest_keys):
+    if dest_key not in cfg.get("destinations", {}):
+        print(f"DEST_{i}_ERROR=destination '{dest_key}' not found in blog-routing.yaml")
+        continue
 
-if unpublished:
-    dest_path.mkdir(parents=True, exist_ok=True)
-    for entry in unpublished:
-        shutil.copy2(workspace_blog / entry, dest_path / entry)
-        for img_ref in extract_image_refs(workspace_blog / entry, workspace_blog):
-            img_src = workspace_blog / img_ref
-            img_dst = dest_path / img_ref
-            img_dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(img_src), str(img_dst))
-    print(f"UNPUBLISHED={','.join(unpublished)}")
-else:
-    print("UNPUBLISHED=")
+    dest_cfg = cfg["destinations"][dest_key]
+    dest_path = Path(os.path.expanduser(dest_cfg["path"] + dest_cfg.get("subdir", ""))).resolve()
+    blog_repo = dest_path.parent
+    blog_subdir = dest_path.name
+
+    if i == 0:
+        print(f"BLOG_DEST={dest_path}")
+        print(f"BLOG_REPO={blog_repo}")
+        print(f"BLOG_SUBDIR={blog_subdir}")
+
+    print(f"DEST_{i}_PATH={dest_path}")
+    print(f"DEST_{i}_REPO={blog_repo}")
+
+    dest_entries = set(p.name for p in dest_path.glob("*")) if dest_path.exists() else set()
+    unpublished = [e for e in ws_entries if e not in dest_entries]
+
+    if unpublished:
+        dest_path.mkdir(parents=True, exist_ok=True)
+        for entry in unpublished:
+            shutil.copy2(workspace_blog / entry, dest_path / entry)
+            for img_ref in extract_image_refs(workspace_blog / entry, workspace_blog):
+                img_src = workspace_blog / img_ref
+                img_dst = dest_path / img_ref
+                img_dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(img_src), str(img_dst))
+        print(f"DEST_{i}_UNPUBLISHED={','.join(unpublished)}")
+        all_unpublished.update(unpublished)
+    else:
+        print(f"DEST_{i}_UNPUBLISHED=")
+
+print(f"DEST_COUNT={len(dest_keys)}")
+print(f"UNPUBLISHED={','.join(sorted(all_unpublished))}")

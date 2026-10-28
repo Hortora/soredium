@@ -864,9 +864,15 @@ def _check_checkout_main(ws, proj):
 
 
 def _check_cleanup_stack(ws, proj):
-    stack_file = ws / ".pause-stack"
-    if not stack_file.exists():
-        return True
+    for stack_file in [ws / ".pause-stack", ws / "design" / ".pause-stack"]:
+        if stack_file.exists():
+            content = stack_file.read_text()
+            branch = subprocess.run(
+                ["git", "-C", str(proj), "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True,
+            ).stdout.strip()
+            if branch and f"branch: {branch}" in content:
+                return False
     return True
 
 
