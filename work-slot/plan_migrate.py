@@ -39,16 +39,15 @@ def _has_state_section(plan_path: Path) -> bool:
 
 
 def _queue_items_from_covers(covers: str, repo: str = ""):
-    from plan_manager import QueueItem
+    from plan_manager import QueueItem, IssueRef
     items = []
     for i, part in enumerate(covers.split(",")):
         num = part.strip()
-        if num and num.isdigit():
+        if num and num.isdigit() and repo:
             items.append(QueueItem(
-                issue_number=int(num),
+                ref=IssueRef(repo, int(num)),
                 title=f"Issue #{num}",
                 active=(i == 0),
-                repo=repo,
             ))
     return items
 
@@ -59,7 +58,7 @@ _EPIC_ITEM_RE = re.compile(
 
 
 def _queue_items_from_epic(epic_path: Path, repo: str = ""):
-    from plan_manager import QueueItem
+    from plan_manager import QueueItem, IssueRef
     items = []
     first_uncompleted = True
     for line in epic_path.read_text().splitlines():
@@ -72,7 +71,8 @@ def _queue_items_from_epic(epic_path: Path, repo: str = ""):
             active = not completed and first_uncompleted
             if active:
                 first_uncompleted = False
-            items.append(QueueItem(issue_num, title, completed=completed, active=active, repo=item_repo))
+            if item_repo:
+                items.append(QueueItem(ref=IssueRef(item_repo, issue_num), title=title, completed=completed, active=active))
     return items
 
 
