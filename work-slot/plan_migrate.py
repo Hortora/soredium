@@ -143,7 +143,7 @@ def migrate_if_needed(design_dir: Path) -> bool:
     meta.pop("issue", None)
     meta.pop("plan", None)
 
-    from plan_manager import parse_plan, build_plan_content, rewrite_plan, _backfill_repo
+    from plan_manager import parse_plan, build_plan_content, rewrite_plan
 
     if plan_path.exists():
         tree = parse_plan(plan_path)
@@ -152,10 +152,6 @@ def migrate_if_needed(design_dir: Path) -> bool:
             tree.state["date"] = tree.started
         if tree.last_wrap:
             tree.state["last-wrap"] = tree.last_wrap
-        # Backfill repo from freshly-set state (old plans had bare #N)
-        issue_repo = meta.get("issue-repo", "")
-        if issue_repo:
-            _backfill_repo(tree.queue, issue_repo)
         rewrite_plan(plan_path, tree)
     elif epic_path.exists():
         issue_repo = meta.get("issue-repo", "")
