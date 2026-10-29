@@ -583,6 +583,41 @@ class TestQueueDecision:
         assert result["ACTION"] != "fork_next_branch"
 
 
+    def test_skips_queue_decision_on_last_active_task(self, tmp_path, monkeypatch):
+        """#478: when the only uncompleted item is the active one, queue_decision
+        should be skipped — work-end implies the active issue is done."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+
+        plan = tmp_path / ".plan"
+        plan.write_text(
+            "## State\nstate: closing:review\nbranch: issue-42\n"
+            "## Queue\n- [ ] Hortora/soredium#42 — Fix the bug ← active\n"
+        )
+
+        from work_end_orchestrator import run_orchestrator
+        from close_progress import update_close_progress
+        for step in ["report_init", "code_review", "branch_audit_conformance",
+                      "branch_audit_coherence", "branch_audit_structure",
+                      "branch_audit_robustness", "loose_ends",
+                      "forcing_function", "sweep_config"]:
+            update_close_progress(tmp_path, step, "done")
+        update_close_progress(tmp_path, "sweep_selected", "")
+
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(tmp_path / "project"),
+            "branch": "issue-42",
+            "base_branch": "main",
+            "meta_state": "closing:review",
+            "plan_path": str(plan),
+        })
+
+        assert result["ACTION"] != "queue_decision", (
+            "queue_decision should be skipped when the only uncompleted item "
+            "is the currently active one — work-end implies it is done"
+        )
+
+
 class TestBlockingVerification:
     """force_done=verify is blocked when verification has blocking failures."""
 

@@ -1002,7 +1002,7 @@ def _loose_ends_context(ctx):
 
 
 def _skip_no_queue_remaining(ctx) -> bool:
-    """Skip queue_decision when .plan has no remaining items."""
+    """Skip queue_decision when .plan has no remaining items after the active one."""
     ws_plan = ctx.workspace / ".plan"
     if not ws_plan.exists():
         return True
@@ -1010,11 +1010,12 @@ def _skip_no_queue_remaining(ctx) -> bool:
     if _proj_dir not in sys.path:
         sys.path.insert(0, _proj_dir)
     try:
-        from plan_io import read_plan, has_uncompleted_items
+        from plan_io import read_plan
         state = read_plan(ws_plan)
         if state is None:
             return True
-        return not has_uncompleted_items(state)
+        remaining = [it for it in state.queue_items if not it.completed and not it.active]
+        return len(remaining) == 0
     except Exception:
         return True
 
@@ -1030,13 +1031,10 @@ def _queue_decision_context(ctx):
         from plan_io import read_plan
         state = read_plan(ws_plan)
         if state:
-            items = state.queue_items
-            done_count = sum(1 for it in items if it.completed)
-            remaining = len(items) - done_count
-            for it in items:
-                if not it.completed and not it.active:
-                    next_title = it.title
-                    break
+            future = [it for it in state.queue_items if not it.completed and not it.active]
+            remaining = len(future)
+            if future:
+                next_title = future[0].title
     except Exception:
         pass
     return {
@@ -1047,7 +1045,7 @@ def _queue_decision_context(ctx):
 
 
 def _has_remaining_queue_items(ctx) -> bool:
-    """Check if the .plan has uncompleted queue items."""
+    """Check if the .plan has uncompleted queue items beyond the active one."""
     ws_plan = ctx.workspace / ".plan"
     if not ws_plan.exists():
         return False
@@ -1055,11 +1053,11 @@ def _has_remaining_queue_items(ctx) -> bool:
     if _proj_dir not in sys.path:
         sys.path.insert(0, _proj_dir)
     try:
-        from plan_io import read_plan, has_uncompleted_items
+        from plan_io import read_plan
         state = read_plan(ws_plan)
         if state is None:
             return False
-        return has_uncompleted_items(state)
+        return any(not it.completed and not it.active for it in state.queue_items)
     except Exception:
         return False
 
