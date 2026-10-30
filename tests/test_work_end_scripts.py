@@ -546,6 +546,41 @@ class TestCloseIssues:
         assert "#3:" in out["ERRORS"]
 
 
+    def test_cross_repo_issues_use_per_ref_repo(self, tmp_path, monkeypatch):
+        """#480: qualified refs like OrgA/repo#42 must close against OrgA/repo, not the default repo."""
+        import importlib
+        import sys as _sys
+
+        import_path = str(ARTIFACT_PROMOTE.parent)
+        if import_path not in _sys.path:
+            _sys.path.insert(0, import_path)
+
+        artifact_promote = importlib.import_module("artifact_promote")
+
+        repos_seen = []
+        def mock_run(args, **kwargs):
+            if args[0] == "gh":
+                repos_seen.append(args[5])
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(artifact_promote.subprocess, "run", mock_run)
+
+        from io import StringIO
+        captured = StringIO()
+        monkeypatch.setattr(_sys, "stdout", captured)
+
+        result = artifact_promote.close_issues(
+            "Hortora/soredium",
+            {"covers": "Hortora/soredium#42,casehubio/neocortex#540"},
+        )
+        monkeypatch.undo()
+
+        assert result == 0
+        assert "Hortora/soredium" in repos_seen, "Issue #42 should close against Hortora/soredium"
+        assert "casehubio/neocortex" in repos_seen, "Issue #540 should close against casehubio/neocortex"
+
+
 # ===========================================================================
 # artifact_promote.py — errors
 # ===========================================================================

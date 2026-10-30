@@ -244,22 +244,23 @@ def close_issues(repo: str, params: dict[str, str]) -> int:
         print("ERROR_DETAIL=covers= argument required")
         return 1
 
-    issues = [str(ref.number) for ref in parse_covers_qualified(covers_str)]
-    if not issues:
+    refs = parse_covers_qualified(covers_str)
+    if not refs:
         print("CLOSED=0")
         return 0
 
     closed = 0
     errors = []
-    for issue_num in issues:
+    for ref in refs:
+        target_repo = ref.repo or repo
         try:
             subprocess.run(
-                ["gh", "issue", "close", issue_num, "--repo", repo],
+                ["gh", "issue", "close", str(ref.number), "--repo", target_repo],
                 capture_output=True, text=True, check=True,
             )
             closed += 1
         except subprocess.CalledProcessError as e:
-            errors.append(f"#{issue_num}: {e.stderr.strip()}")
+            errors.append(f"#{ref.number}: {e.stderr.strip()}")
 
     if errors and closed == 0:
         print("ERROR=gh_failed")
