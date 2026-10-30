@@ -35,7 +35,7 @@ if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
 from common import parse_args, detect_topology
 from git_util import git
-from plan_io import parse_covers
+from plan_io import parse_covers_qualified
 
 
 def _has_remote(cwd: str) -> bool:
@@ -218,7 +218,8 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
             capture_output=True,
         ).returncode != 0
         if has_staged:
-            issue_ref = f"  Refs #{parse_covers(covers)[0]}" if covers else ""
+            refs = parse_covers_qualified(covers) if covers else []
+            issue_ref = f"  Refs #{refs[0].number}" if refs else ""
             r = git(project, "commit", "-m", f"docs(work-end): project-promote artifacts from workspace{issue_ref}")
             if r.returncode != 0:
                 if "nothing to commit" not in r.stdout and "nothing to commit" not in r.stderr:
@@ -243,7 +244,7 @@ def close_issues(repo: str, params: dict[str, str]) -> int:
         print("ERROR_DETAIL=covers= argument required")
         return 1
 
-    issues = [str(n) for n in parse_covers(covers_str)]
+    issues = [str(ref.number) for ref in parse_covers_qualified(covers_str)]
     if not issues:
         print("CLOSED=0")
         return 0

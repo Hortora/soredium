@@ -12,7 +12,7 @@ _project_dir = str(Path(__file__).resolve().parent.parent / "project")
 if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
 from common import parse_args
-from plan_io import parse_covers
+from plan_io import parse_covers_qualified
 from slot_io import parse_slot as _parse_slot
 from verification.close_checks import resolve_canonical_repos
 from verification.close_verify import verify
@@ -37,7 +37,7 @@ def main() -> int:
     base = opts.get("base_branch", "main")
     on_main = opts.get("on_main", "no") == "yes"
     covers_str = opts.get("covers", "")
-    covers = parse_covers(covers_str) if covers_str else None
+    covers = [ref.number for ref in parse_covers_qualified(covers_str)] if covers_str else None
     issue_repo = opts.get("issue_repo", "")
     slot_dir_str = opts.get("slot_dir", "")
     slot_dir = Path(slot_dir_str) if slot_dir_str else None

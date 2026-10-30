@@ -23,7 +23,7 @@ try:
     import worklog as _wl
 except ImportError:
     _wl = None
-from plan_io import parse_covers, parse_covers_qualified
+from plan_io import parse_covers_qualified
 
 from slot_core import (
     SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
@@ -717,7 +717,7 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         epic_num = int(slot_info.get("issue", "0"))
         epic_repo = slot_info.get("issue_repo", "")
         covers_str = slot_info.get("covers", "")
-        completed = parse_covers(covers_str)
+        completed = [ref.number for ref in parse_covers_qualified(covers_str)]
         if epic_num and epic_repo and completed:
             try:
                 from plan_manager import _tick_github_checkboxes
@@ -864,7 +864,7 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
     slot_info = parse_slot(slot_dir)
     if slot_info and slot_info.is_epic:
         covers_str = slot_info.covers
-        completed = parse_covers(covers_str)
+        completed = [ref.number for ref in parse_covers_qualified(covers_str)]
         if completed:
             fixed = _fix_stale_checkboxes(slot_dir / ".slot", completed)
             if fixed:

@@ -105,7 +105,7 @@ try:
     import worklog as _wl
 except ImportError:
     _wl = None
-from plan_io import copy_plan, parse_covers, remove_plan
+from plan_io import copy_plan, parse_covers_qualified, remove_plan
 from slot_io import parse_slot as _parse_slot
 
 
@@ -198,11 +198,15 @@ def _all_covers_closed(covers: str, issue_repo: str) -> bool:
     _project_dir = str(Path(__file__).resolve().parent.parent / "project")
     if _project_dir not in sys.path:
         sys.path.insert(0, _project_dir)
-    from plan_io import parse_covers
-    for num in parse_covers(covers):
+    from plan_io import parse_covers_qualified
+    refs = parse_covers_qualified(covers)
+    if not refs:
+        return False
+    for ref in refs:
+        repo = ref.repo or issue_repo
         try:
             result = subprocess.run(
-                ["gh", "issue", "view", str(num), "--repo", issue_repo,
+                ["gh", "issue", "view", str(ref.number), "--repo", repo,
                  "--json", "state", "--jq", ".state"],
                 capture_output=True, text=True, timeout=5,
             )
@@ -440,14 +444,17 @@ def _close_issues_script(ctx):
                     closable.add(item.ref.number)
 
             if closable:
-                all_covers = set(parse_covers(covers))
-                covers = ",".join(str(n) for n in sorted(all_covers & closable))
+                from plan_io import parse_covers_qualified
+                all_refs = parse_covers_qualified(covers)
+                matched = [ref for ref in all_refs if ref.number in closable]
+                covers = ",".join(str(ref) for ref in matched)
 
             epic_parents = get_completed_epic_parents(ctx.plan_path)
             if epic_parents:
-                existing = set(parse_covers(covers))
+                from plan_io import parse_covers_qualified as _pcq
+                existing_nums = {ref.number for ref in _pcq(covers)}
                 for ep in epic_parents:
-                    if ep.number not in existing:
+                    if ep.number not in existing_nums:
                         covers = f"{covers},{ep}" if covers else str(ep)
         except Exception:
             pass
@@ -1766,7 +1773,7 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
                 _wl.record_session_boundary(
                     conn, mode="close", branch=branch,
                     issue_repo=issue_repo,
-                    issue_number=parse_covers(covers)[0] if covers else 0,
+                    issue_number=parse_covers_qualified(covers)[0].number if covers and parse_covers_qualified(covers) else 0,
                     steps=steps_data,
                 )
                 conn.close()

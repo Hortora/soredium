@@ -25,7 +25,7 @@ _project_dir = str(Path(__file__).resolve().parent.parent / "project")
 if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
 from common import parse_args
-from plan_io import parse_covers
+from plan_io import parse_covers_qualified
 from git_util import git
 
 
@@ -47,7 +47,7 @@ def gh_issue(issue_repo: str, number: str) -> dict:
 def gather_issues(issue_repo: str, covers: str) -> list[dict]:
     if not covers or not issue_repo:
         return []
-    numbers = [str(n) for n in parse_covers(covers)]
+    numbers = [str(ref.number) for ref in parse_covers_qualified(covers)]
     return [gh_issue(issue_repo, n) for n in numbers]
 
 

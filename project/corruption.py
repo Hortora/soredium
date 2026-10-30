@@ -19,7 +19,7 @@ if str(_project_dir) not in sys.path:
     sys.path.insert(0, str(_project_dir))
 
 from lifecycle import VALID_STATES
-from plan_io import read_plan, read_field, parse_covers, parse_covers_qualified, has_uncompleted_items
+from plan_io import read_plan, read_field, parse_covers_qualified, has_uncompleted_items
 
 
 @dataclass
@@ -166,8 +166,8 @@ def check_plan_branch_stale(plan_path: Path) -> Optional[Finding]:
         return None
     covers_str = read_field(plan_path, "covers")
     if covers_str:
-        covers = parse_covers(covers_str)
-        if active_issue in covers:
+        covers_nums = {ref.number for ref in parse_covers_qualified(covers_str)}
+        if active_issue in covers_nums:
             return None
     return Finding(
         scenario="S15_PLAN_BRANCH_STALE",
@@ -396,8 +396,6 @@ def check_queue_consistency(plan_path: Path, owner_repo: str) -> Optional[Findin
         return None
 
     issue_repo = plan_state.fields.get("issue-repo", owner_repo)
-    covers_raw = plan_state.fields.get("covers", "")
-    covers_nums = set(parse_covers(covers_raw))
 
     inconsistencies: list[str] = []
     for item in plan_state.queue_items:

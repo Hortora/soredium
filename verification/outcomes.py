@@ -192,8 +192,8 @@ def verify_issues_closed(issue_repo: str, covers: str,
     if not covers or not issue_repo:
         return Verification("issues_closed", VerifyResult.PASS, {"reason": "no_covers"}, "")
 
-    from plan_io import parse_covers
-    closable = set(parse_covers(covers))
+    from plan_io import parse_covers_qualified
+    closable = {ref.number for ref in parse_covers_qualified(covers)}
 
     if plan_path and plan_path.exists():
         try:
