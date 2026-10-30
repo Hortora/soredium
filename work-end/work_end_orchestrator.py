@@ -402,9 +402,12 @@ def _land_script(ctx):
         return None
     proj = ctx.current_repo_project or ctx.project
     ws = ctx.current_repo_workspace or ctx.workspace
-    return [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
-            "land", f"project={proj}", f"branch={ctx.branch}",
-            f"base_branch={ctx.base_branch}", f"workspace={ws}"]
+    cmd = [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
+           "land", f"project={proj}", f"branch={ctx.branch}",
+           f"base_branch={ctx.base_branch}", f"workspace={ws}"]
+    if ctx.family_root:
+        cmd.append(f"family_root={ctx.family_root}")
+    return cmd
 
 
 def _report_land_script(ctx):

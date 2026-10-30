@@ -261,6 +261,7 @@ def build_branch_batch(
     workspace_path: Path | None,
     branch: str,
     base_branch: str = "main",
+    family_root: Path | None = None,
 ) -> list[RepoDescriptor]:
     """Build RepoDescriptor batch for branch mode. Auto-detects slot clones."""
     if _is_slot_clone(project_path):
@@ -301,6 +302,32 @@ def build_branch_batch(
                 push_target=ws_push_target,
                 base_branch=base_branch,
                 is_workspace=True,
+                transport=Transport.DIRECT,
+            ))
+
+    if family_root and family_root.is_dir():
+        seen = {project_path.resolve()}
+        if workspace_path:
+            seen.add(workspace_path.resolve())
+        for entry in sorted(family_root.iterdir()):
+            if not entry.is_dir() or not (entry / ".git").exists():
+                continue
+            if entry.resolve() in seen:
+                continue
+            seen.add(entry.resolve())
+            br_check = _git(entry, "branch", "--list", branch)
+            if br_check.returncode != 0 or not br_check.stdout.strip():
+                continue
+            ahead = _git(entry, "rev-list", "--count", f"{base_branch}..{branch}")
+            if ahead.returncode != 0 or ahead.stdout.strip() == "0":
+                continue
+            sib_push = _detect_push_target(entry) or ""
+            descs.append(RepoDescriptor(
+                repo_path=entry,
+                canonical_path=entry,
+                push_target=sib_push,
+                base_branch=base_branch,
+                is_workspace=False,
                 transport=Transport.DIRECT,
             ))
 

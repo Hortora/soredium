@@ -1077,3 +1077,56 @@ class TestLandWorkspaceStampOnly:
         )
         assert result.returncode == 0
         assert "WORKSPACE_LANDED=yes" in result.stdout
+
+
+class TestSiblingRepoDiscovery:
+    """#481: build_branch_batch must include sibling repos with the feature branch."""
+
+    def test_sibling_repo_with_branch_included(self, tmp_path):
+        """When a family sibling has the feature branch with commits, include it."""
+        family = tmp_path / "family"
+        project = _init_repo(family / "engine")
+        sibling = _init_repo(family / "platform")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-42-feature"
+
+        _git(project, "checkout", "-b", branch)
+        (project / "work.txt").write_text("project work\n")
+        _git(project, "add", "work.txt")
+        _git(project, "commit", "-m", "feat: project work")
+
+        _git(sibling, "checkout", "-b", branch)
+        (sibling / "sibling-work.txt").write_text("sibling work\n")
+        _git(sibling, "add", "sibling-work.txt")
+        _git(sibling, "commit", "-m", "feat: sibling work")
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from land_flow import build_branch_batch
+
+        descs = build_branch_batch(project, workspace, branch, "main",
+                                   family_root=family)
+
+        repo_paths = {str(d.repo_path) for d in descs}
+        assert str(sibling) in repo_paths, (
+            f"Sibling repo with feature branch should be in batch. "
+            f"Got: {repo_paths}"
+        )
+
+    def test_sibling_without_branch_excluded(self, tmp_path):
+        """Sibling repos without the feature branch should not be included."""
+        family = tmp_path / "family"
+        project = _init_repo(family / "engine")
+        _init_repo(family / "platform")
+        workspace = _init_repo(tmp_path / "workspace")
+        branch = "issue-42-feature"
+
+        _git(project, "checkout", "-b", branch)
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+        from land_flow import build_branch_batch
+
+        descs = build_branch_batch(project, workspace, branch, "main",
+                                   family_root=family)
+
+        repo_paths = {str(d.repo_path) for d in descs}
+        assert str(family / "platform") not in repo_paths

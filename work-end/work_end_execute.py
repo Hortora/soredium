@@ -313,7 +313,10 @@ def cmd_land(opts: dict[str, str]) -> int:
     from land_flow import build_branch_batch, land_batch
 
     ws_path = Path(workspace) if workspace else None
-    descriptors = build_branch_batch(Path(project), ws_path, branch, base_branch)
+    family_root_str = opts.get("family_root", "")
+    family_root = Path(family_root_str) if family_root_str else None
+    descriptors = build_branch_batch(Path(project), ws_path, branch, base_branch,
+                                     family_root=family_root)
 
     result = land_batch(descriptors, branch, progress_path)
 
