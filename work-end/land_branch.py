@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Land a branch onto its base — replaces the mechanical parts of Step 8j.
+DEPRECATED (#490): This module is superseded by land_flow.py for all
+orchestrator operations. The orchestrator uses work_end_execute.py
+(which delegates to land_flow.land_batch) for landing. This file remains
+for backward compatibility with direct CLI usage and existing tests.
 
-Three subcommands that bracket the LLM squash analysis:
-
-  rebase    — detect topology, fetch, rebase branch onto base
-  push      — verify artifact stamp, push to fork remote
-  stamp     — verify content landed, write branch-closed stamp
+Original purpose: Land a branch onto its base — three subcommands
+(rebase, push, stamp) that bracket the LLM squash analysis.
 
 The squash analysis (LLM) and blessed repo delivery (interactive prompt)
 happen between these calls and stay in the skill.

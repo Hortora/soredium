@@ -404,7 +404,8 @@ def _land_script(ctx):
     ws = ctx.current_repo_workspace or ctx.workspace
     cmd = [sys.executable, str(WORK_END_DIR / "work_end_execute.py"),
            "land", f"project={proj}", f"branch={ctx.branch}",
-           f"base_branch={ctx.base_branch}", f"workspace={ws}"]
+           f"base_branch={ctx.base_branch}", f"workspace={ws}",
+           "skip_rebase=yes"]
     if ctx.family_root:
         cmd.append(f"family_root={ctx.family_root}")
     return cmd

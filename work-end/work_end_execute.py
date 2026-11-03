@@ -318,7 +318,9 @@ def cmd_land(opts: dict[str, str]) -> int:
     descriptors = build_branch_batch(Path(project), ws_path, branch, base_branch,
                                      family_root=family_root)
 
-    result = land_batch(descriptors, branch, progress_path)
+    skip_rebase = opts.get("skip_rebase", "") == "yes"
+    result = land_batch(descriptors, branch, progress_path,
+                        skip_rebase=skip_rebase)
 
     if not result.success:
         for s in result.repos:

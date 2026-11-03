@@ -739,11 +739,16 @@ def land_batch(
     branch: str,
     progress_file: Path,
     skip_stamp: set[str] | None = None,
+    skip_rebase: bool = False,
 ) -> LandResult:
     """Execute the shared land flow for a batch of repos.
 
-    Steps: preflight -> rebase -> merge+push -> stamp.
+    Steps: preflight -> [rebase] -> merge+push -> stamp.
     Project repos land before workspace repos.
+
+    When skip_rebase=True, the rebase stage is skipped entirely (#490).
+    Use this when the caller has already rebased (e.g., the orchestrator's
+    rebase step ran before the land step).
     """
     progress = _read_progress(progress_file)
     result = LandResult()
@@ -848,41 +853,43 @@ def land_batch(
             print("STAGE=stamp STATUS=pass")
         return result
 
-    # Step 2: Rebase (skip ALL workspace repos — workspace branches are not
-    # rebased because rebase replays individual commits, and early commits
-    # create lifecycle files that conflict with main's cleanup history.
-    # Workspace merges use non-ff merge instead. See ADR-0016.)
-    for attempt in range(1, 4):
-        print(f"STAGE=rebase ATTEMPT={attempt}")
-        rebase_ok = True
-        failed_desc = None
-        for desc in active:
-            if desc.is_workspace:
-                continue
-            if not _rebase_repo(desc, branch):
-                rebase_ok = False
-                failed_desc = desc
+    # Step 2: Rebase — skipped when the caller already rebased (#490).
+    # Skip ALL workspace repos regardless — workspace branches use non-ff
+    # merge instead of rebase (see ADR-0016).
+    if skip_rebase:
+        print("STAGE=rebase STATUS=skip (caller already rebased)")
+    else:
+        for attempt in range(1, 4):
+            print(f"STAGE=rebase ATTEMPT={attempt}")
+            rebase_ok = True
+            failed_desc = None
+            for desc in active:
+                if desc.is_workspace:
+                    continue
+                if not _rebase_repo(desc, branch):
+                    rebase_ok = False
+                    failed_desc = desc
+                    break
+            if rebase_ok:
+                print("STAGE=rebase STATUS=pass")
                 break
-        if rebase_ok:
-            print("STAGE=rebase STATUS=pass")
-            break
-        if attempt == 3:
-            assert failed_desc is not None
-            branch_count = _git(failed_desc.repo_path, "rev-list", "--count", f"{failed_desc.base_branch}..{branch}")
-            main_count = _git(failed_desc.repo_path, "rev-list", "--count", f"{branch}..{failed_desc.base_branch}")
-            _record_rebase_failure(
-                repo_path=str(failed_desc.repo_path),
-                branch=branch,
-                commit_count=int(branch_count.stdout.strip()) if branch_count.returncode == 0 else 0,
-                main_ahead=int(main_count.stdout.strip()) if main_count.returncode == 0 else 0,
-                error_detail="rebase_conflict_after_3_retries",
-            )
-            result.repos.append(RepoStatus(
-                repo_path=failed_desc.repo_path, error="rebase_conflict",
-            ))
-            result.success = False
-            print("STAGE=rebase STATUS=fail")
-            return result
+            if attempt == 3:
+                assert failed_desc is not None
+                branch_count = _git(failed_desc.repo_path, "rev-list", "--count", f"{failed_desc.base_branch}..{branch}")
+                main_count = _git(failed_desc.repo_path, "rev-list", "--count", f"{branch}..{failed_desc.base_branch}")
+                _record_rebase_failure(
+                    repo_path=str(failed_desc.repo_path),
+                    branch=branch,
+                    commit_count=int(branch_count.stdout.strip()) if branch_count.returncode == 0 else 0,
+                    main_ahead=int(main_count.stdout.strip()) if main_count.returncode == 0 else 0,
+                    error_detail="rebase_conflict_after_3_retries",
+                )
+                result.repos.append(RepoStatus(
+                    repo_path=failed_desc.repo_path, error="rebase_conflict",
+                ))
+                result.success = False
+                print("STAGE=rebase STATUS=fail")
+                return result
 
     # Step 3: Merge + Push (skip TWO_HOP workspace — slot clones are stamp only)
     print("STAGE=push")

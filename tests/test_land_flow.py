@@ -1083,6 +1083,74 @@ class TestRebaseSkipWhenAlreadyOnTop:
         assert "main update" in log.stdout
 
 
+class TestSkipRebase:
+    """#490: land_batch(skip_rebase=True) skips the internal rebase stage."""
+
+    def test_skip_rebase_skips_rebase_stage(self, tmp_path, capsys):
+        from land_flow import RepoDescriptor, Transport, land_batch
+        repo = _init_repo(tmp_path / "project")
+        _add_feature(repo, "issue-42-test")
+
+        desc = RepoDescriptor(
+            repo_path=repo, canonical_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = land_batch([desc], "issue-42-test", tmp_path / ".progress",
+                            skip_rebase=True)
+        assert result.success
+        captured = capsys.readouterr()
+        assert "STAGE=rebase STATUS=skip" in captured.out
+        assert "STAGE=rebase ATTEMPT=" not in captured.out
+
+    def test_skip_rebase_still_lands(self, tmp_path):
+        from land_flow import RepoDescriptor, Transport, land_batch
+        repo = _init_repo(tmp_path / "project")
+        _add_feature(repo, "issue-42-test")
+
+        desc = RepoDescriptor(
+            repo_path=repo, canonical_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = land_batch([desc], "issue-42-test", tmp_path / ".progress",
+                            skip_rebase=True)
+        assert result.success
+        assert result.repos[0].merged
+        assert result.repos[0].pushed
+        assert result.repos[0].stamped
+
+    def test_default_still_rebases(self, tmp_path, capsys):
+        from land_flow import RepoDescriptor, Transport, land_batch
+        repo = _init_repo(tmp_path / "project")
+        _add_feature(repo, "issue-42-test")
+
+        desc = RepoDescriptor(
+            repo_path=repo, canonical_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = land_batch([desc], "issue-42-test", tmp_path / ".progress")
+        assert result.success
+        captured = capsys.readouterr()
+        assert "STAGE=rebase" in captured.out
+
+    def test_skip_rebase_with_diverged_main_still_merges(self, tmp_path):
+        """When orchestrator already rebased, land_batch skips rebase but
+        merge still works because the branch is on top of main."""
+        from land_flow import RepoDescriptor, Transport, land_batch
+        repo = _init_repo(tmp_path / "project")
+        _add_feature(repo, "issue-42-test")
+        # Simulate orchestrator having already rebased — branch is on top of main
+        # (which is the state after the orchestrator's rebase step)
+
+        desc = RepoDescriptor(
+            repo_path=repo, canonical_path=repo, push_target="origin",
+            base_branch="main", is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = land_batch([desc], "issue-42-test", tmp_path / ".progress",
+                            skip_rebase=True)
+        assert result.success
+        assert result.repos[0].landed_sha
+
+
 class TestPreflightUntrackedFiles:
     def test_untracked_files_do_not_block_landing(self, tmp_path):
         """Untracked files (?? prefix) should not cause dirty_worktree error."""
