@@ -137,10 +137,33 @@ If any target directory is missing, warn before proceeding:
    Create it, or skip this destination? (create / skip / abort)
 ```
 
-### Step 6 — Copy entries to destinations
+### Step 5b — Verify image references
+
+Before copying entries, verify all image references resolve. For each entry
+being published, call `check_broken_images()` from `verification.repo_checks`:
+
+```python
+from pathlib import Path
+from verification.repo_checks import check_broken_images
+
+findings = check_broken_images(Path(entry_path))
+```
+
+If any broken refs found, present them:
+```
+⚠️ Broken image references found:
+  entry.md — image not found: images/missing.png
+
+Proceed anyway? (y/n)
+```
+
+If user says `n`, stop. If `y`, continue with broken refs noted.
+
+### Step 6 — Copy entries and images to destinations
 
 For each (entry, destination) pair approved by the user:
 
+1. Copy the entry:
 ```bash
 python3 ~/.claude/skills/publish-blog/blog_publish.py copy-entry \
   "$BLOG_DIR/<filename>" "<target_dir>"
@@ -148,6 +171,18 @@ python3 ~/.claude/skills/publish-blog/blog_publish.py copy-entry \
 
 Expected output: `COPIED=yes`
 Error cases: `ERROR=source_not_found`, `ERROR=copy_failed`
+
+2. Copy referenced images alongside the entry:
+```python
+from verification.repo_checks import extract_image_refs
+import shutil
+
+for raw_ref, resolved in extract_image_refs(Path(entry_path)):
+    if resolved.exists():
+        dest = Path(target_dir) / raw_ref
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(resolved), str(dest))
+```
 
 **Git staging is handled separately in Step 7 — do not manually `git add` here.**
 
