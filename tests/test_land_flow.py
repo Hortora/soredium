@@ -1039,6 +1039,50 @@ class TestRebaseFailureWorklog:
         )
 
 
+class TestRebaseSkipWhenAlreadyOnTop:
+    """#486: _rebase_repo skips when branch is already on top of remote base."""
+
+    def test_skips_rebase_when_already_on_top(self, tmp_path):
+        repo = _init_repo(tmp_path / "project")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feature"], capture_output=True, check=True)
+        (repo / "feature.txt").write_text("new work\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feature"], capture_output=True, check=True)
+
+        from land_flow import _rebase_repo, RepoDescriptor, Transport
+        desc = RepoDescriptor(
+            repo_path=repo, canonical_path=repo,
+            push_target="origin", base_branch="main",
+            is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = _rebase_repo(desc, "feature")
+        assert result is True
+
+    def test_rebases_when_not_on_top(self, tmp_path):
+        repo = _init_repo(tmp_path / "project")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feature"], capture_output=True, check=True)
+        (repo / "feature.txt").write_text("new work\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feature"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"], capture_output=True, check=True)
+        (repo / "main-update.txt").write_text("main moved forward\n")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "main update"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"], capture_output=True, check=True)
+
+        from land_flow import _rebase_repo, RepoDescriptor, Transport
+        desc = RepoDescriptor(
+            repo_path=repo, canonical_path=repo,
+            push_target="origin", base_branch="main",
+            is_workspace=False, transport=Transport.DIRECT,
+        )
+        result = _rebase_repo(desc, "feature")
+        assert result is True
+        log = subprocess.run(["git", "-C", str(repo), "log", "--oneline", "feature"],
+                             capture_output=True, text=True)
+        assert "main update" in log.stdout
+
+
 class TestPreflightUntrackedFiles:
     def test_untracked_files_do_not_block_landing(self, tmp_path):
         """Untracked files (?? prefix) should not cause dirty_worktree error."""

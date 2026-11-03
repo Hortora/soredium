@@ -434,6 +434,16 @@ def _rebase_repo(desc: RepoDescriptor, branch: str) -> bool:
         fetch_remote = desc.push_target
 
     _git(desc.repo_path, "fetch", fetch_remote, desc.base_branch)
+
+    # Skip rebase when branch is already on top of remote base (#486).
+    # The orchestrator's rebase step already ran; re-rebasing here can
+    # fail if remote moved forward between the two steps.
+    is_ancestor = _git(desc.repo_path, "merge-base", "--is-ancestor",
+                       f"{fetch_remote}/{desc.base_branch}", "HEAD")
+    if is_ancestor.returncode == 0:
+        print(f"REBASE_SKIP={desc.repo_path.name} already_on_top_of={fetch_remote}/{desc.base_branch}")
+        return True
+
     result = _git(desc.repo_path, "rebase", f"{fetch_remote}/{desc.base_branch}")
     if result.returncode != 0:
         _git(desc.repo_path, "rebase", "--abort")

@@ -1930,8 +1930,23 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
         if result and "ERROR" in result:
             error = result.get("ERROR", "")
             if error in NON_RETRYABLE_ERRORS:
-                failures[repo_name] = result
-                ctx.steps_executed.append(f"{step_key}:ERROR:classified")
+                # Track attempts even for non-retryable errors (#486).
+                # After MAX_MECHANICAL_RETRIES, auto-skip so the pipeline
+                # makes forward progress instead of looping forever.
+                nr_attempt_key = f"{step_key}_nr_attempt"
+                raw_nr = ctx.progress.get(nr_attempt_key, "0")
+                try:
+                    nr_attempt = int(raw_nr) + 1
+                except (ValueError, TypeError):
+                    nr_attempt = 1
+                update_close_progress(ctx.workspace, nr_attempt_key, str(nr_attempt))
+                if nr_attempt >= MAX_MECHANICAL_RETRIES:
+                    update_close_progress(ctx.workspace, step_key, "skipped_error")
+                    ctx.steps_executed.append(f"{step_key}:NON_RETRYABLE_EXHAUSTED")
+                else:
+                    failures[repo_name] = result
+                    failures[repo_name]["_nr_attempt"] = str(nr_attempt)
+                    ctx.steps_executed.append(f"{step_key}:ERROR:classified:{nr_attempt}")
             else:
                 attempt_key = f"{step_key}_mechanical_attempt"
                 raw_attempt = ctx.progress.get(attempt_key, "0")
@@ -1960,12 +1975,19 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
             "STEP": step.name,
             "FAILED_REPOS": ",".join(failures.keys()),
         }
+        has_rebase_conflict = False
         for repo, result in failures.items():
             context[f"ERROR_{repo}"] = result.get("ERROR", "unknown")
             context[f"DETAIL_{repo}"] = result.get("ERROR_DETAIL", "")
             if result.get("CONFLICT_COUNT"):
                 context[f"CONFLICTS_{repo}"] = result.get("CONFLICT_COUNT", "")
             context[f"FORCE_DONE_HINT_{repo}"] = f"force_done={step.name}:{repo}"
+            nr_attempt = result.get("_nr_attempt", "1")
+            context[f"ATTEMPT_{repo}"] = f"{nr_attempt}/{MAX_MECHANICAL_RETRIES}"
+            if result.get("ERROR", "") == "REBASE_CONFLICT":
+                has_rebase_conflict = True
+        if has_rebase_conflict:
+            context["CONFLICT_RESOLVED_HINT"] = "conflict_resolved=yes"
         return context
 
     if retryable_failure:
@@ -2035,8 +2057,28 @@ def _close_mechanical_error(step: StepDef, ctx: OrchestratorContext,
     error = result.get("ERROR", "")
     if error not in NON_RETRYABLE_ERRORS:
         return None
+
+    # Track attempts for non-retryable errors (#486). Without this,
+    # the engine's own attempt counter is never incremented (because
+    # this handler returns before the engine reaches that code), so
+    # re-invocation without force_done loops forever.
+    nr_key = f"{step.name}_nr_attempt"
+    raw = ctx.progress.get(nr_key, "0")
+    try:
+        nr_attempt = int(raw) + 1
+    except (ValueError, TypeError):
+        nr_attempt = 1
+    update_close_progress(ctx.workspace, nr_key, str(nr_attempt))
+
+    if nr_attempt >= MAX_MECHANICAL_RETRIES:
+        update_close_progress(ctx.workspace, step.name, "skipped_error")
+        return None  # let engine continue past this step
+
     context = {"CONTEXT": f"{error.lower()}", "STEP": step.name}
     context["FORCE_DONE_HINT"] = f"force_done={step.name}"
+    context["ATTEMPT"] = f"{nr_attempt}/{MAX_MECHANICAL_RETRIES}"
+    if error == "REBASE_CONFLICT":
+        context["CONFLICT_RESOLVED_HINT"] = "conflict_resolved=yes"
     context.update(result)
     return {"ACTION": "user_input", **context}
 

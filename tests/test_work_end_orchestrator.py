@@ -2209,7 +2209,8 @@ class TestRebaseConflictNotRetryable:
         assert result["CONTEXT"] == "rebase_conflict"
         assert result["CONFLICT_COUNT"] == "3"
 
-    def test_rebase_conflict_does_not_increment_retry_counter(self, tmp_path, monkeypatch):
+    def test_rebase_conflict_tracks_nr_attempt(self, tmp_path, monkeypatch):
+        """#486: non-retryable errors now track their own attempt counter."""
         def fail_rebase(cmd, ws, **kw):
             return {"ERROR": "REBASE_CONFLICT", "ERROR_DETAIL": "conflict"}
         monkeypatch.setattr("work_end_orchestrator._run_script", fail_rebase)
@@ -2223,6 +2224,7 @@ class TestRebaseConflictNotRetryable:
         })
         from close_progress import read_close_progress
         progress = read_close_progress(tmp_path)
+        assert progress.get("rebase_nr_attempt") == "1"
         assert "rebase_mechanical_attempt" not in progress
 
     def test_non_conflict_error_still_retries(self, tmp_path, monkeypatch):
@@ -3100,6 +3102,106 @@ class TestPerRepoMechanicalAutoSkip:
         assert result.get("ACTION") == "error"
         assert result.get("RETRY") == "2"
 
+    def test_per_repo_non_retryable_auto_skip_after_max(self, tmp_path, monkeypatch):
+        """#486: non-retryable per-repo errors auto-skip after MAX_MECHANICAL_RETRIES."""
+        self._mark_through_promoted(tmp_path)
+        from close_progress import update_close_progress, read_close_progress
+        from work_end_orchestrator import MAX_MECHANICAL_RETRIES
+        update_close_progress(tmp_path, f"land:engine_nr_attempt", str(MAX_MECHANICAL_RETRIES - 1))
+        update_close_progress(tmp_path, "land:work", "done")
+        update_close_progress(tmp_path, "rebase:engine", "done")
+        update_close_progress(tmp_path, "rebase:work", "done")
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        for repo in ["engine", "work"]:
+            repo_dir = slot_path / repo
+            repo_dir.mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", "issue-486-test"], capture_output=True, check=True)
+            (repo_dir / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "feature work"], capture_output=True, check=True)
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- engine (primary)\n- work\n## Status\nstatus: active\n"
+        )
+
+        def failing_land(cmd, ws, **kw):
+            cmd_str = str(cmd)
+            if "land" in cmd_str and "engine" in cmd_str and "report" not in cmd_str:
+                return {"ERROR": "REBASE_CONFLICT", "ERROR_DETAIL": "conflict in file.java"}
+            return {"LANDED_SHA": "abc123", "LANDED": "yes"}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", failing_land)
+
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "engine"),
+            "branch": "issue-486-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+
+        progress = read_close_progress(tmp_path)
+        assert progress.get("land:engine") == "skipped_error", \
+            f"Non-retryable error should auto-skip after max. Got: {progress.get('land:engine')}"
+
+    def test_per_repo_non_retryable_returns_user_input_before_max(self, tmp_path, monkeypatch):
+        """#486: non-retryable per-repo errors return user_input with hints before exhaustion."""
+        self._mark_through_promoted(tmp_path)
+        from close_progress import update_close_progress, read_close_progress
+        update_close_progress(tmp_path, "land:work", "done")
+        update_close_progress(tmp_path, "rebase:engine", "done")
+        update_close_progress(tmp_path, "rebase:work", "done")
+
+        slot_path = tmp_path / "slot"
+        slot_path.mkdir()
+        for repo in ["engine", "work"]:
+            repo_dir = slot_path / repo
+            repo_dir.mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo_dir)], capture_output=True, check=True)
+            (repo_dir / "README.md").write_text(f"# {repo}\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "checkout", "-b", "issue-486-test"], capture_output=True, check=True)
+            (repo_dir / "feature.txt").write_text("work\n")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "."], capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "feature work"], capture_output=True, check=True)
+        (slot_path / ".slot").write_text(
+            "# Slot\n## Repos\n- engine (primary)\n- work\n## Status\nstatus: active\n"
+        )
+
+        def failing_land(cmd, ws, **kw):
+            cmd_str = str(cmd)
+            if "land" in cmd_str and "engine" in cmd_str and "report" not in cmd_str:
+                return {"ERROR": "REBASE_CONFLICT", "ERROR_DETAIL": "conflict"}
+            return {"LANDED_SHA": "abc123", "LANDED": "yes"}
+
+        monkeypatch.setattr("work_end_orchestrator._run_script", failing_land)
+
+        from work_end_orchestrator import run_orchestrator
+        result = run_orchestrator({
+            "workspace": str(tmp_path),
+            "project": str(slot_path / "engine"),
+            "branch": "issue-486-test",
+            "base_branch": "main",
+            "meta_state": "closing:promoted",
+            "in_slot": "yes",
+            "slot_path": str(slot_path),
+        })
+
+        assert result["ACTION"] == "user_input"
+        assert result["CONTEXT"] == "per_repo_failures"
+        assert "CONFLICT_RESOLVED_HINT" in result
+        assert result["CONFLICT_RESOLVED_HINT"] == "conflict_resolved=yes"
+        assert "ATTEMPT_engine" in result
+
 
 class TestRebaseSkipWhenOnMain:
     """Rebase is skipped when branch content is already on main."""
@@ -3166,32 +3268,102 @@ class TestRebaseSkipWhenOnMain:
 
 
 class TestClassifiedErrorForceDoneHint:
-    """Classified errors include force_done hint."""
+    """Classified errors include force_done hint and recovery hints."""
 
     def test_rebase_conflict_includes_force_done_hint(self, tmp_path, monkeypatch):
         monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from work_end_orchestrator import _close_mechanical_error, StepDef, OrchestratorContext
+        from progress import Progress
         step = StepDef("rebase", "closing:promoted", "mechanical")
         ctx = OrchestratorContext(
             workspace=tmp_path, project=tmp_path / "project",
             branch="test", base_branch="main", meta_state="closing:promoted",
             on_main=False, in_slot=False, covers="", issue_repo="",
-            progress={},
+            progress=Progress(),
         )
         result = _close_mechanical_error(step, ctx, {"ERROR": "REBASE_CONFLICT"})
         assert result is not None
         assert "FORCE_DONE_HINT" in result
         assert result["FORCE_DONE_HINT"] == "force_done=rebase"
 
+    def test_rebase_conflict_includes_conflict_resolved_hint(self, tmp_path, monkeypatch):
+        """#486: rebase conflicts must include conflict_resolved hint."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import _close_mechanical_error, StepDef, OrchestratorContext
+        from progress import Progress
+        step = StepDef("rebase", "closing:promoted", "mechanical")
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:promoted",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress=Progress(),
+        )
+        result = _close_mechanical_error(step, ctx, {"ERROR": "REBASE_CONFLICT"})
+        assert result is not None
+        assert result.get("CONFLICT_RESOLVED_HINT") == "conflict_resolved=yes"
+
+    def test_rebase_conflict_includes_attempt_count(self, tmp_path, monkeypatch):
+        """#486: error output shows attempt/max so LLM knows urgency."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import _close_mechanical_error, StepDef, OrchestratorContext, MAX_MECHANICAL_RETRIES
+        from progress import Progress
+        step = StepDef("rebase", "closing:promoted", "mechanical")
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:promoted",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress=Progress(),
+        )
+        result = _close_mechanical_error(step, ctx, {"ERROR": "REBASE_CONFLICT"})
+        assert result is not None
+        assert result.get("ATTEMPT") == f"1/{MAX_MECHANICAL_RETRIES}"
+
+    def test_non_rebase_error_no_conflict_hint(self, tmp_path, monkeypatch):
+        """Non-REBASE_CONFLICT errors should not include conflict_resolved hint."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import _close_mechanical_error, StepDef, OrchestratorContext
+        from progress import Progress
+        step = StepDef("land", "closing:promoted", "mechanical")
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:promoted",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress=Progress(),
+        )
+        result = _close_mechanical_error(step, ctx, {"ERROR": "DIRTY_WORKTREE"})
+        assert result is not None
+        assert "CONFLICT_RESOLVED_HINT" not in result
+
+    def test_non_retryable_auto_skips_after_max(self, tmp_path, monkeypatch):
+        """#486: after MAX_MECHANICAL_RETRIES, non-retryable errors auto-skip."""
+        monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
+        from work_end_orchestrator import _close_mechanical_error, StepDef, OrchestratorContext, MAX_MECHANICAL_RETRIES
+        from progress import Progress
+        from close_progress import update_close_progress
+        step = StepDef("rebase", "closing:promoted", "mechanical")
+        update_close_progress(tmp_path, "rebase_nr_attempt", str(MAX_MECHANICAL_RETRIES - 1))
+        ctx = OrchestratorContext(
+            workspace=tmp_path, project=tmp_path / "project",
+            branch="test", base_branch="main", meta_state="closing:promoted",
+            on_main=False, in_slot=False, covers="", issue_repo="",
+            progress=Progress.load(tmp_path),
+        )
+        result = _close_mechanical_error(step, ctx, {"ERROR": "REBASE_CONFLICT"})
+        assert result is None, "should return None so engine continues past the step"
+        from close_progress import read_close_progress
+        progress = read_close_progress(tmp_path)
+        assert progress.get("rebase") == "skipped_error"
+
     def test_non_retryable_error_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr("work_end_orchestrator._run_script", lambda cmd, ws, **kw: {})
         from work_end_orchestrator import _close_mechanical_error, StepDef, OrchestratorContext
+        from progress import Progress
         step = StepDef("promote", "closing:verified", "mechanical")
         ctx = OrchestratorContext(
             workspace=tmp_path, project=tmp_path / "project",
             branch="test", base_branch="main", meta_state="closing:verified",
             on_main=False, in_slot=False, covers="", issue_repo="",
-            progress={},
+            progress=Progress(),
         )
         result = _close_mechanical_error(step, ctx, {"ERROR": "push_failed"})
         assert result is None
