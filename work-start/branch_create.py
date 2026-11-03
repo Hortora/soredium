@@ -223,8 +223,10 @@ def commit_scaffold(workspace: str, branch: str) -> int:
         print(f"ERROR_DETAIL=workspace is on '{current_branch}', expected '{branch}'")
         return 1
 
-    files_to_add = [f for f in [".plan", "JOURNAL.md", ".work-progress"]
-                    if (Path(workspace) / f).exists()]
+    candidates = [f for f in [".plan", "JOURNAL.md", ".work-progress"]
+                  if (Path(workspace) / f).exists()]
+    files_to_add = [f for f in candidates
+                    if not run_git(workspace, "check-ignore", "-q", f)[0]]
     if files_to_add:
         ok, _ = run_git(workspace, "add", *files_to_add)
         if not ok:

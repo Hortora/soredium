@@ -1133,6 +1133,7 @@ class TestIntegrationBranchMode:
         monkeypatch.setattr("work_end_orchestrator._push_main_mode", lambda ctx: {"PUSHED": "yes", "LANDED_SHA": "abc"})
         monkeypatch.setattr("work_end_orchestrator._verify_main_mode", lambda ctx: {"VERIFIED": "yes"})
         monkeypatch.setattr("work_end_orchestrator._cleanup_main_mode", lambda ctx: {"CLEANED": "yes"})
+        _disable_postconditions(monkeypatch)
         for step in ["report_init", "review", "sweep_config",
                      "review_pass", "promote", "report_promote", "promote_pass",
                      "trajectory"]:
@@ -3838,6 +3839,22 @@ class TestStalePlanCleanup:
         )
         result = verify_cleanup_scaffold(tmp_path)
         assert result.result == VerifyResult.PASS
+
+    def test_cleanup_close_artifacts_preserves_plan_with_remaining(self, tmp_path):
+        """_cleanup_close_artifacts must not remove .plan with uncompleted items."""
+        plan_content = (
+            "## State\nstate: active\n\n"
+            "## Queue\n"
+            "- [x] Hortora/soredium#100 — done item\n"
+            "- [ ] Hortora/soredium#101 — next item ← active\n"
+            "- [ ] Hortora/soredium#102 — future item\n"
+        )
+        (tmp_path / ".plan").write_text(plan_content)
+        (tmp_path / ".close-progress").write_text("cleanup=done\n")
+        from work_end_orchestrator import _cleanup_close_artifacts
+        _cleanup_close_artifacts(tmp_path)
+        assert (tmp_path / ".plan").exists(), ".plan with remaining items must be preserved"
+        assert not (tmp_path / ".close-progress").exists()
 
 
 class TestLifecycleErrorPropagation:

@@ -695,7 +695,11 @@ def _cleanup_close_artifacts(workspace: Path) -> None:
         if p.exists():
             p.unlink()
     plan = workspace / ".plan"
-    remove_plan(plan)
+    if plan.exists():
+        from plan_io import read_plan, has_uncompleted_items
+        state = read_plan(plan)
+        if state is None or not has_uncompleted_items(state):
+            remove_plan(plan)
     for squash_plan in workspace.glob(".squash-plan-*.json"):
         squash_plan.unlink()
 
