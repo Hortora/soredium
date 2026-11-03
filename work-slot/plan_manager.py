@@ -1018,6 +1018,16 @@ def detect(workspace_path: Path) -> dict | None:
             if leaf.active and leaf.batch:
                 batch = leaf.batch
                 break
+        # #488: derive from task-level batches when no top-level batch
+        if not batch and active.tasks:
+            seen: list[str] = []
+            for task in active.tasks:
+                if task.batch and task.batch not in seen:
+                    seen.append(task.batch)
+            for b in seen:
+                if not all(t.done for t in active.tasks if t.batch == b):
+                    batch = b
+                    break
 
     return {
         "has_plan": True,

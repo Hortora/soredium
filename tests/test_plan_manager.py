@@ -1337,6 +1337,102 @@ class TestDetectWithState:
         assert result["active_issue"] == "test/repo#42"
 
 
+PLAN_WITH_COMPLETED_BATCH = """\
+# Work Plan — issue-601-showcase
+
+## Queue
+- [ ] casehubio/casehub-pages#601 — Frontend showcase ← active
+  - [x] Batch 1: Frontend Integration
+    - [x] Task 1: Wire components
+    - [x] Task 2: Add routing
+  - [ ] Batch 2: Example Showcase
+    - [ ] Task 3: Create examples
+    - [ ] Task 4: Write docs
+
+## Session State
+Current: casehubio/casehub-pages#601 — Frontend showcase
+Started: 2026-11-03
+"""
+
+PLAN_ALL_BATCHES_DONE = """\
+# Work Plan — issue-601-showcase
+
+## Queue
+- [ ] casehubio/casehub-pages#601 — Frontend showcase ← active
+  - [x] Batch 1: Frontend Integration
+    - [x] Task 1: Wire components
+  - [x] Batch 2: Example Showcase
+    - [x] Task 2: Create examples
+
+## Session State
+Current: casehubio/casehub-pages#601 — Frontend showcase
+Started: 2026-11-03
+"""
+
+PLAN_NO_BATCHES = """\
+# Work Plan — issue-601-showcase
+
+## Queue
+- [ ] casehubio/casehub-pages#601 — Frontend showcase ← active
+
+## Session State
+Current: casehubio/casehub-pages#601 — Frontend showcase
+Started: 2026-11-03
+"""
+
+PLAN_ALL_UNCHECKED_BATCHES = """\
+# Work Plan — issue-601-showcase
+
+## Queue
+- [ ] casehubio/casehub-pages#601 — Frontend showcase ← active
+  - [ ] Batch 1: Frontend Integration
+    - [ ] Task 1: Wire components
+  - [ ] Batch 2: Example Showcase
+    - [ ] Task 2: Create examples
+
+## Session State
+Current: casehubio/casehub-pages#601 — Frontend showcase
+Started: 2026-11-03
+"""
+
+
+class TestDetectBatchFromTasks:
+    """#488: detect() should derive current_batch from task-level batch structure."""
+
+    def test_completed_batch_shows_next_unchecked(self, tmp_path):
+        (tmp_path / ".plan").write_text(PLAN_WITH_COMPLETED_BATCH)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None
+        assert result["current_batch"] == "Example Showcase"
+
+    def test_all_batches_done_returns_empty(self, tmp_path):
+        (tmp_path / ".plan").write_text(PLAN_ALL_BATCHES_DONE)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None
+        assert result["current_batch"] is None or result["current_batch"] == ""
+
+    def test_no_batch_structure_returns_empty(self, tmp_path):
+        (tmp_path / ".plan").write_text(PLAN_NO_BATCHES)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None
+        assert result["current_batch"] is None or result["current_batch"] == ""
+
+    def test_all_unchecked_returns_first_batch(self, tmp_path):
+        (tmp_path / ".plan").write_text(PLAN_ALL_UNCHECKED_BATCHES)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None
+        assert result["current_batch"] == "Frontend Integration"
+
+    def test_existing_top_level_batch_still_works(self, tmp_path):
+        """Top-level batch markers (### Batch N) should still take precedence."""
+        design = tmp_path / "design"
+        design.mkdir()
+        (design / ".plan").write_text(BATCH_PLAN)
+        result = plan_manager.detect(tmp_path)
+        assert result is not None
+        assert result["current_batch"] == "Batch 1 — Data model"
+
+
 PLAN_WITH_TASKS = """\
 # Work Plan — issue-242-merge-slot
 
