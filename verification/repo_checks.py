@@ -275,3 +275,59 @@ def check_db_state_matches_disk(
         ))
 
     return findings
+
+
+_IMAGE_RE = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
+_HTML_IMG_RE = re.compile(r'<img\s[^>]*src=["\']([^"\']+)["\']', re.IGNORECASE)
+_SKIP_IMAGE_REFS = frozenset({"x", "path", "{thumb_src}"})
+
+
+def check_broken_images(md_file: Path) -> list[Finding]:
+    """Check that all image references in a .md file resolve to real files.
+
+    Catches images stranded in workspace/slot directories that were never
+    promoted alongside the .md content. Used by work-end before stamp,
+    publish-blog before write, and auditor sweeps.
+    """
+    from urllib.parse import unquote
+
+    findings: list[Finding] = []
+    try:
+        content = md_file.read_text(errors="replace")
+    except OSError:
+        return findings
+
+    repo_root = md_file.parent
+    while repo_root.parent != repo_root:
+        if (repo_root / ".git").exists():
+            break
+        repo_root = repo_root.parent
+
+    for line_num, line in enumerate(content.splitlines(), 1):
+        refs = []
+        for m in _IMAGE_RE.finditer(line):
+            refs.append(m.group(2))
+        for m in _HTML_IMG_RE.finditer(line):
+            refs.append(m.group(1))
+
+        for ref in refs:
+            ref = unquote(ref).strip()
+            if ref.startswith(("http://", "https://", "data://", "//")):
+                continue
+            if ref in _SKIP_IMAGE_REFS:
+                continue
+            if ref.startswith("chrome://"):
+                continue
+
+            if ref.startswith("/"):
+                resolved = repo_root / ref.lstrip("/")
+            else:
+                resolved = (md_file.parent / ref).resolve()
+
+            if not resolved.exists():
+                findings.append(Finding(
+                    "ERROR", "broken-image",
+                    f"{md_file.name}:{line_num} — image not found: {ref}",
+                ))
+
+    return findings
