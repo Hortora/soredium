@@ -900,8 +900,16 @@ def _check_cleanup_stack(ws, proj):
     return True
 
 
+def _check_land(ws, proj):
+    """Check if land completed via .close-progress landed SHA keys (#490).
+    Decoupled from .execute-progress, which is land_batch's internal
+    crash-recovery file — not an orchestrator-level evidence source."""
+    progress = read_close_progress(ws)
+    return any(k.startswith("_landed_sha:") for k in progress)
+
+
 EVIDENCE_CHECKS: dict[str, Callable] = {
-    "land": lambda ws, proj: (ws / ".execute-progress").exists(),
+    "land": _check_land,
     "rebase": _check_rebase,
     "close_issues": lambda ws, proj: True,
     "verify": lambda ws, proj: True,
@@ -1931,18 +1939,9 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
         if result and "ERROR" in result:
             error = result.get("ERROR", "")
             if error in NON_RETRYABLE_ERRORS:
-                # Track attempts even for non-retryable errors (#486).
-                # After MAX_MECHANICAL_RETRIES, auto-skip so the pipeline
-                # makes forward progress instead of looping forever.
-                nr_attempt_key = f"{step_key}_nr_attempt"
-                raw_nr = ctx.progress.get(nr_attempt_key, "0")
-                try:
-                    nr_attempt = int(raw_nr) + 1
-                except (ValueError, TypeError):
-                    nr_attempt = 1
-                update_close_progress(ctx.workspace, nr_attempt_key, str(nr_attempt))
-                if nr_attempt >= MAX_MECHANICAL_RETRIES:
-                    update_close_progress(ctx.workspace, step_key, "skipped_error")
+                auto_skip, nr_attempt = _track_nr_attempt(
+                    ctx.workspace, step_key, ctx.progress)
+                if auto_skip:
                     ctx.steps_executed.append(f"{step_key}:NON_RETRYABLE_EXHAUSTED")
                 else:
                     failures[repo_name] = result
@@ -2053,35 +2052,56 @@ CLOSE_USER_INPUT_STEPS = {"arc42_scan", "session_rename", "garden_feedback", "no
 NON_RETRYABLE_ERRORS = {"REBASE_CONFLICT", "DIRTY_WORKTREE", "no_report", "BLOCKING_VERIFICATION_FAILURE"}
 
 
+def _track_nr_attempt(workspace: Path, step_key: str,
+                      progress: dict) -> tuple[bool, int]:
+    """Track non-retryable error attempts (#490).
+
+    Returns (auto_skip, attempt_number). When auto_skip is True,
+    the step has been marked skipped_error and the caller should
+    let the pipeline continue. Single implementation shared by
+    both branch-mode and per-repo error handling.
+    """
+    nr_key = f"{step_key}_nr_attempt"
+    raw = progress.get(nr_key, "0")
+    try:
+        nr_attempt = int(raw) + 1
+    except (ValueError, TypeError):
+        nr_attempt = 1
+    update_close_progress(workspace, nr_key, str(nr_attempt))
+    if nr_attempt >= MAX_MECHANICAL_RETRIES:
+        update_close_progress(workspace, step_key, "skipped_error")
+        return True, nr_attempt
+    return False, nr_attempt
+
+
+def _build_nr_user_input(step_key: str, error: str, nr_attempt: int,
+                         result: dict[str, str]) -> dict[str, str]:
+    """Build user_input response for a non-retryable error."""
+    context: dict[str, str] = {
+        "ACTION": "user_input",
+        "CONTEXT": f"{error.lower()}",
+        "STEP": step_key,
+        "FORCE_DONE_HINT": f"force_done={step_key}",
+        "ATTEMPT": f"{nr_attempt}/{MAX_MECHANICAL_RETRIES}",
+    }
+    if error == "REBASE_CONFLICT":
+        context["CONFLICT_RESOLVED_HINT"] = "conflict_resolved=yes"
+    context.update(result)
+    return context
+
+
 def _close_mechanical_error(step: StepDef, ctx: OrchestratorContext,
                             result: dict[str, str]) -> dict[str, str] | None:
     error = result.get("ERROR", "")
     if error not in NON_RETRYABLE_ERRORS:
         return None
 
-    # Track attempts for non-retryable errors (#486). Without this,
-    # the engine's own attempt counter is never incremented (because
-    # this handler returns before the engine reaches that code), so
-    # re-invocation without force_done loops forever.
-    nr_key = f"{step.name}_nr_attempt"
-    raw = ctx.progress.get(nr_key, "0")
-    try:
-        nr_attempt = int(raw) + 1
-    except (ValueError, TypeError):
-        nr_attempt = 1
-    update_close_progress(ctx.workspace, nr_key, str(nr_attempt))
+    auto_skip, nr_attempt = _track_nr_attempt(
+        ctx.workspace, step.name, ctx.progress)
+    if auto_skip:
+        return None
 
-    if nr_attempt >= MAX_MECHANICAL_RETRIES:
-        update_close_progress(ctx.workspace, step.name, "skipped_error")
-        return None  # let engine continue past this step
-
-    context = {"CONTEXT": f"{error.lower()}", "STEP": step.name}
-    context["FORCE_DONE_HINT"] = f"force_done={step.name}"
-    context["ATTEMPT"] = f"{nr_attempt}/{MAX_MECHANICAL_RETRIES}"
-    if error == "REBASE_CONFLICT":
-        context["CONFLICT_RESOLVED_HINT"] = "conflict_resolved=yes"
-    context.update(result)
-    return {"ACTION": "user_input", **context}
+    return _build_nr_user_input(step.name, error, nr_attempt, result)
 
 
 MAX_FINAL_GATE_ATTEMPTS = 3

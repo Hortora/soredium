@@ -1441,11 +1441,13 @@ class TestReconciliation:
         assert "land" in corrections
 
     def test_preserves_valid_land_done(self, tmp_path):
-        """land=done and .execute-progress exists → preserved."""
-        (tmp_path / ".execute-progress").write_text("project:main=stamped\n")
+        """land=done and landed SHA in .close-progress → preserved (#490)."""
+        from close_progress import update_close_progress
+        update_close_progress(tmp_path, "_landed_sha:project", "abc123")
         from work_end_orchestrator import _reconcile
         progress, corrections = _reconcile(tmp_path, tmp_path / "project",
-                                            {"land": "done"}, "closing:stamped")
+                                            {"land": "done", "_landed_sha:project": "abc123"},
+                                            "closing:stamped")
         assert progress.get("land") == "done"
 
     def test_skips_report_steps(self, tmp_path):
