@@ -410,3 +410,24 @@ def resolve_canonical_repos(
             if Path(orig_path).is_dir():
                 result[sub.name] = orig_path
     return result
+
+
+def check_promoted_images(project: Path) -> list[Finding]:
+    """Check that promoted .md files have all referenced images present.
+
+    Scans docs/blog/ and docs/specs/ in the project for broken image refs.
+    Returns WARN findings (not blocking).
+    """
+    from verification.repo_checks import check_broken_images
+
+    findings: list[Finding] = []
+    scan_dirs = [project / "docs" / "blog", project / "docs" / "specs"]
+    for scan_dir in scan_dirs:
+        if not scan_dir.is_dir():
+            continue
+        for md_file in scan_dir.rglob("*.md"):
+            for f in check_broken_images(md_file):
+                findings.append(Finding(
+                    "WARN", "promoted-broken-image", f.message,
+                ))
+    return findings

@@ -13,6 +13,7 @@ from verification.close_checks import (
     check_landed_completeness,
     check_no_open_findings,
     check_no_stale_scaffold,
+    check_promoted_images,
     check_slot_archive_status,
     resolve_canonical_repos,
 )
@@ -53,6 +54,7 @@ def _run_branch_checks(
                                                           extra_repos=extra_repos)))
         checks.append(_v("artifacts_promoted",
                          verify_artifacts_promoted(workspace, project, branch, base)))
+        checks.append(("promoted_images", check_promoted_images(project)))
         checks.append(("no_open_findings", check_no_open_findings(workspace)))
         checks.append(("no_stale_scaffold", check_no_stale_scaffold(workspace)))
     if covers and issue_repo:
