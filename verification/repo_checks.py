@@ -282,20 +282,19 @@ _HTML_IMG_RE = re.compile(r'<img\s[^>]*src=["\']([^"\']+)["\']', re.IGNORECASE)
 _SKIP_IMAGE_REFS = frozenset({"x", "path", "{thumb_src}"})
 
 
-def check_broken_images(md_file: Path) -> list[Finding]:
-    """Check that all image references in a .md file resolve to real files.
+def extract_image_refs(md_file: Path) -> list[tuple[str, Path]]:
+    """Return (raw_ref, resolved_path) for all local image references in a .md file.
 
-    Catches images stranded in workspace/slot directories that were never
-    promoted alongside the .md content. Used by work-end before stamp,
-    publish-blog before write, and auditor sweeps.
+    Skips URLs, placeholders, chrome:// refs. Resolves relative paths
+    against the .md file's parent; root-relative paths against the repo root.
     """
     from urllib.parse import unquote
 
-    findings: list[Finding] = []
+    refs_out: list[tuple[str, Path]] = []
     try:
         content = md_file.read_text(errors="replace")
     except OSError:
-        return findings
+        return refs_out
 
     repo_root = md_file.parent
     while repo_root.parent != repo_root:
@@ -303,14 +302,14 @@ def check_broken_images(md_file: Path) -> list[Finding]:
             break
         repo_root = repo_root.parent
 
-    for line_num, line in enumerate(content.splitlines(), 1):
-        refs = []
+    for line in content.splitlines():
+        raw_refs: list[str] = []
         for m in _IMAGE_RE.finditer(line):
-            refs.append(m.group(2))
+            raw_refs.append(m.group(2))
         for m in _HTML_IMG_RE.finditer(line):
-            refs.append(m.group(1))
+            raw_refs.append(m.group(1))
 
-        for ref in refs:
+        for ref in raw_refs:
             ref = unquote(ref).strip()
             if ref.startswith(("http://", "https://", "data://", "//")):
                 continue
@@ -324,10 +323,18 @@ def check_broken_images(md_file: Path) -> list[Finding]:
             else:
                 resolved = (md_file.parent / ref).resolve()
 
-            if not resolved.exists():
-                findings.append(Finding(
-                    "ERROR", "broken-image",
-                    f"{md_file.name}:{line_num} — image not found: {ref}",
-                ))
+            refs_out.append((ref, resolved))
 
+    return refs_out
+
+
+def check_broken_images(md_file: Path) -> list[Finding]:
+    """Check that all image references in a .md file resolve to real files."""
+    findings: list[Finding] = []
+    for ref, resolved in extract_image_refs(md_file):
+        if not resolved.exists():
+            findings.append(Finding(
+                "ERROR", "broken-image",
+                f"{md_file.name} — image not found: {ref}",
+            ))
     return findings
