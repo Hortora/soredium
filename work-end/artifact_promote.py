@@ -37,6 +37,33 @@ from common import parse_args, detect_topology
 from git_util import git
 from plan_io import parse_covers_qualified
 
+_verification_dir = str(Path(__file__).resolve().parent.parent / "verification")
+if _verification_dir not in sys.path:
+    sys.path.insert(0, _verification_dir)
+
+
+def _copromote_images(md_source: Path, md_dest: Path, repo_cwd: str) -> int:
+    """Copy images referenced by a .md file from source to destination."""
+    from verification.repo_checks import extract_image_refs
+
+    if md_source.suffix != ".md":
+        return 0
+
+    copied = 0
+    for raw_ref, resolved_src in extract_image_refs(md_source):
+        if not resolved_src.exists():
+            continue
+        rel = Path(raw_ref)
+        if rel.is_absolute():
+            continue
+        img_dest = md_dest.parent / rel
+        img_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(resolved_src), str(img_dest))
+        img_rel = str(img_dest.relative_to(Path(repo_cwd)))
+        git(repo_cwd, "add", img_rel)
+        copied += 1
+    return copied
+
 
 def _has_remote(cwd: str) -> bool:
     r = git(cwd, "remote")
@@ -127,6 +154,7 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
             else:
                 shutil.copy2(str(src), str(dst))
             git(str(wt), "add", artifact)
+            _copromote_images(src, dst, str(wt))
             promoted += 1
 
         if promoted > 0:
@@ -208,6 +236,7 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
         r = git(project, "add", dst_rel)
         if r.returncode == 0:
             promoted += 1
+            _copromote_images(src, dst, project)
         else:
             skipped.append(artifact)
             print(f"SKIP_DETAIL={artifact}: {r.stderr.strip()}", file=sys.stderr)
