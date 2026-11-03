@@ -471,6 +471,15 @@ def _report_close_issues_script(ctx):
             f"step=close-issues", f"closed={closed}"]
 
 
+def _epic_handoff_script(ctx):
+    cmd = [sys.executable, str(WORK_END_DIR / "epic_handoff.py"),
+           f"workspace={ctx.workspace}", f"covers={ctx.covers}",
+           f"issue_repo={ctx.issue_repo}", f"branch={ctx.branch}"]
+    if ctx.plan_path:
+        cmd.append(f"plan_path={ctx.plan_path}")
+    return cmd
+
+
 def _verify_script(ctx):
     if ctx.on_main:
         return None
@@ -1383,6 +1392,11 @@ STEPS: list[StepDef] = [
             requires=("close_issues",),
             skip_fn=_skip_no_covers,
             script_fn=_report_close_issues_script),
+    StepDef("epic_handoff", "closing:stamped", StepType.MECHANICAL,
+            modes=NOT_SYNC,
+            requires=("close_issues",),
+            skip_fn=_skip_no_covers,
+            script_fn=_epic_handoff_script),
     StepDef("upstream_push", "closing:stamped", StepType.MECHANICAL,
             skip_fn=_skip_no_upstream,
             script_fn=_upstream_push_script,

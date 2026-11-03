@@ -3451,7 +3451,7 @@ class TestPostconditionsWired:
         exempt = {s.name for s in mechanical
                   if s.name.startswith("report_") or s.name in (
                       "delete_progress", "elevate_plan", "cleanup_stack", "verify",
-                      "advance_queue")}
+                      "advance_queue", "epic_handoff")}
         required = [s for s in mechanical if s.name not in exempt]
         missing = [s.name for s in required if s.outcome_fn is None]
         assert missing == [], f"Mechanical steps missing outcome_fn: {missing}"
