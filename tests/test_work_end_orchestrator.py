@@ -4386,3 +4386,112 @@ class TestMainModeNotCycle:
         assert "squash" not in main_steps
         assert "report_rebase" not in main_steps
         assert "report_squash" not in main_steps
+
+
+class TestElevatePlanSlotProtection:
+    """#496: _elevate_plan_inline must not clobber the slot-level epic queue."""
+
+    def test_preserves_slot_plan_when_both_exist(self, tmp_path):
+        """Workspace .plan (1 item) must NOT overwrite slot .plan (18 items)."""
+        from work_end_orchestrator import _elevate_plan_inline, OrchestratorContext
+        from progress import Progress
+
+        workspace = tmp_path / "wsp"
+        workspace.mkdir()
+        slot = tmp_path / "slot"
+        slot.mkdir()
+
+        slot_plan_content = (
+            "# Work Plan — epic-377\n\n## Queue\n"
+            "- [x] org/repo#1001 — Done item 1\n"
+            "- [x] org/repo#1002 — Done item 2\n"
+            "- [ ] org/repo#1003 — Open item 3 ← active\n"
+            "- [ ] org/repo#1004 — Open item 4\n"
+        )
+        (slot / ".plan").write_text(slot_plan_content)
+
+        ws_plan_content = (
+            "# Work Plan — issue-1003\n\n## Queue\n"
+            "- [x] org/repo#1003 — Open item 3 ← active\n"
+        )
+        (workspace / ".plan").write_text(ws_plan_content)
+
+        ctx = OrchestratorContext(
+            workspace=workspace, project=tmp_path / "project",
+            branch="issue-1003-test", base_branch="main",
+            meta_state="closing:stamped", on_main=False,
+            in_slot=True, covers="1003", issue_repo="org/repo",
+            progress=Progress(), slot_path=slot,
+        )
+
+        _elevate_plan_inline(ctx)
+
+        actual = (slot / ".plan").read_text()
+        assert "1004" in actual, "Slot plan was clobbered — epic queue item #1004 is gone"
+        assert "1001" in actual, "Slot plan was clobbered — completed item #1001 is gone"
+
+    def test_preserves_slot_plan_when_ws_drained(self, tmp_path):
+        """When workspace plan is drained, don't delete the slot epic queue."""
+        from work_end_orchestrator import _elevate_plan_inline, OrchestratorContext
+        from progress import Progress
+
+        workspace = tmp_path / "wsp"
+        workspace.mkdir()
+        slot = tmp_path / "slot"
+        slot.mkdir()
+
+        slot_plan_content = (
+            "# Work Plan — epic-377\n\n## Queue\n"
+            "- [x] org/repo#1001 — Done\n"
+            "- [ ] org/repo#1002 — Open ← active\n"
+        )
+        (slot / ".plan").write_text(slot_plan_content)
+
+        ws_plan_content = (
+            "# Work Plan — issue-1001\n\n## Queue\n"
+            "- [x] org/repo#1001 — Done ← active\n"
+        )
+        (workspace / ".plan").write_text(ws_plan_content)
+
+        ctx = OrchestratorContext(
+            workspace=workspace, project=tmp_path / "project",
+            branch="issue-1001-test", base_branch="main",
+            meta_state="closing:stamped", on_main=False,
+            in_slot=True, covers="1001", issue_repo="org/repo",
+            progress=Progress(), slot_path=slot,
+        )
+
+        _elevate_plan_inline(ctx)
+
+        assert (slot / ".plan").exists(), "Slot plan was deleted"
+        actual = (slot / ".plan").read_text()
+        assert "1002" in actual, "Slot plan was clobbered — remaining item #1002 is gone"
+
+    def test_elevates_when_no_slot_plan(self, tmp_path):
+        """When slot has no .plan, workspace .plan SHOULD be elevated."""
+        from work_end_orchestrator import _elevate_plan_inline, OrchestratorContext
+        from progress import Progress
+
+        workspace = tmp_path / "wsp"
+        workspace.mkdir()
+        slot = tmp_path / "slot"
+        slot.mkdir()
+
+        ws_plan_content = (
+            "# Work Plan — issue-42\n\n## Queue\n"
+            "- [x] org/repo#42 — Done\n"
+            "- [ ] org/repo#43 — Open ← active\n"
+        )
+        (workspace / ".plan").write_text(ws_plan_content)
+
+        ctx = OrchestratorContext(
+            workspace=workspace, project=tmp_path / "project",
+            branch="issue-42-test", base_branch="main",
+            meta_state="closing:stamped", on_main=False,
+            in_slot=True, covers="42", issue_repo="org/repo",
+            progress=Progress(), slot_path=slot,
+        )
+
+        result = _elevate_plan_inline(ctx)
+        assert result.get("ELEVATED") == "yes"
+        assert (slot / ".plan").exists()

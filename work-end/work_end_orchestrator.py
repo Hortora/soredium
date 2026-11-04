@@ -534,6 +534,11 @@ def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
 
     Must run while workspace is still on the feature branch so .plan is visible.
     Also writes the occupant PID (#366) since the session is still alive.
+
+    CRITICAL (#496): Never overwrite a slot-level .plan that already exists.
+    The slot .plan is the epic queue (source of truth for all issues in the
+    slot). The workspace .plan is a single-issue subset. Copying the subset
+    over the superset silently destroys the epic queue.
     """
     import shutil
     ws_plan = ctx.workspace / ".plan"
@@ -552,6 +557,10 @@ def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
     if not ws_plan.exists():
         return {"ELEVATED": "no", "REASON": "no_plan"}
 
+    # If the slot already has a .plan, it's the epic queue — never clobber it.
+    if slot_plan.exists():
+        return {"ELEVATED": "no", "REASON": "slot_plan_exists"}
+
     _project_dir = str(Path(__file__).resolve().parent.parent / "project")
     if _project_dir not in sys.path:
         sys.path.insert(0, _project_dir)
@@ -559,15 +568,12 @@ def _elevate_plan_inline(ctx: OrchestratorContext) -> dict[str, str]:
         from plan_io import read_plan, has_uncompleted_items
         state = read_plan(ws_plan)
         if state is None or not has_uncompleted_items(state):
-            if slot_plan.exists() and not ctx.dry_run:
-                remove_plan(slot_plan)
             return {"ELEVATED": "no", "REASON": "queue_drained"}
     except Exception:
         return {"ELEVATED": "no", "REASON": "parse_error"}
 
     if not ctx.dry_run:
         from lifecycle import TransitionResult, commit_transition, read_state
-        import shutil as _shutil
         current = read_state(ws_plan)
         if current and current.startswith("closing:"):
             result = TransitionResult(
