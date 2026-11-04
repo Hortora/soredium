@@ -32,6 +32,23 @@ Use: `WORKSPACE`, `PROJECT`, `CURRENT_BRANCH`, `PROJECT_SHA`, `ISSUE_N`,
 `COVERS`, `OWNER_REPO`, `BASE_BRANCH`, `META_STATE`, `HAS_PLAN`,
 `PLAN_PATH`, `ON_MAIN`, `IN_SLOT`, `SLOT_PATH`.
 
+**Slot multi-branch scan (#493):** If `IN_SLOT=yes`, scan for all
+active branches before proceeding:
+
+```bash
+python3 work-end/work_end_execute.py scan-branches slot_path=$SLOT_PATH
+```
+
+If `BRANCHES` > 1, the slot has repos working on different issues.
+Work-end in a slot is **cumulative** — close ALL branches, not just the
+current one. Run Steps 2–3 for each branch sequentially:
+- For each `BRANCH_N`, use that branch name as `$BRANCH`
+- Use `BRANCH_N_ISSUE` to set `covers=`
+- Use `BRANCH_N_REPOS` to identify which project repo to use
+- Delete `.close-progress` between iterations (different branch = fresh state)
+
+After all branches are closed, proceed to Step 4 once.
+
 ```bash
 python3 work-end/work_end_context.py workspace=$WORKSPACE project=$PROJECT
 ```

@@ -525,6 +525,58 @@ def cmd_archive_slot(opts: dict[str, str]) -> int:
     return 0
 
 
+def cmd_scan_branches(opts: dict[str, str]) -> int:
+    """Discover all active feature branches in a slot (#493).
+
+    Outputs one BRANCH_N= line per branch with repo and issue info.
+    Used by work-end SKILL.md for cumulative slot close.
+    """
+    slot_path = opts.get("slot_path", "")
+    base_branch = opts.get("base_branch", "main")
+    if not slot_path:
+        print("ERROR=MISSING_ARGS")
+        print("ERROR_DETAIL=slot_path= is required")
+        return 1
+
+    from pathlib import Path
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    from repo_state import scan_slot_branches
+    slot = Path(slot_path)
+    branches = scan_slot_branches(slot, base_branch)
+
+    if not branches:
+        print("BRANCHES=0")
+        return 0
+
+    print(f"BRANCHES={len(branches)}")
+    for i, branch in enumerate(sorted(branches)):
+        repos_on_branch = []
+        import re
+        issue_match = re.match(r"issue-(\d+)", branch)
+        issue_n = issue_match.group(1) if issue_match else ""
+        _slot_dir = str(Path(__file__).resolve().parent.parent / "work-slot")
+        if _slot_dir not in sys.path:
+            sys.path.insert(0, _slot_dir)
+        from slot_io import parse_slot
+        info = parse_slot(slot)
+        repo_names = info.repos if info else []
+        for name in repo_names:
+            repo_dir = slot / name
+            if not repo_dir.is_dir() or not (repo_dir / ".git").exists():
+                continue
+            result = git(str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD")
+            if result.returncode == 0 and result.stdout.strip() == branch:
+                repos_on_branch.append(name)
+        print(f"BRANCH_{i}={branch}")
+        print(f"BRANCH_{i}_REPOS={','.join(repos_on_branch)}")
+        if issue_n:
+            print(f"BRANCH_{i}_ISSUE={issue_n}")
+
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print("Usage: work_end_execute.py <promote|rebase|land|archive-slot|write-marker|verify-ledger> key=value ...",
@@ -548,9 +600,11 @@ def main() -> int:
         return cmd_write_marker(opts)
     elif command == "verify-ledger":
         return cmd_verify_ledger(opts)
+    elif command == "scan-branches":
+        return cmd_scan_branches(opts)
     else:
         print("ERROR=UNKNOWN_COMMAND")
-        print(f"ERROR_DETAIL=unknown command '{command}' — use promote, rebase, land, archive-slot, close-issues, write-marker, or verify-ledger")
+        print(f"ERROR_DETAIL=unknown command '{command}'")
         return 1
 
 

@@ -454,3 +454,49 @@ class TestScanSlotBranches:
         from repo_state import scan_slot_branches
         branches = scan_slot_branches(slot)
         assert branches == set()
+
+
+class TestScanBranchesCLI:
+    """#493: scan-branches CLI command for cumulative slot close."""
+
+    def test_outputs_branch_info(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+
+        for name, branch in [("engine", "issue-377-topology"), ("agency", "issue-382-budget")]:
+            repo = slot / name
+            repo.mkdir()
+            _init_repo(repo)
+            _make_branch_with_commits(repo, branch, n=1)
+
+        (slot / ".slot").write_text("# Slot\n## Repos\n- engine\n- agency\n## Status\nstatus: active\n")
+
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-end" / "work_end_execute.py"),
+             "scan-branches", f"slot_path={slot}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0
+        lines = result.stdout.strip().split("\n")
+        kv = dict(line.split("=", 1) for line in lines if "=" in line)
+        assert kv["BRANCHES"] == "2"
+        assert "issue-377-topology" in result.stdout
+        assert "issue-382-budget" in result.stdout
+
+    def test_extracts_issue_numbers(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+
+        repo = slot / "engine"
+        repo.mkdir()
+        _init_repo(repo)
+        _make_branch_with_commits(repo, "issue-377-topology", n=1)
+
+        (slot / ".slot").write_text("# Slot\n## Repos\n- engine\n## Status\nstatus: active\n")
+
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "work-end" / "work_end_execute.py"),
+             "scan-branches", f"slot_path={slot}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert "BRANCH_0_ISSUE=377" in result.stdout
