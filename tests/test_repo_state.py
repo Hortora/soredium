@@ -342,3 +342,115 @@ class TestClassifyRepos:
         )
 
         assert repos == []
+
+
+class TestDifferentBranchDisposition:
+    """#492: repos on a different feature branch should get DIFFERENT_BRANCH."""
+
+    def test_repo_on_different_branch(self, tmp_path):
+        repo = tmp_path / "engine"
+        repo.mkdir()
+        _init_repo(repo)
+        _make_branch_with_commits(repo, "issue-377-topology", n=2)
+
+        from repo_state import classify_repo, RepoType, RepoDisposition
+        state = classify_repo(repo, "issue-382-budget", "main", RepoType.CLONE)
+
+        assert state.disposition == RepoDisposition.DIFFERENT_BRANCH
+        assert state.branch == "issue-377-topology"
+
+    def test_repo_on_target_branch_still_has_work(self, tmp_path):
+        repo = tmp_path / "agency"
+        repo.mkdir()
+        _init_repo(repo)
+        _make_branch_with_commits(repo, "issue-382-budget", n=3)
+
+        from repo_state import classify_repo, RepoType, RepoDisposition
+        state = classify_repo(repo, "issue-382-budget", "main", RepoType.CLONE)
+
+        assert state.disposition == RepoDisposition.HAS_WORK
+
+    def test_repo_on_main_is_no_branch(self, tmp_path):
+        """Repo on main with no feature branch → NO_BRANCH, not DIFFERENT_BRANCH."""
+        repo = tmp_path / "docs"
+        repo.mkdir()
+        _init_repo(repo)
+
+        from repo_state import classify_repo, RepoType, RepoDisposition
+        state = classify_repo(repo, "issue-382-budget", "main", RepoType.CLONE)
+
+        assert state.disposition == RepoDisposition.NO_BRANCH
+
+    def test_slot_classify_skips_different_branch_repos(self, tmp_path):
+        """classify_repos in slot mode should classify repos on other branches correctly."""
+        slot = tmp_path / "slot"
+        slot.mkdir()
+
+        for name, branch in [("engine", "issue-377-topology"), ("agency", "issue-382-budget")]:
+            repo = slot / name
+            repo.mkdir()
+            _init_repo(repo)
+            _make_branch_with_commits(repo, branch, n=1)
+            # Repos stay on their feature branches (not checked out to main)
+
+        (slot / ".slot").write_text("# Slot\n## Repos\n- engine (primary)\n- agency\n## Status\nstatus: active\n")
+
+        from repo_state import classify_repos, RepoDisposition
+        repos = classify_repos(slot / "engine", slot / "engine", "issue-382-budget", "main", slot_path=slot)
+
+        engine_state = next(r for r in repos if r.name == "engine")
+        agency_state = next(r for r in repos if r.name == "agency")
+
+        assert engine_state.disposition == RepoDisposition.DIFFERENT_BRANCH
+        assert engine_state.branch == "issue-377-topology"
+        assert agency_state.disposition == RepoDisposition.HAS_WORK
+
+
+class TestScanSlotBranches:
+    """#492: scan_slot_branches discovers all active feature branches."""
+
+    def test_finds_multiple_branches(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+
+        for name, branch in [("engine", "issue-377-topology"), ("agency", "issue-382-budget")]:
+            repo = slot / name
+            repo.mkdir()
+            _init_repo(repo)
+            _make_branch_with_commits(repo, branch, n=1)
+
+        (slot / ".slot").write_text("# Slot\n## Repos\n- engine\n- agency\n## Status\nstatus: active\n")
+
+        from repo_state import scan_slot_branches
+        branches = scan_slot_branches(slot)
+        assert len(branches) == 2
+        assert "issue-377-topology" in branches
+        assert "issue-382-budget" in branches
+
+    def test_repos_on_main_excluded(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+
+        repo1 = slot / "engine"
+        repo1.mkdir()
+        _init_repo(repo1)
+        _make_branch_with_commits(repo1, "issue-377-topology", n=1)
+
+        repo2 = slot / "docs"
+        repo2.mkdir()
+        _init_repo(repo2)
+
+        (slot / ".slot").write_text("# Slot\n## Repos\n- engine\n- docs\n## Status\nstatus: active\n")
+
+        from repo_state import scan_slot_branches
+        branches = scan_slot_branches(slot)
+        assert branches == {"issue-377-topology"}
+
+    def test_empty_slot(self, tmp_path):
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("# Slot\n## Repos\n## Status\nstatus: active\n")
+
+        from repo_state import scan_slot_branches
+        branches = scan_slot_branches(slot)
+        assert branches == set()

@@ -646,14 +646,25 @@ def _promote_plan_next_script(ctx):
 
 
 def _slot_repo_paths(ctx) -> list[Path]:
+    """Collect slot repo paths for checkout_main verification.
+    Excludes repos classified as DIFFERENT_BRANCH (#492) — those
+    are working on a different issue and should stay on their branch."""
     if not ctx.in_slot or not ctx.slot_path or not ctx.slot_path.is_dir():
         return []
+    different_branch_repos = set()
+    if ctx.repos:
+        different_branch_repos = {
+            r.state.path.resolve() for r in ctx.repos
+            if r.state.disposition == RepoDisposition.DIFFERENT_BRANCH
+        }
     seen = {ctx.project.resolve(), ctx.workspace.resolve()}
     extras = []
     for entry in sorted(ctx.slot_path.iterdir()):
         if not entry.is_dir() or not (entry / ".git").exists():
             continue
         if entry.resolve() in seen:
+            continue
+        if entry.resolve() in different_branch_repos:
             continue
         seen.add(entry.resolve())
         extras.append(entry)
@@ -1913,6 +1924,11 @@ def _close_per_repo_mechanical(step: StepDef, ctx: OrchestratorContext) -> dict[
 
         step_key = f"{step.name}:{repo_name}"
         if ctx.progress.get(step_key) in ("done", "skipped", "skipped_error"):
+            continue
+
+        if item.state.disposition == RepoDisposition.DIFFERENT_BRANCH:
+            update_close_progress(ctx.workspace, step_key, "done")
+            ctx.steps_executed.append(f"{step_key}:skipped_different_branch")
             continue
 
         if step.name == "rebase" and item.state.disposition in (

@@ -34,6 +34,7 @@ class RepoDisposition(Enum):
     EMPTY_BRANCH = "empty_branch"
     NO_BRANCH = "no_branch"
     ALREADY_LANDED = "already_landed"
+    DIFFERENT_BRANCH = "different_branch"
 
 
 @dataclass(frozen=True)
@@ -121,7 +122,20 @@ def classify_repo(
     else:
         push_remote = "origin"
 
+    # Detect when repo is on a different feature branch (#492).
+    # If the target branch doesn't exist but the repo IS on a non-base
+    # branch, it's working on a different issue — skip it for this close.
+    actual_branch: str | None = None
     if not branch_exists:
+        cur_result = git(path, "rev-parse", "--abbrev-ref", "HEAD")
+        if cur_result.returncode == 0:
+            cur = cur_result.stdout.strip()
+            if cur and cur != base_branch and cur != "HEAD":
+                actual_branch = cur
+
+    if not branch_exists and actual_branch:
+        disposition = RepoDisposition.DIFFERENT_BRANCH
+    elif not branch_exists:
         disposition = RepoDisposition.NO_BRANCH
     elif already_landed:
         disposition = RepoDisposition.ALREADY_LANDED
@@ -135,7 +149,7 @@ def classify_repo(
         name=path.name,
         repo_type=repo_type,
         disposition=disposition,
-        branch=branch if branch_exists else None,
+        branch=actual_branch if actual_branch else (branch if branch_exists else None),
         commits_ahead=commits_ahead,
         is_dirty=is_dirty,
         has_remote=has_remote,
@@ -186,6 +200,28 @@ def classify_repos(
         if state is not None:
             result.append(state)
     return result
+
+
+def scan_slot_branches(slot_path: Path, base_branch: str = "main") -> set[str]:
+    """Discover all active feature branches across repos in a slot (#492)."""
+    branches: set[str] = set()
+    from slot_io import parse_slot
+    info = parse_slot(slot_path)
+    repo_names = info.repos if info else []
+    if not repo_names and slot_path.is_dir():
+        for entry in sorted(slot_path.iterdir()):
+            if entry.is_dir() and (entry / ".git").exists() and not (entry / ".workspace").exists():
+                repo_names.append(entry.name)
+    for name in repo_names:
+        repo_dir = slot_path / name
+        if not repo_dir.is_dir() or not (repo_dir / ".git").exists():
+            continue
+        result = git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD")
+        if result.returncode == 0:
+            cur = result.stdout.strip()
+            if cur and cur != base_branch and cur != "HEAD":
+                branches.add(cur)
+    return branches
 
 
 @dataclass(frozen=True)
