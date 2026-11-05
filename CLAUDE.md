@@ -418,10 +418,9 @@ python3 scripts/validate_all.py --tier commit
 # Run lifecycle state machine tests
 python3 -m pytest tests/test_lifecycle.py tests/test_pre_push_hook.py -v
 
-# Run work-end orchestrator audit (dry-run across branch/slot/main modes)
-python3 work-end/audit_work_end.py mode=branch
-python3 work-end/audit_work_end.py mode=slot
-python3 work-end/audit_work_end.py mode=main
+# Run work-end close ceremony audit
+python3 work-end/audit_work_end.py mode=check
+python3 work-end/audit_work_end.py workspace=$WORKSPACE
 
 # Reconcile slot DB/disk state (three-phase: audit → strategy → execute)
 python3 scripts/reconcile_slots.py <family-root>              # audit — report divergences
@@ -638,12 +637,12 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `workspace-init` -- one-time setup; creates `~/claude/private/<project>/` or
   `~/claude/public/<project>/` with routing CLAUDE.md, gitignored project symlink
   via `.git/info/exclude`, and all subdirectories
-- `work` -- **unified lifecycle entry point**; eight commands: `work` (start or resume), `work end` (close), `work pause` (save state), `work continue` (keep working), `work resume` (restore paused branch), `work next` (advance to next issue in `.plan` queue), `work sync` (land without closing), `work find` (discover and populate queue). Commands chain bidirectionally via `work_chain.py`. `work/SKILL.md` handles routing and corruption triage; mechanical execution runs via `project/work.py` pipeline engine for start/continue/pause/resume/next/find; close/sync use `work_end_orchestrator.py`
+- `work` -- **unified lifecycle entry point**; eight commands: `work` (start or resume), `work end` (close), `work pause` (save state), `work continue` (keep working), `work resume` (restore paused branch), `work next` (advance to next issue in `.plan` queue), `work sync` (land without closing), `work find` (discover and populate queue). Commands chain bidirectionally via `work_chain.py`. `work/SKILL.md` handles routing and corruption triage; mechanical execution runs via `project/work.py` pipeline engine for start/continue/pause/resume/next/find; close/sync use `work-end/close.py`
 - `work.py` -- unified pipeline engine (`project/work.py`); Python-driven lifecycle for 6 commands (start, continue, pause, resume, next, find). Each command maps to a step list of `StepDef` objects. Mechanical steps run without LLM involvement; judgment steps yield `ACTION=` for LLM dispatch to handler files in `work/handlers/`. Uses `orchestrator_engine.run_loop` (same pattern as work-end). Three-tier conflict resolution via `conflict_resolution.py`
 - `lifecycle.py` -- lifecycle state machine (`project/lifecycle.py`); owns all state transitions via a data-driven table; entry points fire events, the machine determines effects; 12 states (idle, scaffolded, active, transitioning, paused, drained, closing:review/verified/promoted/pushed/merged/stamped); `drained` = queue empty, ceremony done, plan persists, re-activatable via `work find`; three-phase protocol (transition, effects, commit_transition); pre-push hook (`project/pre_push_hook.py`) enforces closing gates
 - `work_chain.py` -- bidirectional chaining engine (`project/work_chain.py`); evaluates `continue`/`next`/`end`/`find` commands and returns deterministic directives (`proceed`, `chain_to_next`, `guard_continue`, etc.); the LLM reads directives, never makes routing decisions
 - `work start` -- pipeline-driven (`project/work.py start`); 15 steps: sync main, resolve issue (judgment), branch name (judgment), create branches, scaffold, platform coherence (judgment), protocols (judgment), garden search, load specs, brainstorm offer (judgment). Mechanical steps delegate to `branch_create.py`, `scaffold.py`, `flyway_scan.py`
-- `work end` -- closes the current branch or main work via `work_end_orchestrator.py`; workspace-promotes and project-promotes artifacts; merges `JOURNAL.md` into ARC42STORIES.MD; posts specs to GitHub issue; closes issue; stamps branch; returns both repos to main. In a slot, runs the full sequence (review, promote, squash, push, merge to canonical, stamp, archive)
+- `work end` -- closes the current branch via `work-end/close.py` atomic ceremony; resolves targets, runs preflight, lands branches (rebase + squash-merge), stamps, advances queue. Pre-close advisory checklist (code review, branch audit, sweeps, diary). Post-close closes GitHub issues and optionally archives slots
 - `work pause` -- pipeline-driven (`project/work.py pause`); entirely mechanical (3 steps: WIP commit project, WIP commit workspace, push-and-stack). Delegates to `pause_exec.py`
 - `work resume` -- pipeline-driven (`project/work.py resume`); 6 steps: stack pick (judgment), pop stack, checkout branches, rebase, reset WIP, context resume (judgment). Delegates to `resume_exec.py`
 - `brief` -- orientation summary; composes ctx.resolve(), work_router.detect_state(), work_health.run_checks() into structured KEY=VALUE output showing branch, issue, plan progress, recent commits, health status

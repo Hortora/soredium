@@ -183,6 +183,8 @@ def parse_plan(plan_path: Path) -> PlanTree:
     in_queue = False
     in_deferred = False
     in_session = False
+    is_queue_format = plan_path.name == ".queue"
+    pre_section = is_queue_format
 
     for line in lines:
         if line.startswith("# Work Plan"):
@@ -193,24 +195,28 @@ def parse_plan(plan_path: Path) -> PlanTree:
             in_queue = False
             in_deferred = False
             in_session = False
+            pre_section = False
             continue
         if line.strip() == "## Queue":
             in_state = False
             in_queue = True
             in_deferred = False
             in_session = False
+            pre_section = False
             continue
         if line.strip() == "## Deferred":
             in_state = False
             in_queue = False
             in_deferred = True
             in_session = False
+            pre_section = False
             continue
         if line.strip() == "## Session State":
             in_state = False
             in_queue = False
             in_deferred = False
             in_session = True
+            pre_section = False
             continue
         if line.startswith("## "):
             in_state = False
@@ -242,7 +248,7 @@ def parse_plan(plan_path: Path) -> PlanTree:
             if m:
                 last_wrap = m.group(1).strip()
 
-        if in_queue:
+        if pre_section or in_queue:
             queue_lines.append(line)
         if in_deferred:
             deferred_lines.append(line)
@@ -999,7 +1005,41 @@ def _set_first_uncompleted_active(items: list[QueueItem]) -> bool:
     return False
 
 
+def _detect_from_queue(queue_path: Path, workspace_path: Path) -> dict | None:
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in _sys.path:
+        _sys.path.insert(0, _project_dir)
+    from queue_io import read_queue
+    queue = read_queue(workspace_path)
+    if not queue:
+        return None
+    completed_count = sum(1 for i in queue.items if i.completed)
+    total_count = len(queue.items)
+    active = queue.active_item()
+    state = {
+        "branch": queue.state.branch,
+        "issue-repo": queue.state.issue_repo,
+        "status": queue.state.status,
+    }
+    if queue.state.covers:
+        state["covers"] = queue.state.covers
+    for k, v in queue.state.extra_fields.items():
+        state[k] = v
+    return {
+        "plan_path": str(queue_path),
+        "active_issue": active.ref if active else None,
+        "completed_count": completed_count,
+        "total_count": total_count,
+        "current_batch": None,
+        "state": state,
+    }
+
+
 def detect(workspace_path: Path) -> dict | None:
+    queue_path = workspace_path / ".queue"
+    if queue_path.exists():
+        return _detect_from_queue(queue_path, workspace_path)
+
     plan_path = workspace_path / ".plan"
     if not plan_path.exists():
         plan_path = workspace_path / "design" / ".plan"

@@ -605,3 +605,37 @@ def close(workspace: Path) -> CloseResult:
     except Exception:
         checkout_all(targets)
         raise
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("ERROR=missing_workspace")
+        return 1
+    workspace = Path(sys.argv[1])
+    if not workspace.is_dir():
+        print(f"ERROR=workspace_not_found:{workspace}")
+        return 1
+    try:
+        result = close(workspace)
+    except Exception as e:
+        print(f"ACTION=error\nERROR={e}")
+        return 1
+    if result.success:
+        print("ACTION=complete")
+        for repo, sha in result.landed.items():
+            print(f"LANDED_{repo}={sha}")
+        if result.next_item:
+            print(f"NEXT_ITEM={result.next_item.ref}")
+        if result.rescued:
+            for repo, shas in result.rescued.items():
+                print(f"RESCUED_{repo}={','.join(shas)}")
+    else:
+        print("ACTION=error")
+        for err in result.errors:
+            print(f"ERROR={err}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

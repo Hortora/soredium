@@ -1,200 +1,74 @@
 #!/usr/bin/env python3
-"""Dry-run audit for work-end orchestrator.
+"""Audit tool for work-end close ceremony.
 
-Runs the orchestrator in dry_run mode against synthetic workspaces
-for each mode (branch, slot, main). Verifies all steps are reached,
-all scripts have correct arguments, and no fallback triggers fire.
+Verifies close.py exists, tests resolve() with current workspace state,
+and reports what would be closed.
 
 Usage:
-    python3 work-end/audit_work_end.py mode=branch
-    python3 work-end/audit_work_end.py mode=slot
-    python3 work-end/audit_work_end.py mode=main
+    python3 work-end/audit_work_end.py workspace=<path>
+    python3 work-end/audit_work_end.py mode=check
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
-from work_end_orchestrator import run_orchestrator, STEPS, determine_pipeline_mode
-from close_progress import update_close_progress, read_close_progress, delete_close_progress
-
-JUDGMENT_STEPS = {
-    "review", "sweep_config", "forage", "protocol",
-    "update_claude_md", "impl_doc_sync", "adr", "write_content",
-    "trajectory", "squash",
-    "arc42_scan", "session_rename", "garden_feedback", "notes",
-}
-
-MAX_ITERATIONS = 80
+from close import resolve, preflight, CloseTarget
+from queue_io import read_queue
 
 
-PHASE_ORDER = [
-    "closing:review", "closing:verified", "closing:promoted",
-    "closing:pushed", "closing:merged", "closing:stamped",
-    "idle", "drained",
-]
+def audit_workspace(workspace: Path) -> dict:
+    queue = read_queue(workspace)
+    if not queue:
+        return {"RESULT": "SKIP", "REASON": "no queue found"}
 
-LIFECYCLE_ADVANCEMENT = {
-    "review_pass": "closing:verified",
-    "promote_pass": "closing:promoted",
-    "push_pass": "closing:pushed",
-    "merge_pass": "closing:merged",
-    "stamp_pass": "closing:stamped",
-    "cleanup_pass": "idle",
-    "cleanup_main": "drained",
-}
+    targets = resolve(workspace)
+    if not targets:
+        return {
+            "RESULT": "WARN",
+            "REASON": "no close targets — branch may not exist",
+            "QUEUE_STATUS": queue.state.status,
+            "QUEUE_BRANCH": queue.state.branch,
+        }
 
-
-def _build_args(workspace, project, mode, meta_state="closing:review"):
-    args = {
-        "workspace": str(workspace),
-        "project": str(project),
-        "branch": "issue-audit-test",
-        "base_branch": "main",
-        "meta_state": meta_state,
-        "covers": "999",
-        "issue_repo": "Hortora/soredium",
-        "dry_run": "yes",
-        "plan_path": str(workspace / ".plan"),
-    }
-    if mode == "slot":
-        args["in_slot"] = "yes"
-        args["slot_path"] = str(workspace / "slot")
-        args["family_root"] = str(workspace / "family")
-        args["slot_num"] = "42"
-    if mode == "main":
-        args["on_main"] = "yes"
-        args["branch"] = "main"
-    return args
-
-
-def _setup_workspace(workspace, project, mode):
-    workspace.mkdir(exist_ok=True)
-    project.mkdir(exist_ok=True)
-    if mode == "slot":
-        (workspace / "slot").mkdir(exist_ok=True)
-        (workspace / "family").mkdir(exist_ok=True)
-    (workspace / ".plan").write_text("## State\nstate: closing:review\n")
-    delete_close_progress(workspace)
-
-
-def _expected_steps(mode):
-    from repo_state import RepoState, RepoType, RepoDisposition
-    p_mode = determine_pipeline_mode(
-        on_main=(mode == "main"),
-        in_slot=(mode == "slot"),
-        mode="end",
-        workspace=Path("/tmp/nonexistent"),
-        covers="999",
-        issue_repo="Hortora/soredium",
-    )
-    result = []
-    for step in STEPS:
-        if p_mode not in step.modes:
-            continue
-        if step.skip_fn:
-            class FakeCtx:
-                on_main = (mode == "main")
-                in_slot = (mode == "slot")
-                covers = "999"
-                progress = {}
-                repos = []
-                workspace = Path("/tmp")
-                mode_str = "end"
-            if step.skip_fn(FakeCtx()):
-                continue
-        result.append(step.name)
-    return result
-
-
-def run_audit(workspace, mode="branch"):
-    workspace = Path(workspace)
-    project = workspace / "project"
-    _setup_workspace(workspace, project, mode)
-
-    actions_seen = []
-    steps_reached = set()
-    sweep_done = False
-    current_meta_state = "closing:review"
-
-    prev_progress = set()
-
-    for i in range(MAX_ITERATIONS):
-        args = _build_args(workspace, project, mode, meta_state=current_meta_state)
-        result = run_orchestrator(args)
-
-        action = result.get("ACTION", "")
-        actions_seen.append(action)
-
-        cur_progress = set(read_close_progress(workspace).keys())
-        new_done = cur_progress - prev_progress
-        for s in new_done:
-            if not s.endswith("_attempt") and s != "sweep_selected":
-                steps_reached.add(s)
-        highest_advancement = current_meta_state
-        for s in new_done:
-            if s in LIFECYCLE_ADVANCEMENT:
-                candidate = LIFECYCLE_ADVANCEMENT[s]
-                if PHASE_ORDER.index(candidate) > PHASE_ORDER.index(highest_advancement):
-                    highest_advancement = candidate
-        current_meta_state = highest_advancement
-        prev_progress = cur_progress
-
-        if action == "error":
-            step_name = result.get("STEP", "unknown")
-            steps_reached.add(step_name)
-            update_close_progress(workspace, step_name, "done")
-            prev_progress = set(read_close_progress(workspace).keys())
-            continue
-
-        if action == "complete":
-            break
-
-        if action == "user_input":
-            ctx = result.get("CONTEXT", "")
-            steps_reached.add(ctx)
-            update_close_progress(workspace, ctx, "done")
-            prev_progress = set(read_close_progress(workspace).keys())
-            continue
-
-        if action in JUDGMENT_STEPS:
-            steps_reached.add(action)
-            if action == "sweep_config" and not sweep_done:
-                update_close_progress(workspace, action, "done")
-                update_close_progress(workspace, "sweep_selected",
-                                      "forage,protocol,update_claude_md,impl_doc_sync,adr,write_content")
-                sweep_done = True
-            else:
-                update_close_progress(workspace, action, "done")
-            prev_progress = set(read_close_progress(workspace).keys())
-            continue
-
-        update_close_progress(workspace, action, "done")
-        steps_reached.add(action)
-        prev_progress = set(read_close_progress(workspace).keys())
-
-    expected = set(_expected_steps(mode))
-
-    progress = read_close_progress(workspace)
-    fallback_triggers = [k for k in progress if k.startswith("fallback_")]
-
-    missing = expected - steps_reached
-    missing = {s for s in missing if not s.startswith("delete_progress") and not s.startswith("report_render")}
-
-    all_reached = len(missing) == 0
-    no_fallbacks = len(fallback_triggers) == 0
-    passed = all_reached and no_fallbacks
+    pre = preflight(targets)
 
     return {
-        "RESULT": "PASS" if passed else "FAIL",
-        "mode": mode,
-        "steps_reached": sorted(steps_reached),
-        "steps_expected": sorted(expected),
-        "steps_missing": sorted(missing),
-        "actions_seen": actions_seen,
-        "fallback_triggers": len(fallback_triggers),
-        "iterations": len(actions_seen),
+        "RESULT": "PASS" if not pre["errors"] else "FAIL",
+        "TARGETS": len(targets),
+        "TARGET_LIST": ", ".join(f"{t.repo.name}:{t.branch}" for t in targets),
+        "QUEUE_STATUS": queue.state.status,
+        "QUEUE_BRANCH": queue.state.branch,
+        "PREFLIGHT_ERRORS": "; ".join(pre["errors"]) if pre["errors"] else "none",
+        "RESCUED": len(pre.get("rescued", {})),
     }
+
+
+def audit_module() -> dict:
+    close_py = Path(__file__).parent / "close.py"
+    queue_io = Path(__file__).parent.parent / "project" / "queue_io.py"
+
+    checks = {
+        "close.py_exists": close_py.exists(),
+        "queue_io.py_exists": queue_io.exists(),
+    }
+
+    try:
+        from close import close, resolve, preflight, stamp, advance, land
+        checks["close_importable"] = True
+        checks["has_resolve"] = callable(resolve)
+        checks["has_preflight"] = callable(preflight)
+        checks["has_land"] = callable(land)
+        checks["has_stamp"] = callable(stamp)
+        checks["has_advance"] = callable(advance)
+        checks["has_close"] = callable(close)
+    except ImportError as e:
+        checks["close_importable"] = False
+        checks["import_error"] = str(e)
+
+    all_pass = all(v for k, v in checks.items() if not k.endswith("_error"))
+    return {"RESULT": "PASS" if all_pass else "FAIL", **{k: str(v) for k, v in checks.items()}}
 
 
 def main():
@@ -204,22 +78,18 @@ def main():
             k, _, v = arg.partition("=")
             args[k] = v
 
-    mode = args.get("mode", "branch")
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result = run_audit(Path(tmpdir), mode=mode)
+    mode = args.get("mode", "")
+    workspace = args.get("workspace", "")
 
-    print(f"Mode: {mode}")
-    for step in result["steps_reached"]:
-        print(f"  + {step}")
-    if result["steps_missing"]:
-        print(f"\nMissing steps:")
-        for step in result["steps_missing"]:
-            print(f"  - {step}")
-    print(f"\nSteps reached: {len(result['steps_reached'])}")
-    print(f"Fallback triggers: {result['fallback_triggers']}")
-    print(f"Iterations: {result['iterations']}")
-    print(f"RESULT={result['RESULT']}")
+    if mode == "check":
+        result = audit_module()
+    elif workspace:
+        result = audit_workspace(Path(workspace))
+    else:
+        result = audit_module()
+
+    for k, v in result.items():
+        print(f"{k}={v}")
 
 
 if __name__ == "__main__":
