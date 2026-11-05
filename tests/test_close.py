@@ -609,6 +609,105 @@ class TestCloseIntegration:
         assert current_proj == "main"
         assert current_ws == "main"
 
+    def test_stamp_sha_is_verifiable(self, tmp_path: Path) -> None:
+        """The stamp commit's SHA reference must be verifiable via git cat-file."""
+        from close import close
+
+        proj = tmp_path / "project"
+        _init_repo(proj)
+        _create_branch_with_commit(proj, "issue-1-feat")
+
+        ws = tmp_path / "workspace"
+        _init_repo(ws)
+        _create_branch_with_commit(ws, "issue-1-feat")
+
+        write_queue(ws, Queue(
+            items=[QueueItem(ref="R#1", title="Feat", completed=False, active=True)],
+            state=QueueState(branch="issue-1-feat", issue_repo="R", status="active"),
+        ))
+        subprocess.run(["git", "-C", str(ws), "add", ".queue"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "add queue"],
+                       capture_output=True, check=True)
+        _checkout(ws, "issue-1-feat")
+        subprocess.run(["git", "-C", str(ws), "merge", "main", "--no-edit"],
+                       capture_output=True, check=True)
+
+        with patch("close.discover_repo_topology") as mock_topo, \
+             patch("close._detect_slot_root", return_value=None):
+            mock_topo.return_value = [
+                (proj, "main", "direct", None, "origin", ""),
+                (ws, "main", "direct", None, "origin", ""),
+            ]
+            result = close(ws)
+
+        assert result.success is True
+
+        stamp_msg = subprocess.run(
+            ["git", "-C", str(proj), "log", "-1", "--format=%s", "issue-1-feat"],
+            capture_output=True, text=True).stdout.strip()
+        assert "branch closed" in stamp_msg
+        assert "landed as" in stamp_msg
+        landed_sha = stamp_msg.split("landed as ")[1].split(" on ")[0]
+        cat = subprocess.run(
+            ["git", "-C", str(proj), "cat-file", "-e", landed_sha],
+            capture_output=True)
+        assert cat.returncode == 0, f"stamp SHA {landed_sha} must be verifiable"
+
+    def test_landed_sha_exists_and_matches_main(self, tmp_path: Path) -> None:
+        """Issue #501: reported LANDED_* SHA must exist and match main HEAD."""
+        from close import close
+
+        proj = tmp_path / "project"
+        _init_repo(proj)
+        _multi_commit_branch(proj, "issue-1-feat", 4)
+
+        ws = tmp_path / "workspace"
+        _init_repo(ws)
+        _create_branch_with_commit(ws, "issue-1-feat")
+
+        write_queue(ws, Queue(
+            items=[QueueItem(ref="R#1", title="Feat", completed=False, active=True)],
+            state=QueueState(branch="issue-1-feat", issue_repo="R", status="active"),
+        ))
+        subprocess.run(["git", "-C", str(ws), "add", ".queue"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "commit", "-m", "add queue"],
+                       capture_output=True, check=True)
+        _checkout(ws, "issue-1-feat")
+        subprocess.run(["git", "-C", str(ws), "merge", "main", "--no-edit"],
+                       capture_output=True, check=True)
+
+        with patch("close.discover_repo_topology") as mock_topo, \
+             patch("close._detect_slot_root", return_value=None):
+            mock_topo.return_value = [
+                (proj, "main", "direct", None, "origin", ""),
+                (ws, "main", "direct", None, "origin", ""),
+            ]
+            result = close(ws)
+
+        assert result.success is True
+
+        for repo_name, sha in result.landed.items():
+            if not sha:
+                continue
+            cat = subprocess.run(
+                ["git", "-C", str(proj if repo_name == "project" else ws),
+                 "cat-file", "-e", sha], capture_output=True)
+            assert cat.returncode == 0, f"LANDED_{repo_name}={sha} must exist"
+
+        proj_head = subprocess.run(
+            ["git", "-C", str(proj), "rev-parse", "HEAD"],
+            capture_output=True, text=True).stdout.strip()
+        assert proj_head == result.landed.get("project", ""), \
+            f"project main HEAD ({proj_head}) must match reported SHA"
+
+        for repo in [proj, ws]:
+            status = subprocess.run(
+                ["git", "-C", str(repo), "status", "--porcelain"],
+                capture_output=True, text=True).stdout.strip()
+            assert status == "", f"{repo.name}: working tree must be clean, got: {status}"
+
     def test_close_no_targets_returns_error(self, tmp_path: Path) -> None:
         from close import close
 
@@ -690,6 +789,18 @@ class TestSquashMergeCommit:
             ["git", "-C", str(repo), "log", "--oneline", f"main~1..main"],
             capture_output=True, text=True).stdout.strip()
         assert log.count("\n") == 0, "squash must produce exactly one commit on main"
+
+    def test_squash_merge_preserves_commit_messages(self, tmp_path):
+        from close import squash_merge
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        _multi_commit_branch(repo, "feat", 3)
+        squash_merge(repo, "feat", "main")
+        msg = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%B", "main"],
+            capture_output=True, text=True).stdout.strip()
+        assert "feat: change 0" in msg, "squash commit must include original messages"
+        assert "feat: change 2" in msg
 
     def test_squash_merge_raises_on_commit_failure(self, tmp_path):
         from close import squash_merge

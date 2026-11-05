@@ -300,8 +300,6 @@ def branch_already_landed(repo: Path, branch: str, base: str) -> bool:
 
 
 def _find_landed_sha(repo: Path, branch: str, base: str) -> str:
-    if _is_ancestor(repo, branch, base):
-        return _rev_parse(repo, base)
     return _rev_parse(repo, base)
 
 
@@ -449,6 +447,8 @@ def land(target: CloseTarget) -> str:
 
     strip_lifecycle_files_from_tree(target.repo, target.base_branch, LIFECYCLE_FILES)
 
+    verify_content_landed(target.repo, target.branch, target.base_branch)
+
     return sha
 
 
@@ -466,8 +466,11 @@ def stamp(target: CloseTarget, landed_sha: str) -> None:
         return
 
     _checkout(target.repo, target.branch)
-    _git(target.repo, "commit", "--allow-empty",
-         "-m", f"chore: branch closed — landed as {landed_sha} on {target.base_branch}")
+    result = _git(target.repo, "commit", "--allow-empty",
+                  "-m", f"chore: branch closed — landed as {landed_sha} on {target.base_branch}")
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"stamp commit failed in {target.repo.name}: {result.stderr.strip()}")
 
 
 # --- advance ---
