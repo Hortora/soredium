@@ -11,12 +11,8 @@ FILE_PATH=$(cat | python3 -c "import json,sys; print(json.load(sys.stdin).get('t
 BASENAME=$(basename "$FILE_PATH" 2>/dev/null)
 
 case "$BASENAME" in
-  .meta|.plan|.slot)
+  .meta|.plan|.queue|.slot)
     echo "BLOCK: Use plan_manager.py API instead of editing $BASENAME directly. Commands: append, set-state, defer, inject-tasks, check-task, detect." >&2
-    exit 2
-    ;;
-  lifecycle.py|pre_push_hook.py)
-    echo "BLOCK: $BASENAME is lifecycle infrastructure. Propose changes as a separate issue." >&2
     exit 2
     ;;
 esac
