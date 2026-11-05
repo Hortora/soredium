@@ -626,3 +626,83 @@ class TestCloseIntegration:
 
         assert result.success is False
         assert len(result.errors) > 0
+
+
+def _multi_commit_branch(repo: Path, branch: str, num_commits: int = 3) -> None:
+    subprocess.run(["git", "-C", str(repo), "checkout", "-b", branch],
+                   capture_output=True, check=True)
+    for i in range(num_commits):
+        (repo / f"file{i}.txt").write_text(f"content {i}")
+        subprocess.run(["git", "-C", str(repo), "add", "."],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit",
+                        "-m", f"feat: change {i} Refs #1"],
+                       capture_output=True, check=True)
+
+
+class TestSquashMergeCommit:
+    """Issue #501: squash_merge must commit on main, not just stage."""
+
+    def test_squash_merge_creates_commit_on_main(self, tmp_path):
+        from close import squash_merge
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        _multi_commit_branch(repo, "feat", 3)
+        pre_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True).stdout.strip()
+        sha = squash_merge(repo, "feat", "main")
+        post_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True).stdout.strip()
+        assert post_sha != pre_sha, "main HEAD must advance after squash_merge"
+        assert post_sha == sha, "returned SHA must match main HEAD"
+
+    def test_squash_merge_clean_working_tree(self, tmp_path):
+        from close import squash_merge
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        _multi_commit_branch(repo, "feat", 3)
+        squash_merge(repo, "feat", "main")
+        status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain"],
+            capture_output=True, text=True).stdout.strip()
+        assert status == "", f"working tree must be clean after squash_merge, got: {status}"
+
+    def test_squash_merge_sha_exists(self, tmp_path):
+        from close import squash_merge
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        _multi_commit_branch(repo, "feat", 3)
+        sha = squash_merge(repo, "feat", "main")
+        result = subprocess.run(
+            ["git", "-C", str(repo), "cat-file", "-e", sha],
+            capture_output=True)
+        assert result.returncode == 0, f"reported SHA {sha} must exist"
+
+    def test_squash_merge_single_commit_on_main(self, tmp_path):
+        from close import squash_merge
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        _multi_commit_branch(repo, "feat", 5)
+        sha = squash_merge(repo, "feat", "main")
+        log = subprocess.run(
+            ["git", "-C", str(repo), "log", "--oneline", f"main~1..main"],
+            capture_output=True, text=True).stdout.strip()
+        assert log.count("\n") == 0, "squash must produce exactly one commit on main"
+
+    def test_squash_merge_raises_on_commit_failure(self, tmp_path):
+        from close import squash_merge
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        _multi_commit_branch(repo, "feat", 2)
+        hooks_dir = repo / ".git" / "hooks"
+        hooks_dir.mkdir(exist_ok=True)
+        hook = hooks_dir / "pre-commit"
+        hook.write_text("#!/bin/sh\nexit 1\n")
+        hook.chmod(0o755)
+        subprocess.run(["git", "-C", str(repo), "config", "--local",
+                        "core.hooksPath", str(hooks_dir)],
+                       capture_output=True, check=True)
+        with pytest.raises(RuntimeError, match="commit failed"):
+            squash_merge(repo, "feat", "main")

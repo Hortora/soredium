@@ -363,14 +363,17 @@ def squash_merge(repo: Path, branch: str, base: str,
     _checkout(repo, branch)
     merge_base_sha = _merge_base(repo, base, branch)
 
-    _git(repo, "reset", "--soft", merge_base_sha)
-
     if squash_msg is None:
         result = _git(repo, "log", "--format=%s", f"{merge_base_sha}..HEAD")
         msgs = result.stdout.strip().splitlines() if result.returncode == 0 else []
         squash_msg = "\n".join(msgs) if msgs else "squash: combined commits"
 
-    _git(repo, "commit", "-m", squash_msg)
+    _git(repo, "reset", "--soft", merge_base_sha)
+
+    result = _git(repo, "commit", "-m", squash_msg)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"squash commit failed in {repo.name}: {result.stderr.strip()}")
     squash_sha = _rev_parse(repo, "HEAD")
 
     _checkout(repo, base)
@@ -378,7 +381,13 @@ def squash_merge(repo: Path, branch: str, base: str,
     if result.returncode != 0:
         _git(repo, "merge", branch)
 
-    return squash_sha
+    landed_sha = _rev_parse(repo, "HEAD")
+    if landed_sha != squash_sha:
+        raise RuntimeError(
+            f"squash_merge verification failed in {repo.name}: "
+            f"expected {squash_sha}, main HEAD is {landed_sha}")
+
+    return landed_sha
 
 
 def _merge_no_ff(repo: Path, branch: str) -> str:
