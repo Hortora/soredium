@@ -285,6 +285,42 @@ def parse_covers(covers_str: str) -> list[int]:
     return result
 
 
+@dataclass
+class Finding:
+    scenario: str
+    severity: str
+    detail: str
+    actions: list[str] = field(default_factory=list)
+    auto_recoverable: bool = False
+    auto_action: str = ""
+
+
+def validate_queue(workspace: Path, queue: Queue,
+                   current_branch: str, base_branch: str) -> list[Finding]:
+    findings: list[Finding] = []
+    if not queue.state.status:
+        findings.append(Finding("S1_MISSING_STATUS", "high",
+                                "queue has no status",
+                                actions=["accept_default"],
+                                auto_recoverable=True,
+                                auto_action="accept_default"))
+    if queue.state.branch and current_branch != base_branch:
+        if current_branch != queue.state.branch:
+            findings.append(Finding("S5_BRANCH_MISMATCH", "high",
+                                    f"branch mismatch: queue={queue.state.branch} actual={current_branch}",
+                                    actions=["switch_to_plan_branch", "update_plan_branch", "ignore"]))
+    queue_path = workspace / ".queue"
+    if queue_path.exists():
+        content = queue_path.read_text()
+        if "<<<<<<" in content or "======" in content or ">>>>>>" in content:
+            findings.append(Finding("S13_MERGE_CONFLICT", "critical",
+                                    "merge conflict markers in .queue",
+                                    actions=["remove_plan"],
+                                    auto_recoverable=True,
+                                    auto_action="remove_plan"))
+    return findings
+
+
 _COVER_QUALIFIED_RE = re.compile(
     r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$"
 )

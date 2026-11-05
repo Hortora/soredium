@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from lifecycle import is_closed, ClosureState
-from plan_io import read_field
+from queue_io import read_queue
 
 
 from git_util import git as _canonical_git
@@ -68,12 +68,10 @@ def _parse_yaml_intent(path):
 
 
 def check_meta_consistency(project, workspace, base_branch="main"):
-    plan_path = Path(workspace) / ".plan"
-    meta_path = Path(workspace) / "design" / ".meta"
-    state_file = plan_path if plan_path.exists() else meta_path
-    if not state_file.exists():
+    queue = read_queue(Path(workspace))
+    if not queue:
         return "CHECK=meta_consistency STATUS=ok"
-    meta_branch = read_field(state_file, "branch")
+    meta_branch = queue.state.branch
     if not meta_branch:
         return "CHECK=meta_consistency STATUS=ok"
     current, _ = _git(workspace, "branch", "--show-current")
@@ -156,11 +154,10 @@ def check_stale_scaffold_on_main(project, workspace, base_branch="main"):
     if current != base_branch:
         return "CHECK=stale_scaffold_on_main STATUS=ok"
     ws = Path(workspace)
-    plan_path = ws / ".plan"
-    if plan_path.exists():
-        from lifecycle import read_state
-        state = read_state(plan_path)
-        if state in ("drained", "active"):
+    queue = read_queue(ws)
+    if queue:
+        status = queue.state.status
+        if status in ("drained", "active"):
             stale = []
             for name in (".meta", ".epic", "JOURNAL.md", ".execute-progress"):
                 if (ws / name).exists():
@@ -170,7 +167,7 @@ def check_stale_scaffold_on_main(project, workspace, base_branch="main"):
                         f"DETAIL=workspace main has stale scaffold: {', '.join(stale)} — run cleanup-scaffold")
             return "CHECK=stale_scaffold_on_main STATUS=ok"
     stale = []
-    for name in (".plan", ".meta", ".epic", "JOURNAL.md", ".execute-progress"):
+    for name in (".queue", ".plan", ".meta", ".epic", "JOURNAL.md", ".execute-progress"):
         if (ws / name).exists():
             stale.append(name)
     if stale:
@@ -232,11 +229,9 @@ def check_branch_closure(project, workspace):
     for e in _parse_pause_stack(workspace):
         if "branch" in e:
             branches_to_check.add(e["branch"])
-    state_file = Path(workspace) / ".plan"
-    if state_file.exists():
-        plan_branch = read_field(state_file, "branch")
-        if plan_branch:
-            branches_to_check.add(plan_branch)
+    queue = read_queue(Path(workspace))
+    if queue and queue.state.branch:
+        branches_to_check.add(queue.state.branch)
     if not branches_to_check:
         return "CHECK=branch_closure STATUS=ok"
     findings = []
@@ -328,31 +323,23 @@ def check_plan_state(project, workspace, owner_repo=None):
 
 
 def format_resume_display(workspace, health_output=""):
-    """Render .plan as a human-readable queue summary for the resume path."""
-    plan_path = Path(workspace) / ".plan"
-    if not plan_path.exists():
+    """Render .queue as a human-readable queue summary for the resume path."""
+    queue = read_queue(Path(workspace))
+    if not queue or not queue.items:
         return ""
 
-    sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
-    from plan_manager import parse_plan, flatten_leaves
+    completed = [i for i in queue.items if i.completed]
+    active_items = [i for i in queue.items if i.active]
+    pending = [i for i in queue.items if not i.completed and not i.active]
 
-    tree = parse_plan(plan_path)
-    leaves = flatten_leaves(tree)
-    if not leaves:
-        return ""
-
-    completed = [l for l in leaves if l.completed]
-    active = [l for l in leaves if l.active]
-    pending = [l for l in leaves if not l.completed and not l.active]
-
-    lines = [f"## Queue ({len(leaves)} items, {len(completed)} complete, "
-             f"{len(active)} active):"]
-    for l in completed:
-        lines.append(f"  ✅ {l.ref} — {l.title}")
-    for l in active:
-        lines.append(f"  → {l.ref} — {l.title} (current)")
-    for l in pending:
-        lines.append(f"     {l.ref} — {l.title}")
+    lines = [f"## Queue ({len(queue.items)} items, {len(completed)} complete, "
+             f"{len(active_items)} active):"]
+    for i in completed:
+        lines.append(f"  ✅ {i.ref} — {i.title}")
+    for i in active_items:
+        lines.append(f"  → {i.ref} — {i.title} (current)")
+    for i in pending:
+        lines.append(f"     {i.ref} — {i.title}")
 
     health_notes = []
     for line in health_output.splitlines():

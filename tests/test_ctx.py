@@ -286,7 +286,7 @@ class TestSlotRootPlanDetection:
     """Plan at slot root (slots/N/.plan) must be found from any repo in the slot."""
 
     def test_plan_at_slot_root_found_from_project(self, tmp_path):
-        """slots/N/.plan detected when CWD is slots/N/engine."""
+        """slots/N/.queue detected when CWD is slots/N/engine."""
         slot_dir = tmp_path / "slots" / "110"
         slot_dir.mkdir(parents=True)
         project = init_repo(slot_dir / "engine")
@@ -298,10 +298,10 @@ class TestSlotRootPlanDetection:
             "# Slot 110 — test\n\n## Issue\norg/repo#1\n\n"
             "## Repos\n- engine (primary)\n"
         )
-        (slot_dir / ".plan").write_text(
-            "# Work Plan — test\n\n## Queue\n"
-            "- [ ] #10 — First ← active\n- [ ] #11 — Second\n\n"
-            "## Session State\nCurrent: #10\nStarted: 2026-01-01\n"
+        (slot_dir / ".queue").write_text(
+            "- [ ] org/repo#10 — First        ← active\n"
+            "- [ ] org/repo#11 — Second\n"
+            "\n## State\nbranch: issue-1-test\nissue-repo: org/repo\nstatus: active\n"
         )
         subprocess.run(
             ["git", "-C", str(project), "checkout", "-b", "issue-1-test"],
@@ -312,8 +312,7 @@ class TestSlotRootPlanDetection:
         data = parse(result)
 
         assert result.returncode == 0
-        assert data["HAS_PLAN"] == "yes", "plan at slot root must be found from project repo"
-        assert data["ACTIVE_ISSUE"] == "10"
+        assert data["HAS_PLAN"] == "yes", "queue at slot root must be found from project repo"
 
 
 class TestClaudeMdParsing:
@@ -440,16 +439,16 @@ covers: 99
         assert data["COVERS"] == "99"
 
     def test_issue_repo_defaults_to_owner_repo(self, tmp_path):
-        """ISSUE_REPO falls back to OWNER_REPO when issue-repo absent."""
+        """ISSUE_REPO falls back to OWNER_REPO when issue-repo absent in queue."""
         claude_md = "GitHub repo: Hortora/soredium"
-        meta_content = """branch: issue-123-test
-issue: 123
-"""
         repo = init_repo(tmp_path / "repo", claude_md)
         subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-123-test"],
                        capture_output=True)
-        (repo / "design").mkdir()
-        (repo / "design" / ".meta").write_text(meta_content)
+        (repo / ".queue").write_text(
+            "- [ ] Hortora/soredium#123 — Test task        ← active\n"
+            "\n## State\nbranch: issue-123-test\nstatus: active\n"
+            "covers: Hortora/soredium#123\n"
+        )
 
         result = run_ctx(repo)
         data = parse(result)
@@ -629,15 +628,15 @@ class TestWorkspaceOkCrossCheck:
         data = parse(run_ctx(project))
         assert data["WORKSPACE_OK"] == "yes"
 
-    def test_wksp_to_non_git_dir_reports_corruption(self, tmp_path):
-        """wksp → non-git dir → CORRUPTION_COUNT > 0 with S9 scenario."""
+    def test_wksp_to_non_git_dir_falls_back_to_single_repo(self, tmp_path):
+        """wksp → non-git dir → falls back to single-repo mode, no corruption."""
         project = init_repo(tmp_path / "project")
         target = tmp_path / "not-a-repo"
         target.mkdir()
         (project / "wksp").symlink_to(target)
         data = parse(run_ctx(project))
-        assert int(data["CORRUPTION_COUNT"]) > 0
-        assert data.get("CORRUPTION_0") == "S9_ORPHANED_WKSP"
+        assert int(data["CORRUPTION_COUNT"]) == 0
+        assert data["SINGLE_REPO"] == "yes"
 
 
 class TestProjectType:

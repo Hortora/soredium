@@ -33,7 +33,7 @@ try:
     import worklog as _wl
 except ImportError:
     _wl = None
-from plan_io import parse_covers
+from queue_io import parse_covers
 from shared_steps import (
     StepDef,
     OrchestratorContextBase,

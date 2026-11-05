@@ -12,7 +12,7 @@ from pathlib import Path
 _project_dir = Path(__file__).resolve().parent
 if str(_project_dir) not in sys.path:
     sys.path.insert(0, str(_project_dir))
-from plan_io import read_field as _read_plan_field
+from queue_io import read_queue as _read_queue
 
 PROGRESS_FILE = ".work-progress"
 PROGRESS_TMP = ".work-progress.tmp"
@@ -89,8 +89,11 @@ STEP_TO_PHASE = {
 
 
 def _read_plan_state(plan_path: Path) -> str:
-    """Read the lifecycle state from a .plan file."""
-    return _read_plan_field(plan_path, "state") or ""
+    """Read the queue status from a .queue file (or .plan via migration)."""
+    queue = _read_queue(plan_path.parent)
+    if queue:
+        return queue.state.status or ""
+    return ""
 
 
 def read_progress(workspace: Path) -> dict[str, str]:
@@ -186,8 +189,8 @@ def is_stale(progress: dict[str, str], meta_state: str,
              excluded_steps: frozenset[str] | None = None) -> bool:
     if not progress:
         return False
-    if plan_path and plan_path.exists():
-        actual_state = _read_plan_field(plan_path, "state") or ""
+    if plan_path and plan_path.parent.is_dir():
+        actual_state = _read_plan_state(plan_path)
         if actual_state and actual_state in LIFECYCLE_PHASE_ORDER:
             meta_state = actual_state
     if meta_state not in LIFECYCLE_PHASE_ORDER:

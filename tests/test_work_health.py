@@ -55,9 +55,10 @@ class TestMetaConsistency:
 
     def test_orphaned_meta_on_main(self, tmp_path):
         workspace = _init_repo(tmp_path / "wksp")
-        design = workspace / "design"
-        design.mkdir()
-        (design / ".meta").write_text("branch: issue-42-foo\nstate: active\n")
+        (workspace / ".queue").write_text(
+            "- [ ] R#42 — Task        ← active\n"
+            "\n## State\nbranch: issue-42-foo\nissue-repo: R\nstatus: active\n"
+        )
         result = check_meta_consistency(str(tmp_path / "proj"), str(workspace))
         assert "STATUS=warn" in result
         assert "orphaned" in result
@@ -66,9 +67,10 @@ class TestMetaConsistency:
         workspace = _init_repo(tmp_path / "wksp")
         subprocess.run(["git", "checkout", "-b", "issue-42-foo"], cwd=workspace,
                         check=True, capture_output=True)
-        design = workspace / "design"
-        design.mkdir()
-        (design / ".meta").write_text("branch: issue-42-foo\nstate: active\n")
+        (workspace / ".queue").write_text(
+            "- [ ] R#42 — Task        ← active\n"
+            "\n## State\nbranch: issue-42-foo\nissue-repo: R\nstatus: active\n"
+        )
         result = check_meta_consistency(str(tmp_path / "proj"), str(workspace))
         assert "STATUS=ok" in result
 
@@ -257,9 +259,10 @@ class TestBranchClosure:
                         capture_output=True)
         subprocess.run(["git", "rebase", "issue-42-foo"], cwd=project,
                         check=True, capture_output=True)
-        design = workspace / "design"
-        design.mkdir()
-        (design / ".meta").write_text("branch: issue-42-foo\nstate: active\n")
+        (workspace / ".queue").write_text(
+            "- [ ] R#42 — Task        ← active\n"
+            "\n## State\nbranch: issue-42-foo\nissue-repo: R\nstatus: active\n"
+        )
         subprocess.run(["git", "checkout", "-b", "issue-42-foo"], cwd=workspace,
                         check=True, capture_output=True)
         result = check_branch_closure(str(project), str(workspace))
@@ -270,9 +273,8 @@ class TestBranchClosure:
 class TestPlanState:
 
     def _write_plan(self, workspace, content):
-        design = Path(workspace) / "design"
-        design.mkdir(exist_ok=True)
-        (design / ".plan").write_text(content)
+        Path(workspace).mkdir(parents=True, exist_ok=True)
+        (Path(workspace) / ".plan").write_text(content)
 
     def test_no_plan_is_ok(self, tmp_path):
         workspace = _init_repo(tmp_path / "wksp")
@@ -284,7 +286,7 @@ class TestPlanState:
         self._write_plan(workspace, (
             "# Work Plan — test\n\n"
             "## Queue\n"
-            "- [ ] #100 — some issue ← active\n\n"
+            "- [ ] Hortora/soredium#100 — some issue ← active\n\n"
             "## Session State\nCurrent: #100\n"
         ))
         result = check_plan_state(str(tmp_path / "proj"), str(workspace), owner_repo="")
@@ -295,7 +297,7 @@ class TestPlanState:
         self._write_plan(workspace, (
             "# Work Plan — test\n\n"
             "## Queue\n"
-            "- [x] #100 — done issue\n\n"
+            "- [x] Hortora/soredium#100 — done issue\n\n"
             "## Session State\nCurrent: #100\n"
         ))
         result = check_plan_state(str(tmp_path / "proj"), str(workspace), owner_repo="Hortora/soredium")
@@ -306,55 +308,52 @@ class TestMarkCompleted:
 
     def test_mark_completed_public_api(self, tmp_path):
         sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
-        from plan_manager import mark_completed, parse_plan
+        from plan_manager import mark_completed, parse_plan, IssueRef
         plan_path = tmp_path / ".plan"
         plan_path.write_text(
             "# Work Plan — test\n\n"
             "## Queue\n"
-            "- [ ] #100 — first issue ← active\n"
-            "- [ ] #101 — second issue\n\n"
+            "- [ ] Hortora/soredium#100 — first issue ← active\n"
+            "- [ ] Hortora/soredium#101 — second issue\n\n"
             "## Session State\nCurrent: #100\n"
         )
-        changed = mark_completed(plan_path, 100)
+        changed = mark_completed(plan_path, IssueRef("Hortora/soredium", 100))
         assert changed is True
         tree = parse_plan(plan_path)
         assert tree.queue[0].completed is True
 
     def test_mark_completed_nonexistent_issue(self, tmp_path):
         sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
-        from plan_manager import mark_completed
+        from plan_manager import mark_completed, IssueRef
         plan_path = tmp_path / ".plan"
         plan_path.write_text(
             "# Work Plan — test\n\n"
             "## Queue\n"
-            "- [ ] #100 — first issue ← active\n\n"
+            "- [ ] Hortora/soredium#100 — first issue ← active\n\n"
             "## Session State\nCurrent: #100\n"
         )
-        changed = mark_completed(plan_path, 999)
+        changed = mark_completed(plan_path, IssueRef("Hortora/soredium", 999))
         assert changed is False
 
 
 class TestResumeDisplay:
 
-    def _write_plan(self, workspace, content):
-        design = Path(workspace) / "design"
-        design.mkdir(exist_ok=True)
-        (design / ".plan").write_text(content)
+    def _write_queue(self, workspace, items_text, state_text="branch: b\nissue-repo: R\nstatus: active\n"):
+        Path(workspace).mkdir(parents=True, exist_ok=True)
+        (Path(workspace) / ".queue").write_text(
+            f"{items_text}\n## State\n{state_text}"
+        )
 
     def test_with_plan(self, tmp_path):
         workspace = tmp_path / "wksp"
-        workspace.mkdir()
-        self._write_plan(workspace, (
-            "# Work Plan — test\n\n"
-            "## Queue\n"
-            "- [x] #142 — completed issue\n"
-            "- [ ] #123 — active issue ← active\n"
-            "- [ ] #155 — pending issue\n\n"
-            "## Session State\nCurrent: #123\nStarted: 2026-08-06\n"
+        self._write_queue(workspace, (
+            "- [x] R#142 — completed issue\n"
+            "- [ ] R#123 — active issue        ← active\n"
+            "- [ ] R#155 — pending issue\n"
         ))
         output = format_resume_display(str(workspace))
-        assert "#142" in output
-        assert "#123" in output
+        assert "R#142" in output
+        assert "R#123" in output
         assert "(current)" in output
         assert "3 items, 1 complete, 1 active" in output
 
@@ -366,12 +365,8 @@ class TestResumeDisplay:
 
     def test_with_health_annotations(self, tmp_path):
         workspace = tmp_path / "wksp"
-        workspace.mkdir()
-        self._write_plan(workspace, (
-            "# Work Plan — test\n\n"
-            "## Queue\n"
-            "- [ ] #100 — some issue ← active\n\n"
-            "## Session State\nCurrent: #100\n"
+        self._write_queue(workspace, (
+            "- [ ] R#100 — some issue        ← active\n"
         ))
         health_output = "CHECK=plan_state STATUS=changed DETAIL=#55 now CLOSED"
         output = format_resume_display(str(workspace), health_output)
@@ -468,12 +463,13 @@ class TestRunChecksIntegration:
     def test_clean_entry_scope(self, tmp_path, capsys):
         project = _init_repo(tmp_path / "proj")
         workspace = _init_repo(tmp_path / "wksp")
+        (workspace / ".workspace").write_text(f"project: {project}\n")
         run_checks("entry", str(project), str(workspace))
         captured = capsys.readouterr()
         assert "FIXED=0" in captured.out
         assert "WARNINGS=0" in captured.out
         assert "ERRORS=0" in captured.out
-        assert captured.out.count("CHECK=") == 9
+        assert captured.out.count("CHECK=") == 12
 
     def test_entry_scope_includes_plan_state_when_owner_repo_provided(self, tmp_path, capsys):
         project = _init_repo(tmp_path / "proj")

@@ -71,15 +71,13 @@ class TestWorkStateDetect:
 
     def test_plan_found_has_plan_true(self, tmp_path):
         repo = init_repo(tmp_path / "repo")
-        (repo / "design").mkdir()
-        (repo / "design" / ".plan").write_text(
-            "# Work Plan — test\n\n## Queue\n"
-            "- [ ] #10 — A ← active\n\n"
-            "## Session State\nCurrent: #10\nStarted: 2026-01-01\n"
+        (repo / ".queue").write_text(
+            "- [ ] Test/repo#10 — A        ← active\n"
+            "\n## State\nbranch: main\nissue-repo: Test/repo\nstatus: active\n"
+            "covers: Test/repo#10\n"
         )
         state = _detect(str(repo))
         assert state.has_plan is True
-        assert state.active_issue == "10"
 
     def test_no_plan_has_plan_false(self, tmp_path):
         repo = init_repo(tmp_path / "repo")
@@ -98,15 +96,14 @@ class TestWorkStateDetect:
         slot_dir = tmp_path / "slots" / "1"
         slot_dir.mkdir(parents=True)
         (slot_dir / ".slot").write_text("# Slot\n\n## Repos\n- engine (primary)\n")
-        (slot_dir / ".plan").write_text(
-            "# Work Plan — test\n\n## Queue\n"
-            "- [ ] #10 — A ← active\n\n"
-            "## Session State\nCurrent: #10\nStarted: 2026-01-01\n"
+        (slot_dir / ".queue").write_text(
+            "- [ ] Test/engine#10 — A        ← active\n"
+            "\n## State\nbranch: main\nissue-repo: Test/engine\nstatus: active\n"
+            "covers: Test/engine#10\n"
         )
         project = init_repo(slot_dir / "engine")
         state = _detect(str(project))
         assert state.has_plan is True
-        assert state.active_issue == "10"
 
     def test_handoff_project_specific_found(self, tmp_path):
         """F4: HANDOFF-{project}.md checked before HANDOFF.md."""

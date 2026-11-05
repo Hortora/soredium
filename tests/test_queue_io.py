@@ -7,6 +7,7 @@ from pathlib import Path
 from project.queue_io import (
     read_queue, write_queue, Queue, QueueItem, QueueState,
     migrate_plan_to_queue, parse_covers, parse_covers_qualified, CoverRef,
+    validate_queue, Finding,
 )
 
 
@@ -197,6 +198,66 @@ def test_queue_with_nested_tasks(tmp_path):
     q = read_queue(tmp_path)
     assert len(q.items) == 2
     assert q.items[0].ref == "R#1"
+
+
+# --- validate_queue ---
+
+def test_validate_queue_ok(tmp_path):
+    (tmp_path / ".queue").write_text(
+        "- [ ] R#1 — Task        ← active\n"
+        "\n## State\nbranch: issue-1\nissue-repo: R\nstatus: active\n"
+    )
+    q = read_queue(tmp_path)
+    findings = validate_queue(tmp_path, q, "issue-1", "main")
+    assert findings == []
+
+
+def test_validate_queue_missing_status(tmp_path):
+    q = Queue(
+        items=[QueueItem(ref="R#1", title="Task", completed=False, active=True)],
+        state=QueueState(branch="issue-1", issue_repo="R", status=""),
+    )
+    findings = validate_queue(tmp_path, q, "issue-1", "main")
+    assert len(findings) == 1
+    assert findings[0].scenario == "S1_MISSING_STATUS"
+    assert findings[0].auto_recoverable is True
+
+
+def test_validate_queue_branch_mismatch(tmp_path):
+    q = Queue(
+        items=[QueueItem(ref="R#1", title="Task", completed=False, active=True)],
+        state=QueueState(branch="issue-1", issue_repo="R", status="active"),
+    )
+    findings = validate_queue(tmp_path, q, "issue-2", "main")
+    assert len(findings) == 1
+    assert findings[0].scenario == "S5_BRANCH_MISMATCH"
+    assert "queue=issue-1" in findings[0].detail
+
+
+def test_validate_queue_branch_mismatch_on_main_ok(tmp_path):
+    """On main, branch mismatch is not flagged (queue may reference old branch)."""
+    q = Queue(
+        items=[QueueItem(ref="R#1", title="Task", completed=False, active=True)],
+        state=QueueState(branch="issue-1", issue_repo="R", status="active"),
+    )
+    findings = validate_queue(tmp_path, q, "main", "main")
+    assert findings == []
+
+
+def test_validate_queue_merge_conflict(tmp_path):
+    (tmp_path / ".queue").write_text(
+        "<<<<<<< HEAD\n"
+        "- [ ] R#1 — Task\n"
+        "=======\n"
+        "- [ ] R#2 — Other\n"
+        ">>>>>>> branch\n"
+    )
+    q = Queue(
+        items=[],
+        state=QueueState(branch="b", issue_repo="R", status="active"),
+    )
+    findings = validate_queue(tmp_path, q, "b", "main")
+    assert any(f.scenario == "S13_MERGE_CONFLICT" for f in findings)
 
 
 def test_queue_with_covers_field(tmp_path):

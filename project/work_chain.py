@@ -46,8 +46,8 @@ def evaluate(
     ctx: dict,
     issue_state: str | None = None,
 ) -> dict:
-    state = ctx.get("META_STATE", "")
-    has_plan = ctx.get("HAS_PLAN") == "yes"
+    state = ctx.get("QUEUE_STATUS", "") or ctx.get("META_STATE", "")
+    has_plan = ctx.get("HAS_QUEUE") == "yes" or ctx.get("HAS_PLAN") == "yes"
     active_issue = ctx.get("ACTIVE_ISSUE", "")
     position = ctx.get("PLAN_POSITION", "")
     on_main = ctx.get("ON_MAIN") == "yes"
@@ -113,7 +113,7 @@ def _evaluate_sync(
 ) -> dict:
     if on_main:
         return {"DIRECTIVE": "chain_to_end", "REASON": "sync_requires_branch"}
-    if state in ("drained", "paused", "idle", "scaffolded", "transitioning"):
+    if state in ("drained", "paused", "idle"):
         return {"DIRECTIVE": "chain_to_end", "REASON": f"cannot_sync_from_{state}"}
     if not active_issue:
         return {"DIRECTIVE": "chain_to_end", "REASON": "no_active_work"}

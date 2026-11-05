@@ -19,7 +19,7 @@ if str(_slot_dir) not in sys.path:
     sys.path.insert(0, str(_slot_dir))
 
 from topology import Topology, find_design_file
-from lifecycle import read_state as _read_state, is_transient as _is_transient, CorruptedState
+from queue_io import read_queue
 
 
 @dataclass
@@ -67,26 +67,45 @@ def detect(topo: Topology, base_branch: str = "main") -> WorkState:
         from plan_migrate import migrate_if_needed
         migrate_if_needed(meta_file.parent)
 
-    # Plan detection via shared search
-    from plan_manager import detect as _plan_detect
+    # Queue/plan detection — read_queue is primary (handles .plan migration)
+    # Search workspace, workspace_root, slot_dir (same as find_design_file)
+    queue = None
+    for search_base in [topo.workspace, topo.workspace_root, topo.slot_dir]:
+        if search_base and search_base.is_dir():
+            queue = read_queue(search_base)
+            if queue:
+                break
     has_plan = False
     plan_path = ""
     active_issue = ""
     plan_position = ""
     plan_batch = ""
 
-    plan_file = find_design_file(".plan", topo)
-    if plan_file:
-        detect_base = plan_file.parent.parent if plan_file.parent.name == "design" else plan_file.parent
-        plan_info = _plan_detect(detect_base)
-        if plan_info:
-            has_plan = True
-            plan_path = plan_info["plan_path"]
-            active_issue = str(plan_info["active_issue"] or "")
-            completed = plan_info.get("completed_count", 0)
-            total = plan_info.get("total_count", 0)
-            plan_position = f"{completed}/{total}" if total else ""
-            plan_batch = plan_info.get("current_batch") or ""
+    if queue:
+        has_plan = True
+        for qb in [topo.workspace, topo.workspace_root, topo.slot_dir]:
+            if qb and (qb / ".queue").exists():
+                plan_path = str(qb / ".queue")
+                break
+        active = queue.active_item()
+        active_issue = active.ref if active else ""
+        completed = sum(1 for i in queue.items if i.completed)
+        total = len(queue.items)
+        plan_position = f"{completed}/{total}" if total else ""
+    else:
+        plan_file = find_design_file(".plan", topo)
+        if plan_file:
+            from plan_manager import detect as _plan_detect
+            detect_base = plan_file.parent.parent if plan_file.parent.name == "design" else plan_file.parent
+            plan_info = _plan_detect(detect_base)
+            if plan_info:
+                has_plan = True
+                plan_path = plan_info["plan_path"]
+                active_issue = str(plan_info["active_issue"] or "")
+                completed = plan_info.get("completed_count", 0)
+                total = plan_info.get("total_count", 0)
+                plan_position = f"{completed}/{total}" if total else ""
+                plan_batch = plan_info.get("current_batch") or ""
 
     # Handoff detection — branch-scoped, working tree only
     has_handoff = False
@@ -106,20 +125,19 @@ def detect(topo: Topology, base_branch: str = "main") -> WorkState:
         handoff_path = str(handoff_file)
         has_handoff = True
 
-    # Lifecycle state — from .plan (unified) or .meta (legacy, pre-migration)
-    state_file = plan_file or find_design_file(".meta", topo)
-    try:
-        meta_state = _read_state(state_file) if state_file else ""
-        meta_state = meta_state or ""
-    except CorruptedState as e:
-        meta_state = f"corrupted:{e.raw_value}"
-    meta_is_transient = bool(meta_state and not meta_state.startswith("corrupted:") and _is_transient(meta_state))
+    # Lifecycle state — from queue status
+    if queue:
+        meta_state = queue.state.status or ""
+    else:
+        meta_state = ""
+    meta_is_transient = False
 
     # Routing
     project_branch = _run("git", "-C", project, "branch", "--show-current") if project != workspace else current_branch
+    has_any_state = queue is not None or find_design_file(".plan", topo) is not None or find_design_file(".meta", topo) is not None
     workspace_dirty = (
         not on_main
-        and state_file is None
+        and not has_any_state
         and project != workspace
         and project_branch == "main"
     )

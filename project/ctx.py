@@ -25,8 +25,7 @@ if str(_slot_dir) not in sys.path:
 
 from topology import resolve as topo_resolve, find_design_file, _run
 from work_state import detect as ws_detect
-from corruption import diagnose as _diagnose
-from plan_io import parse_covers_qualified
+from queue_io import read_queue, validate_queue, parse_covers_qualified
 
 
 def _parse_meta(meta_path: Path) -> dict[str, str]:
@@ -186,34 +185,45 @@ def resolve(cwd=None) -> dict[str, str]:
     wksp_declined = "workspace: declined" in scope_text or "workspace: declined" in root_text
     workspace_ok = "yes" if (wksp_ok or proj_ok or wksp_declined) else "no"
 
-    # Identity — from .plan's ## State section (via plan_manager.detect)
-    plan_state: dict[str, str] = {}
-    if state.has_plan and state.plan_path:
-        from plan_manager import detect as _plan_detect_full
-        plan_p = Path(state.plan_path)
-        detect_base = plan_p.parent.parent if plan_p.parent.name == "design" else plan_p.parent
-        plan_info_full = _plan_detect_full(detect_base)
-        if plan_info_full:
-            plan_state = plan_info_full.get("state", {})
+    # Identity — from .queue's ## State section (via read_queue), with
+    # .plan fallback (via plan_manager.detect) and .meta fallback
+    queue = read_queue(topo.workspace) if topo.workspace and topo.workspace.is_dir() else None
+    queue_state: dict[str, str] = {}
+    if queue:
+        queue_state["branch"] = queue.state.branch
+        queue_state["issue-repo"] = queue.state.issue_repo
+        queue_state["covers"] = queue.state.covers
+        for k, v in queue.state.extra_fields.items():
+            queue_state[k] = v
 
-    # Fallback to .meta if still exists (pre-migration branch)
-    if not plan_state:
-        meta_path = find_design_file(".meta", topo)
-        if meta_path:
-            meta_fallback = _parse_meta(meta_path)
-            plan_state = meta_fallback
+    # Fallback to plan_manager.detect if no queue (pre-migration branch)
+    if not queue_state:
+        plan_state_fallback: dict[str, str] = {}
+        if state.has_plan and state.plan_path:
+            from plan_manager import detect as _plan_detect_full
+            plan_p = Path(state.plan_path)
+            detect_base = plan_p.parent.parent if plan_p.parent.name == "design" else plan_p.parent
+            plan_info_full = _plan_detect_full(detect_base)
+            if plan_info_full:
+                plan_state_fallback = plan_info_full.get("state", {})
+        if not plan_state_fallback:
+            meta_path = find_design_file(".meta", topo)
+            if meta_path:
+                plan_state_fallback = _parse_meta(meta_path)
+        queue_state = plan_state_fallback
 
-    branch_name = plan_state.get("branch", "")
-    project_sha = plan_state.get("project-sha", "")
-    covers = plan_state.get("covers", "")
+    branch_name = queue_state.get("branch", "")
+    project_sha = queue_state.get("project-sha", "")
+    covers = queue_state.get("covers", "")
     refs = parse_covers_qualified(covers) if covers else []
     issue_n = str(refs[0].number) if refs else ""
-    issue_repo = plan_state.get("issue-repo", owner_repo)
-    design_repo_key = plan_state.get("design-repo", "")
-    flyway_next_v = plan_state.get("flyway-next-v", "")
-    meta_section_hashes = plan_state.get("design-section-hashes", "")
+    issue_repo = queue_state.get("issue-repo") or owner_repo
+    design_repo_key = queue_state.get("design-repo", "")
+    flyway_next_v = queue_state.get("flyway-next-v", "")
+    meta_section_hashes = queue_state.get("design-section-hashes", "")
 
-    has_meta = "yes" if plan_state else "no"
+    has_meta = "yes" if queue_state else "no"
+    queue_status = queue.state.status if queue else state.meta_state
 
     # Branch detection
     workspace = str(topo.workspace)
@@ -224,19 +234,12 @@ def resolve(cwd=None) -> dict[str, str]:
     project_branch = _run("git", "-C", project, "branch", "--show-current") if not single_repo else workspace_branch
     current_branch = workspace_branch
 
-    # Corruption detection
-    _plan_file = Path(state.plan_path) if state.plan_path else None
-    corruption_findings = _diagnose(
-        plan_path=_plan_file,
-        meta_state=state.meta_state,
-        project=topo.project,
-        workspace=topo.workspace,
-        base_branch=base_branch,
-        current_branch=current_branch,
-        on_main=state.on_main,
-        owner_repo=owner_repo,
-        slot_dir=topo.slot_dir,
-    )
+    # Corruption detection — via validate_queue (replaces corruption.py)
+    corruption_findings = []
+    if queue:
+        corruption_findings = validate_queue(
+            topo.workspace, queue, current_branch, base_branch,
+        )
 
     # Branch mismatch — guard against empty strings from git failure (F6)
     branch_mismatch = "no"
@@ -307,8 +310,8 @@ def resolve(cwd=None) -> dict[str, str]:
     unfinished_branch = ""
     unfinished_issue = ""
     unfinished_warn = ""
-    _has_local_plan = Path(workspace) / ".plan"
-    if not _has_local_plan.exists():
+    _has_local_queue = (Path(workspace) / ".queue").exists() or (Path(workspace) / ".plan").exists()
+    if not _has_local_queue:
         try:
             _lib = Path.home() / ".claude" / "lib"
             if str(_lib) not in sys.path:
@@ -362,11 +365,14 @@ def resolve(cwd=None) -> dict[str, str]:
         "HAS_HANDOFF": "yes" if state.has_handoff else "no",
         "HANDOFF_PATH": state.handoff_path,
         "HAS_PLAN": "yes" if state.has_plan else "no",
+        "HAS_QUEUE": "yes" if queue else ("yes" if state.has_plan else "no"),
         "PLAN_PATH": state.plan_path,
+        "QUEUE_PATH": state.plan_path,
         "ACTIVE_ISSUE": state.active_issue,
         "PLAN_POSITION": state.plan_position,
         "PLAN_BATCH": state.plan_batch,
         "META_STATE": state.meta_state,
+        "QUEUE_STATUS": queue_status,
         "META_IS_TRANSIENT": "yes" if state.meta_is_transient else "no",
         # CLAUDE.md fields (all from topo.project)
         "OWNER_REPO": owner_repo,

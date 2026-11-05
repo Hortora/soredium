@@ -23,7 +23,7 @@ try:
     import worklog as _wl
 except ImportError:
     _wl = None
-from plan_io import parse_covers_qualified
+from queue_io import parse_covers_qualified
 
 from slot_core import (
     SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME,
@@ -84,7 +84,7 @@ def _build_epic_plan(branch: str, issue_repo: str, cover_refs: list,
     cover_refs: list of CoverRef (from parse_covers_qualified) or plain strings.
     Each CoverRef carries its own repo; bare ints/strings fall back to issue_repo.
     """
-    from plan_io import CoverRef
+    from queue_io import CoverRef
     from plan_manager import QueueItem, IssueRef, build_plan_content
     items: list[QueueItem] = []
     for ref in cover_refs:

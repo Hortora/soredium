@@ -7,7 +7,7 @@ Tier 3: Human intervention (yield ACTION=user_input)
 """
 
 LIFECYCLE_AUTO_RESOLVE = {
-    ".plan", "JOURNAL.md", ".close-progress", ".work-progress",
+    ".queue", ".plan", "JOURNAL.md", ".close-progress", ".work-progress",
     ".close-log.jsonl", ".artifacts-promoted", ".close-progress.tmp",
     ".work-progress.tmp", ".execute-progress", ".land-ledger.jsonl",
 }
