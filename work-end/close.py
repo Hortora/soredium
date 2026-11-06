@@ -244,10 +244,7 @@ def preflight(targets: list[CloseTarget]) -> dict:
 
         local_only = _commits_ahead_of_remote(t.repo, t.base_branch, t.push_target)
         if local_only > 0:
-            rescue_name = f"rescue-{t.repo.name}"
-            _create_branch_at(t.repo, rescue_name, t.base_branch)
-            _reset_to_remote(t.repo, t.base_branch, t.push_target)
-            rescued[t.repo.name] = rescue_name
+            rescued[t.repo.name] = f"{local_only} commit(s) ahead of {t.push_target}/{t.base_branch}"
 
     return {"errors": errors, "rescued": rescued}
 
@@ -639,8 +636,8 @@ def main() -> int:
         if result.next_item:
             print(f"NEXT_ITEM={result.next_item.ref}")
         if result.rescued:
-            for repo, shas in result.rescued.items():
-                print(f"RESCUED_{repo}={','.join(shas)}")
+            for repo, detail in result.rescued.items():
+                print(f"RESCUED_{repo}={detail}")
     else:
         print("ACTION=error")
         for err in result.errors:

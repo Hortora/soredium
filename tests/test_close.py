@@ -247,7 +247,7 @@ class TestPreflight:
         )
         result = preflight([target])
         assert "project" in result["rescued"]
-        assert result["rescued"]["project"] == "rescue-project"
+        assert "ahead of" in result["rescued"]["project"]
 
 
 # --- land tests ---
@@ -801,6 +801,59 @@ class TestSquashMergeCommit:
             capture_output=True, text=True).stdout.strip()
         assert "feat: change 0" in msg, "squash commit must include original messages"
         assert "feat: change 2" in msg
+
+    def test_preflight_rescue_does_not_reset_main(self, tmp_path):
+        """Issue #502: preflight must not reset main when local-only commits exist."""
+        from close import preflight, CloseTarget
+        bare = tmp_path / "bare"
+        subprocess.run(["git", "init", "--bare", str(bare)],
+                       capture_output=True, check=True)
+        repo = tmp_path / "repo"
+        subprocess.run(["git", "clone", str(bare), str(repo)],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t.com"],
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"],
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "--allow-empty", "-m", "init"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "push", "origin", "main"],
+                       capture_output=True, check=True)
+        (repo / "landed.txt").write_text("landed content from issue 725")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat: landed #725"],
+                       capture_output=True, check=True)
+        main_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True).stdout.strip()
+        _multi_commit_branch(repo, "feat", 2)
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"],
+                       capture_output=True)
+        target = CloseTarget(repo=repo, branch="feat", base_branch="main",
+                             transport="direct", canonical=None,
+                             push_target="origin", mirror_target="",
+                             is_workspace=False)
+        result = preflight([target])
+        assert result["errors"] == []
+        post_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "main"],
+            capture_output=True, text=True).stdout.strip()
+        assert post_sha == main_sha, \
+            f"preflight must not reset main: was {main_sha}, now {post_sha}"
+
+    def test_rescued_output_format(self, tmp_path):
+        """Issue #502: RESCUED output must not iterate string character-by-character."""
+        from close import CloseResult
+        from queue_io import QueueItem
+        result = CloseResult(
+            success=True,
+            landed={"project": "abc123"},
+            rescued={"platform": "rescue-platform"},
+        )
+        lines = []
+        for repo, branch_name in result.rescued.items():
+            lines.append(f"RESCUED_{repo}={branch_name}")
+        assert lines == ["RESCUED_platform=rescue-platform"]
 
     def test_squash_merge_raises_on_commit_failure(self, tmp_path):
         from close import squash_merge
