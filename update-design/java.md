@@ -55,17 +55,13 @@ This skill is invoked by `git-commit` when:
 ### Step 0: Detect target document
 
 Before anything else, check whether `ARC42STORIES.MD` exists in the **project repo**.
-Resolve the project path via the `proj/` symlink — this works correctly regardless of
-whether the skill is invoked from the workspace CWD or the project CWD:
+Use `$WORKSPACE` and `$PROJECT` from ctx.py (already run by the parent update-design skill
+in Step 1). Do NOT re-resolve with `git rev-parse` — that bypasses the topology resolver
+and returns the wrong path when CWD is the project repo in a dual-layout workspace.
 
 ```bash
-WORKSPACE=$(git rev-parse --show-toplevel 2>/dev/null)
-PROJECT=$(readlink -f "$WORKSPACE/proj" 2>/dev/null || echo "$WORKSPACE")
 ls "$PROJECT/ARC42STORIES.MD" 2>/dev/null && echo "arc42=yes" || echo "arc42=no"
 ```
-
-If `proj/` is absent (CWD is already the project repo), `PROJECT` falls back to `WORKSPACE`,
-which is the project root — the check remains correct in both cases.
 
 | State | Target document | Behaviour |
 |---|---|---|
@@ -91,14 +87,8 @@ ls "$WORKSPACE/JOURNAL.md" 2>/dev/null
 [ "$(git -C "$WORKSPACE" branch --show-current)" != "main" ]
 ```
 
-Where `$WORKSPACE` and `$PROJECT` are resolved via symlinks:
-```bash
-WORKSPACE=$(git rev-parse --show-toplevel 2>/dev/null)
-PROJECT=$(readlink -f proj 2>/dev/null)
-```
-
-`WORKSPACE` is the git root of the current workspace directory. `PROJECT` follows the `proj/`
-symlink created by `workspace-init`. If `proj/` is missing, fall back to direct mode — do not
+`$WORKSPACE` and `$PROJECT` come from ctx.py (run by the parent update-design skill).
+If `SINGLE_REPO=yes` (no workspace), fall back to direct mode — do not
 attempt to parse CLAUDE.md for paths.
 
 - All three true → **workspace mode**: proceed with journal entry workflow below.
