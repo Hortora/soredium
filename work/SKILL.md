@@ -26,8 +26,8 @@ and judgment steps; `project/work.py` handles mechanical execution.
 
 | Invocation | Route |
 |------------|-------|
-| `work end` | → **work-end** (work_end_orchestrator.py) |
-| `work sync` | → **work sync** (work_end_orchestrator.py mode=sync) |
+| `work end` | → **work-end** (close.py) |
+| `work sync` | → **work sync** (close.py) |
 | `work pause` | → pipeline: `pause` |
 | `work resume` / `resume` | → pipeline: `resume` |
 | `work continue` / `continue` | → pipeline: `continue` |
@@ -210,26 +210,18 @@ the active project has changed. Before calling work.py again:
 
 ---
 
-## Close / Sync (work-end orchestrator)
+## Close / Sync
 
-`work end` and `work sync` use `work_end_orchestrator.py` directly:
-
-```bash
-python3 work-end/work_end_orchestrator.py \
-    workspace=$WORKSPACE project=$PROJECT branch=$BRANCH \
-    base_branch=$BASE meta_state=$META_STATE \
-    [mode=sync] [covers=...] [issue_repo=...] [plan_path=...]
-```
-
-These commands are NOT routed through `project/work.py`. They use the
-existing work-end close pipeline with its own step list and handlers.
+`work end` and `work sync` invoke the `work-end` skill, which runs
+`close.py` — the atomic close ceremony. These commands are NOT routed
+through `project/work.py`.
 
 ---
 
 ## Skill Chaining
 
 **Routes to:**
-- `work-end` (work_end_orchestrator.py) — for `end` and `sync` commands
+- `work-end` (close.py) — for `end` and `sync` commands
 - `handover` — when user picks "wrap" from contextual options
 
 **Uses:**
@@ -238,4 +230,4 @@ existing work-end close pipeline with its own step list and handlers.
 
 **This skill routes and dispatches.** Mechanical execution lives in
 `work.py`. Judgment step details live in `handlers/*.md`. Close ceremony
-lives in `work_end_orchestrator.py`.
+lives in `close.py`.

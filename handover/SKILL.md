@@ -67,7 +67,7 @@ Call in a loop until `ACTION=complete`. Dispatch:
 | `protocol` | Invoke protocol SWEEP |
 | `update_claude_md` | Invoke update-claude-md |
 | `write_content` | Invoke write-content (diary) |
-| `user_input` (epic_hygiene) | Run `hygiene_scan.py`, present findings |
+| `user_input` (epic_hygiene) | Present queue status and open issues |
 | `user_input` (journal_entry) | Write JOURNAL.md entries |
 | `user_input` (arc42_scan) | Read `handlers/arc42_stale_scan.md` |
 | `user_input` (garden_feedback) | Run `garden_feedback_table.py`, present table |
@@ -83,11 +83,7 @@ yielded.
 
 ### Step 3 — Summary
 
-```bash
-python3 work-end/progress_summary.py $WORKSPACE mode=wrap
-```
-
-Print verbatim.
+The orchestrator's `ACTION=complete` output is the summary. Print it.
 
 ---
 
