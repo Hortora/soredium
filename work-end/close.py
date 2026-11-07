@@ -221,14 +221,6 @@ def _commits_ahead_of_remote(repo: Path, base: str, remote: str) -> int:
     return int(count) if count.isdigit() else 0
 
 
-def _create_branch_at(repo: Path, name: str, ref: str) -> None:
-    _git(repo, "branch", name, ref)
-
-
-def _reset_to_remote(repo: Path, base: str, remote: str) -> None:
-    _git(repo, "reset", "--hard", f"{remote}/{base}")
-
-
 def preflight(targets: list[CloseTarget]) -> dict:
     """Verify preconditions before mutating. Returns {errors, rescued}."""
     errors: list[str] = []
@@ -254,13 +246,6 @@ def preflight(targets: list[CloseTarget]) -> dict:
 def _checkout(repo: Path, branch: str) -> None:
     _git(repo, "checkout", branch)
 
-
-def _pull(repo: Path, remote: str, branch: str) -> None:
-    result = _git(repo, "remote")
-    if result.returncode != 0 or remote not in result.stdout:
-        return
-    _git(repo, "fetch", remote, branch)
-    _git(repo, "reset", "--hard", f"{remote}/{branch}")
 
 
 def _merge_base(repo: Path, a: str, b: str) -> str:
