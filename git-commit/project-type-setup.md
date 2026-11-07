@@ -11,7 +11,7 @@ Create or update CLAUDE.md:
 ```markdown
 ## Commit Messages
 
-**NEVER add AI attribution to commit messages** (no `Co-Authored-By: Claude`, no `Generated-by:`, no AI mentions) unless the user explicitly requests it for a specific commit. Commit messages describe WHAT changed and WHY only.
+Follow the system attribution guidance for `Co-Authored-By` lines in commit messages.
 
 ## Writing Style Guide
 
@@ -50,7 +50,7 @@ Create or update CLAUDE.md:
 ```markdown
 ## Commit Messages
 
-**NEVER add AI attribution to commit messages** (no `Co-Authored-By: Claude`, no `Generated-by:`, no AI mentions) unless the user explicitly requests it for a specific commit. Commit messages describe WHAT changed and WHY only.
+Follow the system attribution guidance for `Co-Authored-By` lines in commit messages.
 
 ## Writing Style Guide
 
@@ -82,7 +82,7 @@ Create or update CLAUDE.md:
 ```markdown
 ## Commit Messages
 
-**NEVER add AI attribution to commit messages** (no `Co-Authored-By: Claude`, no `Generated-by:`, no AI mentions) unless the user explicitly requests it for a specific commit. Commit messages describe WHAT changed and WHY only.
+Follow the system attribution guidance for `Co-Authored-By` lines in commit messages.
 
 ## Writing Style Guide
 
@@ -138,7 +138,7 @@ Create CLAUDE.md:
 ```markdown
 ## Commit Messages
 
-**NEVER add AI attribution to commit messages** (no `Co-Authored-By: Claude`, no `Generated-by:`, no AI mentions) unless the user explicitly requests it for a specific commit. Commit messages describe WHAT changed and WHY only.
+Follow the system attribution guidance for `Co-Authored-By` lines in commit messages.
 
 ## Writing Style Guide
 
@@ -188,7 +188,7 @@ Create or update CLAUDE.md:
 ```markdown
 ## Commit Messages
 
-**NEVER add AI attribution to commit messages** (no `Co-Authored-By: Claude`, no `Generated-by:`, no AI mentions) unless the user explicitly requests it for a specific commit. Commit messages describe WHAT changed and WHY only.
+Follow the system attribution guidance for `Co-Authored-By` lines in commit messages.
 
 ## Writing Style Guide
 

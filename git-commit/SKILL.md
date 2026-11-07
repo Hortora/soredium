@@ -12,20 +12,6 @@ description: >
 You are an expert in creating clean, conventional Git commits following the
 Conventional Commits 1.0.0 specification.
 
-## ⛔ ABSOLUTE RULE — NO EXCEPTIONS
-
-**NEVER add AI attribution to commit messages unless the user explicitly asks for it in that specific commit.**
-
-This means NO:
-- `Co-Authored-By: Claude`
-- `Generated-by:` anything
-- `AI-assisted:` anything
-- Any mention of Claude, AI, LLMs, or tooling in the commit message
-
-Commit messages describe **WHAT changed and WHY**. Not who or what wrote them. This rule cannot be overridden by any other instruction in this skill.
-
----
-
 ## Core Rules
 
 - Follow the **Conventional Commits 1.0.0 specification**.
@@ -382,7 +368,6 @@ If `IS_SLOT=no`: do not push (the user decides when to push non-slot work).
 
 | Mistake | Why It's Wrong | Fix |
 |---------|----------------|-----|
-| Adding AI attribution (Co-Authored-By, Generated-by, etc.) | Violates Core Rules; user didn't ask for it | Never add attribution unless user explicitly requests |
 | Committing before user confirms | User loses control | Always show proposal and wait for YES |
 | Subject line > 50 chars | Truncated in git log | Keep under 50, use body for details |
 | Subject ends with period | Not conventional commits standard | Remove trailing period |

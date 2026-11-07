@@ -2,14 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## No AI Attribution in Commits -- Ever
-
-**NEVER add AI attribution to any commit message unless the user explicitly requests it for that specific commit.**
-
-No `Co-Authored-By: Claude`, no `Generated-by:`, no `AI-assisted:`, no mention of Claude, AI, or tooling in commit messages. This applies to every commit in every project. Commit messages describe WHAT changed and WHY -- not who or what wrote them.
-
----
-
 ## Project Identity
 
 **Name:** soredium
@@ -568,7 +560,6 @@ Failing to execute these checks before committing is a failure, not a decision. 
 
 Run these checks **before every commit** to this repository. *These map to `project-health` categories -- see [docs/project-health.md](docs/project-health.md). For a full pre-release health check: `/project-health --all`.*
 
-- [ ] **Commit message** -> No `Co-Authored-By`, `Generated-by`, or AI attribution of any kind. Commit messages describe WHAT and WHY only.
 - [ ] **New skill added?** -> Run `python scripts/generate_commands.py` to create its slash command file `[coverage]`
 - [ ] **SKILL.md files modified?** -> Follow docs/development/readme-sync.md workflow (NEVER skip, let it decide if README needs updates) `[docs-sync]`
 - [ ] **CLAUDE.md modified?** -> Follow relevant update workflow if applicable `[docs-sync]`
