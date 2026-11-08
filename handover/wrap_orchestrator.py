@@ -68,18 +68,17 @@ def _skip_no_plan(ctx: WrapContext) -> bool:
 
 # --- Script builders (wrap-specific) ---
 
-LOOSE_ENDS_SCRIPT = _work_end / "loose_ends_sweep.py"
+_work_pause = Path(__file__).resolve().parent.parent / "work-pause"
 
 
 def _loose_ends_script(ctx):
-    return [sys.executable, str(LOOSE_ENDS_SCRIPT),
-            f"workspace={ctx.workspace}", f"project={ctx.project}",
-            f"branch={ctx.branch}"]
+    return None
 
 
 def _wip_commit_script(ctx):
-    return [sys.executable, str(_work_end / "branch_cleanup.py"),
-            "wip-commit", str(ctx.project), str(ctx.workspace)]
+    return [sys.executable, str(_work_pause / "pause_exec.py"),
+            "commit-wip", str(ctx.workspace),
+            f"message=WIP: session wrap {ctx.branch}"]
 
 
 def _wrap_sweep_defaults() -> str:
