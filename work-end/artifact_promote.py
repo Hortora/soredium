@@ -49,17 +49,21 @@ def _copromote_images(md_source: Path, md_dest: Path, repo_cwd: str) -> int:
     if md_source.suffix != ".md":
         return 0
 
+    dest_repo = Path(repo_cwd)
     copied = 0
     for raw_ref, resolved_src in extract_image_refs(md_source):
         if not resolved_src.exists():
             continue
-        rel = Path(raw_ref)
-        if rel.is_absolute():
-            continue
-        img_dest = md_dest.parent / rel
+        if raw_ref.startswith("/"):
+            img_dest = dest_repo / raw_ref.lstrip("/")
+        else:
+            img_dest = md_dest.parent / raw_ref
         img_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(resolved_src), str(img_dest))
-        img_rel = str(img_dest.relative_to(Path(repo_cwd)))
+        try:
+            img_rel = str(img_dest.relative_to(dest_repo))
+        except ValueError:
+            continue
         git(repo_cwd, "add", img_rel)
         copied += 1
     return copied

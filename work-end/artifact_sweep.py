@@ -23,6 +23,25 @@ sys.path.insert(0, str(_script_dir))
 sys.path.insert(0, str(_script_dir.parent / "project"))
 
 from workspace_artifacts import scan, CATEGORIES
+from artifact_promote import _copromote_images
+
+
+def verify_images(project: Path) -> list[str]:
+    """Check promoted .md files for broken image references."""
+    try:
+        from verification.repo_checks import extract_image_refs
+    except ImportError:
+        return []
+    broken: list[str] = []
+    for dest_dir in ["docs/blog", "docs/specs", "docs/adr"]:
+        target = project / dest_dir
+        if not target.is_dir():
+            continue
+        for md in target.rglob("*.md"):
+            for raw_ref, resolved in extract_image_refs(md):
+                if not resolved.exists():
+                    broken.append(f"{md.relative_to(project)}: {raw_ref}")
+    return broken
 
 
 DEST_PREFIX = {
@@ -99,6 +118,8 @@ def promote_gaps(gaps: list[dict], project: Path,
             shutil.copytree(src, dst)
         else:
             shutil.copy2(src, dst)
+            if src.suffix == ".md":
+                _copromote_images(src, dst, str(project))
 
         subprocess.run(
             ["git", "-C", str(project), "add", gap["dest_rel"]],
@@ -127,6 +148,12 @@ def promote_gaps(gaps: list[dict], project: Path,
                 ["git", "-C", str(project), "commit", "-m", msg],
                 capture_output=True,
             )
+
+    if promoted > 0 and not dry_run:
+        broken = verify_images(project)
+        if broken:
+            return {"promoted": promoted, "by_category": by_category,
+                    "broken_images": broken}
 
     return {"promoted": promoted, "by_category": by_category}
 

@@ -101,6 +101,43 @@ class TestSweepGapDetection:
         assert "specs" in categories
 
 
+class TestImageCopromotion:
+
+    def test_relative_image_copied_with_md(self, tmp_path):
+        from artifact_sweep import find_gaps, promote_gaps
+
+        ws = _init_repo(tmp_path / "workspace")
+        proj = _init_repo(tmp_path / "project")
+
+        (ws / "blog").mkdir()
+        (ws / "blog" / "images").mkdir()
+        (ws / "blog" / "images" / "diagram.png").write_text("PNG")
+        (ws / "blog" / "entry.md").write_text("# E\n![d](images/diagram.png)\n")
+
+        gaps = find_gaps(ws, proj)
+        promote_gaps(gaps, proj)
+
+        assert (proj / "docs" / "blog" / "entry.md").exists()
+        assert (proj / "docs" / "blog" / "images" / "diagram.png").exists()
+
+    def test_absolute_image_copied_with_md(self, tmp_path):
+        from artifact_sweep import find_gaps, promote_gaps
+
+        ws = _init_repo(tmp_path / "workspace")
+        proj = _init_repo(tmp_path / "project")
+
+        (ws / "blog").mkdir()
+        (ws / "assets" / "images").mkdir(parents=True)
+        (ws / "assets" / "images" / "logo.png").write_text("PNG")
+        (ws / "blog" / "entry.md").write_text("# E\n![l](/assets/images/logo.png)\n")
+
+        gaps = find_gaps(ws, proj)
+        promote_gaps(gaps, proj)
+
+        assert (proj / "docs" / "blog" / "entry.md").exists()
+        assert (proj / "assets" / "images" / "logo.png").exists()
+
+
 class TestSweepPromote:
 
     def test_promote_copies_to_project(self, tmp_path):
