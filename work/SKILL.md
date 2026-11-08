@@ -91,7 +91,8 @@ If `CORRUPTION_COUNT` > 0, enter triage flow:
 | `work resume` | on feature branch | Error: "Use `continue`, not `resume`." |
 | `work resume` | main + empty stack | Error: "Nothing to resume." |
 | `work start` (no issue) | `ROUTE=resume_branch` | Redirect → `continue` |
-| `work start #N` | `ROUTE=resume_branch` | Offer: pause current branch and start #N, or continue current work |
+| `work start #N` | `ROUTE=resume_branch` AND #N is active in queue | Redirect → `continue` (branch already covers #N) |
+| `work start #N` | `ROUTE=resume_branch` AND #N is NOT active | Offer: pause current branch and start #N, or continue current work |
 
 ## Step 2 — Route based on ctx.py output
 
