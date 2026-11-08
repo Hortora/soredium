@@ -329,7 +329,7 @@ def extract_image_refs(md_file: Path) -> list[tuple[str, Path]]:
 
 
 def check_broken_images(md_file: Path) -> list[Finding]:
-    """Check that all image references in a .md file resolve to real files."""
+    """Check that all image references in a .md file resolve to real, valid files."""
     findings: list[Finding] = []
     for ref, resolved in extract_image_refs(md_file):
         if not resolved.exists():
@@ -337,4 +337,29 @@ def check_broken_images(md_file: Path) -> list[Finding]:
                 "ERROR", "broken-image",
                 f"{md_file.name} — image not found: {ref}",
             ))
+        elif resolved.stat().st_size == 0:
+            findings.append(Finding(
+                "ERROR", "empty-image",
+                f"{md_file.name} — image is empty (0 bytes): {ref}",
+            ))
+        elif resolved.suffix.lower() == ".svg":
+            try:
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(str(resolved))
+                root = tree.getroot()
+                if "svg" not in root.tag.lower():
+                    findings.append(Finding(
+                        "ERROR", "invalid-svg",
+                        f"{md_file.name} — not a valid SVG (root tag: {root.tag}): {ref}",
+                    ))
+                elif len(list(root)) == 0:
+                    findings.append(Finding(
+                        "WARN", "empty-svg",
+                        f"{md_file.name} — SVG has no content elements: {ref}",
+                    ))
+            except Exception as e:
+                findings.append(Finding(
+                    "ERROR", "corrupt-svg",
+                    f"{md_file.name} — SVG parse error ({e}): {ref}",
+                ))
     return findings
