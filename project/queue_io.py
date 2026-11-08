@@ -308,7 +308,9 @@ def validate_queue(workspace: Path, queue: Queue,
         if current_branch != queue.state.branch:
             findings.append(Finding("S5_BRANCH_MISMATCH", "high",
                                     f"branch mismatch: queue={queue.state.branch} actual={current_branch}",
-                                    actions=["switch_to_plan_branch", "update_plan_branch", "ignore"]))
+                                    actions=["update_plan_branch", "switch_to_plan_branch", "ignore"],
+                                    auto_recoverable=True,
+                                    auto_action="update_plan_branch"))
     queue_path = workspace / ".queue"
     if queue_path.exists():
         content = queue_path.read_text()

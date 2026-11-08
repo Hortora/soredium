@@ -54,6 +54,7 @@ _soredium_root = str(Path(__file__).resolve().parent.parent)
 if _soredium_root not in sys.path:
     sys.path.insert(0, _soredium_root)
 from plan_io import parse_covers, write_field, write_plan
+from queue_io import read_queue, write_queue
 
 
 REQUIRED = {"branch", "project-sha"}
@@ -80,8 +81,24 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
             f"workspace path looks like a project repo (has wksp/ symlink, "
             f"no proj/ symlink, no .workspace marker): {workspace}")
 
+    queue_path = workspace / ".queue"
     plan_path = workspace / ".plan"
     journal_path = workspace / "JOURNAL.md"
+
+    if not force and queue_path.exists():
+        queue = read_queue(workspace)
+        if queue:
+            if queue.state.branch != branch:
+                queue.state.branch = branch
+                write_queue(workspace, queue)
+            if covers and queue.state.covers and covers != queue.state.covers:
+                queue.state.covers = covers
+                write_queue(workspace, queue)
+            return ScaffoldResult(
+                plan_path=str(queue_path),
+                journal_path=str(journal_path) if journal_path.exists() else "",
+                created=False,
+            )
 
     if not force and plan_path.exists() and journal_path.exists():
         content = plan_path.read_text()
