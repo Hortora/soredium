@@ -81,7 +81,16 @@ Skipping is scoped to the failed step ONLY. `skip_step=` is validated
 against the last yielded step. Do not skip steps the orchestrator hasn't
 yielded.
 
-### Step 3 — Summary
+### Step 3 — Artifact sweep
+
+```bash
+python3 ~/.claude/skills/work-end/artifact_sweep.py $WORKSPACE $PROJECT
+```
+
+Promotes any workspace artifacts (specs, ADRs, blog, plans) not yet
+in the project repo. Non-blocking — report gaps but don't fail the wrap.
+
+### Step 4 — Summary
 
 The orchestrator's `ACTION=complete` output is the summary. Print it.
 

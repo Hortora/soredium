@@ -67,12 +67,20 @@ committed state.
 
 After `ACTION=complete`:
 
-1. **Close GitHub issues:**
+1. **Artifact sweep** — promote workspace artifacts to project:
+   ```bash
+   python3 ~/.claude/skills/work-end/artifact_sweep.py $WORKSPACE $PROJECT covers=$COVERS
+   ```
+   This compares workspace `blog/`, `specs/`, `docs/adr/`, `plans/`,
+   `snapshots/` against project destinations and copies anything missing.
+   Covers all categories, not just blog. Reports `GAPS=N` and `PROMOTED=N`.
+
+2. **Close GitHub issues:**
    ```bash
    gh issue close $ISSUE_N --repo $OWNER_REPO --comment "Landed as <SHA>"
    ```
 
-2. **Archive slot** (if `IN_SLOT=yes`):
+3. **Archive slot** (if `IN_SLOT=yes`):
    ```bash
    python3 ~/.claude/skills/work-slot/slot_manager.py archive-slot $FAMILY_ROOT slot=$SLOT_NUM
    ```
