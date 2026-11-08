@@ -157,3 +157,34 @@ def check_dangling_plans(slots_dir: Path) -> list[Finding]:
                     f"slot {slot_dir.name}: .plan references {branch_line} but branch doesn't exist",
                 ))
     return findings
+
+
+def check_unpublished_slot_blogs(
+    slots_dir: Path, published_filenames: set[str],
+) -> list[Finding]:
+    """Detect blog entries on slot workspace clone mains not at any publication destination.
+
+    Slot workspace clones accumulate blogs on main that never reach publication
+    destinations because the ceremony only promotes from canonical workspaces.
+    """
+    findings: list[Finding] = []
+    for slot_dir in sorted(slots_dir.iterdir()):
+        if not slot_dir.is_dir() or slot_dir.name in ("attic", "quarantine"):
+            continue
+        for clone in sorted(slot_dir.iterdir()):
+            if not clone.is_dir() or not clone.name.startswith("wsp-"):
+                continue
+            if not (clone / ".git").exists():
+                continue
+            blog = clone / "blog"
+            if not blog.exists():
+                continue
+            for f in sorted(blog.glob("*.md")):
+                if f.name in ("INDEX.md",):
+                    continue
+                if f.name not in published_filenames:
+                    findings.append(Finding(
+                        "WARN", "slot-blog-unpublished",
+                        f"slot {slot_dir.name}/{clone.name}: {f.name} not at any publication destination",
+                    ))
+    return findings
