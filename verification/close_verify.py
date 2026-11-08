@@ -26,7 +26,8 @@ from verification.outcomes import (
 
 BLOCKING_CATEGORIES = {
     "landed-incomplete", "branch-not-merged", "stamp-sha-not-on-base",
-    "canonical-sync",
+    "canonical-sync", "broken-image", "invalid-svg", "corrupt-svg",
+    "empty-image", "promoted-broken-image",
 }
 
 

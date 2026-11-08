@@ -34,6 +34,23 @@ def copy_entry(source_path: str, dest_dir: str) -> None:
     dest_file = dest / src.name
     try:
         dest_file.write_bytes(src.read_bytes())
+
+        # Co-publish referenced images alongside the .md
+        try:
+            from verification.repo_checks import extract_image_refs
+            for raw_ref, resolved_src in extract_image_refs(src):
+                if not resolved_src.exists():
+                    print(f"WARN=image_not_found: {raw_ref}", flush=True)
+                    continue
+                img_dest = dest / raw_ref
+                img_dest.parent.mkdir(parents=True, exist_ok=True)
+                if not img_dest.exists():
+                    import shutil
+                    shutil.copy2(str(resolved_src), str(img_dest))
+                    print(f"IMAGE_COPIED={raw_ref}", flush=True)
+        except ImportError:
+            pass  # verification module not available — skip image co-publishing
+
         print("COPIED=yes", flush=True)
     except Exception as e:
         print(f"ERROR=copy_failed: {e}", flush=True)

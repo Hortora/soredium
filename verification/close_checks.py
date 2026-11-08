@@ -416,7 +416,7 @@ def check_promoted_images(project: Path) -> list[Finding]:
     """Check that promoted .md files have all referenced images present.
 
     Scans docs/blog/ and docs/specs/ in the project for broken image refs.
-    Returns WARN findings (not blocking).
+    Returns ERROR findings — broken images block the stamp.
     """
     from verification.repo_checks import check_broken_images
 
@@ -428,6 +428,6 @@ def check_promoted_images(project: Path) -> list[Finding]:
         for md_file in scan_dir.rglob("*.md"):
             for f in check_broken_images(md_file):
                 findings.append(Finding(
-                    "WARN", "promoted-broken-image", f.message,
+                    "ERROR", "promoted-broken-image", f.message,
                 ))
     return findings
