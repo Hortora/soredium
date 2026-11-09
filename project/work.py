@@ -165,6 +165,8 @@ RESUME_STEPS: list[StepDef] = [
             script_fn=lambda ctx: [
                 "python3", str(_WORK_RESUME_DIR / "resume_exec.py"), "reset-wip",
                 str(ctx.project), str(ctx.workspace)]),
+    StepDef("sync_queue_branch", "resume", StepType.MECHANICAL,
+            script_fn=_sync_queue_branch_script),
     StepDef("context_resume", "resume", StepType.JUDGMENT,
             action_context_fn=lambda ctx: {"CONTEXT": "load_context"}),
 ]
@@ -301,11 +303,21 @@ def _skip_state_already_active(ctx) -> bool:
     return ctx.meta_state == "active"
 
 
+def _sync_queue_branch_script(ctx):
+    if not ctx.branch:
+        return None
+    return ["python3", str(_PLAN_MANAGER),
+            "set-state", str(ctx.plan_path) if ctx.plan_path else str(ctx.workspace / ".queue"),
+            f"key=branch", f"value={ctx.branch}"]
+
+
 CONTINUE_STEPS: list[StepDef] = [
     StepDef("auto_resolve_transient", "continue", StepType.MECHANICAL,
             skip_fn=_skip_state_already_active),
     StepDef("lifecycle_continue", "continue", StepType.LIFECYCLE,
             from_state="active", to_state="active", event="work_continue"),
+    StepDef("sync_queue_branch", "continue", StepType.MECHANICAL,
+            script_fn=_sync_queue_branch_script),
     StepDef("health_check", "continue", StepType.MECHANICAL,
             script_fn=lambda ctx: [
                 "python3", str(_project_dir / "work_health.py"),
