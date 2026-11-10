@@ -116,12 +116,12 @@ def discover_repo_topology(workspace: Path) -> list[tuple]:
 def _get_slot_repos_if_slot(workspace: Path) -> list[Path]:
     """Return slot repo Paths if workspace is inside a slot, else empty list."""
     try:
-        from slot_core import get_slot_repos, is_workspace_clone
-        slot_dir = workspace.parent
-        if not (slot_dir / ".slot").exists():
-            return []
-        repo_names = get_slot_repos(slot_dir)
-        return [slot_dir / name for name in repo_names]
+        from slot_core import get_slot_repos
+        for candidate in [workspace, workspace.parent]:
+            if (candidate / ".slot").exists():
+                repo_names = get_slot_repos(candidate)
+                return [candidate / name for name in repo_names]
+        return []
     except (ImportError, Exception):
         return []
 

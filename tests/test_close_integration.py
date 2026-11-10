@@ -271,6 +271,116 @@ class TestQueueEdgeCases:
         assert queue.items[1].active
 
 
+# --- Topology 4: slot with repos ---
+
+def _setup_slot(tmp_path, repos: list[str], branch: str,
+                ws_name: str = "wsp-test") -> tuple[Path, list[Path]]:
+    """Create a slot with .slot file, workspace, and N repo clones."""
+    slot_dir = tmp_path / "slots" / "42"
+    slot_dir.mkdir(parents=True)
+
+    repo_lines = "\n".join(f"- {r}" + (" (primary)" if i == 0 else "")
+                           for i, r in enumerate(repos))
+    (slot_dir / ".slot").write_text(
+        f"# Slot 42 — test\n\n## Issue\nR#1\n\n## Repos\n{repo_lines}\n"
+    )
+
+    ws = _init_repo(slot_dir / ws_name)
+    (ws / ".workspace").write_text(f"project: {slot_dir / repos[0]}\n")
+
+    repo_paths = []
+    for name in repos:
+        repo = _init_repo(slot_dir / name)
+        repo_paths.append(repo)
+
+    return slot_dir, repo_paths
+
+
+class TestSlotSingleRepo:
+    """Slot with one project repo + workspace."""
+
+    def test_slot_single_repo_lands(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        ws = slot_dir / "wsp-test"
+
+        _add_commits(repo, "issue-1-feat", 3)
+        _add_commits(ws, "issue-1-feat", 1)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        pre_head = _main_head(repo)
+
+        result = close(slot_dir)
+
+        assert result.success, f"ceremony failed: {result.errors}"
+        assert _main_head(repo) != pre_head
+        assert _file_on_main(repo, "issue-1-feat-file0.txt")
+        assert _on_branch(repo) == "main"
+        assert _is_clean(repo)
+
+    def test_slot_queue_at_root(self, tmp_path):
+        """Queue at slot root (not inside workspace) is found."""
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        q = read_queue(slot_dir)
+        assert q is not None
+        assert q.state.branch == "issue-1-feat"
+
+
+class TestSlotMultiRepo:
+    """Slot with 2+ repos on the same branch."""
+
+    def test_multi_repo_same_branch(self, tmp_path):
+        slot_dir, [agency, connectors] = _setup_slot(
+            tmp_path, ["agency", "connectors"], "issue-1-feat")
+        ws = slot_dir / "wsp-test"
+
+        _add_commits(agency, "issue-1-feat", 3)
+        _add_commits(connectors, "issue-1-feat", 2)
+        _add_commits(ws, "issue-1-feat", 1)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, f"ceremony failed: {result.errors}"
+        assert _file_on_main(agency, "issue-1-feat-file0.txt")
+        assert _file_on_main(connectors, "issue-1-feat-file0.txt")
+        assert _on_branch(agency) == "main"
+        assert _on_branch(connectors) == "main"
+
+    def test_multi_repo_different_branches(self, tmp_path):
+        """Cumulative close: repos on different feature branches."""
+        slot_dir, [agency, connectors] = _setup_slot(
+            tmp_path, ["agency", "connectors"], "issue-1-feat")
+        ws = slot_dir / "wsp-test"
+
+        _add_commits(agency, "issue-1-feat", 2)
+        _add_commits(connectors, "issue-2-other", 2)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, f"ceremony failed: {result.errors}"
+        assert _file_on_main(agency, "issue-1-feat-file0.txt")
+        assert _file_on_main(connectors, "issue-2-other-file0.txt")
+
+    def test_one_repo_no_branch(self, tmp_path):
+        """One repo has the branch, the other doesn't — should still close."""
+        slot_dir, [agency, connectors] = _setup_slot(
+            tmp_path, ["agency", "connectors"], "issue-1-feat")
+
+        _add_commits(agency, "issue-1-feat", 2)
+        # connectors stays on main — no feature branch
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, f"ceremony failed: {result.errors}"
+        assert _file_on_main(agency, "issue-1-feat-file0.txt")
+        assert _on_branch(agency) == "main"
+
+
 # --- Verification helpers ---
 
 class TestPostCeremonyState:
