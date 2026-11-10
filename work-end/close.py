@@ -197,9 +197,23 @@ def resolve(workspace: Path) -> list[CloseTarget]:
 
 # --- preflight ---
 
+_LIFECYCLE_IGNORE = frozenset({
+    ".queue", ".plan", ".close-state", ".work-progress", ".close-progress",
+    ".execute-progress", ".land-ledger.jsonl", ".close-log.jsonl",
+    ".wrap-log.jsonl", ".artifacts-promoted", "JOURNAL.md",
+    ".close-report.json", ".squash-plan",
+})
+
+
 def _is_dirty(repo: Path) -> bool:
     result = _git(repo, "status", "--porcelain")
-    return bool(result.stdout.strip()) if result.returncode == 0 else False
+    if result.returncode != 0:
+        return False
+    for line in result.stdout.strip().splitlines():
+        filename = line[3:].strip().strip('"')
+        if filename not in _LIFECYCLE_IGNORE:
+            return True
+    return False
 
 
 def _remote_reachable(repo: Path, remote: str) -> bool:
