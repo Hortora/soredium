@@ -82,7 +82,10 @@ def extract_image_refs(md_path: Path, root: Path) -> list[str]:
                 continue
             if "{" in raw or "}" in raw:
                 continue
-            resolved = (md_path.parent / raw).resolve()
+            if raw.startswith("/"):
+                resolved = (root / raw.lstrip("/")).resolve()
+            else:
+                resolved = (md_path.parent / raw).resolve()
             if not resolved.is_file():
                 print(f"WARNING: image ref not found: {raw} (in {md_path})",
                       file=sys.stderr)
