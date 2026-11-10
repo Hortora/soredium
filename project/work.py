@@ -129,6 +129,18 @@ PAUSE_STEPS: list[StepDef] = [
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _sync_queue_branch_script(ctx):
+    if not ctx.branch:
+        return None
+    return ["python3", str(_PLAN_MANAGER),
+            "set-state", str(ctx.plan_path) if ctx.plan_path else str(ctx.workspace / ".queue"),
+            f"key=branch", f"value={ctx.branch}"]
+
+
+# ---------------------------------------------------------------------------
 # Resume pipeline — stack pick (judgment) + mechanical restore
 # ---------------------------------------------------------------------------
 
@@ -301,14 +313,6 @@ START_STEPS: list[StepDef] = [
 
 def _skip_state_already_active(ctx) -> bool:
     return ctx.meta_state == "active"
-
-
-def _sync_queue_branch_script(ctx):
-    if not ctx.branch:
-        return None
-    return ["python3", str(_PLAN_MANAGER),
-            "set-state", str(ctx.plan_path) if ctx.plan_path else str(ctx.workspace / ".queue"),
-            f"key=branch", f"value={ctx.branch}"]
 
 
 CONTINUE_STEPS: list[StepDef] = [
