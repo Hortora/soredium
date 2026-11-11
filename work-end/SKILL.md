@@ -51,8 +51,14 @@ python3 ~/.claude/skills/work-end/close.py $WORKSPACE
 ```
 
 This runs the atomic ceremony: resolve targets, preflight, land (rebase +
-squash-merge), stamp branches, advance queue. Either succeeds fully or
+FF-merge), stamp branches, advance queue. Either succeeds fully or
 fails cleanly — repos are never left on mixed branches.
+
+**Landing strategy:** after rebasing the branch onto base, close.py
+FF-merges by default — preserving every individual commit on main.
+Squash-merge only runs when a `.squash-plan` exists (user ran
+`/git-squash` pre-close to compact noise). This ensures the reasoning
+chain in individual commits is never silently destroyed.
 
 Read the output:
 - `ACTION=complete` — ceremony succeeded. Read `LANDED_*` and `NEXT_ITEM`.

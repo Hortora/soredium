@@ -384,6 +384,15 @@ def squash_merge(repo: Path, branch: str, base: str,
     return landed_sha
 
 
+def ff_merge(repo: Path, branch: str) -> str:
+    result = _git(repo, "merge", "--ff-only", branch)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"FF-only merge failed in {repo.name}: branch {branch} "
+            f"is not a fast-forward of HEAD. Rebase first.")
+    return _rev_parse(repo, "HEAD")
+
+
 def _merge_no_ff(repo: Path, branch: str) -> str:
     result = _git(repo, "merge", "--no-ff", branch,
                   "-m", f"Merge branch '{branch}'")
@@ -423,7 +432,7 @@ def land(target: CloseTarget) -> str:
     if target.is_workspace and target.transport == "two-hop":
         return ""
 
-    squash_msg = _read_squash_plan(target.repo) if not target.is_workspace else None
+    squash_plan = _read_squash_plan(target.repo) if not target.is_workspace else None
 
     _checkout(target.repo, target.base_branch)
 
@@ -438,8 +447,12 @@ def land(target: CloseTarget) -> str:
         except RuntimeError:
             _checkout(target.repo, target.base_branch)
             raise
-        sha = squash_merge(target.repo, target.branch,
-                           target.base_branch, squash_msg)
+        if squash_plan:
+            sha = squash_merge(target.repo, target.branch,
+                               target.base_branch, squash_plan)
+        else:
+            _checkout(target.repo, target.base_branch)
+            sha = ff_merge(target.repo, target.branch)
 
     strip_lifecycle_files_from_tree(target.repo, target.base_branch, LIFECYCLE_FILES)
 
