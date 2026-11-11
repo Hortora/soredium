@@ -41,6 +41,11 @@ does not depend on them. Skip any that don't apply.
 6. **Doc sync** — invoke `implementation-doc-sync` if docs need updating
 7. **ADR** — invoke `adr` if architectural decisions were made
 8. **Write content** — invoke `write-content` (diary) for the session
+9. **Squash noise** — invoke `git-squash` to compact WIP/fixup noise.
+   This is the ONLY path to squashing — close.py FF-merges unless
+   git-squash writes a `.squash-plan`. The skill classifies commits
+   intelligently: KEEP meaningful ones, only squash noise. Always offer
+   this step; skip only if the branch has clean, well-structured commits.
 
 Present these as a checklist. User picks which to run.
 
@@ -105,6 +110,7 @@ After `ACTION=complete`:
 **Invoked by:** `work`, `executing-plans`, `subagent-driven-development`
 
 **Invokes (pre-close):** `code-review`, `branch-audit`, `forage`, `protocol`,
-`update-claude-md`, `implementation-doc-sync`, `adr`, `write-content`
+`update-claude-md`, `implementation-doc-sync`, `adr`, `write-content`,
+`git-squash` (noise compaction — writes `.squash-plan` for close.py)
 
 **Uses:** `work-end/close.py` — atomic close ceremony
