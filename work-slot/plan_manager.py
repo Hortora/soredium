@@ -1459,6 +1459,28 @@ def main() -> int:
         print(f"HAS_DEFERRED={result.has_deferred}")
         return 0
 
+    elif command == "check":
+        issues_str = opts.get("issues", "")
+        if not issues_str:
+            print("ERROR=issues is required (format: owner/repo#N,owner/repo#M)", file=_sys.stderr)
+            return 1
+        tree = parse_plan(plan_path)
+        for ref_str in issues_str.split(","):
+            ref_str = ref_str.strip()
+            if not ref_str:
+                continue
+            try:
+                ref = _resolve_ref(ref_str, tree)
+            except ValueError as e:
+                print(f"ERROR={e}", file=_sys.stderr)
+                return 1
+            if mark_completed(plan_path, ref):
+                print(f"CHECKED={ref}")
+            else:
+                print(f"SKIP={ref} (not found or already checked)")
+            tree = parse_plan(plan_path)
+        return 0
+
     elif command == "uncheck":
         issues_str = opts.get("issues", "")
         if not issues_str:
