@@ -62,12 +62,12 @@ If it reads as obligation rather than thought, end on the last real point.
 Novel work needs enough context that a reader understands why it matters.
 Don't cap it; don't pad it. End when the point is made.
 
-**Length is a floor, not a ceiling.** A diary entry with real information —
-architectural reasoning, before/after comparisons, design tradeoffs — should
-be as long as the content demands. Short entries are fine when the work is
-small. But truncating a substantial session to hit a word count produces
+**Length fits the content.** A small fix gets a short entry. A substantial
+architectural change gets a longer one. Word counts in style guides are
+guidance, not caps — meatier topics can and should exceed them. The failure
+mode is truncating a substantial session to hit an arbitrary limit, producing
 entries that summarise without informing. If the reader would need to read
-the git log to understand what happened, the entry is too short.
+the git log to understand what happened, the entry is too short for its topic.
 
 **Include diagrams.** Architectural decisions, data flows, state machines,
 before/after comparisons — if the concept has structure, draw it. Save as
