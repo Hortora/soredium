@@ -605,17 +605,6 @@ def close(workspace: Path) -> CloseResult:
         for target, sha in landed.items():
             stamp(target, sha)
 
-        # Post-stamp verification: check promoted images resolve
-        from verification.repo_checks import check_broken_images
-        for target in targets:
-            for scan_dir in [target.repo / "docs" / "blog", target.repo / "docs" / "specs"]:
-                if not scan_dir.is_dir():
-                    continue
-                for md_file in scan_dir.rglob("*.md"):
-                    findings = check_broken_images(md_file)
-                    for f in findings:
-                        print(f"WARNING: {f.message}", file=sys.stderr)
-
         slot_root = _detect_slot_root(workspace)
 
         if slot_root:
