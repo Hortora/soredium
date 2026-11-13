@@ -62,6 +62,25 @@ If it reads as obligation rather than thought, end on the last real point.
 Novel work needs enough context that a reader understands why it matters.
 Don't cap it; don't pad it. End when the point is made.
 
+**Length is a floor, not a ceiling.** A diary entry with real information —
+architectural reasoning, before/after comparisons, design tradeoffs — should
+be as long as the content demands. Short entries are fine when the work is
+small. But truncating a substantial session to hit a word count produces
+entries that summarise without informing. If the reader would need to read
+the git log to understand what happened, the entry is too short.
+
+**Include diagrams.** Architectural decisions, data flows, state machines,
+before/after comparisons — if the concept has structure, draw it. Save as
+`.svg` files in an `images/` directory alongside the entry (never inline
+`<svg>` in markdown — see `_universal.md`). Reference with
+`![Description](images/name.svg)`. A diagram that shows the reader what
+changed is worth more than three paragraphs describing it.
+
+**Intent: inform, educate, advocate.** A diary entry is not a status update.
+It explains the practicalities and relevance of the work — why this approach,
+what it enables, what the reader should take away. The test: would someone
+outside this project learn something useful from reading this?
+
 ---
 
 ## Entry Types

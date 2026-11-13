@@ -267,6 +267,15 @@ git -C "$TARGET_REPO" commit -m "wip(content): <content-type> — <title> Refs #
 This is mandatory. Uncommitted content is lost on session crash. The commit
 is the save. Semantic squash at work-end cleans up WIP messages.
 
+## Step 6 — Open for review
+
+```bash
+open <written-file-path>
+```
+
+Open the written file in the system default editor (Typora or similar)
+so the author can review the rendered output immediately.
+
 ## Success Criteria
 
 Content creation is complete when:
