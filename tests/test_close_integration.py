@@ -734,3 +734,149 @@ class TestRenderResult:
         lines = render(CloseResult(success=True, landed={"pages": "abc123"}))
         assert lines[0] == "ACTION=complete"
         assert "LANDED_pages=abc123" in lines
+
+
+# --- Result reporting and idle-repo guard (#515, casehubio/casehub-pages#666) ---
+
+def _on_main(repo: Path, sha: str) -> bool:
+    """True when sha is main's tip or an ancestor of it."""
+    r = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", sha, "main"],
+                       capture_output=True)
+    return r.returncode == 0
+
+
+def _same_name_repos(tmp_path: Path) -> tuple[Path, Path]:
+    """Project and workspace whose directories share a name, as with casehub pages."""
+    proj = _init_repo(tmp_path / "code" / "pages")
+    ws = _init_repo(tmp_path / "public" / "pages")
+    (ws / "proj").symlink_to(proj)
+    return proj, ws
+
+
+class TestResultReporting:
+
+    def test_project_and_workspace_with_the_same_name_are_both_reported(self, tmp_path):
+        proj, ws = _same_name_repos(tmp_path)
+        _add_commits(proj, "issue-1-feat", 2)
+        _add_commits(ws, "issue-1-feat", 1)
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert result.success, result.errors
+        assert result.landed == {"pages": _main_head(proj)}
+        # The workspace gains the queue-advance commit after landing, so its landed
+        # SHA is on main but need not be the tip.
+        assert list(result.workspace_landed) == ["pages"]
+        assert _on_main(ws, result.workspace_landed["pages"])
+        assert result.workspace_landed["pages"] != result.landed["pages"]
+        assert _file_on_main(ws, "issue-1-feat-file0.txt")
+
+    def test_same_name_repos_render_as_separate_lines(self, tmp_path):
+        from close import CloseResult, render
+        lines = render(CloseResult(success=True, landed={"pages": "aaa"},
+                                   workspace_landed={"pages": "bbb"}))
+        assert "LANDED_pages=aaa" in lines
+        assert "WORKSPACE_LANDED_pages=bbb" in lines
+
+    def test_single_repo_is_reported_as_landed(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(repo, "issue-1-feat")
+
+        result = _single_repo_close(repo)
+
+        assert result.success, result.errors
+        assert list(result.landed) == ["repo"]
+        assert _on_main(repo, result.landed["repo"])
+        assert _file_on_main(repo, "issue-1-feat-file1.txt")
+        assert result.workspace_landed == {}
+
+    def test_reported_sha_is_main_tip_when_lifecycle_files_are_stripped(self, tmp_path):
+        """casehub-pages#666 bug 3: a leaked lifecycle file must not leave the reported SHA behind main."""
+        proj, ws = _two_repos(tmp_path)
+        _add_commits(proj, "issue-1-feat", 2, reviewed=False)
+        (proj / ".squash-plan").write_text("left over\n")
+        _git(proj, "add", "-f", ".squash-plan")
+        _git(proj, "commit", "-m", "chore: leaked lifecycle file Refs #1")
+        squash_marker.mark(proj, "issue-1-feat")
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert result.success, result.errors
+        assert result.landed["project"] == _main_head(proj), "reported SHA must be main's tip"
+        assert not _file_on_main(proj, ".squash-plan")
+        assert result.landed["project"] in _stamp_msg(proj, "issue-1-feat")
+        assert _file_on_main(proj, "issue-1-feat-file1.txt")
+
+
+class TestIdleRepoGuard:
+
+    def _stuck_rebase(self, repo: Path) -> None:
+        """Leave repo stopped on a rebase conflict, as a failed `pull --rebase` does."""
+        (repo / "conflict.txt").write_text("base\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", "base Refs #1")
+        _git(repo, "checkout", "-b", "upstream-side")
+        (repo / "conflict.txt").write_text("theirs\n")
+        _git(repo, "commit", "-am", "theirs Refs #1")
+        _git(repo, "checkout", "main")
+        (repo / "conflict.txt").write_text("ours\n")
+        _git(repo, "commit", "-am", "ours Refs #1")
+        r = subprocess.run(["git", "-C", str(repo), "rebase", "upstream-side"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0, "fixture must stop on a conflict"
+
+    def test_workspace_mid_rebase_blocks_the_ceremony(self, tmp_path):
+        proj, ws = _two_repos(tmp_path)
+        _add_commits(proj, "issue-1-feat", 2)
+        pre = _main_head(proj)
+        _make_queue(ws, "issue-1-feat")
+        _git(ws, "add", ".queue")
+        _git(ws, "commit", "-m", "queue Refs #1")
+        self._stuck_rebase(ws)
+
+        result = _project_close(proj, ws)
+
+        assert not result.success
+        assert any("workspace" in e and "rebase" in e for e in result.errors), result.errors
+        assert _main_head(proj) == pre, "nothing may land"
+        assert (ws / ".git" / "rebase-merge").exists() or (ws / ".git" / "rebase-apply").exists(), \
+            "the ceremony must not abort a rebase it did not start"
+
+    def test_project_on_detached_head_blocks_the_ceremony(self, tmp_path):
+        proj, ws = _two_repos(tmp_path)
+        _add_commits(proj, "issue-1-feat", 2)
+        pre = _main_head(proj)
+        _git(proj, "checkout", "--detach")
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert not result.success
+        assert any("project" in e and "detached" in e for e in result.errors), result.errors
+        assert _main_head(proj) == pre
+
+    def test_project_mid_merge_blocks_the_ceremony(self, tmp_path):
+        proj, ws = _two_repos(tmp_path)
+        (proj / "conflict.txt").write_text("base\n")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-m", "base Refs #1")
+        _git(proj, "checkout", "-b", "other-side")
+        (proj / "conflict.txt").write_text("theirs\n")
+        _git(proj, "commit", "-am", "theirs Refs #1")
+        _git(proj, "checkout", "main")
+        _add_commits(proj, "issue-1-feat", 1)
+        (proj / "conflict.txt").write_text("ours\n")
+        _git(proj, "commit", "-am", "ours Refs #1")
+        squash_marker.mark(proj, "issue-1-feat")
+        r = subprocess.run(["git", "-C", str(proj), "merge", "other-side"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0, "fixture must stop on a conflict"
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert not result.success
+        assert any("project" in e and "merge" in e for e in result.errors), result.errors

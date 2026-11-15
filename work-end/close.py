@@ -52,6 +52,7 @@ class CloseResult:
     next_item: Optional[QueueItem] = None
     rescued: dict = field(default_factory=dict)
     squash_review: list[str] = field(default_factory=list)
+    workspace_landed: dict = field(default_factory=dict)
 
 
 # --- git helpers ---
@@ -213,6 +214,42 @@ def stamped_branches(workspace: Path) -> list[str]:
             if _branch_exists(repo, branch) and _is_stamp_commit(repo, branch):
                 found.append(f"{repo.name}:{branch}")
     return found
+
+
+_IN_PROGRESS_MARKERS = (
+    ("rebase-merge", "rebase"), ("rebase-apply", "rebase"), ("MERGE_HEAD", "merge"),
+    ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"),
+)
+
+
+def _busy_reason(repo: Path) -> Optional[str]:
+    """Return why the repo cannot take part in a close, or None when it is idle."""
+    for marker, operation in _IN_PROGRESS_MARKERS:
+        result = _git(repo, "rev-parse", "--git-path", marker)
+        if result.returncode != 0:
+            continue
+        marker_path = Path(result.stdout.strip())
+        if not marker_path.is_absolute():
+            marker_path = repo / marker_path
+        if marker_path.exists():
+            return (f"a {operation} is in progress — finish or abort it first; commits made "
+                    f"during it are on a detached HEAD and are lost if it is aborted")
+    if _git(repo, "symbolic-ref", "-q", "HEAD").returncode != 0:
+        return "HEAD is detached — check out a branch first"
+    return None
+
+
+def check_repos_idle(workspace: Path) -> list[str]:
+    """Return an error for each repo that is mid-operation or on a detached HEAD."""
+    repos = [repo for repo, *_ in discover_repo_topology(workspace)]
+    if all(r.resolve() != workspace.resolve() for r in repos) and (workspace / ".git").exists():
+        repos.append(workspace)
+    errors = []
+    for repo in repos:
+        reason = _busy_reason(repo)
+        if reason:
+            errors.append(f"{repo.name}: {reason}")
+    return errors
 
 
 def check_branch_alignment(workspace: Path) -> list[str]:
@@ -442,6 +479,8 @@ def land(target: CloseTarget) -> str:
         _checkout(target.repo, target.base_branch)
         sha = _merge_no_ff(target.repo, target.branch)
     else:
+        # Stripped on the branch so that no commit is added to base after landing.
+        strip_lifecycle_files(target.repo, target.branch, LIFECYCLE_FILES)
         try:
             rebase_onto_base(target.repo, target.branch, target.base_branch,
                              target.push_target)
@@ -455,7 +494,7 @@ def land(target: CloseTarget) -> str:
 
     verify_content_landed(target.repo, target.branch, target.base_branch)
 
-    return sha
+    return _rev_parse(target.repo, target.base_branch)
 
 
 # --- stamp ---
@@ -569,6 +608,10 @@ def _detect_slot_root(workspace: Path) -> Optional[Path]:
 # --- close orchestration ---
 
 def close(workspace: Path) -> CloseResult:
+    busy = check_repos_idle(workspace)
+    if busy:
+        return CloseResult(success=False, errors=busy)
+
     misaligned = check_branch_alignment(workspace)
     if misaligned:
         return CloseResult(success=False, errors=misaligned)
@@ -616,6 +659,9 @@ def close(workspace: Path) -> CloseResult:
         "repos": ", ".join(f"{t.repo.name}:{t.branch}" for t in targets),
     })
 
+    # A workspace repo can share its directory name with the project repo.
+    split_workspace = len(discover_repo_topology(workspace)) > 1
+
     try:
         landed: dict[CloseTarget, str] = {}
         for target in targets:
@@ -640,7 +686,10 @@ def close(workspace: Path) -> CloseResult:
         _remove_close_state(workspace)
         return CloseResult(
             success=True,
-            landed={t.repo.name: sha for t, sha in landed.items()},
+            landed={t.repo.name: sha for t, sha in landed.items()
+                    if not (split_workspace and t.is_workspace)},
+            workspace_landed={t.repo.name: sha for t, sha in landed.items()
+                              if split_workspace and t.is_workspace},
             next_item=next_item,
             rescued=pre["rescued"],
         )
@@ -654,6 +703,8 @@ def render(result: CloseResult) -> list[str]:
     if result.success:
         lines = ["ACTION=complete"]
         lines += [f"LANDED_{repo}={sha}" for repo, sha in result.landed.items()]
+        lines += [f"WORKSPACE_LANDED_{repo}={sha}"
+                  for repo, sha in result.workspace_landed.items()]
         if result.next_item:
             lines.append(f"NEXT_ITEM={result.next_item.ref}")
         lines += [f"RESCUED_{repo}={detail}" for repo, detail in result.rescued.items()]

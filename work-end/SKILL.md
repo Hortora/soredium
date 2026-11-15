@@ -72,6 +72,9 @@ review. Otherwise the recorded tip must equal the branch tip.
 
 Read the output:
 - `ACTION=complete` — ceremony succeeded. Read `LANDED_*` and `NEXT_ITEM`.
+  `LANDED_<repo>` is that project repo's base-branch tip after landing.
+  Workspace repos are reported separately as `WORKSPACE_LANDED_<repo>`,
+  because a workspace can share its directory name with the project.
 - `ACTION=squash_review_needed` — nothing was changed. Each
   `SQUASH_REVIEW=<repo>:<branch>: <reason>` line names a branch that has
   not been reviewed at its current tip (never reviewed, commits added
@@ -79,6 +82,11 @@ Read the output:
   the ceremony again. Do not work around this by landing manually.
 - `ACTION=error` — ceremony failed. Read `ERROR=` lines, diagnose, and
   report to user.
+  If an error says a rebase, merge or other operation is in progress, or
+  that HEAD is detached, stop and tell the user. Do not run
+  `git rebase --abort` or `git merge --abort` yourself: commits made while
+  the operation was stopped belong to no branch and are discarded by an
+  abort. Find and save them first (`git reflog`).
 
 **If `.close-state` exists** before running, a previous ceremony was
 interrupted. The ceremony is idempotent — re-run it. It picks up from
