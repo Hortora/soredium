@@ -118,8 +118,8 @@ style files. Load personal style or fall back to `voice/common-voice.md`.
 
 **Resolve author initials** from `~/.claude/settings.json` `initials` field.
 
-**Determine type:** article or note/diary. Auto-route from invocation
-context when unambiguous. Set frontmatter: `entry_type`, `subtype: diary`
+**Type is always note.** Diary entries use `entry_type: note, subtype: diary` —
+never `article`. Set frontmatter: `entry_type: note`, `subtype: diary`
 (for notes), `projects` from CLAUDE.md `**Repository:**` field using
 `<github-org>/<repo-name>` format (e.g. `casehubio/engine`). If no
 `**Repository:**` field exists, fall back to CLAUDE.md `**Name:**` field.
@@ -241,7 +241,7 @@ Frontmatter:
 layout: post
 title: "<title>"
 date: YYYY-MM-DD
-entry_type: <article|note>
+entry_type: note
 subtype: diary
 projects: [<project>, ...]
 tags: [<tag>, ...]
