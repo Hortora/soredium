@@ -200,6 +200,43 @@ def main() -> int:
     if dry_run:
         print("DRY_RUN=yes")
 
+    # Also sweep canonical workspace→project promotion gaps
+    # (catches content written to workspace main that was never promoted)
+    try:
+        from verification.cross_checks import check_workspace_promotion_gaps, promote_workspace_gaps
+        canon_gaps = check_workspace_promotion_gaps(workspace, project)
+        if canon_gaps:
+            print(f"PROMOTION_GAPS={len(canon_gaps)}")
+            if not dry_run:
+                actions = promote_workspace_gaps(workspace, project)
+                if actions:
+                    print(f"SWEPT={len(actions)}")
+                    for a in actions:
+                        print(a)
+                    subprocess.run(["git", "-C", str(project), "add", "docs/"],
+                                   capture_output=True)
+                    has_changes = subprocess.run(
+                        ["git", "-C", str(project), "diff", "--cached", "--quiet"],
+                        capture_output=True,
+                    ).returncode != 0
+                    if has_changes:
+                        issue_ref = ""
+                        if covers:
+                            from queue_io import parse_covers
+                            nums = parse_covers(covers)
+                            if nums:
+                                issue_ref = f"  Refs #{nums[0]}"
+                        subprocess.run(["git", "-C", str(project), "commit", "-m",
+                                        f"docs: sweep-promote {len(actions)} workspace artifacts{issue_ref}"],
+                                       capture_output=True)
+            else:
+                for g in canon_gaps:
+                    print(f"WOULD_SWEEP={g.category}: {g.message}")
+        else:
+            print("PROMOTION_GAPS=0")
+    except ImportError:
+        pass
+
     return 0
 
 

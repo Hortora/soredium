@@ -86,6 +86,17 @@ After `ACTION=complete`:
    `snapshots/` against project destinations and copies anything missing.
    Covers all categories, not just blog. Reports `GAPS=N` and `PROMOTED=N`.
 
+1b. **Canonical workspace sweep** — also check the canonical workspace
+   (not just the slot clone) for unpromoted blogs/specs/images:
+   ```bash
+   python3 ~/.claude/skills/work-end/artifact_promote.py sweep-gaps $PROJECT $CANONICAL_WORKSPACE covers=$COVERS
+   ```
+   `$CANONICAL_WORKSPACE` is the original workspace repo (e.g.
+   `~/claude/public/casehub/quarkmind`), resolved via the project's
+   `wksp` symlink target's `local` remote. If `$WORKSPACE` IS the
+   canonical workspace (non-slot work), skip this step.
+   Reports `PROMOTION_GAPS=N` and `SWEPT=N`. Auto-fixes all gaps.
+
 2. **Close GitHub issues:**
    ```bash
    gh issue close $ISSUE_N --repo $OWNER_REPO --comment "Landed as <SHA>"

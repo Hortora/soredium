@@ -400,11 +400,63 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
     return 0
 
 
+def sweep_promotion_gaps(project: str, workspace: str, params: dict[str, str]) -> int:
+    """Detect and fix workspace→project promotion gaps.
+
+    Compares workspace blog/specs/images against project docs/ and
+    promotes anything missing. Runs as a final sweep after branch-based
+    promotion to catch content written directly to workspace main.
+    """
+    from verification.cross_checks import check_workspace_promotion_gaps, promote_workspace_gaps
+
+    ws = Path(workspace)
+    proj = Path(project)
+    covers = params.get("covers", "")
+
+    if not ws.is_dir() or not proj.is_dir():
+        print("ERROR=path_not_found")
+        return 1
+
+    gaps = check_workspace_promotion_gaps(ws, proj)
+    if not gaps:
+        print("PROMOTION_GAPS=0")
+        return 0
+
+    print(f"PROMOTION_GAPS={len(gaps)}")
+    for g in gaps:
+        print(f"GAP={g.category}: {g.message}")
+
+    actions = promote_workspace_gaps(ws, proj)
+    if actions:
+        for a in actions:
+            print(a)
+
+        has_staged = subprocess.run(
+            ["git", "-C", project, "add", "docs/"],
+            capture_output=True,
+        ).returncode == 0
+
+        if has_staged:
+            has_changes = subprocess.run(
+                ["git", "-C", project, "diff", "--cached", "--quiet"],
+                capture_output=True,
+            ).returncode != 0
+            if has_changes:
+                refs = parse_covers_qualified(covers) if covers else []
+                issue_ref = f"  Refs #{refs[0].number}" if refs else ""
+                git(project, "commit", "-m", f"docs(work-end): sweep-promote {len(actions)} workspace artifacts{issue_ref}")
+                _push_or_report(project)
+
+    print(f"SWEPT={len(actions)}")
+    return 0
+
+
 SUBCOMMANDS = {
     "to-workspace-main": lambda args: to_workspace_main(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "to-project": lambda args: to_project(args[0], args[1], parse_args(args[2:])) if len(args) >= 2 else _usage(),
     "close-issues": lambda args: close_issues(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
     "archive-plans": lambda args: archive_plans(args[0], parse_args(args[1:])) if len(args) >= 1 else _usage(),
+    "sweep-gaps": lambda args: sweep_promotion_gaps(args[0], args[1], parse_args(args[2:])) if len(args) >= 2 else _usage(),
 }
 
 

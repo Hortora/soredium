@@ -188,3 +188,103 @@ def check_unpublished_slot_blogs(
                         f"slot {slot_dir.name}/{clone.name}: {f.name} not at any publication destination",
                     ))
     return findings
+
+
+SKIP_FILENAMES = {"INDEX.md", "index.html", ".gitkeep", "decisions.md", "pipeline.state"}
+
+_IMG_SUFFIXES = {".svg", ".png", ".jpg", ".jpeg"}
+
+
+def check_workspace_promotion_gaps(
+    workspace: Path, project: Path,
+) -> list[Finding]:
+    """Detect blogs/specs/images in workspace not promoted to project docs/.
+
+    Compares workspace main blog/ against project docs/blog/, and
+    workspace specs/ against project docs/specs/. Also checks blog
+    images (images/, svg/, assets/ subdirs).
+    """
+    findings: list[Finding] = []
+
+    for art_type, ws_sub, proj_sub in [
+        ("blog", "blog", "docs/blog"),
+        ("spec", "specs", "docs/specs"),
+    ]:
+        ws_dir = workspace / ws_sub
+        proj_dir = project / proj_sub
+        if not ws_dir.exists():
+            continue
+        proj_names = set()
+        if proj_dir.exists():
+            proj_names = {f.name for f in proj_dir.glob("*.md")}
+        for f in sorted(ws_dir.glob("*.md")):
+            if f.name in SKIP_FILENAMES or f.name in proj_names:
+                continue
+            findings.append(Finding(
+                "ERROR", f"unpromoted-{art_type}",
+                f"{workspace.name}/{ws_sub}/{f.name} not in {project.name}/{proj_sub}/",
+            ))
+
+    ws_blog = workspace / "blog"
+    proj_blog = project / "docs" / "blog"
+    if ws_blog.exists() and proj_blog.exists():
+        for img_sub in ("images", "svg", "assets"):
+            ws_imgs = ws_blog / img_sub
+            proj_imgs = proj_blog / img_sub
+            if not ws_imgs.exists():
+                continue
+            proj_img_names = set()
+            if proj_imgs.exists():
+                proj_img_names = {f.name for f in proj_imgs.iterdir()
+                                  if f.suffix.lower() in _IMG_SUFFIXES}
+            for f in ws_imgs.iterdir():
+                if f.suffix.lower() in _IMG_SUFFIXES and f.name not in proj_img_names:
+                    findings.append(Finding(
+                        "WARN", "unpromoted-image",
+                        f"{workspace.name}/blog/{img_sub}/{f.name} not in {project.name}/docs/blog/{img_sub}/",
+                    ))
+
+    return findings
+
+
+def promote_workspace_gaps(
+    workspace: Path, project: Path,
+) -> list[str]:
+    """Auto-fix workspace→project promotion gaps. Returns list of actions taken."""
+    import shutil
+
+    actions: list[str] = []
+
+    for art_type, ws_sub, proj_sub in [
+        ("blog", "blog", "docs/blog"),
+        ("spec", "specs", "docs/specs"),
+    ]:
+        ws_dir = workspace / ws_sub
+        proj_dir = project / proj_sub
+        if not ws_dir.exists():
+            continue
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        proj_names = {f.name for f in proj_dir.glob("*.md")}
+        for f in sorted(ws_dir.glob("*.md")):
+            if f.name in SKIP_FILENAMES or f.name in proj_names:
+                continue
+            shutil.copy2(str(f), str(proj_dir / f.name))
+            actions.append(f"PROMOTED {art_type}: {f.name}")
+
+    ws_blog = workspace / "blog"
+    proj_blog = project / "docs" / "blog"
+    if ws_blog.exists():
+        for img_sub in ("images", "svg", "assets"):
+            ws_imgs = ws_blog / img_sub
+            proj_imgs = proj_blog / img_sub
+            if not ws_imgs.exists():
+                continue
+            proj_imgs.mkdir(parents=True, exist_ok=True)
+            proj_img_names = {f.name for f in proj_imgs.iterdir()
+                              if f.suffix.lower() in _IMG_SUFFIXES} if proj_imgs.exists() else set()
+            for f in ws_imgs.iterdir():
+                if f.suffix.lower() in _IMG_SUFFIXES and f.name not in proj_img_names:
+                    shutil.copy2(str(f), str(proj_imgs / f.name))
+                    actions.append(f"PROMOTED image: {img_sub}/{f.name}")
+
+    return actions
