@@ -279,7 +279,7 @@ def _file_exists_on_branch(repo: Path, branch: str, filename: str) -> bool:
 
 
 class TestLand:
-    def test_squash_merge_produces_single_commit(self, tmp_path: Path) -> None:
+    def test_land_preserves_branch_commits(self, tmp_path: Path) -> None:
         from close import land, CloseTarget
 
         repo = tmp_path / "project"
@@ -304,7 +304,8 @@ class TestLand:
 
         assert sha != ""
         main_count_after = _commit_count(repo)
-        assert main_count_after == main_count_before + 1
+        assert main_count_after == main_count_before + 2, \
+            "both branch commits must reach main individually"
         assert _file_exists_on_branch(repo, "main", "issue-1-feat-file.txt")
         assert _file_exists_on_branch(repo, "main", "second.txt")
 
