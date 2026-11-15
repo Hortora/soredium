@@ -444,3 +444,108 @@ class TestPostCeremonyState:
 
         # 9. No .close-state left behind
         assert not (ws / ".close-state").exists()
+
+
+# --- Wrong-branch guards (#513, casehubio/casehub-pages#666) ---
+
+def _land_and_stamp(repo: Path, branch: str) -> str:
+    """Land a branch on main by fast-forward and stamp it, as a completed close would."""
+    _git(repo, "checkout", "main")
+    _git(repo, "merge", "--ff-only", branch)
+    landed = _main_head(repo)
+    _git(repo, "checkout", branch)
+    _git(repo, "commit", "--allow-empty", "-m",
+         f"chore: branch closed — landed as {landed} on main  Refs #1")
+    return landed
+
+
+def _commits_ahead(repo: Path, branch: str) -> int:
+    return int(_git(repo, "rev-list", "--count", f"main..{branch}").stdout.strip())
+
+
+class TestWrongBranchGuards:
+
+    def test_stamped_branch_is_not_closed_again(self, tmp_path):
+        """Queue names an already-stamped branch: the ceremony must fail, not report success."""
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-1-old", 2)
+        landed = _land_and_stamp(repo, "issue-1-old")
+        _git(repo, "checkout", "main")
+        _make_queue(repo, "issue-1-old")
+
+        with patch("close.discover_repo_topology") as m, \
+             patch("close._detect_slot_root", return_value=None):
+            m.return_value = [(repo, "main", "direct", None, "origin", "")]
+            result = close(repo)
+
+        assert not result.success, "closing a stamped branch must not report success"
+        assert result.landed == {}
+        assert any("already closed" in e for e in result.errors), result.errors
+        assert _main_head(repo) == landed, "main must not move"
+
+    def test_queue_branch_differs_from_project_branch(self, tmp_path):
+        """The pages #666 case: queue names the old stamped branch, project is on new work."""
+        proj = _init_repo(tmp_path / "project")
+        ws = _init_repo(tmp_path / "workspace")
+        (ws / "proj").symlink_to(proj)
+        _add_commits(proj, "issue-1-old", 2)
+        landed = _land_and_stamp(proj, "issue-1-old")
+        _git(proj, "checkout", "main")
+        _add_commits(proj, "issue-2-new", 3)
+        _make_queue(ws, "issue-1-old")
+
+        with patch("close.discover_repo_topology") as m, \
+             patch("close._detect_slot_root", return_value=None):
+            m.return_value = [
+                (proj, "main", "direct", None, "origin", ""),
+                (ws, "main", "direct", None, "origin", ""),
+            ]
+            result = close(ws)
+
+        assert not result.success, "queue/branch mismatch must not report success"
+        assert result.landed == {}
+        joined = " ".join(result.errors)
+        assert "issue-2-new" in joined and "issue-1-old" in joined, result.errors
+        assert _main_head(proj) == landed, "main must not move"
+        assert _on_branch(proj) == "issue-2-new", "project must be left on its work branch"
+        assert _commits_ahead(proj, "issue-2-new") == 3, "unlanded work must be intact"
+        assert not (ws / ".close-state").exists()
+
+    def test_empty_queue_branch_with_project_on_feature_branch(self, tmp_path):
+        """Queue has no branch recorded while the project is on a feature branch."""
+        proj = _init_repo(tmp_path / "project")
+        ws = _init_repo(tmp_path / "workspace")
+        (ws / "proj").symlink_to(proj)
+        _add_commits(proj, "issue-2-new", 2)
+        _make_queue(ws, "")
+
+        with patch("close.discover_repo_topology") as m, \
+             patch("close._detect_slot_root", return_value=None):
+            m.return_value = [
+                (proj, "main", "direct", None, "origin", ""),
+                (ws, "main", "direct", None, "origin", ""),
+            ]
+            result = close(ws)
+
+        assert not result.success
+        assert any("issue-2-new" in e for e in result.errors), result.errors
+        assert _on_branch(proj) == "issue-2-new"
+
+    def test_rerun_skips_stamped_repo_and_lands_the_rest(self, tmp_path):
+        """Interrupted slot close: one repo already stamped, the other still needs landing."""
+        slot_dir, [agency, connectors] = _setup_slot(
+            tmp_path, ["agency", "connectors"], "issue-1-feat")
+        _add_commits(agency, "issue-1-feat", 2)
+        _add_commits(connectors, "issue-1-feat", 2)
+        agency_landed = _land_and_stamp(agency, "issue-1-feat")
+        connectors_pre = _main_head(connectors)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, f"ceremony failed: {result.errors}"
+        assert "connectors" in result.landed
+        assert "agency" not in result.landed, "stamped repo must not be reported as landed again"
+        assert _main_head(agency) == agency_landed, "already-landed repo must not change"
+        assert _main_head(connectors) != connectors_pre
+        assert _file_on_main(connectors, "issue-1-feat-file0.txt")

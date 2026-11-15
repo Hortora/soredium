@@ -183,7 +183,12 @@ def resolve(workspace: Path) -> list[CloseTarget]:
 
     for branch in branches:
         for repo, base, transport, canonical, push, mirror in topology:
-            if _branch_exists(repo, branch) and _has_commits_ahead(repo, branch, base):
+            if not _branch_exists(repo, branch):
+                continue
+            # A stamp is an empty commit ahead of base: it is not work to land.
+            if _is_stamp_commit(repo, branch):
+                continue
+            if _has_commits_ahead(repo, branch, base):
                 is_ws = (repo.resolve() == workspace.resolve())
                 targets.append(CloseTarget(
                     repo=repo, branch=branch, base_branch=base,
@@ -193,6 +198,41 @@ def resolve(workspace: Path) -> list[CloseTarget]:
                 ))
 
     return targets
+
+
+def stamped_branches(workspace: Path) -> list[str]:
+    """Return 'repo:branch' for every candidate branch that is already stamped closed."""
+    queue = read_queue(workspace)
+    if queue is None:
+        return []
+    found = []
+    for branch in discover_active_branches(workspace, queue):
+        for repo, *_ in discover_repo_topology(workspace):
+            if _branch_exists(repo, branch) and _is_stamp_commit(repo, branch):
+                found.append(f"{repo.name}:{branch}")
+    return found
+
+
+def check_branch_alignment(workspace: Path) -> list[str]:
+    """Return an error for each project repo sitting on a feature branch the queue does not name."""
+    queue = read_queue(workspace)
+    if queue is None:
+        return []
+    branches = discover_active_branches(workspace, queue)
+    topology = discover_repo_topology(workspace)
+    named = ", ".join(branches) if branches else "no branch"
+    errors = []
+    for repo, base, *_ in topology:
+        # The workspace repo may legitimately sit on its base branch or lag the project.
+        if len(topology) > 1 and repo.resolve() == workspace.resolve():
+            continue
+        current = _current_branch(repo)
+        if current and current != base and current not in branches:
+            errors.append(
+                f"{repo.name} is on branch '{current}' but the queue names {named} — "
+                f"refusing to close. Set the queue branch to '{current}' or check out "
+                f"the queued branch, then retry.")
+    return errors
 
 
 # --- preflight ---
@@ -572,9 +612,21 @@ def _detect_slot_root(workspace: Path) -> Optional[Path]:
 # --- close orchestration ---
 
 def close(workspace: Path) -> CloseResult:
+    misaligned = check_branch_alignment(workspace)
+    if misaligned:
+        return CloseResult(success=False, errors=misaligned)
+
     targets = resolve(workspace)
 
     if not targets:
+        stamped = stamped_branches(workspace)
+        if stamped:
+            return CloseResult(
+                success=False,
+                errors=[f"branch already closed (stamped): {', '.join(stamped)} — "
+                        f"nothing was landed. The queue names a branch that has "
+                        f"already been closed."],
+            )
         return CloseResult(
             success=False,
             errors=["no targets found — branch may not exist or has no commits"],
