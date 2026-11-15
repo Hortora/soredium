@@ -364,6 +364,10 @@ Commit squash analysis — <N> commits in range
   Result: <N> commits → <M> commits — <absorbed> absorbed (no content lost), <dropped> dropped
 ```
 
+**Nothing to change?** If every commit is KEEP and no rewrite is needed, tell the
+user and go straight to Step 8b to record the review. An unrecorded review is
+invisible to the close ceremony.
+
 **The plan is mandatory. Execution never happens without explicit user YES.**
 
 For any range > 10 commits, always write the full plan to a file on the working
@@ -955,6 +959,28 @@ To undo entirely:
 
 ---
 
+### Step 8b — Record the review
+
+Run this as the last step of every squash review, including a review
+that concluded the branch is already clean and nothing was rewritten:
+
+```bash
+python3 ~/.claude/skills/project/squash_marker.py mark <project> branch=<ORIG_BRANCH>
+```
+
+It records the branch's current tip in `refs/squash-reviewed/<branch>`
+and prints `MARKED=<sha>`. `work-end/close.py` lands a multi-commit
+branch only when that recorded tip equals the branch tip, so:
+
+- Record only after the rewrite and branch swap are finished. The
+  record means "this exact history has been reviewed".
+- Any commit or rebase after this step makes the record stale, and the
+  close ceremony will ask for the review again. Re-run the review; do
+  not move the record by hand.
+- Do not create a `.squash-plan` file. Nothing reads it.
+
+---
+
 ### Step 9 — Backup cleanup (offered on future runs)
 
 On any subsequent `/git-squash` invocation, check for old backup branches:
@@ -1042,5 +1068,8 @@ Bypass with `git push --no-verify` after manually confirming history is clean.
 detected
 
 **Reads:** `~/.claude/skills/git-squash/squash-policy.md` — the classification rules
+
+**Records for:** `work-end` — Step 8b writes `refs/squash-reviewed/<branch>`
+via `project/squash_marker.py`; `work-end/close.py` checks it before landing
 
 **Does not invoke anything** — standalone analysis and rebase skill

@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
 
 from queue_io import read_queue, write_queue, Queue, QueueItem, QueueState
 from close import close, resolve, CloseTarget
+import squash_marker
 
 
 # --- helpers ---
@@ -38,12 +39,15 @@ def _init_repo(path: Path) -> Path:
     return path
 
 
-def _add_commits(repo: Path, branch: str, n: int = 2) -> None:
+def _add_commits(repo: Path, branch: str, n: int = 2, reviewed: bool = True) -> None:
+    """Create a branch with n commits. reviewed=True records a squash review at its tip."""
     _git(repo, "checkout", "-b", branch)
     for i in range(n):
         (repo / f"{branch}-file{i}.txt").write_text(f"content {i}")
         _git(repo, "add", ".")
         _git(repo, "commit", "-m", f"feat: {branch} change {i} Refs #1")
+    if reviewed:
+        squash_marker.mark(repo, branch)
 
 
 def _make_queue(ws: Path, branch: str, issue_repo: str = "R",
@@ -549,3 +553,184 @@ class TestWrongBranchGuards:
         assert _main_head(agency) == agency_landed, "already-landed repo must not change"
         assert _main_head(connectors) != connectors_pre
         assert _file_on_main(connectors, "issue-1-feat-file0.txt")
+
+
+# --- Squash review marker (#514, casehubio/casehub-pages#666) ---
+
+def _subjects_on_main(repo: Path, since: str) -> list[str]:
+    out = _git(repo, "log", "--format=%s", f"{since}..main").stdout.strip()
+    return out.splitlines() if out else []
+
+
+def _single_repo_close(repo: Path):
+    with patch("close.discover_repo_topology") as m, \
+         patch("close._detect_slot_root", return_value=None):
+        m.return_value = [(repo, "main", "direct", None, "origin", "")]
+        return close(repo)
+
+
+def _project_close(proj: Path, ws: Path):
+    with patch("close.discover_repo_topology") as m, \
+         patch("close._detect_slot_root", return_value=None):
+        m.return_value = [
+            (proj, "main", "direct", None, "origin", ""),
+            (ws, "main", "direct", None, "origin", ""),
+        ]
+        return close(ws)
+
+
+def _two_repos(tmp_path: Path) -> tuple[Path, Path]:
+    proj = _init_repo(tmp_path / "project")
+    ws = _init_repo(tmp_path / "workspace")
+    (ws / "proj").symlink_to(proj)
+    return proj, ws
+
+
+class TestSquashReviewGate:
+
+    def test_several_commits_without_review_do_not_land(self, tmp_path):
+        proj, ws = _two_repos(tmp_path)
+        pre = _main_head(proj)
+        _add_commits(proj, "issue-1-feat", 3, reviewed=False)
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert not result.success
+        assert result.errors == [], "review-needed is its own outcome, not an error"
+        assert len(result.squash_review) == 1
+        assert "project:issue-1-feat" in result.squash_review[0]
+        assert "no squash review" in result.squash_review[0]
+        assert _main_head(proj) == pre, "nothing may land"
+        assert _on_branch(proj) == "issue-1-feat"
+        assert not (ws / ".close-state").exists()
+
+    def test_reviewed_branch_lands_with_every_commit_preserved(self, tmp_path):
+        proj, ws = _two_repos(tmp_path)
+        pre = _main_head(proj)
+        _add_commits(proj, "issue-1-feat", 3, reviewed=True)
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert result.success, result.errors
+        subjects = _subjects_on_main(proj, pre)
+        assert len(subjects) == 3, f"all three commits must reach main: {subjects}"
+        assert all(s.startswith("feat: issue-1-feat change") for s in subjects)
+
+    def test_single_commit_lands_without_review(self, tmp_path):
+        proj, ws = _two_repos(tmp_path)
+        _add_commits(proj, "issue-1-feat", 1, reviewed=False)
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert result.success, result.errors
+        assert _file_on_main(proj, "issue-1-feat-file0.txt")
+
+    def test_commits_added_after_review_do_not_land(self, tmp_path):
+        proj, ws = _two_repos(tmp_path)
+        pre = _main_head(proj)
+        _add_commits(proj, "issue-1-feat", 2, reviewed=True)
+        (proj / "late.txt").write_text("late")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-m", "wip: late change Refs #1")
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert not result.success
+        assert "1 commit(s) added since" in result.squash_review[0]
+        assert _main_head(proj) == pre
+
+    def test_leftover_squash_plan_file_does_not_collapse_commits(self, tmp_path):
+        """An untracked .squash-plan left in the working tree must be inert."""
+        proj, ws = _two_repos(tmp_path)
+        pre = _main_head(proj)
+        _add_commits(proj, "issue-1-feat", 3, reviewed=True)
+        (proj / ".squash-plan").write_text("squash-plan: left over from earlier work\n")
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert result.success, result.errors
+        subjects = _subjects_on_main(proj, pre)
+        assert len([s for s in subjects if s.startswith("feat:")]) == 3, subjects
+        assert not any("squash-plan" in s for s in subjects), subjects
+
+    def test_committed_squash_plan_does_not_collapse_commits(self, tmp_path):
+        """The pages #666 case: .squash-plan committed on the branch after git-squash."""
+        proj, ws = _two_repos(tmp_path)
+        pre = _main_head(proj)
+        _add_commits(proj, "issue-1-feat", 3, reviewed=False)
+        (proj / ".squash-plan").write_text("squash-plan: compacted 43 -> 7 commits\n")
+        _git(proj, "add", "-f", ".squash-plan")
+        _git(proj, "commit", "-m", "chore: mark branch as squash-compacted Refs #1")
+        squash_marker.mark(proj, "issue-1-feat")
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert result.success, result.errors
+        subjects = _subjects_on_main(proj, pre)
+        assert len([s for s in subjects if s.startswith("feat:")]) == 3, subjects
+        assert not any(s.startswith("squash-plan:") for s in subjects), subjects
+
+    def test_marker_is_removed_after_landing(self, tmp_path):
+        proj, ws = _two_repos(tmp_path)
+        _add_commits(proj, "issue-1-feat", 2, reviewed=True)
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert result.success, result.errors
+        r = subprocess.run(["git", "-C", str(proj), "rev-parse", "--verify", "-q",
+                            squash_marker.marker_ref("issue-1-feat")], capture_output=True)
+        assert r.returncode != 0, "marker must be deleted once the branch has landed"
+
+    def test_workspace_repo_is_not_gated(self, tmp_path):
+        """Only project repos need a squash review; workspace commits land as they are."""
+        proj, ws = _two_repos(tmp_path)
+        _add_commits(proj, "issue-1-feat", 1, reviewed=False)
+        _add_commits(ws, "issue-1-feat", 3, reviewed=False)
+        _make_queue(ws, "issue-1-feat")
+
+        result = _project_close(proj, ws)
+
+        assert result.success, f"{result.errors} {result.squash_review}"
+
+    def test_slot_reports_every_repo_needing_review(self, tmp_path):
+        slot_dir, [agency, connectors] = _setup_slot(
+            tmp_path, ["agency", "connectors"], "issue-1-feat")
+        _add_commits(agency, "issue-1-feat", 2, reviewed=False)
+        _add_commits(connectors, "issue-1-feat", 2, reviewed=False)
+        agency_pre, connectors_pre = _main_head(agency), _main_head(connectors)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert not result.success
+        joined = " ".join(result.squash_review)
+        assert "agency:issue-1-feat" in joined and "connectors:issue-1-feat" in joined
+        assert _main_head(agency) == agency_pre and _main_head(connectors) == connectors_pre
+
+
+class TestRenderResult:
+
+    def test_review_needed_output(self):
+        from close import CloseResult, render
+        lines = render(CloseResult(success=False,
+                                   squash_review=["pages:issue-1: no squash review recorded"]))
+        assert lines[0] == "ACTION=squash_review_needed"
+        assert "SQUASH_REVIEW=pages:issue-1: no squash review recorded" in lines
+
+    def test_error_output(self):
+        from close import CloseResult, render
+        lines = render(CloseResult(success=False, errors=["boom"]))
+        assert lines == ["ACTION=error", "ERROR=boom"]
+
+    def test_complete_output(self):
+        from close import CloseResult, render
+        lines = render(CloseResult(success=True, landed={"pages": "abc123"}))
+        assert lines[0] == "ACTION=complete"
+        assert "LANDED_pages=abc123" in lines

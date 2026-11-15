@@ -21,6 +21,7 @@ if _slot_dir not in sys.path:
     sys.path.insert(0, _slot_dir)
 
 from queue_io import read_queue, write_queue, Queue, QueueItem
+import squash_marker
 
 
 LIFECYCLE_FILES = [
@@ -50,6 +51,7 @@ class CloseResult:
     landed: dict = field(default_factory=dict)
     next_item: Optional[QueueItem] = None
     rescued: dict = field(default_factory=dict)
+    squash_review: list[str] = field(default_factory=list)
 
 
 # --- git helpers ---
@@ -339,13 +341,6 @@ def _find_landed_sha(repo: Path, branch: str, base: str) -> str:
     return _rev_parse(repo, base)
 
 
-def _read_squash_plan(repo: Path) -> Optional[str]:
-    plan_path = repo / ".squash-plan"
-    if plan_path.exists():
-        return plan_path.read_text().strip()
-    return None
-
-
 def strip_lifecycle_files(repo: Path, branch: str, files: list[str]) -> None:
     _checkout(repo, branch)
     removed = False
@@ -390,38 +385,6 @@ def rebase_onto_base(repo: Path, branch: str, base: str, push_target: str) -> No
 
     raise RuntimeError(
         f"Rebase failed after 3 attempts: {repo.name}:{branch} onto {base}")
-
-
-def squash_merge(repo: Path, branch: str, base: str,
-                 squash_msg: Optional[str] = None) -> str:
-    _checkout(repo, branch)
-    merge_base_sha = _merge_base(repo, base, branch)
-
-    if squash_msg is None:
-        result = _git(repo, "log", "--format=%s", f"{merge_base_sha}..HEAD")
-        msgs = result.stdout.strip().splitlines() if result.returncode == 0 else []
-        squash_msg = "\n".join(msgs) if msgs else "squash: combined commits"
-
-    _git(repo, "reset", "--soft", merge_base_sha)
-
-    result = _git(repo, "commit", "-m", squash_msg)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"squash commit failed in {repo.name}: {result.stderr.strip()}")
-    squash_sha = _rev_parse(repo, "HEAD")
-
-    _checkout(repo, base)
-    result = _git(repo, "merge", "--ff-only", branch)
-    if result.returncode != 0:
-        _git(repo, "merge", branch)
-
-    landed_sha = _rev_parse(repo, "HEAD")
-    if landed_sha != squash_sha:
-        raise RuntimeError(
-            f"squash_merge verification failed in {repo.name}: "
-            f"expected {squash_sha}, main HEAD is {landed_sha}")
-
-    return landed_sha
 
 
 def ff_merge(repo: Path, branch: str) -> str:
@@ -472,8 +435,6 @@ def land(target: CloseTarget) -> str:
     if target.is_workspace and target.transport == "two-hop":
         return ""
 
-    squash_plan = _read_squash_plan(target.repo) if not target.is_workspace else None
-
     _checkout(target.repo, target.base_branch)
 
     if target.is_workspace:
@@ -487,12 +448,8 @@ def land(target: CloseTarget) -> str:
         except RuntimeError:
             _checkout(target.repo, target.base_branch)
             raise
-        if squash_plan:
-            sha = squash_merge(target.repo, target.branch,
-                               target.base_branch, squash_plan)
-        else:
-            _checkout(target.repo, target.base_branch)
-            sha = ff_merge(target.repo, target.branch)
+        _checkout(target.repo, target.base_branch)
+        sha = ff_merge(target.repo, target.branch)
 
     strip_lifecycle_files_from_tree(target.repo, target.base_branch, LIFECYCLE_FILES)
 
@@ -632,6 +589,17 @@ def close(workspace: Path) -> CloseResult:
             errors=["no targets found — branch may not exist or has no commits"],
         )
 
+    # Checked before anything is rebased: the ceremony's own rebase changes every SHA.
+    review_needed = []
+    for target in targets:
+        if target.is_workspace:
+            continue
+        reason = squash_marker.review_status(target.repo, target.branch, target.base_branch)
+        if reason:
+            review_needed.append(f"{target.repo.name}:{target.branch}: {reason}")
+    if review_needed:
+        return CloseResult(success=False, squash_review=review_needed)
+
     queue = read_queue(workspace)
     active = queue.active_item() if queue else None
     closing_issue = active.ref if active else ""
@@ -656,6 +624,7 @@ def close(workspace: Path) -> CloseResult:
 
         for target, sha in landed.items():
             stamp(target, sha)
+            squash_marker.clear(target.repo, target.branch)
 
         slot_root = _detect_slot_root(workspace)
 
@@ -680,6 +649,20 @@ def close(workspace: Path) -> CloseResult:
         raise
 
 
+def render(result: CloseResult) -> list[str]:
+    """KEY=value lines describing a ceremony result."""
+    if result.success:
+        lines = ["ACTION=complete"]
+        lines += [f"LANDED_{repo}={sha}" for repo, sha in result.landed.items()]
+        if result.next_item:
+            lines.append(f"NEXT_ITEM={result.next_item.ref}")
+        lines += [f"RESCUED_{repo}={detail}" for repo, detail in result.rescued.items()]
+        return lines
+    if result.squash_review:
+        return ["ACTION=squash_review_needed"] + [f"SQUASH_REVIEW={r}" for r in result.squash_review]
+    return ["ACTION=error"] + [f"ERROR={e}" for e in result.errors]
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print("ERROR=missing_workspace")
@@ -693,21 +676,11 @@ def main() -> int:
     except Exception as e:
         print(f"ACTION=error\nERROR={e}")
         return 1
+    for line in render(result):
+        print(line)
     if result.success:
-        print("ACTION=complete")
-        for repo, sha in result.landed.items():
-            print(f"LANDED_{repo}={sha}")
-        if result.next_item:
-            print(f"NEXT_ITEM={result.next_item.ref}")
-        if result.rescued:
-            for repo, detail in result.rescued.items():
-                print(f"RESCUED_{repo}={detail}")
-    else:
-        print("ACTION=error")
-        for err in result.errors:
-            print(f"ERROR={err}")
-        return 1
-    return 0
+        return 0
+    return 2 if result.squash_review else 1
 
 
 if __name__ == "__main__":

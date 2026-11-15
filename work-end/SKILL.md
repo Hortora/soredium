@@ -41,11 +41,13 @@ does not depend on them. Skip any that don't apply.
 6. **Doc sync** — invoke `implementation-doc-sync` if docs need updating
 7. **ADR** — invoke `adr` if architectural decisions were made
 8. **Write content** — invoke `write-content` (diary) for the session
-9. **Squash noise** — invoke `git-squash` to compact WIP/fixup noise.
-   This is the ONLY path to squashing — close.py FF-merges unless
-   git-squash writes a `.squash-plan`. The skill classifies commits
-   intelligently: KEEP meaningful ones, only squash noise. Always offer
-   this step; skip only if the branch has clean, well-structured commits.
+9. **Squash review** — invoke `git-squash` on every project repo whose
+   branch has more than one commit. This is the ONLY path to squashing:
+   close.py never squashes. The skill keeps informational commits and
+   compacts only noise, then records the reviewed branch tip. The
+   ceremony refuses to land a multi-commit branch without that record,
+   so this step is required, not optional, for such branches. Never
+   create a `.squash-plan` file — nothing reads it.
 
 Present these as a checklist. User picks which to run.
 
@@ -59,14 +61,22 @@ This runs the atomic ceremony: resolve targets, preflight, land (rebase +
 FF-merge), stamp branches, advance queue. Either succeeds fully or
 fails cleanly — repos are never left on mixed branches.
 
-**Landing strategy:** after rebasing the branch onto base, close.py
-FF-merges by default — preserving every individual commit on main.
-Squash-merge only runs when a `.squash-plan` exists (user ran
-`/git-squash` pre-close to compact noise). This ensures the reasoning
-chain in individual commits is never silently destroyed.
+**Landing strategy:** close.py rebases the branch onto base and
+fast-forwards. Every commit on the branch reaches main individually.
+close.py has no squash path of any kind.
+
+**Squash review gate:** before touching anything, close.py checks each
+project repo's branch against the tip git-squash recorded
+(`refs/squash-reviewed/<branch>`). A single-commit branch needs no
+review. Otherwise the recorded tip must equal the branch tip.
 
 Read the output:
 - `ACTION=complete` — ceremony succeeded. Read `LANDED_*` and `NEXT_ITEM`.
+- `ACTION=squash_review_needed` — nothing was changed. Each
+  `SQUASH_REVIEW=<repo>:<branch>: <reason>` line names a branch that has
+  not been reviewed at its current tip (never reviewed, commits added
+  since, or rebased since). Invoke `git-squash` for each one, then run
+  the ceremony again. Do not work around this by landing manually.
 - `ACTION=error` — ceremony failed. Read `ERROR=` lines, diagnose, and
   report to user.
 
@@ -122,6 +132,6 @@ After `ACTION=complete`:
 
 **Invokes (pre-close):** `code-review`, `branch-audit`, `forage`, `protocol`,
 `update-claude-md`, `implementation-doc-sync`, `adr`, `write-content`,
-`git-squash` (noise compaction — writes `.squash-plan` for close.py)
+`git-squash` (semantic squash; records the reviewed tip that close.py checks)
 
 **Uses:** `work-end/close.py` — atomic close ceremony
