@@ -46,7 +46,7 @@ from slot_isx import (
     _teardown_isx, _wire_isx_remotes,
 )
 from slot_claude import (
-    relocate_claude_projects, sweep_orphaned_claude_projects,
+    relocate_claude_projects, sweep_orphaned_claude_projects, is_claude_session,
 )
 from slot_git import (
     configure_slot_remotes, configure_update_instead,
@@ -841,17 +841,29 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
             sys.exit(1)
     active = find_active_sessions(slot_dir)
     if active:
-        if not force:
-            for pid, cmd, path in active:
-                print(f"ACTIVE_SESSION={pid}:{cmd}:{path}")
-            print(f"ERROR=active_sessions slot={slot_num}")
-            print(f"ERROR_DETAIL={len(active)} active process(es) in slot directory")
-            print("HINT=close the session first, or pass --force to override")
+        claude_sessions = [(pid, cmd, path) for pid, cmd, path in active if is_claude_session(cmd)]
+        other_sessions = [(pid, cmd, path) for pid, cmd, path in active if not is_claude_session(cmd)]
+        if claude_sessions:
+            # Hard stop regardless of --force: moving the slot while a Claude Code
+            # session is running corrupts its conversation history.
+            for pid, cmd, path in claude_sessions:
+                print(f"ACTIVE_CLAUDE_SESSION={pid}:{cmd}:{path}")
+            print(f"ERROR=active_claude_sessions slot={slot_num}")
+            print(f"ERROR_DETAIL={len(claude_sessions)} Claude Code session(s) running in slot — conversation history would be corrupted")
+            print("HINT=close the Claude Code session first; --force does not bypass this check")
             sys.exit(1)
-        else:
-            for pid, cmd, path in active:
-                print(f"WARN_ACTIVE_SESSION={pid}:{cmd}:{path}")
-            print(f"WARN=active_sessions_overridden slot={slot_num}")
+        if other_sessions:
+            if not force:
+                for pid, cmd, path in other_sessions:
+                    print(f"ACTIVE_SESSION={pid}:{cmd}:{path}")
+                print(f"ERROR=active_sessions slot={slot_num}")
+                print(f"ERROR_DETAIL={len(other_sessions)} active process(es) in slot directory")
+                print("HINT=close the session first, or pass --force to override")
+                sys.exit(1)
+            else:
+                for pid, cmd, path in other_sessions:
+                    print(f"WARN_ACTIVE_SESSION={pid}:{cmd}:{path}")
+                print(f"WARN=active_sessions_overridden slot={slot_num}")
 
     has_promotion_stamp = any(
         (sub / ".artifacts-promoted").exists() or (sub / "design" / ".artifacts-promoted").exists()

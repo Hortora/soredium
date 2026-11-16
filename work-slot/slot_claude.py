@@ -1,6 +1,7 @@
 """slot_claude.py — Claude Code project directory management."""
 
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -70,6 +71,19 @@ def relocate_claude_projects(slot_dir: Path, dest_dir: Path) -> int:
     except OSError:
         pass
     return 0
+
+
+_CLAUDE_VERSION_RE = re.compile(r'^\d+\.\d+\.\d+')
+
+
+def is_claude_session(cmd: str) -> bool:
+    """Return True if the command looks like a live Claude Code process.
+
+    Claude Code's Electron binary appears in lsof output as its version
+    string (e.g. '2.1.325'). It may also appear as 'claude' or 'Claude'.
+    Node and zsh processes are NOT Claude Code sessions.
+    """
+    return bool(_CLAUDE_VERSION_RE.match(cmd)) or cmd.lower() in ('claude', 'claude-code')
 
 
 def find_active_sessions(slot_dir: Path) -> list[tuple[int, str, str]]:
