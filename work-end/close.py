@@ -54,6 +54,18 @@ class CloseResult:
     squash_review: list[str] = field(default_factory=list)
     workspace_landed: dict = field(default_factory=dict)
     slot_ready: str = ""
+    # Queue items this ceremony closed, in the order they landed, and each one's branch.
+    closed_items: list[str] = field(default_factory=list)
+    closed_branches: dict = field(default_factory=dict)
+
+
+@dataclass
+class BatchEntry:
+    """One queue item's share of a close: its issue and the branches that carry it."""
+    issue: str
+    branches: list[str]
+    done: bool          # marked done earlier in the session, as opposed to the active item
+    targets: list = field(default_factory=list)
 
 
 # --- git helpers ---
@@ -175,13 +187,28 @@ def _current_branch(repo: Path) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def resolve(workspace: Path) -> list[CloseTarget]:
+def batch_entries(workspace: Path, queue: Queue) -> list[BatchEntry]:
+    """Everything one ceremony closes: each done item in queue order, then the active item."""
+    entries = [BatchEntry(issue=item.ref, branches=[item.done_branch], done=True)
+               for item in queue.done_items()]
+    done_branches = {item.done_branch for item in queue.done_items()}
+    active = queue.active_item()
+    entries.append(BatchEntry(
+        issue=active.ref if active else "",
+        branches=[b for b in discover_active_branches(workspace, queue)
+                  if b not in done_branches],
+        done=False))
+    return entries
+
+
+def resolve(workspace: Path, branches: Optional[list[str]] = None) -> list[CloseTarget]:
     """Determine what to close. Returns a CloseTarget per repo×branch with commits."""
     queue = read_queue(workspace)
     if queue is None:
         return []
 
-    branches = discover_active_branches(workspace, queue)
+    if branches is None:
+        branches = discover_active_branches(workspace, queue)
     topology = discover_repo_topology(workspace)
     targets = []
 
@@ -259,6 +286,7 @@ def check_branch_alignment(workspace: Path) -> list[str]:
     if queue is None:
         return []
     branches = discover_active_branches(workspace, queue)
+    branches += [i.done_branch for i in queue.done_items() if i.done_branch not in branches]
     topology = discover_repo_topology(workspace)
     named = ", ".join(branches) if branches else "no branch"
     errors = []
@@ -547,12 +575,34 @@ def advance(workspace: Path, expected_issue: str) -> Optional[QueueItem]:
     return queue.active_item()
 
 
-def commit_and_push_queue(workspace: Path, closing_issue: str) -> None:
+def complete_item(workspace: Path, issue: str) -> None:
+    """Check one done item, once its own landing and stamp have succeeded."""
+    queue = read_queue(workspace)
+    if queue is not None and queue.complete(issue):
+        write_queue(workspace, queue)
+
+
+def settle_queue(workspace: Path) -> Optional[QueueItem]:
+    """After done items were closed: activate the next open item, or drain the queue."""
+    queue = read_queue(workspace)
+    if queue is None:
+        return None
+    if queue.active_item() is None:
+        if queue.has_next():
+            queue.activate_next()
+            queue.set_status("active")
+        elif not queue.done_items():
+            queue.set_status("drained")
+        write_queue(workspace, queue)
+    return queue.active_item()
+
+
+def commit_and_push_queue(workspace: Path, closing_issue: str, refs_issue: str = "") -> None:
     if not (workspace / ".queue").exists():
         return
     _git(workspace, "add", ".queue")
     result = _git(workspace, "commit", "-m", f"chore: advance queue — completed {closing_issue}",
-                  "-m", _issue_trailer(closing_issue), "--", ".queue")
+                  "-m", _issue_trailer(refs_issue or closing_issue), "--", ".queue")
     if result.returncode != 0 and _git(workspace, "status", "--porcelain", "--", ".queue").stdout.strip():
         raise RuntimeError(
             f"queue commit failed in {workspace.name}: {result.stderr.strip()}")
@@ -664,9 +714,25 @@ def close(workspace: Path) -> CloseResult:
     if misaligned:
         return CloseResult(success=False, errors=misaligned)
 
-    targets = resolve(workspace)
+    queue = read_queue(workspace)
+    entries = batch_entries(workspace, queue) if queue else []
+    repos = [repo for repo, *_ in discover_repo_topology(workspace)]
 
-    if not targets:
+    missing = []
+    for entry in entries:
+        entry.targets = resolve(workspace, entry.branches)
+        if entry.done and not entry.targets and not any(
+                _branch_exists(repo, b) for repo in repos for b in entry.branches):
+            missing.append(
+                f"{entry.issue} is marked done on branch '{entry.branches[0]}', which exists "
+                f"in no repo — nothing was landed. Restore the branch or correct the queue.")
+    if missing:
+        return CloseResult(success=False, errors=missing)
+
+    targets = [t for entry in entries for t in entry.targets]
+    done_entries = [e for e in entries if e.done]
+
+    if not targets and not done_entries:
         stamped = stamped_branches(workspace)
         if stamped:
             return CloseResult(
@@ -681,6 +747,7 @@ def close(workspace: Path) -> CloseResult:
         )
 
     # Checked before anything is rebased: the ceremony's own rebase changes every SHA.
+    # One branch that needs review holds back the whole batch, so nothing lands out of order.
     review_needed = []
     for target in targets:
         if target.is_workspace:
@@ -691,46 +758,67 @@ def close(workspace: Path) -> CloseResult:
     if review_needed:
         return CloseResult(success=False, squash_review=review_needed)
 
-    queue = read_queue(workspace)
     active = queue.active_item() if queue else None
     closing_issue = active.ref if active else ""
-    stamp_issue = closing_issue or (queue.state.covers.split(",")[0].strip() if queue else "")
+    covers_issue = queue.state.covers.split(",")[0].strip() if queue else ""
 
     pre = preflight(targets)
     if pre["errors"]:
-        return CloseResult(success=False, errors=pre["errors"])
+        return CloseResult(success=False, errors=list(dict.fromkeys(pre["errors"])))
 
     session_id = _generate_session_id()
     _write_close_state(workspace, {
         "step": "landing",
-        "closing_issue": closing_issue,
+        "closing_issue": ", ".join(e.issue for e in entries if e.issue and (e.done or e.targets)),
         "session_id": session_id,
         "repos": ", ".join(f"{t.repo.name}:{t.branch}" for t in targets),
     })
 
     # A workspace repo can share its directory name with the project repo.
     split_workspace = len(discover_repo_topology(workspace)) > 1
+    slot_root = _detect_slot_root(workspace)
+
+    landed: dict[CloseTarget, str] = {}
+    closed: list[str] = []
+    closed_branches: dict[str, str] = {}
+    active_landed = False
 
     try:
-        landed: dict[CloseTarget, str] = {}
-        for target in targets:
-            sha = land(target, stamp_issue)
-            landed[target] = sha
+        for entry in entries:
+            if not entry.done and not entry.targets:
+                continue  # the active item was never started: it stays active
+            issue = entry.issue or covers_issue
+            for target in entry.targets:
+                landed[target] = land(target, issue)
+            for target in entry.targets:
+                stamp(target, landed[target], issue)
+                squash_marker.clear(target.repo, target.branch)
+            if entry.done:
+                # Checked only now, so a later failure leaves the rest done-but-not-closed.
+                complete_item(workspace, entry.issue)
+                closed.append(entry.issue)
+                closed_branches[entry.issue] = entry.branches[0]
+            else:
+                active_landed = True
 
-        for target, sha in landed.items():
-            stamp(target, sha, stamp_issue)
-            squash_marker.clear(target.repo, target.branch)
-
-        slot_root = _detect_slot_root(workspace)
+        def finish_queue() -> Optional[QueueItem]:
+            item = advance(workspace, closing_issue) if active_landed else None
+            if active_landed and closing_issue:
+                closed.append(closing_issue)
+                closed_branches[closing_issue] = entry_branch(entries[-1])
+            if done_entries:
+                item = settle_queue(workspace)
+            return item
 
         if slot_root:
-            next_item = advance(workspace, closing_issue)
+            next_item = finish_queue()
             elevate_queue(workspace, slot_root)
             checkout_all(targets)
         else:
             checkout_all(targets)
-            next_item = advance(workspace, closing_issue)
-            commit_and_push_queue(workspace, closing_issue)
+            next_item = finish_queue()
+            commit_and_push_queue(workspace, ", ".join(closed) or closing_issue,
+                                  closed[-1] if closed else covers_issue)
 
         _remove_close_state(workspace)
 
@@ -752,10 +840,22 @@ def close(workspace: Path) -> CloseResult:
                               if split_workspace and t.is_workspace},
             next_item=next_item,
             rescued=pre["rescued"],
+            closed_items=closed,
+            closed_branches=closed_branches,
         )
     except Exception:
         checkout_all(targets)
+        if closed and not slot_root:
+            # Record the items that did close, so a rerun starts from the failed one.
+            try:
+                commit_and_push_queue(workspace, ", ".join(closed), closed[-1])
+            except RuntimeError as commit_error:
+                print(f"WARN=queue_progress_not_committed detail={commit_error}", file=sys.stderr)
         raise
+
+
+def entry_branch(entry: BatchEntry) -> str:
+    return entry.branches[0] if entry.branches else ""
 
 
 def render(result: CloseResult) -> list[str]:
@@ -765,6 +865,8 @@ def render(result: CloseResult) -> list[str]:
         lines += [f"LANDED_{repo}={sha}" for repo, sha in result.landed.items()]
         lines += [f"WORKSPACE_LANDED_{repo}={sha}"
                   for repo, sha in result.workspace_landed.items()]
+        lines += [f"CLOSED_ITEM={ref} branch={result.closed_branches.get(ref, '')}"
+                  for ref in result.closed_items]
         if result.next_item:
             lines.append(f"NEXT_ITEM={result.next_item.ref}")
         lines += [f"RESCUED_{repo}={detail}" for repo, detail in result.rescued.items()]
