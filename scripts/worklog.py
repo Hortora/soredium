@@ -13,9 +13,14 @@ import sqlite3
 import sys
 from pathlib import Path
 
-_project_dir = str(Path(__file__).resolve().parent.parent / "project")
-if _project_dir not in sys.path:
-    sys.path.insert(0, _project_dir)
+# This file runs from the repo (scripts/) and from its installed copy (~/.claude/lib/),
+# where the sibling project/ directory does not exist.
+for _candidate in (Path(__file__).resolve().parent.parent / "project",
+                   Path.home() / ".claude" / "skills" / "project"):
+    if (_candidate / "plan_io.py").exists():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
 from plan_io import parse_covers
 
 SCHEMA_VERSION = 4

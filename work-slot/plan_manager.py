@@ -1400,9 +1400,10 @@ def main() -> int:
         pos_str = opts.get("position")
         position = int(pos_str) if pos_str else None
         if opts.get('skip-duplicate-check') != 'yes':
-            _lib = Path.home() / '.claude' / 'lib'
-            if _lib.exists() and str(_lib) not in _sys.path:
-                _sys.path.insert(0, str(_lib))
+            _here = Path(__file__).resolve().parent.parent
+            for _dir in (_here / "project", _here / "scripts", Path.home() / '.claude' / 'lib'):
+                if _dir.exists() and str(_dir) not in _sys.path:
+                    _sys.path.append(str(_dir))
             try:
                 import worklog as _wl
                 import os as _os
@@ -1418,8 +1419,8 @@ def main() -> int:
                         _conn.close()
                         return 1
                 _conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"WARN=duplicate_check_unavailable detail={e}")
         skip_state = opts.get("skip-state-check") == "yes"
         added = append_to_queue(plan_path, items, position=position, skip_state_check=skip_state)
         for item in added:

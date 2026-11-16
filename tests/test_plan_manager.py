@@ -1766,6 +1766,42 @@ class TestAppendDuplicateGate:
         assert result.returncode == 1
         assert "DUPLICATE=yes" in result.stdout
 
+    def test_append_reports_when_the_check_cannot_run(self, tmp_path):
+        """A broken worklog must be visible, not silently skip the duplicate gate."""
+        import subprocess, os
+        plan = tmp_path / ".plan"
+        plan.write_text(SINGLE_ISSUE_PLAN)
+        (tmp_path / "not-a-db").mkdir()
+        env = {**os.environ, "WORKLOG_DB": str(tmp_path / "not-a-db")}
+        result = subprocess.run(
+            [sys.executable, self.PLAN_MANAGER_SCRIPT, "append", str(plan),
+             "issues=test/repo#99:New work"],
+            capture_output=True, text=True, env=env,
+        )
+        assert "WARN=duplicate_check_unavailable" in result.stdout
+
+    def test_installed_worklog_copy_is_importable(self, tmp_path):
+        """worklog.py is installed alone into ~/.claude/lib; it must still find plan_io."""
+        import subprocess, os, shutil
+        repo = Path(__file__).parent.parent
+        home = tmp_path / "home"
+        lib = home / ".claude" / "lib"
+        lib.mkdir(parents=True)
+        shutil.copy(repo / "scripts" / "worklog.py", lib / "worklog.py")
+        skills_project = home / ".claude" / "skills" / "project"
+        skills_project.parent.mkdir(parents=True)
+        shutil.copytree(repo / "project", skills_project,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        env["HOME"] = str(home)
+        result = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {str(lib)!r}); import worklog; print(worklog.__file__)"],
+            capture_output=True, text=True, env=env, cwd=str(tmp_path),
+        )
+        assert result.returncode == 0, result.stderr
+        assert str(lib) in result.stdout
+
     def test_append_allows_when_no_active_work(self, tmp_path):
         import subprocess, os
         plan = tmp_path / ".plan"
