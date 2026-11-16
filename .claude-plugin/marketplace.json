@@ -7,6 +7,12 @@
   },
   "plugins": [
     {
+      "name": "adr",
+      "source": "./adr",
+      "description": "Use when recording architectural decisions: user says \"create an ADR\", \"document why we chose X\", significant technic...",
+      "version": "1.0.0"
+    },
+    {
       "name": "code-review",
       "source": "./code-review",
       "description": "Use when the user says \"review the code\", \"check these changes\", \"review this\", \"look at staged changes\", or invokes ...",
