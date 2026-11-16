@@ -431,14 +431,29 @@ def strip_lifecycle_files_from_tree(repo: Path, branch: str, files: list[str]) -
         _git(repo, "commit", "-m", "chore: strip leaked lifecycle files", "-m", _issue_trailer(""))
 
 
+def _rebase_target(repo: Path, base: str, remote_base: str) -> str:
+    """The newer of the local base and its remote-tracking ref.
+
+    The branch is fast-forwarded onto the local base afterwards, so it must sit on
+    top of it. The local base is ahead of the remote whenever something landed and
+    was not pushed yet: an earlier item in the same batch, for one.
+    """
+    if _git(repo, "rev-parse", "--verify", "-q", remote_base).returncode != 0:
+        return base
+    if _is_ancestor(repo, remote_base, base):
+        return base
+    if _is_ancestor(repo, base, remote_base):
+        return remote_base
+    raise RuntimeError(
+        f"{repo.name}: local {base} and {remote_base} have diverged — each has commits "
+        f"the other lacks. Nothing was landed. Reconcile them first; the ceremony will "
+        f"not choose one.")
+
+
 def rebase_onto_base(repo: Path, branch: str, base: str, push_target: str) -> None:
     _checkout(repo, branch)
     _git(repo, "fetch", push_target, base)
-    remote_base = f"{push_target}/{base}"
-
-    result = _git(repo, "rev-parse", "--verify", remote_base)
-    if result.returncode != 0:
-        remote_base = base
+    remote_base = _rebase_target(repo, base, f"{push_target}/{base}")
 
     if _is_ancestor(repo, remote_base, "HEAD"):
         return

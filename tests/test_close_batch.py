@@ -310,3 +310,95 @@ class TestRendering:
         assert "CLOSED_ITEM=R#1 branch=b1" in lines
         assert "CLOSED_ITEM=R#2 branch=b2" in lines
         assert lines.index("CLOSED_ITEM=R#1 branch=b1") < lines.index("CLOSED_ITEM=R#2 branch=b2")
+
+
+# --- #526: a real remote, with local main ahead of it ---
+
+def _with_remote(tmp_path: Path, proj: Path) -> Path:
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    _git(proj, "remote", "add", "origin", str(bare))
+    _git(proj, "push", "-q", "origin", "main")
+    return bare
+
+
+class TestLocalBaseAheadOfRemote:
+    """Fixtures without a remote hid this: the rebase targeted the remote-tracking
+    base and ignored a local base that had moved on."""
+
+    def test_two_branches_cut_from_the_pushed_base_both_land(self, repos, tmp_path):
+        proj, ws = repos
+        _with_remote(tmp_path, proj)
+        pre = _main(proj)
+        _branch(proj, "b1", {"one.txt": "1"})
+        _branch(proj, "b2", {"two.txt": "2"})
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1",
+                                        "feat: b2 adds two.txt Refs #1"]
+        assert _merge_commits(proj, pre) == 0
+
+    def test_single_branch_lands_when_local_main_has_unpushed_commits(self, repos, tmp_path):
+        proj, ws = repos
+        _with_remote(tmp_path, proj)
+        _branch(proj, "b1", {"one.txt": "1"})
+        (proj / "local-only.txt").write_text("x")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-m", "feat: landed locally, not pushed Refs #9")
+        pre = _main(proj)
+        _queue(ws, [("R#1", "b1")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1"]
+        assert _git(proj, "show", "main:local-only.txt").stdout == "x"
+
+    def test_remote_ahead_of_local_main_still_lands(self, repos, tmp_path):
+        proj, ws = repos
+        bare = _with_remote(tmp_path, proj)
+        _branch(proj, "b1", {"one.txt": "1"})
+        other = tmp_path / "other"
+        subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True)
+        _git(other, "config", "user.email", "o@test.com")
+        _git(other, "config", "user.name", "Other")
+        (other / "remote-only.txt").write_text("r")
+        _git(other, "add", ".")
+        _git(other, "commit", "-m", "feat: pushed by someone else Refs #9")
+        _git(other, "push", "-q", "origin", "main")
+        _queue(ws, [("R#1", "b1")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _git(proj, "show", "main:remote-only.txt").stdout == "r"
+        assert _git(proj, "show", "main:one.txt").stdout == "1"
+        assert _merge_commits(proj, "HEAD~2") == 0
+
+    def test_diverged_local_and_remote_base_is_refused_untouched(self, repos, tmp_path):
+        proj, ws = repos
+        bare = _with_remote(tmp_path, proj)
+        _branch(proj, "b1", {"one.txt": "1"})
+        other = tmp_path / "other"
+        subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True)
+        _git(other, "config", "user.email", "o@test.com")
+        _git(other, "config", "user.name", "Other")
+        (other / "remote-only.txt").write_text("r")
+        _git(other, "add", ".")
+        _git(other, "commit", "-m", "feat: pushed by someone else Refs #9")
+        _git(other, "push", "-q", "origin", "main")
+        (proj / "local-only.txt").write_text("x")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-m", "feat: landed locally, not pushed Refs #9")
+        pre = _main(proj)
+        _queue(ws, [("R#1", "b1")])
+
+        with pytest.raises(RuntimeError, match="diverged"):
+            _close(proj, ws)
+
+        assert _main(proj) == pre
+        assert _state(ws)["R#1"] == (False, False, "b1")
+        assert _git(proj, "branch", "--show-current").stdout.strip() == "main"
