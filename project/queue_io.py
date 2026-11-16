@@ -17,6 +17,8 @@ class QueueItem:
     title: str
     completed: bool
     active: bool
+    # Done but not closed: finished on this branch, close ceremony not yet run.
+    done_branch: str = ""
 
 
 @dataclass
@@ -47,15 +49,31 @@ class Queue:
             item.completed = True
             item.active = False
 
-    def has_next(self) -> bool:
+    def done_items(self) -> list[QueueItem]:
+        """Items finished on a branch and awaiting the close ceremony, in queue order."""
+        return [i for i in self.items if i.done_branch and not i.completed]
+
+    def complete(self, ref: str) -> bool:
+        """Close one named item. Used once its landing and stamp have succeeded."""
         for item in self.items:
-            if not item.completed and not item.active:
+            if item.ref == ref and not item.completed:
+                item.completed = True
+                item.active = False
+                item.done_branch = ""
                 return True
         return False
 
+    def _open(self, item: QueueItem) -> bool:
+        return not item.completed and not item.active and not item.done_branch
+
+    def has_next(self) -> bool:
+        return any(self._open(item) for item in self.items)
+
     def activate_next(self) -> None:
+        if self.active_item() is not None:
+            return
         for item in self.items:
-            if not item.completed and not item.active:
+            if self._open(item):
                 item.active = True
                 return
 
@@ -69,6 +87,7 @@ _ITEM_RE = re.compile(
     r"^- \[([ x])\] "
     r"(.+?)(?:\s+← active)?$"
 )
+_DONE_RE = re.compile(r"\s*(?:←|<-)\s*done on (\S+)")
 _REF_TITLE_RE = re.compile(r"^(.+?) — (.+)$")
 _SUB_TASK_RE = re.compile(r"^\s+- \[[ x]\] ")
 
@@ -82,12 +101,16 @@ def _parse_item(line: str) -> Optional[QueueItem]:
     rest = m.group(2).strip()
     if "← active" in rest:
         rest = rest.replace("← active", "").strip()
+    done_m = _DONE_RE.search(rest)
+    done_branch = done_m.group(1) if done_m and not completed else ""
+    rest = _DONE_RE.sub("", rest).strip()
     rest = re.sub(r"\s*\(epic\)\s*", "", rest).strip()
     tm = _REF_TITLE_RE.match(rest)
     if tm:
         return QueueItem(ref=tm.group(1), title=tm.group(2),
-                         completed=completed, active=active)
-    return QueueItem(ref=rest, title="", completed=completed, active=active)
+                         completed=completed, active=active, done_branch=done_branch)
+    return QueueItem(ref=rest, title="", completed=completed, active=active,
+                     done_branch=done_branch)
 
 
 _KNOWN_STATE_FIELDS = {"branch", "issue-repo", "status", "covers"}
@@ -172,6 +195,8 @@ def write_queue(workspace: Path, queue: Queue) -> None:
     for i, item in enumerate(queue.items):
         check = "x" if item.completed else " "
         marker = "        ← active" if item.active else ""
+        if item.done_branch and not item.completed and not item.active:
+            marker = f" ← done on {item.done_branch}"
         if item.title:
             lines.append(f"- [{check}] {item.ref} — {item.title}{marker}")
         else:

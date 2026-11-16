@@ -56,6 +56,8 @@ class QueueItem:
     children: list['QueueItem'] = field(default_factory=list)
     batch: str | None = None
     tasks: list[TaskItem] = field(default_factory=list)
+    # Done but not closed: finished on this branch, close ceremony not yet run.
+    done_branch: str = ""
 
 
 @dataclass
@@ -89,6 +91,7 @@ class LeafItem:
     active: bool
     parent_epic: IssueRef | None
     batch: str | None
+    done_branch: str = ""
 
 
 @dataclass
@@ -103,10 +106,11 @@ class AdvanceResult:
 
 
 _ITEM_RE = re.compile(
-    r'^(\s*)- \[([ x])\] (?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)\s*—\s*(.+?)(?:\s*\(epic\))?(?:\s*(?:←|<-)\s*active)?$'
+    r'^(\s*)- \[([ x])\] (?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)\s*—\s*(.+?)(?:\s*\(epic\))?(?:\s*(?:←|<-)\s*(?:active|done on \S+))?$'
 )
 _EPIC_MARKER_RE = re.compile(r'\(epic\)')
 _ACTIVE_MARKER_RE = re.compile(r'(?:←|<-)\s*active')
+_DONE_MARKER_RE = re.compile(r'(?:←|<-)\s*done on (\S+)')
 _BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*(?:←|<-)\s*current)?$')
 _DEFERRED_RE = re.compile(
     r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]*)\](?:\s+—\s+(.+))?$'
@@ -317,8 +321,10 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
             title_raw = item_m.group(5).strip()
             title = _EPIC_MARKER_RE.sub("", title_raw).strip()
             title = _ACTIVE_MARKER_RE.sub("", title).strip()
+            title = _DONE_MARKER_RE.sub("", title).strip()
             is_epic = bool(_EPIC_MARKER_RE.search(item_m.group(0)))
             active = bool(_ACTIVE_MARKER_RE.search(item_m.group(0)))
+            done_m = _DONE_MARKER_RE.search(item_m.group(0))
 
             item = QueueItem(
                 ref=ref,
@@ -327,6 +333,7 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
                 active=active,
                 is_epic=is_epic,
                 batch=current_batch,
+                done_branch=done_m.group(1) if done_m and not completed else "",
             )
 
             if is_epic:
@@ -429,6 +436,7 @@ def _flatten_items(items: list[QueueItem], result: list[LeafItem],
                 active=item.active,
                 parent_epic=parent_epic,
                 batch=item.batch,
+                done_branch=item.done_branch,
             ))
 
 
@@ -511,6 +519,8 @@ def _write_item(item: QueueItem, lines: list[str], indent: int) -> None:
     check = "x" if item.completed else " "
     epic_marker = " (epic)" if item.is_epic else ""
     active_marker = " ← active" if item.active else ""
+    if item.done_branch and not item.completed and not item.active:
+        active_marker = f" ← done on {item.done_branch}"
     lines.append(f"{prefix}- [{check}] {item.ref} — {item.title}{epic_marker}{active_marker}")
 
     if item.is_epic and item.children:
@@ -590,9 +600,8 @@ def advance(plan_path: Path,
     _mark_completed(tree.queue, completed_leaf.ref)
     _mark_parent_epics_if_done(tree.queue)
 
-    next_leaf = None
-    if active_idx + 1 < len(leaves):
-        next_leaf = leaves[active_idx + 1]
+    next_leaf = _next_open_leaf(leaves, active_idx)
+    if next_leaf:
         _mark_active(tree.queue, next_leaf.ref)
 
     batch_complete = False
@@ -632,6 +641,66 @@ def advance(plan_path: Path,
         safe_exit=safe_exit,
         has_deferred=has_deferred,
     )
+
+
+def _next_open_leaf(leaves: list[LeafItem], after: int) -> LeafItem | None:
+    """The next item that is neither closed nor done-awaiting-close."""
+    for leaf in leaves[after + 1:]:
+        if not leaf.completed and not leaf.done_branch:
+            return leaf
+    return None
+
+
+class MarkDoneError(Exception):
+    def __init__(self, code: str, detail: str):
+        super().__init__(detail)
+        self.code = code
+
+
+def _set_done(items: list[QueueItem], ref: IssueRef, branch: str) -> bool:
+    for item in items:
+        if item.ref == ref and not item.is_epic:
+            item.active = False
+            item.done_branch = branch
+            return True
+        if item.is_epic and item.children and _set_done(item.children, ref, branch):
+            return True
+    return False
+
+
+def mark_done(plan_path: Path, branch: str = "") -> dict:
+    """Mark the active item done on its branch without closing it, and activate the next.
+
+    Nothing is landed, stamped or closed on GitHub: the close ceremony does that
+    later for every done item, in queue order. The branch is recorded on the item
+    because the State section only ever names the active item's branch.
+    """
+    tree = parse_plan(plan_path)
+    leaves = flatten_leaves(tree)
+    active_idx = next((i for i, leaf in enumerate(leaves) if leaf.active), None)
+    if active_idx is None:
+        raise MarkDoneError("no_active_issue", "the queue has no active item to mark done")
+    branch = branch or tree.state.get("branch", "")
+    if not branch:
+        raise MarkDoneError(
+            "no_branch", "the queue names no branch for the active item; pass branch=<name>")
+
+    done_leaf = leaves[active_idx]
+    _set_done(tree.queue, done_leaf.ref, branch)
+    next_leaf = _next_open_leaf(leaves, active_idx)
+    if next_leaf:
+        _mark_active(tree.queue, next_leaf.ref)
+    tree.current_issue = next_leaf.ref if next_leaf else None
+    tree.state["branch"] = ""
+    if "covers" in tree.state or next_leaf:
+        tree.state["covers"] = str(next_leaf.ref) if next_leaf else ""
+    rewrite_plan(plan_path, tree)
+
+    pending = sum(1 for leaf in flatten_leaves(parse_plan(plan_path)) if leaf.done_branch)
+    return {"done": done_leaf.ref, "branch": branch,
+            "next": next_leaf.ref if next_leaf else None,
+            "next_title": next_leaf.title if next_leaf else "",
+            "pending": pending}
 
 
 def advance_issue(plan_path: Path | None,
@@ -1030,7 +1099,7 @@ def promote_selected(plan_path: Path,
 
 def _set_first_uncompleted_active(items: list[QueueItem]) -> bool:
     for item in items:
-        if not item.completed and not item.is_epic:
+        if not item.completed and not item.is_epic and not item.done_branch:
             item.active = True
             return True
         if item.is_epic and item.children:
@@ -1478,6 +1547,22 @@ def main() -> int:
         for r in removed:
             print(f"REMOVED={r}")
         print(f"REMOVED_COUNT={len(removed)}")
+        return 0
+
+    elif command == "mark-done":
+        try:
+            result = mark_done(plan_path, branch=opts.get("branch", ""))
+        except MarkDoneError as e:
+            print(f"ERROR={e.code}")
+            print(f"ERROR_DETAIL={e}")
+            return 1
+        print(f"DONE={result['done']}")
+        print(f"DONE_BRANCH={result['branch']}")
+        print(f"NEXT={result['next'] if result['next'] else 'none'}")
+        if result["next_title"]:
+            print(f"NEXT_TITLE={result['next_title']}")
+        print(f"DONE_PENDING={result['pending']}")
+        print("OFFER=wrap_or_continue")
         return 0
 
     elif command == "advance":
