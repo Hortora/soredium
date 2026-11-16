@@ -104,6 +104,22 @@ LIFECYCLE_FILES = [
     ".close-log.jsonl", ".wrap-log.jsonl",
 ]
 
+
+# Files that legitimately differ between a landed branch and its base. Everything
+# else is content: a branch that changes only Markdown, text or images is NOT merged.
+NON_CONTENT_FILES = LIFECYCLE_FILES + [
+    ".plan", ".queue", ".meta", ".close-state", ".work-progress", ".squash-plan",
+]
+_CONTENT_PATHSPEC = [".", *[f":(exclude,top){f}" for f in NON_CONTENT_FILES]]
+
+
+def _content_differences(repo_path: Path, base: str, branch: str) -> list[str] | None:
+    """Files whose content differs between base and branch, or None if git failed."""
+    diff = _git(repo_path, "diff", "--name-only", base, branch, "--", *_CONTENT_PATHSPEC)
+    if diff.returncode != 0:
+        return None
+    return [f for f in diff.stdout.splitlines() if f]
+
 SOURCE_EXTENSIONS = (
     ".java", ".kt", ".xml", ".yaml", ".yml", ".json",
     ".properties", ".sql", ".py", ".ts", ".tsx", ".js",
@@ -112,21 +128,20 @@ SOURCE_EXTENSIONS = (
 
 
 def _verify_content_landed(desc: RepoDescriptor, branch: str) -> str | None:
-    """Return error string if branch source content is not on base_branch."""
+    """Return error string if any file the branch changed differs from base_branch."""
     result = _git(desc.repo_path, "diff", "--name-only",
-                  f"{desc.base_branch}...{branch}")
+                  f"{desc.base_branch}...{branch}", "--", *_CONTENT_PATHSPEC)
     if result.returncode != 0:
         return f"diff_failed repo={desc.repo_path.name}"
-    source_files = [f for f in result.stdout.strip().split("\n")
-                    if f and any(f.endswith(ext) for ext in SOURCE_EXTENSIONS)]
-    if not source_files:
+    changed = [f for f in result.stdout.splitlines() if f]
+    if not changed:
         return None
-    diff = _git(desc.repo_path, "diff", desc.base_branch, branch,
-                "--", *source_files)
-    if diff.returncode == 0 and diff.stdout.strip():
-        missing = [f for f in _git(desc.repo_path, "diff", "--name-only",
-                   desc.base_branch, branch, "--", *source_files)
-                   .stdout.strip().split("\n") if f]
+    diff = _git(desc.repo_path, "diff", "--name-only", desc.base_branch, branch,
+                "--", *changed)
+    if diff.returncode != 0:
+        return f"diff_failed repo={desc.repo_path.name}"
+    missing = [f for f in diff.stdout.splitlines() if f]
+    if missing:
         return f"content_not_landed repo={desc.repo_path.name} files={len(missing)}"
     return None
 
@@ -523,10 +538,7 @@ def _merge_and_push_direct(
 
     co = _git(desc.repo_path, "checkout", desc.base_branch)
     if co.returncode != 0:
-        diff = _git(desc.repo_path, "diff", "--stat",
-                    desc.base_branch, branch,
-                    "--", *[f"*{ext}" for ext in SOURCE_EXTENSIONS])
-        if diff.returncode == 0 and not diff.stdout.strip():
+        if _content_differences(desc.repo_path, desc.base_branch, branch) == []:
             sha = _git(desc.repo_path, "rev-parse", desc.base_branch)
             status.landed_sha = sha.stdout.strip() if sha.returncode == 0 else ""
             status.merged = True
@@ -796,7 +808,7 @@ def land_batch(
 
     # Step 1b: Already-merged detection. Two checks:
     # (a) Branch HEAD is an ancestor of main (manual merge, ff-merge replay).
-    # (b) No source-file diff between branch and main (squash already landed).
+    # (b) No content diff of any file type between branch and main (squash already landed).
     already_merged: list[RepoDescriptor] = []
     for desc in list(active):
         if desc.is_workspace:
@@ -809,10 +821,7 @@ def land_batch(
         if is_ancestor.returncode == 0:
             merged = True
         else:
-            diff = _git(desc.repo_path, "diff", "--stat",
-                        desc.base_branch, branch,
-                        "--", *[f"*{ext}" for ext in SOURCE_EXTENSIONS])
-            if diff.returncode == 0 and not diff.stdout.strip():
+            if _content_differences(desc.repo_path, desc.base_branch, branch) == []:
                 merged = True
                 method = "content_identical"
         if merged:
