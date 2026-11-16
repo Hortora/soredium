@@ -120,16 +120,20 @@ After `ACTION=complete`:
    gh issue close $ISSUE_N --repo $OWNER_REPO --comment "Landed as <SHA>"
    ```
 
-3. **Archive slot** (if `IN_SLOT=yes`):
-   ```bash
-   python3 ~/.claude/skills/work-slot/slot_manager.py archive-slot $FAMILY_ROOT slot=$SLOT_NUM
-   ```
+3. **Slot status** (if `IN_SLOT=yes`): never archive from here and never offer to.
+   A slot cannot be archived by a session running inside it.
+   - `SLOT_READY_FOR_ARCHIVE=<slot>` in the ceremony output: report "Slot N has
+     landed and is marked ready for archive."
+   - No such line and a `NEXT_ITEM`: the slot still has work queued; say nothing
+     about archiving.
+   - No such line and no `NEXT_ITEM`: report that the slot was not marked landed
+     and show the ceremony output. Do not work around it with `--force`.
 
-3. **Queue advancement:**
+4. **Queue advancement:**
    If `NEXT_ITEM` is present, report it: "Next issue: `NEXT_ITEM`".
    If no next item, the queue is drained.
 
-4. **Report:** Print the ceremony result. Include landed SHAs and
+5. **Report:** Print the ceremony result. Include landed SHAs and
    any rescued commits.
 
 ---

@@ -971,3 +971,76 @@ class TestIssueReferenceHook:
         r = subprocess.run(["git", "-C", str(repo), "commit", "--allow-empty", "-m", message],
                            capture_output=True, text=True)
         assert (r.returncode == 0) == accepted, r.stderr
+
+
+# --- A slot whose queue is drained is marked landed, ready to archive (#521) ---
+
+class TestSlotMarkedLanded:
+
+    def _landed(self, slot_dir: Path) -> dict[str, str]:
+        text = (slot_dir / ".landed").read_text()
+        return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
+
+    def test_drained_queue_writes_landed_marker(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, result.errors
+        assert result.slot_ready == str(slot_dir)
+        marker = self._landed(slot_dir)
+        assert marker["branch"] == "issue-1-feat"
+        assert marker["landed_shas"] == f"engine:{_main_head(repo)}"
+        assert "wsp-test" not in marker["repos"]
+
+    def test_marker_is_not_written_while_issues_remain(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(slot_dir, "issue-1-feat",
+                    items=[("R#1", "First"), ("R#2", "Second")])
+
+        result = close(slot_dir)
+
+        assert result.success, result.errors
+        assert result.next_item is not None
+        assert result.slot_ready == ""
+        assert not (slot_dir / ".landed").exists()
+
+    def test_marker_keeps_repos_landed_by_an_earlier_close(self, tmp_path):
+        slot_dir, [agency, connectors] = _setup_slot(
+            tmp_path, ["agency", "connectors"], "issue-1-feat")
+        _add_commits(agency, "issue-1-feat", 1)
+        _make_queue(slot_dir, "issue-1-feat")
+        (slot_dir / ".landed").write_text(
+            "branch=issue-0-old\nrepos=connectors\nlanded_shas=connectors:abc123\n")
+
+        result = close(slot_dir)
+
+        assert result.success, result.errors
+        shas = dict(e.split(":") for e in self._landed(slot_dir)["landed_shas"].split(","))
+        assert shas == {"connectors": "abc123", "agency": _main_head(agency)}
+
+    def test_render_reports_ready_for_archive(self, tmp_path):
+        from close import render
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        _add_commits(repo, "issue-1-feat", 1)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        lines = render(close(slot_dir))
+
+        assert f"SLOT_READY_FOR_ARCHIVE={slot_dir}" in lines
+
+    def test_non_slot_close_writes_no_marker(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-1-feat", 1)
+        _make_queue(repo, "issue-1-feat")
+
+        with patch("close.discover_repo_topology") as m:
+            m.return_value = [(repo, "main", "direct", None, "origin", "")]
+            result = close(repo)
+
+        assert result.success
+        assert result.slot_ready == ""
+        assert not (repo / ".landed").exists()

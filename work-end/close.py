@@ -53,6 +53,7 @@ class CloseResult:
     rescued: dict = field(default_factory=dict)
     squash_review: list[str] = field(default_factory=list)
     workspace_landed: dict = field(default_factory=dict)
+    slot_ready: str = ""
 
 
 # --- git helpers ---
@@ -616,6 +617,42 @@ def _detect_slot_root(workspace: Path) -> Optional[Path]:
     return None
 
 
+def _slot_dir_of(workspace: Path) -> Optional[Path]:
+    """The slot directory when the ceremony runs in a slot, whichever level it was given."""
+    for candidate in (workspace, workspace.parent):
+        if (candidate / ".slot").exists():
+            return candidate
+    return None
+
+
+def mark_slot_landed(slot_dir: Path, branch: str, project_shas: dict[str, str]) -> None:
+    """Record that every issue in this slot has landed, so it is ready to archive.
+
+    The marker is a claim, not a proof: archive-slot checks each SHA against the
+    canonical repo's base branch before it moves anything. Repos landed by an
+    earlier close in the same slot are kept.
+    """
+    marker = slot_dir / ".landed"
+    shas: dict[str, str] = {}
+    if marker.exists():
+        for line in marker.read_text().splitlines():
+            if line.startswith("landed_shas="):
+                for entry in line.split("=", 1)[1].split(","):
+                    if ":" in entry:
+                        name, sha = entry.split(":", 1)
+                        shas[name] = sha
+    shas.update({name: sha for name, sha in project_shas.items() if sha})
+    if not shas:
+        return
+    import datetime
+    marker.write_text("\n".join([
+        f"branch={branch}",
+        f"repos={','.join(shas)}",
+        f"landed_shas={','.join(f'{n}:{s}' for n, s in shas.items())}",
+        f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}",
+    ]) + "\n")
+
+
 # --- close orchestration ---
 
 def close(workspace: Path) -> CloseResult:
@@ -696,8 +733,19 @@ def close(workspace: Path) -> CloseResult:
             commit_and_push_queue(workspace, closing_issue)
 
         _remove_close_state(workspace)
+
+        slot_ready = ""
+        slot_dir = _slot_dir_of(workspace)
+        if slot_dir is not None and next_item is None:
+            mark_slot_landed(
+                slot_dir, queue.state.branch if queue else "",
+                {t.repo.name: sha for t, sha in landed.items() if not t.is_workspace})
+            if (slot_dir / ".landed").exists():
+                slot_ready = str(slot_dir)
+
         return CloseResult(
             success=True,
+            slot_ready=slot_ready,
             landed={t.repo.name: sha for t, sha in landed.items()
                     if not (split_workspace and t.is_workspace)},
             workspace_landed={t.repo.name: sha for t, sha in landed.items()
@@ -720,6 +768,8 @@ def render(result: CloseResult) -> list[str]:
         if result.next_item:
             lines.append(f"NEXT_ITEM={result.next_item.ref}")
         lines += [f"RESCUED_{repo}={detail}" for repo, detail in result.rescued.items()]
+        if result.slot_ready:
+            lines.append(f"SLOT_READY_FOR_ARCHIVE={result.slot_ready}")
         return lines
     if result.squash_review:
         return ["ACTION=squash_review_needed"] + [f"SQUASH_REVIEW={r}" for r in result.squash_review]
