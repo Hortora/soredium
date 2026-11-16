@@ -39,7 +39,7 @@ def _isolated_home(tmp_path_factory, monkeypatch):
 def _no_stray_sessions(request, monkeypatch):
     """A git hook can leave a short-lived child process inside a test repo. Only the
     tests of session detection itself should see real processes."""
-    if request.cls is not None and request.cls.__name__ == "TestFindActiveSessions":
+    if request.cls is not None and request.cls.__name__ in ("TestFindActiveSessions", "TestSessionSlotBoundary"):
         return
     monkeypatch.setattr("slot_claude.find_active_sessions", lambda d: [])
 
@@ -2804,3 +2804,174 @@ class TestProcessArchiveRequests:
         assert len(results) == 1
         assert results[0]["action"] == "deferred"
         assert "12345" in results[0]["reason"]
+
+
+# --- #521: archive purges build outputs; session detection respects slot boundaries ---
+
+def _maven_module(path: Path, built: bool = True) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "pom.xml").write_text("<project/>")
+    if built:
+        (path / "target" / "classes").mkdir(parents=True)
+        (path / "target" / "classes" / "A.class").write_bytes(b"x" * 100)
+    return path
+
+
+class TestPurgeBuildOutputs:
+
+    def test_removes_slot_m2_and_maven_targets_at_any_depth(self, tmp_path):
+        slot = tmp_path / "slots" / "5"
+        repo = init_repo(slot / "engine")
+        _maven_module(repo)
+        _maven_module(repo / "modules" / "core")
+        (slot / ".m2" / "repository" / "g").mkdir(parents=True)
+        (slot / ".m2" / "repository" / "g" / "a.jar").write_bytes(b"j" * 50)
+
+        removed, freed = slot_lifecycle._purge_build_outputs(slot)
+
+        assert not (slot / ".m2").exists()
+        assert not (repo / "target").exists()
+        assert not (repo / "modules" / "core" / "target").exists()
+        assert (repo / "pom.xml").exists() and (repo / "modules" / "core" / "pom.xml").exists()
+        assert removed == 3
+        assert freed >= 250
+
+    def test_keeps_source_and_git_data(self, tmp_path):
+        slot = tmp_path / "slots" / "5"
+        repo = init_repo(slot / "engine")
+        _maven_module(repo)
+        (repo / "src").mkdir()
+        (repo / "src" / "Main.java").write_text("class Main {}")
+        head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout
+
+        slot_lifecycle._purge_build_outputs(slot)
+
+        assert (repo / "src" / "Main.java").read_text() == "class Main {}"
+        assert subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout == head
+        assert subprocess.run(["git", "-C", str(repo), "fsck"], capture_output=True).returncode == 0
+
+    def test_keeps_target_without_a_pom(self, tmp_path):
+        """A directory that merely happens to be called target is not a build output."""
+        slot = tmp_path / "slots" / "5"
+        repo = init_repo(slot / "engine")
+        (repo / "src" / "target").mkdir(parents=True)
+        (repo / "src" / "target" / "Aim.java").write_text("class Aim {}")
+
+        removed, _ = slot_lifecycle._purge_build_outputs(slot)
+
+        assert (repo / "src" / "target" / "Aim.java").exists()
+        assert removed == 0
+
+    def test_keeps_target_holding_tracked_files(self, tmp_path, capsys):
+        slot = tmp_path / "slots" / "5"
+        repo = init_repo(slot / "engine")
+        _maven_module(repo)
+        (repo / "target" / "kept.txt").write_text("tracked")
+        subprocess.run(["git", "-C", str(repo), "add", "-f", "target/kept.txt"], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "track"], capture_output=True, check=True)
+
+        removed, _ = slot_lifecycle._purge_build_outputs(slot)
+
+        assert (repo / "target" / "kept.txt").exists()
+        assert removed == 0
+        assert "WARN=target_has_tracked_files" in capsys.readouterr().out
+
+    def test_never_follows_a_symlink_out_of_the_slot(self, tmp_path):
+        outside_m2 = tmp_path / "host-m2"
+        (outside_m2 / "repository").mkdir(parents=True)
+        (outside_m2 / "repository" / "keep.jar").write_bytes(b"k")
+        outside_target = tmp_path / "shared-target"
+        outside_target.mkdir()
+        (outside_target / "keep.class").write_bytes(b"k")
+        slot = tmp_path / "slots" / "5"
+        repo = init_repo(slot / "engine")
+        _maven_module(repo, built=False)
+        (slot / ".m2").symlink_to(outside_m2)
+        (repo / "target").symlink_to(outside_target)
+
+        slot_lifecycle._purge_build_outputs(slot)
+
+        assert (outside_m2 / "repository" / "keep.jar").exists()
+        assert (outside_target / "keep.class").exists()
+        assert not (slot / ".m2").exists() and not (slot / ".m2").is_symlink()
+        assert not (repo / "target").is_symlink()
+
+    def test_does_not_touch_other_slots(self, tmp_path):
+        slot = tmp_path / "slots" / "5"
+        other = tmp_path / "slots" / "55"
+        _maven_module(init_repo(slot / "engine"))
+        other_repo = _maven_module(init_repo(other / "engine"))
+        (other / ".m2").mkdir()
+
+        slot_lifecycle._purge_build_outputs(slot)
+
+        assert (other_repo / "target" / "classes" / "A.class").exists()
+        assert (other / ".m2").exists()
+
+    def test_archive_slot_purges_before_moving(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr("slot_lifecycle._has_unmerged_content", lambda d: [])
+        monkeypatch.setattr("slot_lifecycle.verify_landed_shas", lambda d, f: (True, []))
+        monkeypatch.setattr("slot_lifecycle._repack_broken_alternates", lambda d, f: 0)
+        monkeypatch.setattr("slot_lifecycle._teardown_isx", lambda d: None)
+        monkeypatch.setattr("slot_lifecycle.sweep_orphaned_claude_projects", lambda f: 0)
+        monkeypatch.setattr("slot_lifecycle._escape_slot_cwd", lambda d, f: (False, None))
+        monkeypatch.setattr("slot_lifecycle.relocate_claude_projects", lambda s, d: 0)
+        slot = tmp_path / "slots" / "99"
+        repo = init_repo(slot / "blocks")
+        _maven_module(repo)
+        (slot / ".m2" / "repository").mkdir(parents=True)
+        (slot / ".landed").write_text("landed_shas=abc:123\n")
+        (slot / ".slot").write_text("## Repos\n- blocks (primary)\n")
+
+        slot_lifecycle.archive_slot(tmp_path, 99, force=True)
+
+        dest = tmp_path / "slots" / "attic" / "99"
+        assert (dest / "blocks" / "pom.xml").exists()
+        assert not (dest / "blocks" / "target").exists()
+        assert not (dest / ".m2").exists()
+        assert "BUILD_OUTPUTS_PURGED=2" in capsys.readouterr().out
+
+    def test_blocked_archive_purges_nothing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("slot_claude.find_active_sessions",
+                            lambda d: [(1, "claude", str(d))])
+        monkeypatch.setattr("slot_lifecycle._has_unmerged_content", lambda d: [])
+        monkeypatch.setattr("slot_lifecycle.verify_landed_shas", lambda d, f: (True, []))
+        slot = tmp_path / "slots" / "99"
+        repo = init_repo(slot / "blocks")
+        _maven_module(repo)
+        (slot / ".m2").mkdir()
+        (slot / ".landed").write_text("landed_shas=abc:123\n")
+        (slot / ".slot").write_text("## Repos\n- blocks (primary)\n")
+
+        with pytest.raises(SystemExit):
+            slot_lifecycle.archive_slot(tmp_path, 99, force=True)
+
+        assert (repo / "target" / "classes" / "A.class").exists()
+        assert (slot / ".m2").exists()
+
+
+class TestSessionSlotBoundary:
+
+    LSOF_CWD = (
+        "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\n"
+        "2.1.325   101 me    cwd    DIR   1,4      640  111 {root}/slots/21/engine\n"
+        "2.1.325   102 me    cwd    DIR   1,4      640  112 {root}/slots/211/engine\n"
+        "2.1.325   103 me    cwd    DIR   1,4      640  113 {root}/slots/21\n"
+        "node      104 me    cwd    DIR   1,4      640  114 {root}/slots/21-old/x\n"
+    )
+
+    def test_cwd_match_stops_at_the_slot_directory(self, tmp_path):
+        slot = tmp_path / "slots" / "21"
+        slot.mkdir(parents=True)
+        cwd_out = self.LSOF_CWD.format(root=tmp_path)
+
+        def fake_run(args, **kw):
+            out = cwd_out if args[:3] == ["lsof", "-d", "cwd"] else ""
+            return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run):
+            found = slot_claude.find_active_sessions(slot)
+
+        assert sorted(pid for pid, _, _ in found) == [101, 103]

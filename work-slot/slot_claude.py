@@ -118,7 +118,7 @@ def find_active_sessions(slot_dir: Path) -> list[tuple[int, str, str]]:
             if pid in seen_pids:
                 continue
             path = parts[-1] if len(parts) >= 9 else ""
-            if lsof_args[1] == "-d" and not path.startswith(slot_str):
+            if lsof_args[1] == "-d" and path != slot_str and not path.startswith(slot_str + os.sep):
                 continue
             seen_pids.add(pid)
             cmd = parts[0]

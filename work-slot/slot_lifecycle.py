@@ -782,6 +782,60 @@ def _converge_state(slot_dir: Path, family_root: Path, slot_num: int) -> str | N
     return None
 
 
+def _tree_size(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path, followlinks=False):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _purge_build_outputs(slot_dir: Path) -> tuple[int, int]:
+    """Delete regenerable build outputs inside a slot: every .m2 directory, and every
+    Maven target/ directory (sibling pom.xml, nothing tracked by git inside it).
+
+    Never follows a symlink: a symlinked .m2 or target is unlinked and its destination
+    is left alone. Returns (entries removed, bytes freed). Failures warn and continue.
+    """
+    removed = 0
+    freed = 0
+
+    def _remove(path: Path) -> None:
+        nonlocal removed, freed
+        try:
+            if path.is_symlink():
+                path.unlink()
+            else:
+                size = _tree_size(path)
+                shutil.rmtree(path)
+                freed += size
+            removed += 1
+        except OSError as e:
+            print(f"WARN=purge_failed path={path} detail={e}")
+
+    for root, dirs, _files in os.walk(slot_dir, topdown=True, followlinks=False):
+        root_path = Path(root)
+        for name in list(dirs):
+            path = root_path / name
+            if name == ".git":
+                dirs.remove(name)
+            elif name == ".m2":
+                dirs.remove(name)
+                _remove(path)
+            elif name == "target" and (root_path / "pom.xml").is_file():
+                dirs.remove(name)
+                if not path.is_symlink():
+                    rc, tracked, _ = run_cmd(["git", "-C", str(root_path), "ls-files", "--", "target"])
+                    if rc == 0 and tracked.strip():
+                        print(f"WARN=target_has_tracked_files path={path} — left in place")
+                        continue
+                _remove(path)
+    return removed, freed
+
+
 def archive_slot(family_root: Path, slot_num: int, force: bool = False,
                   resolution: str | None = None) -> None:
     slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
@@ -898,6 +952,10 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
         print(f"ALTERNATES_REPACKED={repacked}")
 
     _teardown_isx(slot_dir)
+
+    purged, freed = _purge_build_outputs(slot_dir)
+    if purged:
+        print(f"BUILD_OUTPUTS_PURGED={purged} freed_mb={freed // (1024 * 1024)}")
 
     attic_dir = slot_dir.parent / "attic"
     attic_dir.mkdir(exist_ok=True)
@@ -1016,6 +1074,7 @@ def restore_slot(family_root: Path, slot_num: int) -> None:
             print(f"WARN=remnant_dir_persists path={attic_dir}")
     if copied:
         print(f"CLAUDE_PROJECTS_COPIED={copied}")
+    (dest / ".m2").mkdir(exist_ok=True)  # purged at archive; the slot's Maven settings point here
     _transition(
         dest, "active",
         family_root=family_root, slot_number=slot_num,
