@@ -402,3 +402,124 @@ class TestLocalBaseAheadOfRemote:
         assert _main(proj) == pre
         assert _state(ws)["R#1"] == (False, False, "b1")
         assert _git(proj, "branch", "--show-current").stdout.strip() == "main"
+
+
+class TestLandsOnDiskOnly:
+    """#515: the ceremony lands in canonical and pushes nothing; publishing is offered."""
+
+    @pytest.fixture
+    def published(self, repos, tmp_path):
+        proj, ws = repos
+        remote = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)],
+                       capture_output=True, check=True)
+        _git(proj, "remote", "add", "origin", str(remote))
+        _git(proj, "push", "-q", "origin", "main")
+        _git(proj, "fetch", "-q", "origin")
+        return proj, ws, remote
+
+    def _remote_main(self, remote: Path) -> str:
+        return _git(remote, "rev-parse", "main").stdout.strip()
+
+    def test_nothing_is_pushed_and_publishing_is_offered(self, published):
+        proj, ws, remote = published
+        before = self._remote_main(remote)
+        _branch(proj, "issue-1-a", {"a.txt": "a", "b.txt": "b"})
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert self._remote_main(remote) == before
+        assert result.unpublished == {str(proj.resolve()): 2}
+        lines = render(result)
+        assert f"UNPUBLISHED={proj.resolve()} commits=2" in lines
+        assert "OFFER=publish" in lines
+
+    def test_publish_command_then_puts_it_on_the_remote(self, published):
+        import canonical_sync
+        proj, ws, remote = published
+        _branch(proj, "issue-1-a", {"a.txt": "a"})
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+        _close(proj, ws)
+
+        assert canonical_sync.main(["publish", str(proj)]) == 0
+
+        assert self._remote_main(remote) == _git(proj, "rev-parse", "main").stdout.strip()
+
+    def test_no_offer_when_the_repo_has_no_remote(self, repos):
+        proj, ws = repos
+        _branch(proj, "issue-1-a", {"a.txt": "a"})
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert "OFFER=publish" not in render(result)
+
+    def test_reported_sha_is_the_tip_of_main(self, repos):
+        """casehub-pages#666 bug 3: no commit is added to main after the landing."""
+        proj, ws = repos
+        _git(proj, "checkout", "-b", "issue-1-a")
+        (proj / "a.txt").write_text("a")
+        (proj / ".close-state").write_text("leaked\n")
+        _git(proj, "add", "-A", "-f")
+        _git(proj, "commit", "-m", "feat: a with a leaked lifecycle file Refs #1")
+        _git(proj, "checkout", "main")
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        main = _git(proj, "rev-parse", "main").stdout.strip()
+        assert result.landed["project"] == main
+        assert _git(proj, "ls-tree", "--name-only", "main", "--", ".close-state").stdout == ""
+        assert (proj / "a.txt").exists()
+
+    def test_unreachable_remote_refuses_and_names_the_offline_option(self, published, tmp_path):
+        proj, ws, remote = published
+        _git(proj, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+        _branch(proj, "issue-1-a", {"a.txt": "a"})
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+        main_before = _git(proj, "rev-parse", "main").stdout.strip()
+
+        with pytest.raises(RuntimeError, match="offline=yes"):
+            _close(proj, ws)
+
+        assert _git(proj, "rev-parse", "main").stdout.strip() == main_before
+
+    def test_offline_lands_with_a_warning(self, published, tmp_path):
+        proj, ws, remote = published
+        _git(proj, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+        _branch(proj, "issue-1-a", {"a.txt": "a"})
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+
+        with patch("close.discover_repo_topology") as m, \
+             patch("close._detect_slot_root", return_value=None):
+            m.return_value = [(proj, "main", "direct", None, "origin", ""),
+                              (ws, "main", "direct", None, "origin", "")]
+            result = close(ws, offline=True)
+
+        assert result.success, result.errors
+        assert any("not checked" in w for w in result.warnings)
+        assert any(line.startswith("WARN=") for line in render(result))
+
+    def test_a_failed_landing_leaves_every_checkout_where_it_was(self, repos):
+        proj, ws = repos
+        _branch(proj, "issue-1-a", {"a.txt": "branch"})
+        (proj / "a.txt").write_text("main")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-m", "feat: main changes a Refs #1")
+        _git(proj, "checkout", "-b", "other-work")
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+        squash_marker.mark(proj, "issue-1-a")
+
+        try:
+            result = _close(proj, ws)
+            failed = not result.success
+        except RuntimeError:
+            failed = True
+
+        assert failed
+        assert _git(proj, "branch", "--show-current").stdout.strip() == "other-work"
+        assert not (proj / ".git" / "rebase-merge").exists()

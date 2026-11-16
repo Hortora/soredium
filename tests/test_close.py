@@ -328,7 +328,8 @@ class TestLand:
         sha2 = land(target)
         assert sha2 == sha1
 
-    def test_land_workspace_uses_non_ff_merge(self, tmp_path: Path) -> None:
+    def test_land_workspace_is_linear(self, tmp_path: Path) -> None:
+        """Workspace repos land like project repos: fast-forward, no merge commit."""
         from close import land, CloseTarget
 
         ws = tmp_path / "workspace"
@@ -342,28 +343,42 @@ class TestLand:
             is_workspace=True,
         )
         sha = land(target)
-        assert sha != ""
 
-        _checkout(ws, "main")
-        log = _log_oneline(ws, 5)
-        has_merge_commit = any("Merge branch" in line for line in log)
-        assert has_merge_commit
+        main = subprocess.run(["git", "-C", str(ws), "rev-parse", "main"],
+                              capture_output=True, text=True).stdout.strip()
+        merges = subprocess.run(["git", "-C", str(ws), "rev-list", "--merges", "--count", "main"],
+                                capture_output=True, text=True).stdout.strip()
+        assert sha == main
+        assert merges == "0"
 
-    def test_land_two_hop_workspace_returns_empty(self, tmp_path: Path) -> None:
+    def test_land_slot_workspace_clone_reaches_its_canonical(self, tmp_path: Path) -> None:
+        """A slot's workspace clone lands in the canonical workspace repo it names as `local`."""
         from close import land, CloseTarget
 
-        ws = tmp_path / "workspace"
-        _init_repo(ws)
-        _create_branch_with_commit(ws, "issue-1-feat")
+        canonical = tmp_path / "canonical"
+        _init_repo(canonical)
+        clone = tmp_path / "slot" / "workspace"
+        subprocess.run(["git", "clone", "-q", str(canonical), str(clone)],
+                       capture_output=True, check=True)
+        for key, value in (("user.email", "test@test.com"), ("user.name", "Test")):
+            subprocess.run(["git", "-C", str(clone), "config", key, value], check=True)
+        subprocess.run(["git", "-C", str(clone), "remote", "rename", "origin", "local"],
+                       capture_output=True, check=True)
+        _create_branch_with_commit(clone, "issue-1-feat")
 
         target = CloseTarget(
-            repo=ws, branch="issue-1-feat", base_branch="main",
-            transport="two-hop", canonical=tmp_path / "canonical",
+            repo=clone, branch="issue-1-feat", base_branch="main",
+            transport="two-hop", canonical=canonical,
             push_target="origin", mirror_target="",
             is_workspace=True,
         )
         sha = land(target)
-        assert sha == ""
+
+        tip = subprocess.run(["git", "-C", str(clone), "rev-parse", "issue-1-feat"],
+                             capture_output=True, text=True).stdout.strip()
+        canonical_main = subprocess.run(["git", "-C", str(canonical), "rev-parse", "main"],
+                                        capture_output=True, text=True).stdout.strip()
+        assert sha == tip == canonical_main
 
     def test_land_strips_lifecycle_files(self, tmp_path: Path) -> None:
         from close import land, CloseTarget

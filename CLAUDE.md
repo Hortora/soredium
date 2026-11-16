@@ -401,6 +401,9 @@ python3 scripts/validate_all.py --tier commit
 
 # Run close ceremony and queue tests (real git repos)
 python3 -m pytest tests/test_close.py tests/test_close_integration.py tests/test_close_batch.py -v
+
+# Run landing and publishing tests (canonical, slot clone, two bare remotes)
+python3 -m pytest tests/test_canonical_sync.py tests/test_landed_check.py -v
 python3 -m pytest tests/test_queue_io.py tests/test_queue_file_roundtrip.py tests/test_queue_done_state.py tests/test_work_chain.py -v
 
 # Run slot lifecycle tests
@@ -625,7 +628,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `lifecycle.py` -- older state machine (`project/lifecycle.py`) with a transition table that includes `closing:*` states. The close ceremony no longer uses it. `project/pre_push_hook.py` still reads it; replacing that gate is part of #515
 - `work_chain.py` -- bidirectional chaining engine (`project/work_chain.py`), run as a script by the work skill: `work_chain.py <continue|next|end|sync|find> queue=<path>`. Prints `CHAIN_DIRECTIVE` (`proceed`, `chain_to_next`, `chain_to_end`, `guard_next`, ...). Whether an item is finished is read from the queue, not from GitHub. Prints `OFFER=wrap_or_continue` whenever an item is finished or done items await closing; the LLM reads directives, never makes routing decisions
 - `work start` -- pipeline-driven (`project/work.py start`); 15 steps: sync main, resolve issue (judgment), branch name (judgment), create branches, scaffold, platform coherence (judgment), protocols (judgment), garden search, load specs, brainstorm offer (judgment). Mechanical steps delegate to `branch_create.py`, `scaffold.py`, `flyway_scan.py`
-- `work end` -- closes work via the `work-end/close.py` ceremony; resolves targets, runs preflight, lands branches (rebase + fast-forward; it never squashes, see Landing Rules), stamps, advances queue. One ceremony lands every done-not-closed item in queue order, then the active one. Pre-close advisory checklist (code review, branch audit, sweeps, diary), run once per batch. Post-close closes GitHub issues. In a slot it never archives: when the queue drains it marks the slot landed and reports it ready for archive
+- `work end` -- closes work via the `work-end/close.py` ceremony; resolves targets, runs preflight, lands branches in the canonical repo on disk through `project/canonical_sync.py` (rebase + fast-forward; it never squashes and never pushes, see Landing Rules), stamps, advances queue. Publishing is a separate step the ceremony offers: `canonical_sync.py publish <repo>`. One ceremony lands every done-not-closed item in queue order, then the active one. Pre-close advisory checklist (code review, branch audit, sweeps, diary), run once per batch. Post-close closes GitHub issues. In a slot it never archives: when the queue drains it marks the slot landed and reports it ready for archive
 - `work pause` -- pipeline-driven (`project/work.py pause`); entirely mechanical (3 steps: WIP commit project, WIP commit workspace, push-and-stack). Delegates to `pause_exec.py`
 - `work resume` -- pipeline-driven (`project/work.py resume`); 6 steps: stack pick (judgment), pop stack, checkout branches, rebase, reset WIP, context resume (judgment). Delegates to `resume_exec.py`
 - `brief` -- orientation summary; composes ctx.resolve(), work_router.detect_state(), work_health.run_checks() into structured KEY=VALUE output showing branch, issue, plan progress, recent commits, health status
@@ -784,6 +787,8 @@ Hortora/soredium#515, and the slot-layout follow-on is #512.
 2. **Canonical is the sync point.** The repos directly under `~/claude/<family>/` are
    canonical. Work reaches canonical before it reaches anything else.
 3. **Only canonical publishes.** Slots, clones and feature branches never push to GitHub.
+   Landing and publishing are separate: `work end` lands on disk, and
+   `project/canonical_sync.py publish <repo>` pushes canonical's base branch when asked.
 4. **No direct squashes.** Squashing happens only through the `git-squash` skill, which
    records the tip it reviewed in `refs/squash-reviewed/<branch>`. `work-end/close.py`
    never squashes, and lands a multi-commit branch only when that record equals the

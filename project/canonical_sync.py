@@ -306,6 +306,45 @@ def _conflicted(worktree: Path) -> list[str]:
             _out(worktree, "diff", "--name-only", "--diff-filter=U").splitlines() if name]
 
 
+@contextmanager
+def checked_out(repo: Path | str, branch: str) -> Iterator[Path]:
+    """A directory where `branch` is checked out, without switching any existing checkout.
+
+    Yields the worktree that already has the branch, or a temporary one that is
+    removed afterwards. Refuses when that worktree is mid-rebase or mid-merge:
+    whoever started that operation owns it.
+    """
+    repo = Path(repo)
+    if not _sha(repo, f"refs/heads/{branch}"):
+        raise SyncError("no_branch", f"{repo.name}: branch {branch} does not exist")
+    worktree = _worktree_of(repo, branch)
+    if worktree is not None:
+        operation = _in_progress(worktree)
+        if operation:
+            raise SyncError(
+                "busy",
+                f"{repo.name}: a {operation} is in progress in {worktree}; finish it first")
+        yield worktree
+        return
+    for path, _ in _worktrees(repo):
+        if _rebase_in_progress(path) == branch:
+            raise SyncError(
+                "busy", f"{repo.name}: {branch} is already being rebased in {path}")
+    temporary = Path(tempfile.mkdtemp(prefix="soredium-worktree-"))
+    added = git(repo, "worktree", "add", "-q", str(temporary / "wt"), branch)
+    if added.returncode != 0:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise SyncError(
+            "worktree_refused",
+            f"{repo.name}: cannot open a worktree for {branch}: {added.stderr.strip()}")
+    try:
+        yield temporary / "wt"
+    finally:
+        git(repo, "worktree", "remove", "--force", str(temporary / "wt"))
+        shutil.rmtree(temporary, ignore_errors=True)
+        git(repo, "worktree", "prune")
+
+
 def rebase(repo: Path | str, branch: str, canon: Optional[Canonical] = None) -> str:
     """Rebase `branch` onto canonical's base branch. Returns the new tip.
 
@@ -323,29 +362,7 @@ def rebase(repo: Path | str, branch: str, canon: Optional[Canonical] = None) -> 
         raise SyncError("no_base", f"{canon.repo.name}: no {canon.base} branch")
     if _is_ancestor(repo, onto, tip):
         return tip
-
-    worktree = _worktree_of(repo, branch)
-    temporary: Optional[Path] = None
-    if worktree is None:
-        for path, _ in _worktrees(repo):
-            if _rebase_in_progress(path) == branch:
-                raise SyncError(
-                    "busy", f"{repo.name}: {branch} is already being rebased in {path}")
-        temporary = Path(tempfile.mkdtemp(prefix="soredium-rebase-"))
-        added = git(repo, "worktree", "add", "-q", str(temporary / "wt"), branch)
-        if added.returncode != 0:
-            shutil.rmtree(temporary, ignore_errors=True)
-            raise SyncError(
-                "rebase_refused",
-                f"{repo.name}: cannot open a worktree for {branch}: {added.stderr.strip()}")
-        worktree = temporary / "wt"
-    else:
-        operation = _in_progress(worktree)
-        if operation:
-            raise SyncError(
-                "busy",
-                f"{repo.name}: a {operation} is in progress in {worktree}; finish it first")
-    try:
+    with checked_out(repo, branch) as worktree:
         result = git(worktree, "rebase", "-q", onto, timeout=_NETWORK_TIMEOUT)
         if result.returncode != 0:
             if _rebase_in_progress(worktree) is not None:
@@ -359,11 +376,6 @@ def rebase(repo: Path | str, branch: str, canon: Optional[Canonical] = None) -> 
                 "rebase_refused",
                 f"{repo.name}: {branch} could not be rebased: "
                 f"{(result.stderr or result.stdout).strip()}")
-    finally:
-        if temporary is not None:
-            git(repo, "worktree", "remove", "--force", str(temporary / "wt"))
-            shutil.rmtree(temporary, ignore_errors=True)
-            git(repo, "worktree", "prune")
     return _sha(repo, f"refs/heads/{branch}")
 
 

@@ -99,6 +99,12 @@ Read the output:
   `LANDED_<repo>` is that project repo's base-branch tip after landing.
   Workspace repos are reported separately as `WORKSPACE_LANDED_<repo>`,
   because a workspace can share its directory name with the project.
+  **Landed means on disk.** Every branch is now on its canonical repo's
+  base branch (the repo under `~/claude/<family>/`); from a slot, the work
+  has reached canonical. Nothing was pushed. Each
+  `UNPUBLISHED=<canonical repo> commits=<N>` line names a canonical repo
+  whose base branch holds commits its remote lacks. `WARN=` lines are
+  shown to the user as they are.
 - `ACTION=squash_review_needed` — nothing was changed. Each
   `SQUASH_REVIEW=<repo>:<branch>: <reason>` line names a branch that has
   not been reviewed at its current tip (never reviewed, commits added
@@ -106,6 +112,10 @@ Read the output:
   the ceremony again. Do not work around this by landing manually.
 - `ACTION=error` — ceremony failed. Read `ERROR=` lines, diagnose, and
   report to user.
+  If an error says the remote could not be fetched and names
+  `offline=yes`, tell the user the remote is unreachable and ask whether to
+  land without checking it; only then rerun with
+  `close.py <workspace> offline=yes`. Never add it on your own.
   If an error says a rebase, merge or other operation is in progress, or
   that HEAD is detached, stop and tell the user. Do not run
   `git rebase --abort` or `git merge --abort` yourself: commits made while
@@ -161,8 +171,26 @@ After `ACTION=complete`:
    If `NEXT_ITEM` is present, report it: "Next issue: `NEXT_ITEM`".
    If no next item, the queue is drained.
 
-5. **Report:** Print the ceremony result. Include landed SHAs and
-   any rescued commits.
+5. **Report:** Print the ceremony result. Include landed SHAs and any
+   `WARN=` lines.
+
+6. **Offer to publish** (only when the output has `OFFER=publish`):
+   publishing is a separate step from landing and is never done without
+   the user saying so. List each `UNPUBLISHED` repo with its commit count
+   and ask once whether to publish them. On yes, for each repo:
+
+   ```bash
+   python3 ~/.claude/skills/project/canonical_sync.py publish <canonical repo>
+   ```
+
+   Read the output: `PUBLISHED=<remote>` and `PUSHED=<N>` on success;
+   `MIRRORED=failed` with a `WARN=` line means the main remote has the work
+   and only the mirror is behind. `ERROR=diverged` means the remote moved
+   while canonical held unpublished commits: stop and tell the user; do not
+   force, reset or rebase the base branch. On no, say the commits stay on
+   disk and can be published later with the same command.
+   `canonical_sync.py status <repo>` prints `UNPUBLISHED=<N>` at any time.
+   Never push with `git push` from a slot or a feature branch.
 
 ---
 

@@ -4,6 +4,11 @@ Single entry point: close(workspace) → CloseResult.
 Reads .queue and git state; lands branches, stamps, advances queue.
 Each step is idempotent — re-running after failure picks up from
 committed state.
+
+Landing goes through project/canonical_sync.py: every branch ends on the
+canonical repo's base branch by fast-forward, on disk. Nothing is pushed here;
+publishing is `canonical_sync.py publish <repo>`, which the ceremony offers when
+canonical holds commits its remote lacks. No checkout is switched while landing.
 """
 from __future__ import annotations
 
@@ -22,6 +27,8 @@ if _slot_dir not in sys.path:
 
 from queue_io import read_queue, write_queue, Queue, QueueItem
 import squash_marker
+import canonical_sync
+from canonical_sync import SyncError
 
 
 LIFECYCLE_FILES = [
@@ -57,6 +64,9 @@ class CloseResult:
     # Queue items this ceremony closed, in the order they landed, and each one's branch.
     closed_items: list[str] = field(default_factory=list)
     closed_branches: dict = field(default_factory=dict)
+    # Canonical repos holding commits their remote lacks: {canonical path: count}.
+    unpublished: dict = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -370,11 +380,6 @@ def _checkout(repo: Path, branch: str) -> None:
 
 
 
-def _merge_base(repo: Path, a: str, b: str) -> str:
-    result = _git(repo, "merge-base", a, b)
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
 def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     result = _git(repo, "merge-base", "--is-ancestor", ancestor, descendant)
     return result.returncode == 0
@@ -385,161 +390,55 @@ def _rev_parse(repo: Path, ref: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def _diff_stat(repo: Path, a: str, b: str) -> str:
-    result = _git(repo, "diff", "--stat", a, b,
-                  "--", ".", ":(exclude).close-progress",
-                  ":(exclude).close-state", ":(exclude)JOURNAL.md",
-                  ":(exclude).execute-progress", ":(exclude).land-ledger.jsonl",
-                  ":(exclude).artifacts-promoted", ":(exclude).squash-plan",
-                  ":(exclude).close-report.json", ":(exclude).close-log.jsonl",
-                  ":(exclude).wrap-log.jsonl", ":(exclude).work-progress")
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-def branch_already_landed(repo: Path, branch: str, base: str) -> bool:
-    if _is_ancestor(repo, branch, base):
-        return True
-    diff = _diff_stat(repo, branch, base)
-    return diff == ""
-
-
-def _find_landed_sha(repo: Path, branch: str, base: str) -> str:
-    return _rev_parse(repo, base)
-
-
 def strip_lifecycle_files(repo: Path, branch: str, files: list[str]) -> None:
-    _checkout(repo, branch)
-    removed = False
-    for f in files:
-        fpath = repo / f
-        if fpath.exists():
-            _git(repo, "rm", "-f", f)
-            removed = True
-    if removed:
-        _git(repo, "commit", "-m", "chore: strip lifecycle files before merge", "-m", _issue_trailer(""))
+    """Remove tracked lifecycle files from the branch, as a commit on the branch.
 
-
-def strip_lifecycle_files_from_tree(repo: Path, branch: str, files: list[str]) -> None:
-    _checkout(repo, branch)
-    removed = False
-    for f in files:
-        fpath = repo / f
-        if fpath.exists():
-            _git(repo, "rm", "-f", f)
-            removed = True
-    if removed:
-        _git(repo, "commit", "-m", "chore: strip leaked lifecycle files", "-m", _issue_trailer(""))
-
-
-def _rebase_target(repo: Path, base: str, remote_base: str) -> str:
-    """The newer of the local base and its remote-tracking ref.
-
-    The branch is fast-forwarded onto the local base afterwards, so it must sit on
-    top of it. The local base is ahead of the remote whenever something landed and
-    was not pushed yet: an earlier item in the same batch, for one.
+    Done before landing, so no commit is ever added to the base branch afterwards.
     """
-    if _git(repo, "rev-parse", "--verify", "-q", remote_base).returncode != 0:
-        return base
-    if _is_ancestor(repo, remote_base, base):
-        return base
-    if _is_ancestor(repo, base, remote_base):
-        return remote_base
-    raise RuntimeError(
-        f"{repo.name}: local {base} and {remote_base} have diverged — each has commits "
-        f"the other lacks. Nothing was landed. Reconcile them first; the ceremony will "
-        f"not choose one.")
-
-
-def rebase_onto_base(repo: Path, branch: str, base: str, push_target: str) -> None:
-    _checkout(repo, branch)
-    _git(repo, "fetch", push_target, base)
-    remote_base = _rebase_target(repo, base, f"{push_target}/{base}")
-
-    if _is_ancestor(repo, remote_base, "HEAD"):
+    tracked = [f for f in files
+               if _git(repo, "ls-tree", "--name-only", branch, "--", f).stdout.strip()]
+    if not tracked:
         return
+    with canonical_sync.checked_out(repo, branch) as tree:
+        _git(tree, "rm", "-q", "-f", "--", *tracked)
+        result = _git(tree, "commit", "-m", "chore: strip lifecycle files before merge",
+                      "-m", _issue_trailer(""))
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"{repo.name}: could not strip lifecycle files from {branch}: "
+                f"{result.stderr.strip()}")
 
-    for attempt in range(3):
-        result = _git(repo, "rebase", remote_base)
-        if result.returncode == 0:
-            return
-        _git(repo, "rebase", "--abort")
 
-    raise RuntimeError(
-        f"Rebase failed after 3 attempts: {repo.name}:{branch} onto {base}")
-
-
-def ff_merge(repo: Path, branch: str) -> str:
-    result = _git(repo, "merge", "--ff-only", branch)
-    if result.returncode != 0:
+def verify_content_landed(target: CloseTarget, landed_sha: str) -> None:
+    """The branch tip must be on canonical's base branch. Checked, never assumed."""
+    canon = canonical_sync.locate(target.repo)
+    tip = _rev_parse(target.repo, target.branch)
+    base_tip = _rev_parse(canon.repo, canon.base)
+    if not tip or base_tip != landed_sha or not _is_ancestor(canon.repo, tip, canon.base):
         raise RuntimeError(
-            f"FF-only merge failed in {repo.name}: branch {branch} "
-            f"is not a fast-forward of HEAD. Rebase first.")
-    return _rev_parse(repo, "HEAD")
+            f"Content from {target.branch} not landed on {canon.repo.name}:{canon.base} "
+            f"(branch {tip[:12]}, base {base_tip[:12]})")
 
 
-def _merge_no_ff(repo: Path, branch: str, issue: str = "") -> str:
-    result = _git(repo, "merge", "--no-ff", branch,
-                  "-m", f"Merge branch '{branch}'", "-m", _issue_trailer(issue))
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Non-ff merge failed: {repo.name}:{branch}: {result.stderr.strip()}")
-    return _rev_parse(repo, "HEAD")
+def land_targets(targets: list[CloseTarget], offline: bool = False) -> dict:
+    """Land every target in canonical, on disk. Returns {target: LandResult}.
 
-
-def _push(repo: Path, remote: str, branch: str,
-          force_with_lease: bool = False) -> None:
-    args = ["push", remote, branch]
-    if force_with_lease:
-        args.insert(1, "--force-with-lease")
-    _git(repo, *args)
-
-
-def _push_two_hop(repo: Path, canonical: Path) -> None:
-    result = _git(repo, "remote", "get-url", "local")
-    if result.returncode != 0:
-        return
-    _git(repo, "push", "local", "main")
-
-
-def verify_content_landed(repo: Path, branch: str, base: str) -> None:
-    result = _git(repo, "diff", "--stat", base, branch,
-                  "--", ".", *[f":(exclude){f}" for f in LIFECYCLE_FILES])
-    if result.returncode == 0 and result.stdout.strip():
-        raise RuntimeError(
-            f"Content from {branch} not fully landed on {base}: "
-            f"{result.stdout.strip()}")
+    Project and workspace repos take the same linear path: rebase, then
+    fast-forward the canonical base branch. Nothing is pushed.
+    """
+    for target in targets:
+        strip_lifecycle_files(target.repo, target.branch, LIFECYCLE_FILES)
+    results = canonical_sync.land_all(
+        [(target.repo, target.branch) for target in targets], offline=offline)
+    landed = dict(zip(targets, results))
+    for target, result in landed.items():
+        verify_content_landed(target, result.sha)
+    return landed
 
 
 def land(target: CloseTarget, issue: str = "") -> str:
-    if branch_already_landed(target.repo, target.branch, target.base_branch):
-        return _find_landed_sha(target.repo, target.branch, target.base_branch)
-
-    if target.is_workspace and target.transport == "two-hop":
-        return ""
-
-    _checkout(target.repo, target.base_branch)
-
-    if target.is_workspace:
-        strip_lifecycle_files(target.repo, target.branch, LIFECYCLE_FILES)
-        _checkout(target.repo, target.base_branch)
-        sha = _merge_no_ff(target.repo, target.branch, issue)
-    else:
-        # Stripped on the branch so that no commit is added to base after landing.
-        strip_lifecycle_files(target.repo, target.branch, LIFECYCLE_FILES)
-        try:
-            rebase_onto_base(target.repo, target.branch, target.base_branch,
-                             target.push_target)
-        except RuntimeError:
-            _checkout(target.repo, target.base_branch)
-            raise
-        _checkout(target.repo, target.base_branch)
-        sha = ff_merge(target.repo, target.branch)
-
-    strip_lifecycle_files_from_tree(target.repo, target.base_branch, LIFECYCLE_FILES)
-
-    verify_content_landed(target.repo, target.branch, target.base_branch)
-
-    return _rev_parse(target.repo, target.base_branch)
+    """Land one target; returns the canonical base SHA it landed as."""
+    return land_targets([target])[target].sha
 
 
 # --- stamp ---
@@ -560,10 +459,10 @@ def stamp(target: CloseTarget, landed_sha: str, issue: str = "") -> None:
     if _is_stamp_commit(target.repo, target.branch):
         return
 
-    _checkout(target.repo, target.branch)
-    result = _git(target.repo, "commit", "--allow-empty",
-                  "-m", f"chore: branch closed — landed as {landed_sha} on {target.base_branch}",
-                  "-m", _issue_trailer(issue))
+    with canonical_sync.checked_out(target.repo, target.branch) as tree:
+        result = _git(tree, "commit", "--allow-empty",
+                      "-m", f"chore: branch closed — landed as {landed_sha} on {target.base_branch}",
+                      "-m", _issue_trailer(issue))
     if result.returncode != 0:
         raise RuntimeError(
             f"stamp commit failed in {target.repo.name}: {result.stderr.strip()}")
@@ -641,8 +540,14 @@ def elevate_queue(workspace: Path, slot_root: Optional[Path]) -> None:
 # --- checkout ---
 
 def checkout_all(targets: list[CloseTarget]) -> None:
+    """Move the session's own checkouts off the closed branch, onto the base branch.
+
+    Only a repo that is sitting on the branch just closed is moved; a repo that is
+    on anything else is someone's work in progress and is left where it is.
+    """
     for target in targets:
-        _checkout(target.repo, target.base_branch)
+        if _current_branch(target.repo) == target.branch:
+            _checkout(target.repo, target.base_branch)
 
 
 # --- close-state ---
@@ -720,7 +625,7 @@ def mark_slot_landed(slot_dir: Path, branch: str, project_shas: dict[str, str]) 
 
 # --- close orchestration ---
 
-def close(workspace: Path) -> CloseResult:
+def close(workspace: Path, offline: bool = False) -> CloseResult:
     busy = check_repos_idle(workspace)
     if busy:
         return CloseResult(success=False, errors=busy)
@@ -794,6 +699,8 @@ def close(workspace: Path) -> CloseResult:
     slot_root = _detect_slot_root(workspace)
 
     landed: dict[CloseTarget, str] = {}
+    unpublished: dict[str, int] = {}
+    warnings: list[str] = []
     closed: list[str] = []
     closed_branches: dict[str, str] = {}
     active_landed = False
@@ -803,8 +710,19 @@ def close(workspace: Path) -> CloseResult:
             if not entry.done and not entry.targets:
                 continue  # the active item was never started: it stays active
             issue = entry.issue or covers_issue
-            for target in entry.targets:
-                landed[target] = land(target, issue)
+            try:
+                results = land_targets(entry.targets, offline)
+            except SyncError as error:
+                hint = (" — rerun with offline=yes to land without checking the remote"
+                        if error.code == "fetch_failed" else "")
+                raise RuntimeError(f"{error.detail}{hint}") from error
+            for target, outcome in results.items():
+                landed[target] = outcome.sha
+                warnings.extend(outcome.warnings)
+                canonical = str(canonical_sync.locate(target.repo).repo)
+                unpublished.pop(canonical, None)
+                if outcome.unpublished:
+                    unpublished[canonical] = outcome.unpublished
             for target in entry.targets:
                 stamp(target, landed[target], issue)
                 squash_marker.clear(target.repo, target.branch)
@@ -857,9 +775,11 @@ def close(workspace: Path) -> CloseResult:
             rescued=pre["rescued"],
             closed_items=closed,
             closed_branches=closed_branches,
+            unpublished=unpublished,
+            warnings=list(dict.fromkeys(warnings)),
         )
     except Exception:
-        checkout_all(targets)
+        # Nothing was switched while landing, so no checkout needs putting back.
         if closed and not slot_root:
             # Record the items that did close, so a rerun starts from the failed one.
             try:
@@ -884,7 +804,11 @@ def render(result: CloseResult) -> list[str]:
                   for ref in result.closed_items]
         if result.next_item:
             lines.append(f"NEXT_ITEM={result.next_item.ref}")
-        lines += [f"RESCUED_{repo}={detail}" for repo, detail in result.rescued.items()]
+        lines += [f"WARN={warning}" for warning in result.warnings]
+        lines += [f"UNPUBLISHED={repo} commits={count}"
+                  for repo, count in result.unpublished.items()]
+        if result.unpublished:
+            lines.append("OFFER=publish")
         if result.slot_ready:
             lines.append(f"SLOT_READY_FOR_ARCHIVE={result.slot_ready}")
         return lines
@@ -901,8 +825,9 @@ def main() -> int:
     if not workspace.is_dir():
         print(f"ERROR=workspace_not_found:{workspace}")
         return 1
+    offline = any(arg in ("offline=yes", "--offline") for arg in sys.argv[2:])
     try:
-        result = close(workspace)
+        result = close(workspace, offline=offline)
     except Exception as e:
         print(f"ACTION=error\nERROR={e}")
         return 1
