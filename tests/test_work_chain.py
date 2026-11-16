@@ -89,7 +89,9 @@ class TestEvaluateContinue:
 
 
 class TestEvaluateNext:
-    def test_open_issue_guards_back_to_continue(self):
+    def test_open_issue_is_marked_done_not_guarded(self):
+        """#517: an issue stays open until the close ceremony lands it, so an open
+        issue cannot mean the work is unfinished. `next` marks the item done."""
         ctx = {
             "META_STATE": "active",
             "HAS_PLAN": "yes",
@@ -98,8 +100,8 @@ class TestEvaluateNext:
             "ON_MAIN": "no",
         }
         result = evaluate("next", ctx, issue_state="OPEN")
-        assert result["DIRECTIVE"] == "guard_continue"
-        assert result["REASON"] == "issue_still_open"
+        assert result["DIRECTIVE"] == "proceed"
+        assert result["REASON"] == "mark_done"
         assert result["ACTIVE_ISSUE"] == "42"
 
     def test_closed_issue_proceeds(self):
@@ -142,7 +144,9 @@ class TestEvaluateNext:
 
 
 class TestEvaluateEnd:
-    def test_remaining_queue_with_open_issue_guards_back(self):
+    def test_open_issue_does_not_block_the_close(self):
+        """#517: an open issue is the normal state before a close. Refusing to close
+        on it made `work end` impossible until the issue was closed by hand."""
         ctx = {
             "META_STATE": "active",
             "HAS_PLAN": "yes",
@@ -151,8 +155,8 @@ class TestEvaluateEnd:
             "ON_MAIN": "no",
         }
         result = evaluate("end", ctx, issue_state="OPEN")
-        assert result["DIRECTIVE"] == "guard_next"
-        assert result["REASON"] == "queue_not_empty"
+        assert result["DIRECTIVE"] == "proceed"
+        assert result["REASON"] == "ready_to_close"
 
     def test_empty_queue_proceeds(self):
         ctx = {

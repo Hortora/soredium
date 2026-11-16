@@ -26,6 +26,7 @@ if str(_slot_dir) not in sys.path:
 from topology import resolve as topo_resolve, find_design_file, _run
 from work_state import detect as ws_detect
 from queue_io import read_queue, validate_queue, parse_covers_qualified
+from work_chain import done_fields
 
 
 def _parse_meta(meta_path: Path) -> dict[str, str]:
@@ -373,6 +374,8 @@ def resolve(cwd=None) -> dict[str, str]:
         "PLAN_BATCH": state.plan_batch,
         "META_STATE": state.meta_state,
         "QUEUE_STATUS": queue_status,
+        # Items finished on a branch and awaiting the close ceremony (#517)
+        **done_fields(queue),
         "META_IS_TRANSIENT": "yes" if state.meta_is_transient else "no",
         # CLAUDE.md fields (all from topo.project)
         "OWNER_REPO": owner_repo,

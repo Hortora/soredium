@@ -348,13 +348,26 @@ def _skip_no_deferred(ctx) -> bool:
     return "has_deferred" not in ctx.last_output
 
 
+def _finish_active_command(ctx) -> list[str] | None:
+    """How `work next` leaves the active item.
+
+    On a feature branch the work has not landed, so the item is marked done on
+    that branch and stays open: the close ceremony lands and closes it later.
+    On the base branch there is nothing left to land, so the item is closed.
+    """
+    if not ctx.plan_path:
+        return None
+    if ctx.branch and ctx.branch != ctx.base_branch:
+        return ["python3", str(_PLAN_MANAGER), "mark-done", str(ctx.plan_path),
+                f"branch={ctx.branch}"]
+    return ["python3", str(_PLAN_MANAGER), "advance", str(ctx.plan_path)]
+
+
 NEXT_STEPS: list[StepDef] = [
     StepDef("lifecycle_next", "next", StepType.LIFECYCLE,
             from_state="active", to_state="transitioning", event="work_next"),
     StepDef("advance_issue", "next", StepType.MECHANICAL,
-            script_fn=lambda ctx: [
-                "python3", str(_PLAN_MANAGER), "advance",
-                str(ctx.plan_path)] if ctx.plan_path else None),
+            script_fn=_finish_active_command),
     StepDef("tick_github", "next", StepType.MECHANICAL),
     StepDef("context_refresh", "next", StepType.MECHANICAL),
     StepDef("deferred_check", "next", StepType.JUDGMENT,
