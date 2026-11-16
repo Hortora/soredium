@@ -70,7 +70,7 @@ _ITEM_RE = re.compile(
     r"(.+?)(?:\s+← active)?$"
 )
 _REF_TITLE_RE = re.compile(r"^(.+?) — (.+)$")
-_SUB_TASK_RE = re.compile(r"^  - \[[ x]\] ")
+_SUB_TASK_RE = re.compile(r"^\s+- \[[ x]\] ")
 
 
 def _parse_item(line: str) -> Optional[QueueItem]:
@@ -124,6 +124,9 @@ def read_queue(workspace: Path) -> Optional[Queue]:
             continue
         elif stripped == "## Deferred":
             section = "deferred"
+            continue
+        elif stripped == "## Queue":
+            section = "queue"
             continue
         elif stripped.startswith("## ") and section != "queue":
             section = "tail"

@@ -77,6 +77,8 @@ class PlanTree:
     last_wrap: str | None = None
     deferred: list[DeferredItem] = field(default_factory=list)
     state: dict[str, str] = field(default_factory=dict)
+    deferred_raw: list[str] = field(default_factory=list)
+    extra_sections: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -107,7 +109,7 @@ _EPIC_MARKER_RE = re.compile(r'\(epic\)')
 _ACTIVE_MARKER_RE = re.compile(r'(?:←|<-)\s*active')
 _BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*(?:←|<-)\s*current)?$')
 _DEFERRED_RE = re.compile(
-    r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]+)\](?:\s+—\s+(.+))?$'
+    r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]*)\](?:\s+—\s+(.+))?$'
 )
 _TASK_BATCH_RE = re.compile(r'^\s*- \[([ x])\]\s*Batch\s+\d+:\s*(.+)')
 _TASK_ITEM_RE = re.compile(r'^\s*- \[([ x])\]\s*Task\s+\d+:\s*(.+)')
@@ -185,6 +187,8 @@ def parse_plan(plan_path: Path) -> PlanTree:
     in_session = False
     is_queue_format = plan_path.name == ".queue"
     pre_section = is_queue_format
+    in_extra = False
+    extra_lines: list[str] = []
 
     for line in lines:
         if line.startswith("# Work Plan"):
@@ -196,6 +200,7 @@ def parse_plan(plan_path: Path) -> PlanTree:
             in_deferred = False
             in_session = False
             pre_section = False
+            in_extra = False
             continue
         if line.strip() == "## Queue":
             in_state = False
@@ -203,6 +208,7 @@ def parse_plan(plan_path: Path) -> PlanTree:
             in_deferred = False
             in_session = False
             pre_section = False
+            in_extra = False
             continue
         if line.strip() == "## Deferred":
             in_state = False
@@ -210,6 +216,7 @@ def parse_plan(plan_path: Path) -> PlanTree:
             in_deferred = True
             in_session = False
             pre_section = False
+            in_extra = False
             continue
         if line.strip() == "## Session State":
             in_state = False
@@ -217,12 +224,20 @@ def parse_plan(plan_path: Path) -> PlanTree:
             in_deferred = False
             in_session = True
             pre_section = False
+            in_extra = False
             continue
         if line.startswith("## "):
             in_state = False
             in_queue = False
             in_deferred = False
             in_session = False
+            pre_section = False
+            in_extra = True
+            extra_lines.append(line.rstrip())
+            continue
+
+        if in_extra:
+            extra_lines.append(line.rstrip())
             continue
 
         if in_state:
@@ -255,6 +270,9 @@ def parse_plan(plan_path: Path) -> PlanTree:
 
     queue = _parse_queue_lines(queue_lines)
     deferred = _parse_deferred_lines(deferred_lines)
+    deferred_raw = _unparsed_deferred_lines(deferred_lines)
+    while extra_lines and not extra_lines[-1]:
+        extra_lines.pop()
 
     if state_dict and not started:
         started = state_dict.get("date", "")
@@ -263,7 +281,8 @@ def parse_plan(plan_path: Path) -> PlanTree:
 
     return PlanTree(heading=heading, queue=queue, current_issue=current_issue,
                     started=started, last_wrap=last_wrap, deferred=deferred,
-                    state=state_dict)
+                    state=state_dict, deferred_raw=deferred_raw,
+                    extra_sections=extra_lines)
 
 
 def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
@@ -379,10 +398,16 @@ def _parse_deferred_lines(lines: list[str]) -> list[DeferredItem]:
             title = m.group(2).strip()
             scale = m.group(3).strip()
             complexity = m.group(4).strip()
-            repos = [r.strip() for r in m.group(5).split(",")]
+            repos = [r.strip() for r in m.group(5).split(",") if r.strip()]
             reason = (m.group(6) or "").strip()
             items.append(DeferredItem(title, scale, complexity, repos, completed, reason))
     return items
+
+
+def _unparsed_deferred_lines(lines: list[str]) -> list[str]:
+    """Deferred-section lines that are not recognised items; kept verbatim across a rewrite."""
+    return [line.rstrip() for line in lines
+            if line.strip() and not _DEFERRED_RE.match(line.strip())]
 
 
 def flatten_leaves(tree: PlanTree) -> list[LeafItem]:
@@ -409,12 +434,14 @@ def _flatten_items(items: list[QueueItem], result: list[LeafItem],
 
 def rewrite_plan(plan_path: Path, tree: PlanTree) -> None:
     content = build_plan_content(
-        tree.heading.replace("Work Plan — ", ""),
+        re.sub(r"^(?:Work Plan\s*—\s*)+", "", tree.heading).strip(),
         tree.queue,
         tree.started,
         last_wrap=tree.last_wrap,
         deferred=tree.deferred,
         state=tree.state,
+        deferred_raw=tree.deferred_raw,
+        extra_sections=tree.extra_sections,
     )
     _project_dir = str(Path(__file__).resolve().parent.parent / "project")
     if _project_dir not in _sys.path:
@@ -426,8 +453,10 @@ def rewrite_plan(plan_path: Path, tree: PlanTree) -> None:
 def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
                        last_wrap: str | None = None,
                        deferred: list[DeferredItem] | None = None,
-                       state: dict[str, str] | None = None) -> str:
-    lines = [f"# Work Plan — {branch_slug}"]
+                       state: dict[str, str] | None = None,
+                       deferred_raw: list[str] | None = None,
+                       extra_sections: list[str] | None = None) -> str:
+    lines = [f"# Work Plan — {branch_slug}".rstrip()]
 
     if state:
         lines.append("")
@@ -443,14 +472,15 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
         for item in items:
             _write_item(item, lines, indent=0)
 
-    if deferred:
+    if deferred or deferred_raw:
         lines.append("")
         lines.append("## Deferred")
-        for d in deferred:
+        for d in deferred or []:
             check = "x" if d.completed else " "
             repos_str = ", ".join(d.repos)
             reason_suffix = f" — {d.reason}" if d.reason else ""
             lines.append(f"- [{check}] {d.title} ({d.scale} / {d.complexity}) [{repos_str}]{reason_suffix}")
+        lines.extend(deferred_raw or [])
 
     if not state:
         lines.append("")
@@ -467,6 +497,10 @@ def build_plan_content(branch_slug: str, items: list[QueueItem], date: str,
         lines.append(f"date: {date}")
         if last_wrap:
             lines.append(f"Last wrap: {last_wrap}")
+
+    if extra_sections:
+        lines.append("")
+        lines.extend(extra_sections)
 
     lines.append("")
     return "\n".join(lines)
