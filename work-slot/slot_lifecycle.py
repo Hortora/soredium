@@ -718,14 +718,8 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
         epic_repo = slot_info.get("issue_repo", "")
         covers_str = slot_info.get("covers", "")
         completed = [ref.number for ref in parse_covers_qualified(covers_str)]
-        if epic_num and epic_repo and completed:
-            try:
-                from plan_manager import _tick_github_checkboxes
-                ok = _tick_github_checkboxes(epic_repo, epic_num, completed)
-                if not ok:
-                    print("WARN=epic_tick_failed")
-            except (ImportError, Exception):
-                print("WARN=epic_tick_skipped")
+        if not _tick_epic(epic_repo, epic_num, completed):
+            print("WARN=epic_tick_failed")
 
     # Report
     for s in result.repos:
@@ -780,6 +774,18 @@ def _converge_state(slot_dir: Path, family_root: Path, slot_num: int) -> str | N
         print(f"STATE_CONVERGED=ready from={cur} slot={slot_num}")
         return "ready"
     return None
+
+
+def _tick_epic(epic_repo: str, epic_num: int, completed: list[int]) -> bool:
+    """Tick the completed issues' checkboxes on the epic's GitHub issue.
+
+    True when there was nothing to tick or GitHub accepted the update.
+    """
+    if not epic_repo or not epic_num or not completed:
+        return True
+    import plan_manager
+    return plan_manager._tick_github_checkboxes(
+        plan_manager.IssueRef(epic_repo, epic_num), completed)
 
 
 def _tree_size(path: Path) -> int:
@@ -938,14 +944,8 @@ def archive_slot(family_root: Path, slot_num: int, force: bool = False,
                 print(f"WARN=stale_checkboxes issues={','.join(str(c) for c in completed)}")
             epic_num = int(slot_info.issue or "0")
             epic_repo = slot_info.issue_repo
-            if epic_num and epic_repo:
-                try:
-                    from plan_manager import _tick_github_checkboxes
-                    ok = _tick_github_checkboxes(epic_repo, epic_num, completed)
-                    if not ok:
-                        print("WARN=github_unreachable_for_checkbox_verify")
-                except (ImportError, Exception):
-                    print("WARN=github_unreachable_for_checkbox_verify")
+            if not _tick_epic(epic_repo, epic_num, completed):
+                print("WARN=github_unreachable_for_checkbox_verify")
 
     repacked = _repack_broken_alternates(slot_dir, family_root)
     if repacked:
