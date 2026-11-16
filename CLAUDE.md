@@ -788,6 +788,30 @@ Local validation is optional but recommended -- pre-commit validation runs autom
 
 ---
 
+## Landing Rules
+
+Every script and skill that merges, pushes or squashes must obey these. They are
+being enforced in stages; the design, the landing flow and the stage order are in
+Hortora/soredium#515, and the slot-layout follow-on is #512.
+
+1. **Linear history.** No merge commits on a base branch, in project or workspace repos.
+2. **Canonical is the sync point.** The repos directly under `~/claude/<family>/` are
+   canonical. Work reaches canonical before it reaches anything else.
+3. **Only canonical publishes.** Slots, clones and feature branches never push to GitHub.
+4. **No direct squashes.** Squashing happens only through the `git-squash` skill, which
+   records the tip it reviewed in `refs/squash-reviewed/<branch>`. `work-end/close.py`
+   never squashes, and lands a multi-commit branch only when that record equals the
+   branch tip; otherwise it returns `ACTION=squash_review_needed`.
+
+Canonical may be mid-work: never stash, reset or check out in a canonical repo, and
+never run `git rebase --abort` or `git merge --abort` on an operation you did not
+start — commits made while it was stopped belong to no branch and are discarded.
+
+Claims about git or script behaviour must be observed, not assumed.
+`tests/test_git_landing_behaviour.py` pins the git behaviours the design relies on.
+
+---
+
 ## Workspace Model
 
 Skills write methodology artifacts to a companion workspace, not the project repo.
