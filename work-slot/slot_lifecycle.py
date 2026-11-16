@@ -627,113 +627,17 @@ def _update_slot_repos(slot_dir: Path, repo_name: str, add: bool) -> None:
 
 
 def merge_slot(family_root: Path, slot_num: int) -> int:
-    slot_dir = _resolve_slot_dir_for_number(family_root, slot_num)
-    if not slot_dir.exists():
-        print(f"ERROR=slot_not_found slot={slot_num}")
-        return 1
+    """Removed. Kept as a stub so an old session or script gets a clear answer.
 
-    if not (slot_dir / ".phase-a-complete").exists():
-        print(f"ERROR=not_ready slot={slot_num}")
-        return 1
-    if (slot_dir / ".landed").exists():
-        print(f"ERROR=already_landed slot={slot_num}")
-        return 1
-
-    _converge_state(slot_dir, family_root, slot_num)
-
-    slot_info = parse_slot(slot_dir)
-    _slot_is_epic = slot_info.is_epic if slot_info else False
-    if _slot_is_epic:
-        try:
-            from plan_manager import detect as _plan_detect
-            plan_info = _plan_detect(slot_dir)
-            if plan_info:
-                _done = plan_info.get("completed_count", 0)
-                _total = plan_info.get("total_count", 0)
-                print(f"EPIC_STATUS={_done} completed, {_total - _done} remaining")
-        except Exception as e:
-            print(f"WARN=epic_status_unavailable {e}")
-
-    branch = ""
-    for line in (slot_dir / ".phase-a-complete").read_text().splitlines():
-        if line.startswith("branch="):
-            branch = line.split("=", 1)[1]
-    if not branch:
-        print("ERROR=no_branch_in_marker")
-        return 1
-
-    # Build batch and land via shared flow
-    from land_flow import build_slot_batch, land_batch
-
-    descriptors = build_slot_batch(slot_dir, branch=branch)
-    if not descriptors:
-        print("ERROR=no_repos_in_slot")
-        print("HINT=no repos have the feature branch — check slot setup")
-        return 1
-
-    progress_file = slot_dir / ".execute-progress"
-    result = land_batch(descriptors, branch, progress_file)
-
-    # Collect landed repos (may be partial if some repos failed)
-    project_repos = [d.repo_path.name for d in descriptors if not d.is_workspace]
-    landed_shas = {s.repo_path.name: s.landed_sha for s in result.repos if s.landed_sha}
-    # github_push_failed with pushed=True is non-blocking — local push succeeded
-    failed_repos = [
-        s.repo_path.name for s in result.repos
-        if s.error and not (s.error == "github_push_failed" and s.pushed)
-    ]
-    stamped_repos = [s.repo_path.name for s in result.repos if s.stamped]
-    shas_str = ",".join(f"{r}:{s}" for r, s in landed_shas.items())
-
-    # Write .landed marker when at least one repo landed successfully.
-    # The marker records which repos succeeded and which failed — the
-    # verify step uses this to report partial success accurately.
-    if landed_shas:
-        marker_lines = [
-            f"branch={branch}",
-            f"repos={','.join(project_repos)}",
-            f"landed_shas={shas_str}",
-            f"stamped={','.join(stamped_repos)}",
-            f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}",
-        ]
-        if failed_repos:
-            marker_lines.append(f"failed={','.join(failed_repos)}")
-        (slot_dir / ".landed").write_text("\n".join(marker_lines) + "\n")
-    else:
-        # Nothing landed at all — hard failure
-        for s in result.repos:
-            if s.error:
-                print(f"ERROR={s.error} repo={s.repo_path.name}")
-        print("ERROR=no_repos_landed")
-        return 1
-
-    _transition(
-        slot_dir, "landed",
-        family_root=family_root, slot_number=slot_num,
-        landed_shas=landed_shas,
-    )
-
-    if _slot_is_epic:
-        epic_num = int(slot_info.get("issue", "0"))
-        epic_repo = slot_info.get("issue_repo", "")
-        covers_str = slot_info.get("covers", "")
-        completed = [ref.number for ref in parse_covers_qualified(covers_str)]
-        if not _tick_epic(epic_repo, epic_num, completed):
-            print("WARN=epic_tick_failed")
-
-    # Report
-    for s in result.repos:
-        icon = "OK" if not s.error else "FAIL"
-        stamped_flag = " STAMPED" if s.stamped else ""
-        print(f"RESULT={s.repo_path.name} STATUS={'ok' if not s.error else s.error} SHA={s.landed_sha}{stamped_flag} ICON={icon}")
-    ok_count = sum(1 for s in result.repos if not s.error)
-    fail_count = len(failed_repos)
-    print(f"SUMMARY=ok:{ok_count} fail:{fail_count}")
-    print(f"LANDED_SHAS={shas_str}")
-    if failed_repos:
-        print(f"WARN=partial_land failed_repos={','.join(failed_repos)}")
-        return 1
-    return 0
+    This was a second landing path with its own preflight, rebase and push logic,
+    including hard resets to the remote. Nothing has written the marker it needed
+    (.phase-a-complete) since the close ceremony was rewritten, so it could not run.
+    A slot is landed by `work end` inside it; close.py writes .landed when the
+    slot's queue drains, and archive-slot verifies that marker.
+    """
+    print(f"ERROR=merge_slot_removed slot={slot_num}")
+    print("HINT=run `work end` in the slot; it lands the work and marks the slot landed")
+    return 1
 
 
 def _has_active_plan(slot_dir: Path) -> str | None:

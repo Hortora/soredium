@@ -24,7 +24,7 @@ import slot_io
 import slot_git
 import slot_claude
 import slot_isx
-from slot_test_helpers import init_repo, init_repo_with_workspace, init_repo_with_remote
+from slot_test_helpers import init_repo, init_repo_with_workspace, init_repo_with_remote, land_slot
 
 
 @pytest.fixture(autouse=True)
@@ -577,108 +577,10 @@ class TestResolveCanonicalRepo:
 
 
 
-class TestMergeSlot:
-    def test_clean_rebase_and_push(self, tmp_path):
-        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-        assert (canonicals["engine"] / "feature.py").exists()
-        assert (slot / ".landed").exists()
-        landed = (slot / ".landed").read_text()
-        assert "branch=issue-42-test" in landed
-        assert "engine:" in landed
-
-    def test_conflict_returns_error(self, tmp_path):
-        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        (canonicals["engine"] / "feature.py").write_text("# conflict\n")
-        subprocess.run(["git", "-C", str(canonicals["engine"]), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(canonicals["engine"]), "commit", "-m", "conflict"], capture_output=True)
-        subprocess.run(["git", "-C", str(canonicals["engine"]), "push", "origin", "main"], capture_output=True)
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code != 0
-        assert not (slot / ".landed").exists()
-
-    def test_not_found(self, tmp_path):
-        family = tmp_path / "family"
-        (family / "slots").mkdir(parents=True)
-        assert slot_lifecycle.merge_slot(family, 99) == 1
-
-    def test_not_ready(self, tmp_path):
-        family = tmp_path / "family"
-        slot = family / "slots" / "1"
-        slot.mkdir(parents=True)
-        assert slot_lifecycle.merge_slot(family, 1) == 1
-
-    def test_already_landed(self, tmp_path):
-        family, _, slot, _ = _create_merge_test_repos(tmp_path, ["engine"])
-        (slot / ".landed").write_text("already\n")
-        assert slot_lifecycle.merge_slot(family, 1) == 1
-
-
-
-class TestMergeSlotStamping:
-    def test_writes_stamp_commits_on_merge(self, tmp_path):
-        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-
-        rc, log, _ = slot_core.run_cmd(
-            ["git", "-C", str(slot / "engine"), "log", "-1", "--format=%s"]
-        )
-        assert rc == 0
-        assert log.strip().startswith("chore: branch closed — landed as")
-        assert "on main" in log.strip()
-
-    def test_stamp_sha_matches_landed_shas(self, tmp_path):
-        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
-
-        landed = (slot / ".landed").read_text()
-        sha_from_landed = ""
-        for line in landed.splitlines():
-            if line.startswith("landed_shas="):
-                for entry in line.split("=", 1)[1].split(","):
-                    if entry.startswith("engine:"):
-                        sha_from_landed = entry.split(":", 1)[1]
-
-        rc, log, _ = slot_core.run_cmd(
-            ["git", "-C", str(slot / "engine"), "log", "-1", "--format=%s"]
-        )
-        assert sha_from_landed in log.strip()
-
-    def test_multi_repo_all_stamped(self, tmp_path):
-        family, canonicals, slot, branch = _create_merge_test_repos(
-            tmp_path, ["engine", "iot"]
-        )
-        slot_lifecycle.merge_slot(family, 1)
-
-        for repo_name in ["engine", "iot"]:
-            rc, log, _ = slot_core.run_cmd(
-                ["git", "-C", str(slot / repo_name), "log", "-1", "--format=%s"]
-            )
-            assert rc == 0
-            assert log.strip().startswith("chore: branch closed")
-
-    def test_no_stamp_on_merge_failure(self, tmp_path):
-        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        (canonicals["engine"] / "feature.py").write_text("# conflict\n")
-        subprocess.run(["git", "-C", str(canonicals["engine"]), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(canonicals["engine"]), "commit", "-m", "conflict"], capture_output=True)
-        subprocess.run(["git", "-C", str(canonicals["engine"]), "push", "origin", "main"], capture_output=True)
-
-        slot_lifecycle.merge_slot(family, 1)
-
-        rc, log, _ = slot_core.run_cmd(
-            ["git", "-C", str(slot / "engine"), "log", "-1", "--format=%s"]
-        )
-        assert "chore: branch closed" not in log.strip()
-
-
-
 class TestArchiveSlot:
     def test_moves_to_attic_after_verified_merge(self, tmp_path):
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         slot_lifecycle.archive_slot(family, 1)
 
@@ -691,7 +593,7 @@ class TestArchiveSlot:
     def test_preserves_repos_in_attic(self, tmp_path):
         """Archived slot must retain repo directories — attic is the recovery safety net."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         assert (slot / "engine").is_dir()
         slot_lifecycle.archive_slot(family, 1)
@@ -755,7 +657,7 @@ class TestArchiveSlot:
 
     def test_writes_pid_file_on_archive(self, tmp_path, monkeypatch):
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         fake_home = tmp_path / "home"
         claude_projects = fake_home / ".claude" / "projects"
@@ -773,7 +675,7 @@ class TestArchiveSlot:
 
     def test_sweep_renames_after_pid_exits(self, tmp_path, monkeypatch):
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         fake_home = tmp_path / "home"
         claude_projects = fake_home / ".claude" / "projects"
@@ -892,90 +794,11 @@ class TestResolveCanonicalRepoClone:
 
 
 
-class TestMergeSlotClone:
-    def test_clone_merge_pushes_then_merges(self, tmp_path):
-        family, canonicals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-        assert (canonicals["engine"] / "feature.py").exists()
-        assert (slot / ".landed").exists()
-
-    def test_clone_multi_repo_merge(self, tmp_path):
-        family, canonicals, slot, branch = _create_clone_test_repos(tmp_path, ["engine", "iot"])
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-        for name in ["engine", "iot"]:
-            assert (canonicals[name] / "feature.py").exists()
-
-    def test_clone_stamps_pushed_to_bare(self, tmp_path):
-        """Stamps are pushed to origin (bare repo acting as GitHub)."""
-        family, canonicals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
-        bare_path = family / ".engine-bare.git"
-        rc, log, _ = slot_core.run_cmd(
-            ["git", "-C", str(bare_path), "log", "--all", "--oneline", "--grep=branch closed"]
-        )
-        assert "branch closed" in log
-
-
-
-class TestMergeSlotCanonicalSafety:
-    def test_passes_when_canonical_not_on_main(self, tmp_path, capsys):
-        """Relaxed preflight: canonical on a feature branch is fine (D7)."""
-        family, canonicals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
-        subprocess.run(
-            ["git", "-C", str(canonicals["engine"]), "checkout", "-b", "some-other-branch"],
-            capture_output=True, check=True,
-        )
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-        out = capsys.readouterr().out
-        assert "not_on_main" not in out.lower()
-
-    def test_fails_when_canonical_has_dirty_worktree_on_main(self, tmp_path, capsys):
-        family, canonicals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
-        (canonicals["engine"] / "dirty.txt").write_text("uncommitted change\n")
-        subprocess.run(
-            ["git", "-C", str(canonicals["engine"]), "add", "dirty.txt"],
-            capture_output=True, check=True,
-        )
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code != 0
-        assert not (slot / ".landed").exists()
-        out = capsys.readouterr().out
-        assert "dirty" in out.lower() or "DIRTY" in out
-
-    def test_dirty_worktree_on_feature_branch_passes(self, tmp_path, capsys):
-        """Dirty worktree on non-main branch is fine — push to main still works."""
-        family, canonicals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
-        subprocess.run(
-            ["git", "-C", str(canonicals["engine"]), "checkout", "-b", "detour"],
-            capture_output=True, check=True,
-        )
-        (canonicals["engine"] / "dirty.txt").write_text("uncommitted change\n")
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-        out = capsys.readouterr().out
-        assert "dirty_worktree" not in out
-
-    def test_passes_when_canonical_not_on_main_worktree_layout(self, tmp_path, capsys):
-        family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        subprocess.run(
-            ["git", "-C", str(canonicals["engine"]), "checkout", "-b", "detour"],
-            capture_output=True, check=True,
-        )
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-        out = capsys.readouterr().out
-        assert "not_on_main" not in out.lower()
-
-
-
 class TestArchiveSlotDoubleArchive:
     def test_merges_when_attic_slot_already_exists(self, tmp_path, capsys):
         """archive_slot merges into existing attic entry — handles restore-then-rearchive."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         # First archive — should succeed
         slot_lifecycle.archive_slot(family, 1)
@@ -1006,7 +829,7 @@ class TestArchiveSlotCleanup:
     def test_cleans_remnant_after_move(self, tmp_path):
         """If shutil.move succeeds but source dir reappears, archive cleans it up."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         original_move = shutil.move
 
@@ -1026,7 +849,7 @@ class TestArchiveSlotCleanup:
     def test_warns_if_remnant_persists(self, tmp_path, capsys):
         """If cleanup can't remove the dir (non-IDE content), warn."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         original_move = shutil.move
 
@@ -1048,7 +871,7 @@ class TestArchiveSlotPromotionGate:
     def test_warns_when_no_promotion_stamp(self, tmp_path, capsys):
         """archive_slot should warn when .artifacts-promoted stamp is missing."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         # No .artifacts-promoted stamp — promotion never ran
         slot_lifecycle.archive_slot(family, 1)
@@ -1059,7 +882,7 @@ class TestArchiveSlotPromotionGate:
     def test_no_warning_when_stamp_exists(self, tmp_path, capsys):
         """No warning when .artifacts-promoted stamp is present."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         # Simulate promotion stamp from close_artifacts.py
         ws_dirs = [d for d in slot.iterdir() if d.is_dir() and d.name.startswith("work")]
@@ -1114,7 +937,7 @@ class TestArchiveSlotStateConvergence:
     def test_converges_active_to_landed_when_landed_marker_exists(self, tmp_path, capsys):
         """State converges from active to landed when .landed file is present."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         slot_lifecycle.archive_slot(family, 1)
 
@@ -1142,7 +965,7 @@ class TestArchiveSlotTransitionBeforeMove:
     def test_slot_state_set_before_physical_move(self, tmp_path):
         """Slot .slot file has state: archived even if _transition would fail."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         slot_lifecycle.archive_slot(family, 1)
 
@@ -1153,7 +976,7 @@ class TestArchiveSlotTransitionBeforeMove:
     def test_state_rollback_on_move_failure(self, tmp_path, capsys):
         """If shutil.move fails, .slot state rolls back to prior value."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         def fail_move(src, dst):
             raise OSError("simulated move failure")
@@ -1170,7 +993,7 @@ class TestArchiveSlotUnmergedBypass:
     def test_unmerged_bypassed_when_shas_verified(self, tmp_path, capsys):
         """Unmerged content is bypassed when .landed SHAs are verified on main."""
         family, canonicals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        land_slot(family, slot, branch)
 
         subprocess.run(["git", "-C", str(slot / "engine"), "checkout", "-b", "leftover-branch"], capture_output=True)
         (slot / "engine" / "leftover.txt").write_text("extra")
@@ -1229,68 +1052,6 @@ class TestVerifyLandedShasWorkspace:
         verified, failures = slot_metadata.verify_landed_shas(slot, family)
         assert not verified
         assert any("not found" in f for f in failures)
-
-
-class TestMergeSlotIncludesWorkspace:
-    def _add_workspace_to_slot(self, family, slot, branch, ws_name="wsp-casehub-engine"):
-        """Add a properly set up workspace clone to a slot."""
-        ws_orig = init_repo_with_remote(family / ws_name)
-        slot_git.configure_update_instead(ws_orig)
-        ws_clone = slot / ws_name
-        bare_path = family / f".{ws_name}-bare.git"
-        subprocess.run(
-            ["git", "clone", "--shared", "--branch", "main",
-             str(ws_orig), str(ws_clone)],
-            capture_output=True, check=True,
-        )
-        subprocess.run(["git", "-C", str(ws_clone), "config", "user.name", "Test"], capture_output=True)
-        subprocess.run(["git", "-C", str(ws_clone), "config", "user.email", "test@test.com"], capture_output=True)
-        subprocess.run(["git", "-C", str(ws_clone), "checkout", "-b", branch], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(ws_clone), "remote", "rename", "origin", "local"], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(ws_clone), "remote", "add", "origin", str(bare_path)], capture_output=True)
-        subprocess.run(["git", "-C", str(ws_clone), "fetch", "origin"], capture_output=True)
-        (ws_clone / ".workspace").touch()
-        (ws_clone / "blog.md").write_text("# Blog entry\n")
-        subprocess.run(["git", "-C", str(ws_clone), "add", "."], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(ws_clone), "commit", "-m", "blog entry"], capture_output=True, check=True)
-        return ws_orig
-
-    def test_workspace_clones_are_merged(self, tmp_path):
-        """merge_slot discovers workspace clones and stamps them."""
-        family, canonicals, slot, branch = _create_merge_test_repos(
-            tmp_path, ["engine"]
-        )
-        self._add_workspace_to_slot(family, slot, branch)
-
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-
-        landed = (slot / ".landed").read_text()
-        assert "engine:" in landed
-
-    def test_workspace_with_marker_is_merged(self, tmp_path):
-        """Workspace detected by .workspace marker is processed."""
-        family, canonicals, slot, branch = _create_merge_test_repos(
-            tmp_path, ["engine"]
-        )
-        self._add_workspace_to_slot(family, slot, branch, "custom-ws")
-
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-
-    def test_project_repos_still_merge_with_workspace(self, tmp_path):
-        """Project repos merge normally alongside workspace repos."""
-        family, canonicals, slot, branch = _create_merge_test_repos(
-            tmp_path, ["engine", "iot"]
-        )
-        self._add_workspace_to_slot(family, slot, branch)
-
-        exit_code = slot_lifecycle.merge_slot(family, 1)
-        assert exit_code == 0
-
-        for name in ["engine", "iot"]:
-            assert (canonicals[name] / "feature.py").exists()
-
 
 
 class TestRemoveSlotForceArchiveClaude:
@@ -1381,52 +1142,6 @@ class TestAllocateSlotNumberDB:
         slot_lifecycle.allocate_slot_number(family_a)
         num = slot_lifecycle.allocate_slot_number(family_b)
         assert num == 1
-
-
-
-class TestMergeSlotEpicCheck:
-    """Tests for merge_slot() epic status output and post-merge tick."""
-
-    def test_merge_slot_prints_epic_status(self, tmp_path, capsys):
-        """merge_slot prints EPIC_STATUS for epic slots."""
-        family = tmp_path / "family"
-        wt = family / "slots" / "72"
-        wt.mkdir(parents=True)
-        (wt / ".slot").write_text(
-            "# Slot 72\n\n## Issue\norg/repo#50\nCovers: 83,84\nType: epic\n\n"
-            "## Batch Plan\n\n### Batch 1 — Work\n"
-            "- [x] #83 — Done\n- [ ] #84 — Active ← active\n\n"
-            "## Session State\nCurrent batch: 1\nCurrent issue: #84 — Active\n\n"
-            "## Repos\n- engine (primary)\n"
-        )
-        (wt / ".plan").write_text(
-            "# Work Plan — slot-72\n\n## State\nbranch: issue-50\nstate: active\ncovers: 83,84\n\n"
-            "## Queue\n- [x] org/repo#83 — Done\n- [ ] org/repo#84 — Active ← active\n"
-        )
-        (wt / ".phase-a-complete").write_text("branch=issue-50\nrepos=engine\n")
-        repo = init_repo(wt / "engine")
-        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "issue-50"], capture_output=True)
-        (repo / "file.txt").write_text("content")
-        subprocess.run(["git", "-C", str(repo), "add", "file.txt"], capture_output=True)
-        subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat: work"], capture_output=True)
-        with patch.object(slot_core, "resolve_canonical_repo", return_value=repo):
-            result = slot_lifecycle.merge_slot(family, 72)
-        out = capsys.readouterr().out
-        assert "EPIC_STATUS=1 completed, 1 remaining" in out
-
-    def test_unreadable_plan_is_reported_not_swallowed(self, tmp_path, capsys):
-        """A plan that cannot be parsed must produce a warning, not silence."""
-        family = tmp_path / "family"
-        wt = family / "slots" / "73"
-        wt.mkdir(parents=True)
-        (wt / ".slot").write_text(
-            "# Slot 73\n\n## Issue\norg/repo#50\nCovers: 83\nType: epic\n\n## Repos\n- engine (primary)\n")
-        (wt / ".plan").write_text(
-            "# Work Plan — slot-73\n\n## State\nbranch: issue-50\nstate: active\n\n"
-            "## Queue\n- [ ] #83 — bare number\n")
-        (wt / ".phase-a-complete").write_text("branch=issue-50\nrepos=engine\n")
-        slot_lifecycle.merge_slot(family, 73)
-        assert "WARN=epic_status_unavailable" in capsys.readouterr().out
 
 
 
@@ -1524,212 +1239,6 @@ class TestCreateSlotUsesNewDir:
         assert (tmp_path / "slots").exists()
         assert not (tmp_path / "worktrees").exists()
         assert (tmp_path / "slots" / "1").exists()
-
-
-
-class TestMergeSlotRelaxedPreflight:
-    def _setup_slot(self, tmp_path):
-        family = tmp_path / "family"
-        family.mkdir()
-        canonical = init_repo_with_remote(family / "engine")
-        slot_git.configure_update_instead(canonical)
-
-        slot_dir = family / "slots" / "1"
-        slot_dir.mkdir(parents=True)
-        clone = slot_dir / "engine"
-        bare_path = family / ".engine-bare.git"
-        subprocess.run(["git", "clone", "--shared", "--branch", "main",
-                        str(canonical), str(clone)], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(clone), "config", "user.name", "Test"], capture_output=True)
-        subprocess.run(["git", "-C", str(clone), "config", "user.email", "test@test.com"], capture_output=True)
-        subprocess.run(["git", "-C", str(clone), "checkout", "-b", "feature-1"],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(clone), "remote", "rename", "origin", "local"],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(clone), "remote", "add", "origin",
-                        str(bare_path)], capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(clone), "fetch", "origin"], capture_output=True)
-
-        (clone / "feature.txt").write_text("new feature")
-        subprocess.run(["git", "-C", str(clone), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(clone), "commit", "-m", "feat: feature"],
-                       capture_output=True)
-
-        (slot_dir / ".phase-a-complete").write_text("branch=feature-1\n")
-        (slot_dir / ".slot").write_text(
-            "# Slot 1 — feature-1\n## Repos\n- engine\n")
-        return family, slot_dir, canonical, clone
-
-    def test_canonical_on_feature_branch_passes_preflight(self, tmp_path):
-        family, slot_dir, canonical, clone = self._setup_slot(tmp_path)
-        subprocess.run(["git", "-C", str(canonical), "checkout", "-b", "other-work"],
-                       capture_output=True)
-
-        import io
-        captured = io.StringIO()
-        with patch("sys.stdout", captured):
-            result = slot_lifecycle.merge_slot(family, 1)
-        assert "not_on_main" not in captured.getvalue()
-
-    def test_dirty_worktree_on_main_blocks(self, tmp_path):
-        family, slot_dir, canonical, clone = self._setup_slot(tmp_path)
-        (canonical / "dirty.txt").write_text("uncommitted")
-        subprocess.run(["git", "-C", str(canonical), "add", "dirty.txt"],
-                       capture_output=True, check=True)
-
-        import io
-        captured = io.StringIO()
-        with patch("sys.stdout", captured):
-            result = slot_lifecycle.merge_slot(family, 1)
-        assert result == 1
-        assert "dirty_worktree" in captured.getvalue()
-
-    def test_untracked_file_on_main_does_not_block(self, tmp_path):
-        """Canonical may hold untracked files; only tracked changes on main block."""
-        family, slot_dir, canonical, clone = self._setup_slot(tmp_path)
-        (canonical / "scratch.txt").write_text("untracked")
-
-        import io
-        captured = io.StringIO()
-        with patch("sys.stdout", captured):
-            result = slot_lifecycle.merge_slot(family, 1)
-        assert result == 0, captured.getvalue()
-        assert "dirty_worktree" not in captured.getvalue()
-        assert (canonical / "scratch.txt").read_text() == "untracked"
-        log = subprocess.run(["git", "-C", str(canonical), "log", "--oneline", "main"],
-                             capture_output=True, text=True).stdout
-        assert "feat: feature" in log
-
-    def test_unpushed_commits_auto_pushed_in_preflight(self, tmp_path):
-        """Canonical has unpushed commits on main — preflight pushes them."""
-        family, slot_dir, canonical, clone = self._setup_slot(tmp_path)
-        (canonical / "local-work.txt").write_text("local work")
-        subprocess.run(["git", "-C", str(canonical), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(canonical), "commit", "-m", "local work"], capture_output=True)
-
-        import io
-        captured = io.StringIO()
-        with patch("sys.stdout", captured):
-            result = slot_lifecycle.merge_slot(family, 1)
-
-        assert "SYNC=pushed" in captured.getvalue()
-        bare_path = family / ".engine-bare.git"
-        rc, bare_log, _ = slot_core.run_cmd(
-            ["git", "-C", str(bare_path), "log", "--oneline", "main"])
-        assert "local work" in bare_log
-
-    def test_dirty_worktree_on_feature_branch_passes(self, tmp_path):
-        family, slot_dir, canonical, clone = self._setup_slot(tmp_path)
-        subprocess.run(["git", "-C", str(canonical), "checkout", "-b", "other-work"],
-                       capture_output=True)
-        (canonical / "dirty.txt").write_text("uncommitted")
-
-        import io
-        captured = io.StringIO()
-        with patch("sys.stdout", captured):
-            result = slot_lifecycle.merge_slot(family, 1)
-        assert "dirty_worktree" not in captured.getvalue()
-
-
-
-class TestMergeSlotDualPush:
-    def _setup_full_slot(self, tmp_path):
-        """Create a slot with project + workspace, using real bare repos."""
-        family = tmp_path / "family"
-        family.mkdir()
-
-        proj_orig = init_repo_with_remote(family / "engine")
-        slot_git.configure_update_instead(proj_orig)
-
-        ws_orig = init_repo_with_remote(family / "work-hub")
-        slot_git.configure_update_instead(ws_orig)
-
-        slot_dir = family / "slots" / "1"
-        slot_dir.mkdir(parents=True)
-
-        for name, orig in [("engine", proj_orig), ("work-hub", ws_orig)]:
-            clone = slot_dir / name
-            bare_path = family / f".{name}-bare.git"
-            subprocess.run(["git", "clone", "--shared", "--branch", "main",
-                            str(orig), str(clone)], capture_output=True, check=True)
-            subprocess.run(["git", "-C", str(clone), "config", "user.name", "Test"], capture_output=True)
-            subprocess.run(["git", "-C", str(clone), "config", "user.email", "test@test.com"], capture_output=True)
-            subprocess.run(["git", "-C", str(clone), "checkout", "-b", "feature-1"], capture_output=True, check=True)
-            subprocess.run(["git", "-C", str(clone), "remote", "rename", "origin", "local"], capture_output=True, check=True)
-            subprocess.run(["git", "-C", str(clone), "remote", "add", "origin", str(bare_path)], capture_output=True, check=True)
-            subprocess.run(["git", "-C", str(clone), "fetch", "origin"], capture_output=True)
-
-        (slot_dir / "engine" / "feature.txt").write_text("feature work")
-        subprocess.run(["git", "-C", str(slot_dir / "engine"), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(slot_dir / "engine"), "commit", "-m", "feat: add feature"], capture_output=True)
-
-        (slot_dir / "work-hub" / "journal.md").write_text("# Journal")
-        subprocess.run(["git", "-C", str(slot_dir / "work-hub"), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(slot_dir / "work-hub"), "commit", "-m", "docs: journal"], capture_output=True)
-
-        (slot_dir / ".phase-a-complete").write_text("branch=feature-1\n")
-        (slot_dir / ".slot").write_text(
-            "# Slot 1 — feature-1\n## Repos\n- engine\n")
-
-        return family, slot_dir, proj_orig, ws_orig
-
-    def test_workspace_repo_merged_by_slot(self, tmp_path, capsys):
-        """Workspace repos are now processed by merge_slot (convergence)."""
-        family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
-        result = slot_lifecycle.merge_slot(family, 1)
-
-        assert result == 0
-        captured = capsys.readouterr().out
-        assert "SKIPPED_WORKSPACE" not in captured
-
-        rc, ws_log, _ = slot_core.run_cmd(
-            ["git", "-C", str(ws_orig), "log", "--oneline"])
-        assert "journal" in ws_log.lower()
-
-        landed = (slot_dir / ".landed").read_text()
-        assert "engine:" in landed
-
-    def test_github_push_failure_is_warning_not_error(self, tmp_path, capsys):
-        """If canonical can't push to GitHub, local push succeeded — warn, don't block."""
-        family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
-        import land_flow
-        original_git = land_flow._git
-
-        def mock_github_fail(repo, *args):
-            repo_str = str(repo)
-            if "push" in args and "origin" in args and "main" in args:
-                if str(family / "engine") in repo_str or str(family / "work-hub") in repo_str:
-                    import subprocess
-                    return subprocess.CompletedProcess(
-                        args=["git"], returncode=1, stdout="", stderr="network error",
-                    )
-            return original_git(repo, *args)
-
-        with patch.object(land_flow, "_git", side_effect=mock_github_fail):
-            result = slot_lifecycle.merge_slot(family, 1)
-
-        assert result == 0
-        captured = capsys.readouterr().out
-        assert "github_push_failed" in captured
-
-    def test_local_push_failure_blocks(self, tmp_path):
-        """If slot can't push to canonical, hard stop — work not landed."""
-        family, slot_dir, proj_orig, ws_orig = self._setup_full_slot(tmp_path)
-        import land_flow
-        original_git = land_flow._git
-
-        def mock_local_fail(repo, *args):
-            if "push" in args and "local" in args and "main" in args:
-                import subprocess
-                return subprocess.CompletedProcess(
-                    args=["git"], returncode=1, stdout="", stderr="rejected",
-                )
-            return original_git(repo, *args)
-
-        with patch.object(land_flow, "_git", side_effect=mock_local_fail):
-            result = slot_lifecycle.merge_slot(family, 1)
-
-        assert result == 1
 
 
 
@@ -2975,3 +2484,26 @@ class TestSessionSlotBoundary:
             found = slot_claude.find_active_sessions(slot)
 
         assert sorted(pid for pid, _, _ in found) == [101, 103]
+
+
+class TestMergeSlotRemoved:
+    """#515: merge-slot was a second landing path with hard resets. It is a stub now."""
+
+    def test_refuses_and_points_to_work_end(self, tmp_path, capsys):
+        family, canonicals, slot, branch = _create_clone_test_repos(tmp_path, ["engine"])
+        main_before = subprocess.run(
+            ["git", "-C", str(canonicals["engine"]), "rev-parse", "main"],
+            capture_output=True, text=True).stdout
+
+        assert slot_lifecycle.merge_slot(family, 1) == 1
+
+        out = capsys.readouterr().out
+        assert "ERROR=merge_slot_removed" in out
+        assert "work end" in out
+        assert not (slot / ".landed").exists()
+        assert subprocess.run(
+            ["git", "-C", str(canonicals["engine"]), "rev-parse", "main"],
+            capture_output=True, text=True).stdout == main_before
+
+    def test_land_flow_module_is_gone(self):
+        assert not (skill_dir.parent / "work-end" / "land_flow.py").exists()

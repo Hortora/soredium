@@ -81,7 +81,8 @@ class TestVerifyLandedShas:
     def test_passes_when_sha_on_main(self, tmp_path):
         import slot_lifecycle
         family, originals, slot, branch = _create_merge_test_repos(tmp_path, ["engine"])
-        slot_lifecycle.merge_slot(family, 1)
+        from slot_test_helpers import land_slot
+        land_slot(family, slot, branch)
 
         ok, failures = slot_metadata.verify_landed_shas(slot, family)
         assert ok is True

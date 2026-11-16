@@ -36,3 +36,39 @@ def init_repo_with_remote(path: Path) -> Path:
     subprocess.run(["git", "-C", str(path), "commit", "-m", "initial"], capture_output=True, check=True)
     subprocess.run(["git", "-C", str(path), "push", "-u", "origin", "main"], capture_output=True, check=True)
     return path
+
+
+def land_slot(family: Path, slot: Path, branch: str) -> dict[str, str]:
+    """Put a slot in the landed state the way a finished close leaves it.
+
+    Each repo's branch is fast-forwarded onto its canonical main, and the slot's
+    .landed marker records the SHAs. Returns {repo: sha}.
+    """
+    import datetime
+    shas: dict[str, str] = {}
+    for clone in sorted(d for d in slot.iterdir() if (d / ".git").exists()):
+        canonical = family / clone.name
+        if not canonical.is_dir():
+            continue
+        tip = subprocess.run(["git", "-C", str(clone), "rev-parse", "--verify", "-q", branch],
+                             capture_output=True, text=True).stdout.strip()
+        if not tip:
+            continue
+        subprocess.run(["git", "-C", str(canonical), "fetch", "-q", str(clone), branch],
+                       capture_output=True, check=True)
+        current = subprocess.run(["git", "-C", str(canonical), "branch", "--show-current"],
+                                 capture_output=True, text=True).stdout.strip()
+        if current == "main":
+            subprocess.run(["git", "-C", str(canonical), "merge", "-q", "--ff-only", tip],
+                           capture_output=True, check=True)
+        else:
+            subprocess.run(["git", "-C", str(canonical), "branch", "-f", "main", tip],
+                           capture_output=True, check=True)
+        shas[clone.name] = tip
+    (slot / ".landed").write_text("\n".join([
+        f"branch={branch}",
+        f"repos={','.join(shas)}",
+        f"landed_shas={','.join(f'{n}:{s}' for n, s in shas.items())}",
+        f"timestamp={datetime.datetime.now(datetime.timezone.utc).isoformat()}",
+    ]) + "\n")
+    return shas
