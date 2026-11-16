@@ -24,13 +24,6 @@ def _git(repo_path, *args: str, **kwargs) -> subprocess.CompletedProcess:
     return _canonical_git(repo_path, *args, timeout=kwargs.get("timeout", 10))
 
 
-SOURCE_EXTENSIONS = (
-    ".java", ".kt", ".xml", ".yaml", ".yml", ".json",
-    ".properties", ".sql", ".py", ".ts", ".tsx", ".js",
-    ".jsx", ".css", ".scss", ".html",
-)
-
-
 class VerifyResult(Enum):
     PASS = "pass"
     FAIL = "fail"
@@ -77,30 +70,14 @@ def verify_content_landed(repo_path: Path, landed_sha: str,
         return Verification("content_landed", VerifyResult.UNKNOWN,
                             {"reason": "no_landed_sha"}, repo_name)
 
-    result = _git(repo_path, "merge-base", "--is-ancestor", landed_sha, base_branch)
-    if result.returncode == 0:
+    from landed_check import content_on_base
+    outcome = content_on_base(repo_path, landed_sha, base_branch)
+    if outcome.landed:
         return Verification("content_landed", VerifyResult.PASS,
-                            {"method": "ancestry", "sha": landed_sha}, repo_name)
-
-    diff = _git(repo_path, "diff", f"{base_branch}..{landed_sha}",
-                "--", *[f"*{ext}" for ext in SOURCE_EXTENSIONS])
-    if diff.returncode == 0 and not diff.stdout.strip():
-        return Verification("content_landed", VerifyResult.PASS,
-                            {"method": "empty_source_diff", "sha": landed_sha},
-                            repo_name)
-
-    if diff.returncode == 0:
-        diff_names = _git(repo_path, "diff", "--name-only",
-                          f"{base_branch}..{landed_sha}",
-                          "--", *[f"*{ext}" for ext in SOURCE_EXTENSIONS])
-        files = [f for f in diff_names.stdout.strip().split("\n") if f]
-        return Verification("content_landed", VerifyResult.FAIL,
-                            {"method": "diff_check", "diff_files": files,
-                             "sha": landed_sha}, repo_name)
-
-    return Verification("content_landed", VerifyResult.UNKNOWN,
-                        {"reason": "diff_failed", "sha": landed_sha,
-                         "stderr": diff.stderr[:200] if diff.stderr else ""},
+                            {"method": outcome.method, "sha": landed_sha}, repo_name)
+    return Verification("content_landed", VerifyResult.FAIL,
+                        {"method": "whole_tree", "reason": outcome.reason,
+                         "diff_files": outcome.missing, "sha": landed_sha},
                         repo_name)
 
 

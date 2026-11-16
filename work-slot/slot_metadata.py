@@ -3,9 +3,15 @@
 Parsing and writing moved to project/slot_io.py (Phase 2, #425).
 """
 
+import sys
 from pathlib import Path
 
 from slot_core import run_cmd
+
+_project_dir = str(Path(__file__).resolve().parent.parent / "project")
+if _project_dir not in sys.path:
+    sys.path.insert(0, _project_dir)
+from landed_check import content_on_base
 
 
 def _read_promotion_stamp(slot_dir: Path) -> tuple[list[str], list[str], str]:
@@ -82,28 +88,9 @@ def verify_landed_shas(slot_dir: Path, family_root: Path) -> tuple[bool, list[st
             if not canonical.is_dir():
                 failures.append(f"{repo_name}: canonical repo not found at {canonical}")
                 continue
-        rc, _, _ = run_cmd([
-            "git", "-C", str(canonical), "merge-base", "--is-ancestor", sha, "main",
-        ])
-        if rc == 0:
-            continue
-        rc2, msg, _ = run_cmd([
-            "git", "-C", str(canonical), "log", "-1", "--format=%s", sha,
-        ])
-        if rc2 == 0 and msg.strip():
-            rc3, match, _ = run_cmd([
-                "git", "-C", str(canonical), "log", "--oneline",
-                "--grep", msg.strip(), "main", "-1",
-            ])
-            if rc3 == 0 and match.strip():
-                continue
-        rc4, diff_out, _ = run_cmd([
-            "git", "-C", str(canonical), "diff", f"main..{sha}",
-            "--", "*.java", "*.ts", "*.tsx", "*.py", "*.kt",
-        ])
-        if rc4 == 0 and not diff_out.strip():
-            continue
-        failures.append(f"{repo_name}: SHA {sha[:12]} not reachable from main")
+        result = content_on_base(canonical, sha, "main")
+        if not result.landed:
+            failures.append(f"{repo_name}: {result.describe()}")
     return len(failures) == 0, failures
 
 

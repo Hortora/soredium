@@ -101,7 +101,7 @@ class TestVerifyLandedShas:
         ok, failures = slot_metadata.verify_landed_shas(slot, family)
         assert ok is False
         assert len(failures) == 1
-        assert "not reachable from main" in failures[0]
+        assert "not found in engine" in failures[0]
 
     def test_fails_with_no_landed_marker(self, tmp_path):
         ok, failures = slot_metadata.verify_landed_shas(tmp_path, tmp_path)
