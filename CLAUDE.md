@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Name:** soredium
 **GitHub:** [Hortora/soredium](https://github.com/Hortora/soredium)
 **Marketplace:** `/plugin marketplace add github.com/Hortora/soredium`
-**Status:** Post-merge. 33 skills (workflow + garden), Python tooling, Quarkus/Java engine. Active development on main.
+**Status:** Post-merge. 51 skills (workflow + garden), Python tooling, Quarkus/Java engine. Active development on main.
 
 @SOURCES.md
 
@@ -305,7 +305,7 @@ All major skills include "Common Pitfalls" tables documenting real mistakes:
 Some skills in this repository are **developer-only** -- they require a cloned repository and are not available to marketplace plugin users.
 
 **Rules:**
-- **In `skills/` directory** -- auto-discovered and synced for developers
+- **A directory at the repository root** -- auto-discovered and synced for developers
 - **Not in `marketplace.json`** -- invisible to the web installer and not installable via plugin
 - **Not in README.md** -- not documented as a user-facing skill
 - **SKILL.md includes a prominent DEV-ONLY note** -- so Claude knows not to recommend it to marketplace users
@@ -315,7 +315,7 @@ Some skills in this repository are **developer-only** -- they require a cloned r
 - `fix-ci` -- dev-only CI debugging tool
 
 **When adding a new developer-only skill:**
-1. Create it in `skills/<name>/` as normal
+1. Create it in `<name>/` at the repository root as normal
 2. Do NOT add it to `.claude-plugin/marketplace.json`
 3. Do NOT add it to README.md
 4. Add "DEV-ONLY" prominently in the SKILL.md and CSO description
@@ -370,16 +370,13 @@ third-party and excluded.
 
 ---
 
-## Blog
-
-
 ## Writing Style Guide -- Mandatory for Blog Content
 
 **The writing style guide at `~/claude-workspace/writing-styles/blog-technical.md` is mandatory for all blog and diary entries. It is not a soft suggestion.**
 
-When invoking `write-blog`:
-- Load the guide in full before drafting (Step 0 of the write-blog workflow)
-- Complete the pre-draft voice classification before generating any prose (Step 4)
+When writing a diary or blog entry with `write-content`:
+- Load the guide in full before drafting
+- Complete the pre-draft voice classification before generating any prose
 - Verify the draft against "What to Avoid" before showing it -- do not show a draft that fails
 
 Do not produce a draft without completing these steps. The guide constrains vocabulary, register, heading style, and what to avoid. A Claude that reads the guide and then generates anyway without classification has not followed it.
@@ -395,20 +392,19 @@ When working on this repository, use these commands:
 python3 scripts/claude-skill sync-local --all -y
 # Or use the slash command: /sync-local
 
-# Launch the web skill manager UI
-python3 scripts/web_installer.py          # opens http://localhost:8765
-
-# Regenerate web app data after chaining changes
-python3 scripts/generate_web_app_data.py
-
-# Run all tests (~2010 tests; ~2m including Playwright UI tests)
+# Run all tests (~4500 tests; the slot and close suites use real git repos
+# and take 10-15 minutes on their own -- run them in the background)
 python3 -m pytest tests/ -v
 
 # Run commit-tier validators
 python3 scripts/validate_all.py --tier commit
 
-# Run lifecycle state machine tests
-python3 -m pytest tests/test_lifecycle.py tests/test_pre_push_hook.py -v
+# Run close ceremony and queue tests (real git repos)
+python3 -m pytest tests/test_close.py tests/test_close_integration.py tests/test_close_batch.py -v
+python3 -m pytest tests/test_queue_io.py tests/test_queue_file_roundtrip.py tests/test_queue_done_state.py tests/test_work_chain.py -v
+
+# Run slot lifecycle tests
+python3 -m pytest tests/test_slot_lifecycle.py tests/test_slot_metadata.py -v
 
 # Run work-end close ceremony audit
 python3 work-end/audit_work_end.py mode=check
@@ -443,10 +439,6 @@ python3 scripts/validation/validate_project_types.py --verbose
 
 # Check if a primary doc needs modularising
 python3 scripts/validation/validate_doc_structure.py CLAUDE.md
-
-# Revert stray subtype: log -> subtype: diary (run periodically until sessions converge)
-python3 scripts/revert_diary_subtype.py          # dry-run: shows what needs changing
-python3 scripts/revert_diary_subtype.py --apply  # apply changes
 
 # Validate a garden entry locally (same as CI)
 python3 scripts/validate_pr.py <entry_file> ${HORTORA_GARDEN:-~/.hortora/garden}
@@ -501,7 +493,6 @@ python3 scripts/validate_garden.py <garden_path> --freshness  # check entry stal
 
 **After editing any skill:** run `sync-local` so `~/.claude/skills/` has the latest version.
 **After adding a new skill:** run `generate_commands.py` AND add to `marketplace.json` plugins list.
-**After chaining changes:** run `generate_web_app_data.py` to sync `docs/index.html` CHAIN data.
 **Worktrees for feature development:** use `.worktrees/` (gitignored). Create with `git worktree add .worktrees/<name> -b <branch>`. Always use `--force` when removing after subagent use.
 
 ---
@@ -628,12 +619,13 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `workspace-init` -- one-time setup; creates `~/claude/private/<project>/` or
   `~/claude/public/<project>/` with routing CLAUDE.md, gitignored project symlink
   via `.git/info/exclude`, and all subdirectories
-- `work` -- **unified lifecycle entry point**; eight commands: `work` (start or resume), `work end` (close), `work pause` (save state), `work continue` (keep working), `work resume` (restore paused branch), `work next` (advance to next issue in `.plan` queue), `work sync` (land without closing), `work find` (discover and populate queue). Commands chain bidirectionally via `work_chain.py`. `work/SKILL.md` handles routing and corruption triage; mechanical execution runs via `project/work.py` pipeline engine for start/continue/pause/resume/next/find; close/sync use `work-end/close.py`
-- `work.py` -- unified pipeline engine (`project/work.py`); Python-driven lifecycle for 6 commands (start, continue, pause, resume, next, find). Each command maps to a step list of `StepDef` objects. Mechanical steps run without LLM involvement; judgment steps yield `ACTION=` for LLM dispatch to handler files in `work/handlers/`. Uses `orchestrator_engine.run_loop` (same pattern as work-end). Three-tier conflict resolution via `conflict_resolution.py`
-- `lifecycle.py` -- lifecycle state machine (`project/lifecycle.py`); owns all state transitions via a data-driven table; entry points fire events, the machine determines effects; 12 states (idle, scaffolded, active, transitioning, paused, drained, closing:review/verified/promoted/pushed/merged/stamped); `drained` = queue empty, ceremony done, plan persists, re-activatable via `work find`; three-phase protocol (transition, effects, commit_transition); pre-push hook (`project/pre_push_hook.py`) enforces closing gates
-- `work_chain.py` -- bidirectional chaining engine (`project/work_chain.py`); evaluates `continue`/`next`/`end`/`find` commands and returns deterministic directives (`proceed`, `chain_to_next`, `guard_continue`, etc.); the LLM reads directives, never makes routing decisions
+- `work` -- **unified lifecycle entry point**; eight commands: `work` (start or resume), `work end` (close), `work pause` (save state), `work continue` (keep working), `work resume` (restore paused branch), `work next` (mark the active issue done on its branch and activate the next one in the `.queue`), `work sync` (land without closing), `work find` (discover and populate queue). Commands chain bidirectionally via `work_chain.py`. `work/SKILL.md` handles routing and corruption triage; mechanical execution runs via `project/work.py` pipeline engine for start/continue/pause/resume/next/find; close/sync use `work-end/close.py`
+- `work.py` -- unified pipeline engine (`project/work.py`); Python-driven lifecycle for 6 commands (start, continue, pause, resume, next, find). Each command maps to a step list of `StepDef` objects. Mechanical steps run without LLM involvement; judgment steps yield `ACTION=` for LLM dispatch to handler files in `work/handlers/`. Uses `orchestrator_engine.run_loop`. Three-tier conflict resolution via `conflict_resolution.py`
+- `.queue` -- the issue queue and its state, one file per workspace (or slot root). Read and written by `work-slot/plan_manager.py` and `project/queue_io.py`; never edited by hand. Queue status is one of `active`, `paused`, `drained`, `idle`. An item is unchecked, **done but not closed** (`- [ ] ref — title ← done on <branch>`, written by `plan_manager.py mark-done`), or checked (closed by the close ceremony)
+- `lifecycle.py` -- older state machine (`project/lifecycle.py`) with a transition table that includes `closing:*` states. The close ceremony no longer uses it. `project/pre_push_hook.py` still reads it; replacing that gate is part of #515
+- `work_chain.py` -- bidirectional chaining engine (`project/work_chain.py`), run as a script by the work skill: `work_chain.py <continue|next|end|sync|find> queue=<path>`. Prints `CHAIN_DIRECTIVE` (`proceed`, `chain_to_next`, `chain_to_end`, `guard_next`, ...). Whether an item is finished is read from the queue, not from GitHub. Prints `OFFER=wrap_or_continue` whenever an item is finished or done items await closing; the LLM reads directives, never makes routing decisions
 - `work start` -- pipeline-driven (`project/work.py start`); 15 steps: sync main, resolve issue (judgment), branch name (judgment), create branches, scaffold, platform coherence (judgment), protocols (judgment), garden search, load specs, brainstorm offer (judgment). Mechanical steps delegate to `branch_create.py`, `scaffold.py`, `flyway_scan.py`
-- `work end` -- closes the current branch via `work-end/close.py` atomic ceremony; resolves targets, runs preflight, lands branches (rebase + squash-merge), stamps, advances queue. Pre-close advisory checklist (code review, branch audit, sweeps, diary). Post-close closes GitHub issues and optionally archives slots
+- `work end` -- closes work via the `work-end/close.py` ceremony; resolves targets, runs preflight, lands branches (rebase + fast-forward; it never squashes, see Landing Rules), stamps, advances queue. One ceremony lands every done-not-closed item in queue order, then the active one. Pre-close advisory checklist (code review, branch audit, sweeps, diary), run once per batch. Post-close closes GitHub issues. In a slot it never archives: when the queue drains it marks the slot landed and reports it ready for archive
 - `work pause` -- pipeline-driven (`project/work.py pause`); entirely mechanical (3 steps: WIP commit project, WIP commit workspace, push-and-stack). Delegates to `pause_exec.py`
 - `work resume` -- pipeline-driven (`project/work.py resume`); 6 steps: stack pick (judgment), pop stack, checkout branches, rebase, reset WIP, context resume (judgment). Delegates to `resume_exec.py`
 - `brief` -- orientation summary; composes ctx.resolve(), work_router.detect_state(), work_health.run_checks() into structured KEY=VALUE output showing branch, issue, plan progress, recent commits, health status
@@ -644,7 +636,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `protocol` -- CAPTURE, SWEEP, SEARCH, HEALTH -- project-level protocol management
 
 **Branch-level review:**
-- `branch-audit` -- holistic branch-level review across four dimensions (Conformance, Coherence, Structure, Robustness); runs at work-end Step 2.2; fills the post-implementation lifecycle point in review-tiers.md
+- `branch-audit` -- holistic branch-level review across four dimensions (Conformance, Coherence, Structure, Robustness); runs in the work-end pre-close checklist (Step 2); fills the post-implementation lifecycle point in review-tiers.md
 
 **Router skills** (dispatch to per-language content files -- never load cross-language content):
 - `code-review` -- Java/TS/Python per-line checklist via `java.md`, `typescript.md`, `python.md`
@@ -667,12 +659,10 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `update-claude-md` -- CLAUDE.md sync, invoked by all commit skills
 - `docs/development/readme-sync.md` -- README.md sync, invoked by `git-commit` for type: skills only
 - `adr` -- Architecture Decision Records in MADR format
-- `design-snapshot` -- immutable dated record of design state; links to ADRs rather than duplicating them
 - `idea-log` -- lightweight living log for undecided possibilities; park ideas before they evaporate, promote to ADR when ready
-- `write-content` -- universal content creation skill; determines content type (Note/log/musing/idea, Article/explanation/commentary/essay/tutorial/how-to, Brief, News), applies structure principles, anti-slop guidance, and form-specific rules; consumed by write-blog and any future content skill
-- `write-blog` -- living project diary; captures decisions, pivots, and discoveries in diary voice as they happen; consumes write-content for content type and writing guidance
+- `write-content` -- universal content creation skill; determines content type (Note/log/musing/idea, Article/explanation/commentary/essay/tutorial/how-to, Brief, News), applies structure principles, anti-slop guidance, and form-specific rules; also the skill for the project diary (diary type): decisions, pivots, and discoveries captured in diary voice as they happen
 - `publish-blog` -- routes blog entries to external git destinations via blog-routing.yaml; Level 2 blog routing (per-entry cross-posting), independent of epic Level 1 routing
-- `handover` -- end-of-session HANDOFF.md generator; lazy references to blog, design-snapshot, and CLAUDE.md rather than loading them; invokes write-blog, design-snapshot, and update-claude-md via user-confirmed wrap checklist
+- `handover` -- end-of-session HANDOFF.md generator; lazy references to blog and CLAUDE.md rather than loading them; invokes write-content and update-claude-md via user-confirmed wrap checklist
 
 **TypeScript/Node.js:**
 - `ts-dev` -- TypeScript development; strict mode, async patterns, error handling, testing
@@ -691,12 +681,8 @@ but this checklist ensures the new type is fully wired into all workflows.**
   - `project-health` routes to `python.md` -- Python-specific health checks
 
 **Health & quality skills** (correctness and improvement):
-- `project-health` -- universal health check; answers "is the project correct, complete, and consistent?"; auto-chains to type-specific skill at tier 3+
+- `project-health` -- universal health check; answers "is the project correct, complete, and consistent?"; loads the content file for the project type (`java.md`, `typescript.md`, `python.md`, `skills-repo.md`, `blog.md`, `custom.md`) rather than chaining to a separate skill
 - `project-refine` -- companion to project-health for improvement opportunities; never blocks work
-- `skills-project-health` -- extends project-health for type: skills (skill craft, cross-refs, marketplace, validators)
-- `java-project-health` -- extends project-health for type: java
-- `blog-project-health` -- extends project-health for type: blog
-- `custom-project-health` -- extends project-health for type: custom
 
 ## Quality Assurance Framework
 
@@ -741,8 +727,8 @@ For complete inventory of validation scripts by tier:
 [QUALITY.md -- Validation Script Roadmap](QUALITY.md#validation-script-roadmap)
 
 **Quick reference (19 validators total):**
-- **COMMIT tier (<2s)**: frontmatter, CSO, references, naming, sections, structure, project-types, blog-frontmatter
-- **PUSH tier (<30s)**: flowcharts, cross-document, temporal, usability, edge-cases, behavior, readme-sync, external-links, code-examples, web-app
+- **COMMIT tier (<2s)**: frontmatter, CSO, references, naming, sections, structure, project-types, blog-frontmatter, plan-bypass
+- **PUSH tier (<30s)**: flowcharts, cross-document, temporal, usability, edge-cases, behavior, readme-sync, external-links, code-examples
 - **CI tier (<5min)**: Python quality (mypy, flake8, bandit) + functional tests
 - **On disk, not yet registered**: validate_blog_commit.py (git hook only -- needs commit message), validate_doc_structure.py (on-demand -- needs target path)
 
