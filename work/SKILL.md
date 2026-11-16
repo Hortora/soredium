@@ -36,8 +36,8 @@ and judgment steps; `project/work.py` handles mechanical execution.
 | `work` / `work start` | → router (Step 1b) → pipeline: `start` |
 | `resume handover` | → handover skill directly |
 
-For `continue`, `next`, `find`: read `CHAIN_DIRECTIVE` from ctx.py
-first (Step 1c).
+For `continue`, `next`, `end`, `find`: get the chain directive first
+(Step 1c).
 
 **Step 1b — Run ctx.py**
 
@@ -74,13 +74,30 @@ If `CORRUPTION_COUNT` > 0, enter triage flow:
 
 **Step 1c — Bidirectional chaining**
 
+```bash
+python3 ~/.claude/skills/project/work_chain.py <continue|next|end|find> queue=$QUEUE_PATH
+```
+
+Follow `CHAIN_DIRECTIVE`. Routing is never decided from prose or memory.
+
+**Done is not closed.** `work next` on a feature branch marks the active
+item *done on its branch* and activates the next one. Nothing is landed and
+the GitHub issue stays open. Never close an issue, tick a checkbox or run
+work-end to move to the next issue: `work end`, once, lands and closes every
+done item in queue order. `DONE_ITEMS` lists what is waiting.
+
+**`OFFER=wrap_or_continue`** — whenever this line is present, present the
+wrap-vs-continue decision below, with a recommendation, before doing
+anything else. It appears every time an item is finished and whenever done
+items are waiting to be closed. Do not skip it and do not offer work-end
+per issue.
+
 | DIRECTIVE | Action |
 |-----------|--------|
 | `proceed` | Continue with the invoked command |
 | `chain_to_next` | Redirect to `next` pipeline |
-| `chain_to_end` | Redirect to work-end |
+| `chain_to_end` | Redirect to work-end. With `CHAIN_REASON=done_items_await_close`, nothing is active and finished items are waiting: work-end closes them all |
 | `chain_to_find` | Redirect to `find` pipeline |
-| `guard_continue` | "Issue still open. Continue working." → `continue` pipeline |
 | `guard_next` | "Queue has items. Continue or advance?" → present choice |
 | `no_work_found` | "No work found." → stay |
 
@@ -116,9 +133,12 @@ Present: continue / switch / next / sync / end / pause / wrap.
 User picks → route to the matching pipeline or skill.
 
 **Mid-session issue completion (D4):** When an issue completes during
-a session, check queue state before suggesting next action.
-Recommend `next` or `wrap` with reasoning. Never suggest work-end
-when queue has remaining issues.
+a session, run `work next`. It marks the item done on its branch, leaves the
+issue open, and prints `OFFER=wrap_or_continue`. Present that decision every
+time. "Continue" means `work start` on the next item, on a new branch cut
+from the base branch (or stacked on the done branch only when the next issue
+needs its code). "Wrap" means one `work end`, which closes every done item.
+Never suggest work-end per issue.
 
 **Wrap-vs-continue decision:**
 

@@ -172,6 +172,26 @@ class TestBatchLandsInQueueOrder:
                                         "feat: b2 adds two.txt Refs #1"]
         assert _merge_commits(proj, pre) == 0
 
+    def test_stacked_branch_after_main_moved_does_not_replay_the_earlier_branch(self, repos):
+        """The first branch is rebased, so its commits get new SHAs; the second branch
+        still carries the old copies and must not land them a second time."""
+        proj, ws = repos
+        _branch(proj, "b1", {"one.txt": "1", "one-b.txt": "1"})
+        _branch(proj, "b2", {"two.txt": "2"}, start="b1")
+        (proj / "elsewhere.txt").write_text("x")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-m", "feat: landed by someone else Refs #9")
+        pre = _main(proj)
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1",
+                                        "feat: b1 adds one-b.txt Refs #1",
+                                        "feat: b2 adds two.txt Refs #1"]
+        assert _merge_commits(proj, pre) == 0
+
     def test_main_moved_on_since_the_branches_were_cut(self, repos):
         proj, ws = repos
         _branch(proj, "b1", {"one.txt": "1"})
