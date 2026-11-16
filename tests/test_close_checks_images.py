@@ -45,7 +45,7 @@ class TestCheckPromotedImages:
         from verification.close_checks import check_promoted_images
         findings = check_promoted_images(proj)
         assert len(findings) >= 1
-        assert all(f.severity == "WARN" for f in findings)
+        assert all(f.severity == "ERROR" for f in findings)
         assert any("missing.png" in f.message for f in findings)
 
     def test_url_refs_not_flagged(self, tmp_path):

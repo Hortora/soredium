@@ -120,4 +120,4 @@ class TestVerifyBranch:
         assert "FAILURE_1=" in captured.out
         failure_lines = [l for l in captured.out.splitlines() if l.startswith("FAILURE_")]
         assert len(failure_lines) >= 1
-        assert "project_merged" in failure_lines[0]
+        assert any("project_stamped" in line for line in failure_lines)
