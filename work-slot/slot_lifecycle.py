@@ -84,13 +84,13 @@ def _build_epic_plan(branch: str, issue_repo: str, cover_refs: list,
     cover_refs: list of CoverRef (from parse_covers_qualified) or plain strings.
     Each CoverRef carries its own repo; bare ints/strings fall back to issue_repo.
     """
-    from queue_io import CoverRef
     from plan_manager import QueueItem, IssueRef, build_plan_content
     items: list[QueueItem] = []
     for ref in cover_refs:
-        if isinstance(ref, CoverRef):
+        # Duck-typed: plan_io and queue_io each define a CoverRef.
+        if hasattr(ref, "number"):
             num = ref.number
-            repo = ref.repo or issue_repo
+            repo = getattr(ref, "repo", "") or issue_repo
         else:
             try:
                 num = int(ref)
@@ -651,8 +651,8 @@ def merge_slot(family_root: Path, slot_num: int) -> int:
                 _done = plan_info.get("completed_count", 0)
                 _total = plan_info.get("total_count", 0)
                 print(f"EPIC_STATUS={_done} completed, {_total - _done} remaining")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"WARN=epic_status_unavailable {e}")
 
     branch = ""
     for line in (slot_dir / ".phase-a-complete").read_text().splitlines():
@@ -1016,7 +1016,6 @@ def restore_slot(family_root: Path, slot_num: int) -> None:
             print(f"WARN=remnant_dir_persists path={attic_dir}")
     if copied:
         print(f"CLAUDE_PROJECTS_COPIED={copied}")
-    ensure_clone_layout(dest)
     _transition(
         dest, "active",
         family_root=family_root, slot_number=slot_num,

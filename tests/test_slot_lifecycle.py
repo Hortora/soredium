@@ -27,6 +27,14 @@ import slot_isx
 from slot_test_helpers import init_repo, init_repo_with_workspace, init_repo_with_remote
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """Slot code looks up ~/claude/public/<family>/<repo> and ~/.claude/projects.
+    Point home at an empty directory so no test reads or fetches a real repo."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+
 class TestAllocateSlotNumber:
     """DB-authoritative numbering replaced disk-scan allocation.
     See TestAllocateSlotNumberDB for the primary test class."""
@@ -1384,7 +1392,7 @@ class TestMergeSlotEpicCheck:
         )
         (wt / ".plan").write_text(
             "# Work Plan — slot-72\n\n## State\nbranch: issue-50\nstate: active\ncovers: 83,84\n\n"
-            "## Queue\n- [x] #83 — Done\n- [ ] #84 — Active ← active\n"
+            "## Queue\n- [x] org/repo#83 — Done\n- [ ] org/repo#84 — Active ← active\n"
         )
         (wt / ".phase-a-complete").write_text("branch=issue-50\nrepos=engine\n")
         repo = init_repo(wt / "engine")
@@ -1393,10 +1401,23 @@ class TestMergeSlotEpicCheck:
         subprocess.run(["git", "-C", str(repo), "add", "file.txt"], capture_output=True)
         subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat: work"], capture_output=True)
         with patch.object(slot_core, "resolve_canonical_repo", return_value=repo):
-            with patch.object(slot_git, "is_worktree", return_value=False):
-                result = slot_lifecycle.merge_slot(family, 72)
+            result = slot_lifecycle.merge_slot(family, 72)
         out = capsys.readouterr().out
-        assert "EPIC_STATUS=" in out
+        assert "EPIC_STATUS=1 completed, 1 remaining" in out
+
+    def test_unreadable_plan_is_reported_not_swallowed(self, tmp_path, capsys):
+        """A plan that cannot be parsed must produce a warning, not silence."""
+        family = tmp_path / "family"
+        wt = family / "slots" / "73"
+        wt.mkdir(parents=True)
+        (wt / ".slot").write_text(
+            "# Slot 73\n\n## Issue\norg/repo#50\nCovers: 83\nType: epic\n\n## Repos\n- engine (primary)\n")
+        (wt / ".plan").write_text(
+            "# Work Plan — slot-73\n\n## State\nbranch: issue-50\nstate: active\n\n"
+            "## Queue\n- [ ] #83 — bare number\n")
+        (wt / ".phase-a-complete").write_text("branch=issue-50\nrepos=engine\n")
+        slot_lifecycle.merge_slot(family, 73)
+        assert "WARN=epic_status_unavailable" in capsys.readouterr().out
 
 
 
@@ -1544,6 +1565,8 @@ class TestMergeSlotRelaxedPreflight:
     def test_dirty_worktree_on_main_blocks(self, tmp_path):
         family, slot_dir, canonical, clone = self._setup_slot(tmp_path)
         (canonical / "dirty.txt").write_text("uncommitted")
+        subprocess.run(["git", "-C", str(canonical), "add", "dirty.txt"],
+                       capture_output=True, check=True)
 
         import io
         captured = io.StringIO()
@@ -1551,6 +1574,22 @@ class TestMergeSlotRelaxedPreflight:
             result = slot_lifecycle.merge_slot(family, 1)
         assert result == 1
         assert "dirty_worktree" in captured.getvalue()
+
+    def test_untracked_file_on_main_does_not_block(self, tmp_path):
+        """Canonical may hold untracked files; only tracked changes on main block."""
+        family, slot_dir, canonical, clone = self._setup_slot(tmp_path)
+        (canonical / "scratch.txt").write_text("untracked")
+
+        import io
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            result = slot_lifecycle.merge_slot(family, 1)
+        assert result == 0, captured.getvalue()
+        assert "dirty_worktree" not in captured.getvalue()
+        assert (canonical / "scratch.txt").read_text() == "untracked"
+        log = subprocess.run(["git", "-C", str(canonical), "log", "--oneline", "main"],
+                             capture_output=True, text=True).stdout
+        assert "feat: feature" in log
 
     def test_unpushed_commits_auto_pushed_in_preflight(self, tmp_path):
         """Canonical has unpushed commits on main — preflight pushes them."""
@@ -1816,33 +1855,35 @@ class TestCreateSlotCollisionFamily:
 class TestCreateSlotWkspValidation:
     @patch("slot_lifecycle.validate_slot_wksp")
     @patch("slot_lifecycle.run_cmd")
-    def test_create_slot_exits_on_broken_wksp(self, mock_cmd, mock_validate, tmp_path, capsys):
-        """create_slot must fail if post-creation validation finds broken wksp/."""
+    def test_create_slot_warns_on_broken_wksp(self, mock_cmd, mock_validate, tmp_path, capsys):
+        """Post-creation validation warns and never destroys the slot it just built."""
         family = tmp_path / "casehub"
-        family.mkdir()
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
 
         mock_cmd.return_value = (0, "", "")
         mock_validate.return_value = ["engine: wksp/ symlink dangling -> /nonexistent"]
 
-        with pytest.raises(slot_core.SlotCreationError, match="wksp_validation_failed"):
-            slot_lifecycle.create_slot(
-                family_root=family,
-                repos=["engine"],
-                branch="issue-99-test",
-                issue="99",
-                issue_repo="casehubio/engine",
-                covers="99",
-                context="test",
-            )
+        result = slot_lifecycle.create_slot(
+            family_root=family,
+            repos=["engine"],
+            branch="issue-99-test",
+            issue="99",
+            issue_repo="casehubio/engine",
+            covers="99",
+            context="test",
+        )
+
+        out = capsys.readouterr().out
+        assert "WARN=wksp_validation engine: wksp/ symlink dangling" in out
+        assert (family / "slots" / str(result["slot_number"])).is_dir()
+        assert "claude/public" not in out, "must not discover a real workspace"
 
     @patch("slot_lifecycle.validate_slot_wksp")
     @patch("slot_lifecycle.run_cmd")
     def test_create_slot_succeeds_when_wksp_ok(self, mock_cmd, mock_validate, tmp_path):
         """create_slot succeeds when validation passes."""
         family = tmp_path / "casehub"
-        family.mkdir()
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
 
         mock_cmd.return_value = (0, "", "")
         mock_validate.return_value = []
@@ -2271,14 +2312,19 @@ class TestFindActiveSessions:
 
 
 class TestArchiveSlotSessionGuard:
-    def test_blocks_when_active_session(self, tmp_path, monkeypatch, capsys):
+
+    def _slot(self, tmp_path, monkeypatch, cmd):
         monkeypatch.setattr(
             "slot_claude.find_active_sessions",
-            lambda d: [(12345, "claude", str(d / "blocks"))],
+            lambda d: [(12345, cmd, str(d / "blocks"))],
         )
         monkeypatch.setattr("slot_lifecycle._has_unmerged_content", lambda d: [])
-        monkeypatch.setattr("slot_lifecycle.ensure_clone_layout", lambda d: None)
         monkeypatch.setattr("slot_lifecycle.verify_landed_shas", lambda d, f: (True, []))
+        monkeypatch.setattr("slot_lifecycle._repack_broken_alternates", lambda d, f: 0)
+        monkeypatch.setattr("slot_lifecycle._teardown_isx", lambda d: None)
+        monkeypatch.setattr("slot_lifecycle.sweep_orphaned_claude_projects", lambda f: 0)
+        monkeypatch.setattr("slot_lifecycle._escape_slot_cwd", lambda d, f: (False, None))
+        monkeypatch.setattr("slot_lifecycle.relocate_claude_projects", lambda s, d: 0)
         slot_dir = tmp_path / "slots" / "99"
         slot_dir.mkdir(parents=True)
         (slot_dir / ".landed").write_text("landed_shas=abc:123\n")
@@ -2286,40 +2332,84 @@ class TestArchiveSlotSessionGuard:
         repo = slot_dir / "blocks"
         repo.mkdir()
         (repo / ".git").mkdir()
+        (tmp_path / "slots" / "attic").mkdir(parents=True)
+        return slot_dir
+
+    def test_blocks_when_active_session(self, tmp_path, monkeypatch, capsys):
+        slot_dir = self._slot(tmp_path, monkeypatch, "node")
 
         with pytest.raises(SystemExit) as exc_info:
             slot_lifecycle.archive_slot(tmp_path, 99, force=False)
+
         assert exc_info.value.code == 1
-        captured = capsys.readouterr()
-        assert "ERROR=active_sessions" in captured.out
+        assert "ERROR=active_sessions" in capsys.readouterr().out
+        assert slot_dir.exists()
 
     def test_force_overrides_active_session(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(
-            "slot_claude.find_active_sessions",
-            lambda d: [(12345, "claude", str(d / "blocks"))],
-        )
-        monkeypatch.setattr('slot_lifecycle._has_unmerged_content', lambda d: [])
-        monkeypatch.setattr('slot_lifecycle.ensure_clone_layout', lambda d: None)
-        monkeypatch.setattr('slot_lifecycle.verify_landed_shas', lambda d, f: (True, []))
-        monkeypatch.setattr('slot_lifecycle._repack_broken_alternates', lambda d, f: 0)
-        monkeypatch.setattr('slot_lifecycle._teardown_isx', lambda d: None)
-        monkeypatch.setattr('slot_lifecycle.sweep_orphaned_claude_projects', lambda f: 0)
-        monkeypatch.setattr('slot_lifecycle._escape_slot_cwd', lambda d, f: (False, None))
-        monkeypatch.setattr('slot_lifecycle.relocate_claude_projects', lambda s, d: 0)
-
-        slot_dir = tmp_path / "slots" / "99"
-        slot_dir.mkdir(parents=True)
-        (slot_dir / ".landed").write_text("landed_shas=abc:123\n")
-        (slot_dir / ".slot").write_text("## Repos\n- blocks (primary)\n")
-        repo = slot_dir / "blocks"
-        repo.mkdir()
-        (repo / ".git").mkdir()
-        attic = tmp_path / "slots" / "attic"
-        attic.mkdir(parents=True)
+        self._slot(tmp_path, monkeypatch, "node")
 
         slot_lifecycle.archive_slot(tmp_path, 99, force=True)
-        captured = capsys.readouterr()
-        assert "WARN=active_sessions_overridden" in captured.out
+
+        assert "WARN=active_sessions_overridden" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("force", [False, True])
+    @pytest.mark.parametrize("cmd", ["claude", "2.1.325"])
+    def test_claude_session_is_a_hard_stop_even_with_force(
+            self, tmp_path, monkeypatch, capsys, cmd, force):
+        slot_dir = self._slot(tmp_path, monkeypatch, cmd)
+
+        with pytest.raises(SystemExit) as exc_info:
+            slot_lifecycle.archive_slot(tmp_path, 99, force=force)
+
+        assert exc_info.value.code == 1
+        out = capsys.readouterr().out
+        assert "ERROR=active_claude_sessions" in out
+        assert "active_sessions_overridden" not in out
+        assert slot_dir.exists(), "slot must not be moved while a Claude session is running"
+        assert not (tmp_path / "slots" / "attic" / "99").exists()
+
+
+class TestIsClaudeSession:
+
+    @pytest.mark.parametrize("cmd", ["claude", "Claude", "claude-code", "2.1.325", "10.0.1"])
+    def test_recognises_claude_code(self, cmd):
+        assert slot_claude.is_claude_session(cmd)
+
+    @pytest.mark.parametrize("cmd", ["node", "zsh", "python3.14", "git", "", "claudette", "2.1", "v2.1.325"])
+    def test_ignores_other_processes(self, cmd):
+        assert not slot_claude.is_claude_session(cmd)
+
+
+class TestRestoreSlot:
+
+    def test_restores_from_attic_and_marks_active(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr("slot_lifecycle.relocate_claude_projects", lambda s, d: 0)
+        transitions = []
+        monkeypatch.setattr("slot_lifecycle._transition",
+                            lambda d, state, **kw: transitions.append((d, state)))
+        attic = tmp_path / "slots" / "attic" / "7"
+        attic.mkdir(parents=True)
+        (attic / ".slot").write_text("## Repos\n- engine (primary)\n")
+        (attic / "engine").mkdir()
+        (attic / "engine" / "kept.txt").write_text("work")
+
+        slot_lifecycle.restore_slot(tmp_path, 7)
+
+        dest = tmp_path / "slots" / "7"
+        assert (dest / "engine" / "kept.txt").read_text() == "work"
+        assert not attic.exists()
+        assert transitions == [(dest, "active")]
+        assert "RESTORED=7" in capsys.readouterr().out
+
+    def test_refuses_to_restore_over_an_active_slot(self, tmp_path, capsys):
+        (tmp_path / "slots" / "attic" / "7").mkdir(parents=True)
+        (tmp_path / "slots" / "7").mkdir(parents=True)
+
+        with pytest.raises(SystemExit):
+            slot_lifecycle.restore_slot(tmp_path, 7)
+
+        assert "ERROR=active_slot_exists" in capsys.readouterr().out
+        assert (tmp_path / "slots" / "attic" / "7").exists()
 
 
 class TestPostCreationChecksSoftFail:
