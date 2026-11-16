@@ -35,6 +35,15 @@ def _isolated_home(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
 
 
+@pytest.fixture(autouse=True)
+def _no_stray_sessions(request, monkeypatch):
+    """A git hook can leave a short-lived child process inside a test repo. Only the
+    tests of session detection itself should see real processes."""
+    if request.cls is not None and request.cls.__name__ == "TestFindActiveSessions":
+        return
+    monkeypatch.setattr("slot_claude.find_active_sessions", lambda d: [])
+
+
 class TestAllocateSlotNumber:
     """DB-authoritative numbering replaced disk-scan allocation.
     See TestAllocateSlotNumberDB for the primary test class."""
@@ -366,7 +375,7 @@ class TestCreateSlotIsx:
     def test_create_isx_slot_preflight_fails(self, mock_cmd, tmp_path):
         family = tmp_path / "casehub"
         family.mkdir()
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
         mock_cmd.return_value = (0, "", "")
         with patch("shutil.which", return_value=None):
             with pytest.raises(slot_core.SlotCreationError, match="isx is not on PATH"):
@@ -381,7 +390,7 @@ class TestCreateSlotIsx:
     def test_create_isx_slot_writes_isolation(self, mock_cmd, tmp_path):
         family = tmp_path / "casehub"
         family.mkdir()
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
         mock_cmd.return_value = (0, "", "")
         with patch("shutil.which", return_value="/opt/homebrew/bin/isx"):
             result = slot_lifecycle.create_slot(
@@ -400,7 +409,7 @@ class TestCreateSlotIsx:
     def test_create_non_isx_unchanged(self, mock_cmd, tmp_path):
         family = tmp_path / "casehub"
         family.mkdir()
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
         mock_cmd.return_value = (0, "", "")
         result = slot_lifecycle.create_slot(
             family_root=family, repos=["engine"],
@@ -416,7 +425,7 @@ class TestCreateSlotIsx:
     def test_create_isx_slot_isx_branch_fails(self, mock_cmd, tmp_path, capsys):
         family = tmp_path / "casehub"
         family.mkdir()
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
         call_count = [0]
         def side_effect(args, cwd=None):
             call_count[0] += 1
@@ -2140,7 +2149,7 @@ class TestCreateSlotInstallsHook:
         """create_slot installs post-commit push hook in each repo clone."""
         family = tmp_path / "casehub"
         family.mkdir()
-        init_repo(family / "engine")
+        init_repo_with_workspace(family / "engine")
 
         mock_cmd.return_value = (0, "", "")
 
