@@ -387,7 +387,7 @@ def strip_lifecycle_files(repo: Path, branch: str, files: list[str]) -> None:
             _git(repo, "rm", "-f", f)
             removed = True
     if removed:
-        _git(repo, "commit", "-m", "chore: strip lifecycle files before merge")
+        _git(repo, "commit", "-m", "chore: strip lifecycle files before merge", "-m", _issue_trailer(""))
 
 
 def strip_lifecycle_files_from_tree(repo: Path, branch: str, files: list[str]) -> None:
@@ -399,7 +399,7 @@ def strip_lifecycle_files_from_tree(repo: Path, branch: str, files: list[str]) -
             _git(repo, "rm", "-f", f)
             removed = True
     if removed:
-        _git(repo, "commit", "-m", "chore: strip leaked lifecycle files")
+        _git(repo, "commit", "-m", "chore: strip leaked lifecycle files", "-m", _issue_trailer(""))
 
 
 def rebase_onto_base(repo: Path, branch: str, base: str, push_target: str) -> None:
@@ -433,11 +433,12 @@ def ff_merge(repo: Path, branch: str) -> str:
     return _rev_parse(repo, "HEAD")
 
 
-def _merge_no_ff(repo: Path, branch: str) -> str:
+def _merge_no_ff(repo: Path, branch: str, issue: str = "") -> str:
     result = _git(repo, "merge", "--no-ff", branch,
-                  "-m", f"Merge branch '{branch}'")
+                  "-m", f"Merge branch '{branch}'", "-m", _issue_trailer(issue))
     if result.returncode != 0:
-        raise RuntimeError(f"Non-ff merge failed: {repo.name}:{branch}")
+        raise RuntimeError(
+            f"Non-ff merge failed: {repo.name}:{branch}: {result.stderr.strip()}")
     return _rev_parse(repo, "HEAD")
 
 
@@ -465,7 +466,7 @@ def verify_content_landed(repo: Path, branch: str, base: str) -> None:
             f"{result.stdout.strip()}")
 
 
-def land(target: CloseTarget) -> str:
+def land(target: CloseTarget, issue: str = "") -> str:
     if branch_already_landed(target.repo, target.branch, target.base_branch):
         return _find_landed_sha(target.repo, target.branch, target.base_branch)
 
@@ -477,7 +478,7 @@ def land(target: CloseTarget) -> str:
     if target.is_workspace:
         strip_lifecycle_files(target.repo, target.branch, LIFECYCLE_FILES)
         _checkout(target.repo, target.base_branch)
-        sha = _merge_no_ff(target.repo, target.branch)
+        sha = _merge_no_ff(target.repo, target.branch, issue)
     else:
         # Stripped on the branch so that no commit is added to base after landing.
         strip_lifecycle_files(target.repo, target.branch, LIFECYCLE_FILES)
@@ -506,13 +507,19 @@ def _is_stamp_commit(repo: Path, branch: str) -> bool:
     return result.stdout.strip().startswith("chore: branch closed")
 
 
-def stamp(target: CloseTarget, landed_sha: str) -> None:
+def _issue_trailer(issue: str) -> str:
+    """Trailer that satisfies a commit-msg hook requiring an issue reference."""
+    return f"Refs {issue}" if issue else "no-issue: close ceremony bookkeeping"
+
+
+def stamp(target: CloseTarget, landed_sha: str, issue: str = "") -> None:
     if _is_stamp_commit(target.repo, target.branch):
         return
 
     _checkout(target.repo, target.branch)
     result = _git(target.repo, "commit", "--allow-empty",
-                  "-m", f"chore: branch closed — landed as {landed_sha} on {target.base_branch}")
+                  "-m", f"chore: branch closed — landed as {landed_sha} on {target.base_branch}",
+                  "-m", _issue_trailer(issue))
     if result.returncode != 0:
         raise RuntimeError(
             f"stamp commit failed in {target.repo.name}: {result.stderr.strip()}")
@@ -543,7 +550,11 @@ def commit_and_push_queue(workspace: Path, closing_issue: str) -> None:
     if not (workspace / ".queue").exists():
         return
     _git(workspace, "add", ".queue")
-    _git(workspace, "commit", "-m", f"chore: advance queue — completed {closing_issue}")
+    result = _git(workspace, "commit", "-m", f"chore: advance queue — completed {closing_issue}",
+                  "-m", _issue_trailer(closing_issue), "--", ".queue")
+    if result.returncode != 0 and _git(workspace, "status", "--porcelain", "--", ".queue").stdout.strip():
+        raise RuntimeError(
+            f"queue commit failed in {workspace.name}: {result.stderr.strip()}")
 
 
 # --- elevate ---
@@ -646,6 +657,7 @@ def close(workspace: Path) -> CloseResult:
     queue = read_queue(workspace)
     active = queue.active_item() if queue else None
     closing_issue = active.ref if active else ""
+    stamp_issue = closing_issue or (queue.state.covers.split(",")[0].strip() if queue else "")
 
     pre = preflight(targets)
     if pre["errors"]:
@@ -665,11 +677,11 @@ def close(workspace: Path) -> CloseResult:
     try:
         landed: dict[CloseTarget, str] = {}
         for target in targets:
-            sha = land(target)
+            sha = land(target, stamp_issue)
             landed[target] = sha
 
         for target, sha in landed.items():
-            stamp(target, sha)
+            stamp(target, sha, stamp_issue)
             squash_marker.clear(target.repo, target.branch)
 
         slot_root = _detect_slot_root(workspace)

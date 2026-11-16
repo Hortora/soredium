@@ -5,7 +5,7 @@
 MSG=$(cat "$1")
 
 # Allow: issue reference anywhere in the message
-if echo "$MSG" | grep -qE '(Refs|Closes|Fixes|Resolves) #[0-9]+'; then
+if echo "$MSG" | grep -qE '(Refs|Closes|Fixes|Resolves) ([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#[0-9]+'; then
   exit 0
 fi
 

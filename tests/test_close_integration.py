@@ -880,3 +880,94 @@ class TestIdleRepoGuard:
 
         assert not result.success
         assert any("project" in e and "merge" in e for e in result.errors), result.errors
+
+
+# --- Repos whose commit-msg hook requires an issue reference (#518) ---
+
+HOOKS_DIR = Path(__file__).parent.parent / ".githooks"
+
+
+def _require_issue_refs(repo: Path) -> None:
+    """Install soredium's own commit-msg hook, which rejects commits with no issue reference."""
+    hooks = repo / ".git" / "hooks"
+    hooks.mkdir(exist_ok=True)
+    target = hooks / "commit-msg"
+    target.write_text((HOOKS_DIR / "commit-msg").read_text())
+    target.chmod(0o755)
+
+
+def _close_single(repo: Path):
+    with patch("close.discover_repo_topology") as m:
+        m.return_value = [(repo, "main", "direct", None, "origin", "")]
+        return close(repo)
+
+
+class TestIssueReferenceHook:
+
+    def test_hook_fixture_rejects_a_commit_without_a_reference(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _require_issue_refs(repo)
+        r = subprocess.run(["git", "-C", str(repo), "commit", "--allow-empty", "-m", "chore: nothing"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+
+    def test_close_completes_with_an_active_issue(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(repo, "issue-1-feat", issue_repo="Owner/repo")
+        _git(repo, "add", ".queue")
+        _git(repo, "commit", "-m", "chore: queue Refs #1")
+        squash_marker.mark(repo, "issue-1-feat")
+        _require_issue_refs(repo)
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        stamp = _git(repo, "log", "-1", "--format=%B", "issue-1-feat").stdout
+        assert stamp.startswith("chore: branch closed")
+        assert "Refs Owner/repo#1" in stamp
+        assert not (repo / ".close-state").exists()
+        assert "advance queue" in _git(repo, "log", "-1", "--format=%s", "main").stdout
+        assert _is_clean(repo)
+
+    def test_close_uses_covers_when_no_item_is_active(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-7-feat", 1)
+        write_queue(repo, Queue(items=[], state=QueueState(
+            branch="issue-7-feat", issue_repo="Owner/repo", status="active",
+            covers="Owner/repo#7")))
+        _require_issue_refs(repo)
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        assert "Refs Owner/repo#7" in _git(repo, "log", "-1", "--format=%B", "issue-7-feat").stdout
+
+    def test_close_completes_when_no_issue_is_known(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-9-feat", 1)
+        write_queue(repo, Queue(items=[], state=QueueState(
+            branch="issue-9-feat", issue_repo="Owner/repo", status="active")))
+        _require_issue_refs(repo)
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        stamp = _git(repo, "log", "-1", "--format=%B", "issue-9-feat").stdout
+        assert stamp.startswith("chore: branch closed")
+        assert "no-issue" in stamp
+
+    @pytest.mark.parametrize("message,accepted", [
+        ("fix: thing  Refs #12", True),
+        ("fix: thing\n\nRefs Owner/repo#12", True),
+        ("fix: thing\n\nCloses owner-x/repo.y#3", True),
+        ("chore: tidy  no-issue: tooling", True),
+        ("fix: thing mentioning Owner/repo#12 without a keyword", False),
+        ("fix: thing", False),
+    ])
+    def test_hook_accepts_qualified_references(self, tmp_path, message, accepted):
+        repo = _init_repo(tmp_path / "repo")
+        _require_issue_refs(repo)
+        r = subprocess.run(["git", "-C", str(repo), "commit", "--allow-empty", "-m", message],
+                           capture_output=True, text=True)
+        assert (r.returncode == 0) == accepted, r.stderr
