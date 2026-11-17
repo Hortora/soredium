@@ -168,7 +168,8 @@ def test_commit_scaffold_happy_path(workspace_repo):
     )
     assert result.returncode == 0
     assert "COMMITTED=yes" in result.stdout
-    assert "PUSHED=no" in result.stdout  # no remote
+    assert "BACKED_UP=refs/backup/" in result.stdout
+    assert "PUSHED" not in result.stdout
 
     # Verify commit message
     log = subprocess.run(
@@ -293,72 +294,138 @@ def _init_repo_with_bare(tmp_path, name, remote_name="origin"):
     return repo, bare
 
 
+def _sync(project, workspace):
+    return subprocess.run(
+        ["python3", str(BRANCH_CREATE), "sync-main", str(project), str(workspace), "base=main"],
+        capture_output=True, text=True,
+    )
+
+
+def _sha(repo, ref="main"):
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", ref],
+                          capture_output=True, text=True).stdout.strip()
+
+
+def _someone_else_pushes(tmp_path, bare, filename="theirs.txt"):
+    other = tmp_path / f"other-{filename}"
+    subprocess.run(["git", "clone", "-q", str(bare), str(other)], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(other), "config", "user.name", "Other"], capture_output=True)
+    subprocess.run(["git", "-C", str(other), "config", "user.email", "o@test.com"], capture_output=True)
+    subprocess.run(["git", "-C", str(other), "checkout", "-q", "main"], capture_output=True)
+    (other / filename).write_text("theirs\n")
+    subprocess.run(["git", "-C", str(other), "add", "."], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(other), "commit", "-q", "-m", "feat: theirs"],
+                   capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(other), "push", "-q", "origin", "main"],
+                   capture_output=True, check=True)
+    return _sha(other)
+
+
+def _local_commit(repo, filename="mine.txt"):
+    (repo / filename).write_text("mine\n")
+    subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "feat: landed, not published"],
+                   capture_output=True, check=True)
+    return _sha(repo)
+
+
 def test_sync_main_single_remote(tmp_path):
-    """sync-main with no fork: fetch + rebase only."""
     project, bare = _init_repo_with_bare(tmp_path, "project")
     workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
 
-    result = subprocess.run(
-        ["python3", str(BRANCH_CREATE), "sync-main",
-         str(project), str(workspace), "base=main"],
-        capture_output=True, text=True,
-    )
+    result = _sync(project, workspace)
+
     assert result.returncode == 0
     assert "SYNCED=yes" in result.stdout
+    assert "MODEL=single" in result.stdout
+    assert "STRATEGY=current repo=project" in result.stdout
 
 
-def test_sync_main_with_upstream_remote(tmp_path):
-    """sync-main with upstream remote: fetch upstream, rebase, push origin."""
-    blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
-    fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
-
-    (blessed / "upstream-change.md").write_text("from upstream")
-    subprocess.run(["git", "-C", str(blessed), "add", "."], capture_output=True)
-    subprocess.run(["git", "-C", str(blessed), "commit", "-m", "upstream work"], capture_output=True, check=True)
-    subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"], capture_output=True, check=True)
-
+def test_sync_main_fast_forwards_to_the_remote(tmp_path):
+    project, bare = _init_repo_with_bare(tmp_path, "project")
     workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+    theirs = _someone_else_pushes(tmp_path, bare)
 
-    result = subprocess.run(
-        ["python3", str(BRANCH_CREATE), "sync-main",
-         str(fork), str(workspace), "base=main"],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0
-    assert "MODEL=upstream" in result.stdout
+    result = _sync(project, workspace)
+
+    assert "STRATEGY=fast-forward repo=project" in result.stdout
+    assert _sha(project) == theirs
+    assert (project / "theirs.txt").exists()
+
+
+def test_sync_main_leaves_unpublished_commits_exactly_as_they_are(tmp_path):
+    """Commits on main the remote lacks are landed work awaiting publish. They used to be
+    rebased, and the fork force-pushed."""
+    project, bare = _init_repo_with_bare(tmp_path, "project")
+    workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+    mine = _local_commit(project)
+    remote_before = _sha(bare)
+
+    result = _sync(project, workspace)
+
+    assert "STRATEGY=ahead repo=project" in result.stdout
+    assert "UNPUBLISHED=1 repo=project" in result.stdout
+    assert _sha(project) == mine
+    assert _sha(bare) == remote_before
     assert "SYNCED=yes" in result.stdout
-    assert (fork / "upstream-change.md").exists()
 
 
-def test_sync_main_with_fork_remote(tmp_path):
-    """sync-main with fork remote: fetch origin (blessed), rebase, push to fork."""
-    blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
+def test_sync_main_never_rewrites_or_merges_when_the_remote_also_moved(tmp_path):
+    project, bare = _init_repo_with_bare(tmp_path, "project")
+    workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+    mine = _local_commit(project)
+    theirs = _someone_else_pushes(tmp_path, bare)
+
+    result = _sync(project, workspace)
+
+    assert result.returncode == 0
+    assert "STRATEGY=diverged repo=project" in result.stdout
+    assert "NOTE=diverged repo=project" in result.stdout
+    assert _sha(project) == mine                       # not rebased, not merged
+    assert _sha(bare) == theirs                        # nothing pushed
+    merges = subprocess.run(["git", "-C", str(project), "rev-list", "--merges", "--count", "main"],
+                            capture_output=True, text=True).stdout.strip()
+    assert merges == "0"
+    assert "SYNCED=yes" in result.stdout               # work can start from canonical
+
+
+def test_sync_main_with_upstream_and_fork_pushes_to_neither(tmp_path):
+    project, blessed_bare = _init_repo_with_bare(tmp_path, "project")
+    workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
     fork_bare = tmp_path / ".fork-bare.git"
-    fork_bare.mkdir()
-    subprocess.run(["git", "init", "--bare", str(fork_bare)], capture_output=True, check=True)
-    subprocess.run(
-        ["git", "-C", str(blessed), "remote", "add", "fork", str(fork_bare)],
-        capture_output=True, check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(blessed), "push", "fork", "main"],
-        capture_output=True,
-    )
+    subprocess.run(["git", "clone", "-q", "--bare", str(blessed_bare), str(fork_bare)],
+                   capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(project), "remote", "rename", "origin", "upstream"],
+                   capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(fork_bare)],
+                   capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(project), "fetch", "-q", "--all"], capture_output=True)
+    theirs = _someone_else_pushes(tmp_path, blessed_bare)
+    fork_before = _sha(fork_bare)
 
+    result = _sync(project, workspace)
+
+    assert "MODEL=upstream" in result.stdout
+    assert _sha(project) == theirs
+    assert _sha(fork_bare) == fork_before               # the fork only moves when publishing
+
+
+def test_sync_main_with_fork_remote_reports_the_model(tmp_path):
+    project, bare = _init_repo_with_bare(tmp_path, "project")
     workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+    fork_bare = tmp_path / ".fork-bare.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(bare), str(fork_bare)],
+                   capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(project), "remote", "add", "fork", str(fork_bare)],
+                   capture_output=True, check=True)
 
-    result = subprocess.run(
-        ["python3", str(BRANCH_CREATE), "sync-main",
-         str(blessed), str(workspace), "base=main"],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0
-    assert "SYNCED=yes" in result.stdout
+    result = _sync(project, workspace)
+
     assert "MODEL=fork" in result.stdout
+    assert "SYNCED=yes" in result.stdout
 
 
 def test_sync_main_missing_args():
-    """sync-main without enough args fails."""
     result = subprocess.run(
         ["python3", str(BRANCH_CREATE), "sync-main"],
         capture_output=True, text=True,
@@ -368,232 +435,115 @@ def test_sync_main_missing_args():
 
 
 def test_sync_main_network_failure_non_fatal(tmp_path):
-    """sync-main with unreachable remote warns but does not fail."""
-    project, _ = _init_repo_with_bare(tmp_path, "project")
+    project, bare = _init_repo_with_bare(tmp_path, "project")
     workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
-    subprocess.run(
-        ["git", "-C", str(project), "remote", "set-url", "origin", "https://unreachable.invalid/repo.git"],
-        capture_output=True,
-    )
+    subprocess.run(["git", "-C", str(project), "remote", "set-url", "origin",
+                    str(tmp_path / "gone.git")], capture_output=True, check=True)
+    before = _sha(project)
 
-    result = subprocess.run(
-        ["python3", str(BRANCH_CREATE), "sync-main",
-         str(project), str(workspace), "base=main"],
-        capture_output=True, text=True,
-    )
+    result = _sync(project, workspace)
+
     assert result.returncode == 0
     assert "SYNCED=partial" in result.stdout
-    assert "WARN=" in result.stdout
+    assert "WARN=fetch_project_failed" in result.stdout
+    assert "STRATEGY=offline repo=project" in result.stdout
+    assert _sha(project) == before
 
 
-def _make_fork_of(tmp_path, blessed_bare, name="fork"):
-    """Clone a fork from a blessed bare repo (shared history)."""
-    fork_bare = tmp_path / f".{name}-bare.git"
-    fork_bare.mkdir(parents=True)
-    subprocess.run(["git", "clone", "--bare", str(blessed_bare), str(fork_bare)], capture_output=True, check=True)
-    fork = tmp_path / name
-    subprocess.run(["git", "clone", str(fork_bare), str(fork)], capture_output=True, check=True)
-    subprocess.run(["git", "-C", str(fork), "config", "user.name", "Test"], capture_output=True)
-    subprocess.run(["git", "-C", str(fork), "config", "user.email", "test@test.com"], capture_output=True)
-    subprocess.run(["git", "-C", str(fork), "remote", "add", "upstream", str(blessed_bare)], capture_output=True, check=True)
-    return fork, fork_bare
+def test_sync_main_repo_without_a_remote(tmp_path):
+    project = tmp_path / "project"
+    workspace = tmp_path / "workspace"
+    for repo in (project, workspace):
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=T", "-c", "user.email=t@t",
+                        "commit", "-q", "--allow-empty", "-m", "init"], check=True)
 
+    result = _sync(project, workspace)
 
-def test_sync_main_merges_when_commits_already_pushed(tmp_path):
-    """When fork has commits already on origin but not upstream, merge instead of rebase."""
-    blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
-    fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
-
-    (fork / "fork-work.md").write_text("fork local work")
-    subprocess.run(["git", "-C", str(fork), "add", "."], capture_output=True)
-    subprocess.run(["git", "-C", str(fork), "commit", "-m", "fork work"], capture_output=True, check=True)
-    subprocess.run(["git", "-C", str(fork), "push", "origin", "main"], capture_output=True, check=True)
-
-    fork_sha = subprocess.run(
-        ["git", "-C", str(fork), "rev-parse", "HEAD"],
-        capture_output=True, text=True,
-    ).stdout.strip()
-
-    (blessed / "upstream-new.md").write_text("upstream advance")
-    subprocess.run(["git", "-C", str(blessed), "add", "."], capture_output=True)
-    subprocess.run(["git", "-C", str(blessed), "commit", "-m", "upstream advance"], capture_output=True, check=True)
-    subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"], capture_output=True, check=True)
-
-    workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
-
-    result = subprocess.run(
-        ["python3", str(BRANCH_CREATE), "sync-main",
-         str(fork), str(workspace), "base=main"],
-        capture_output=True, text=True,
-    )
     assert result.returncode == 0
-    assert "STRATEGY=merge" in result.stdout
-    assert (fork / "upstream-new.md").exists()
-    assert (fork / "fork-work.md").exists()
-
-    is_ancestor = subprocess.run(
-        ["git", "-C", str(fork), "merge-base", "--is-ancestor", fork_sha, "HEAD"],
-        capture_output=True,
-    )
-    assert is_ancestor.returncode == 0, "Original fork SHA must still be reachable"
+    assert "SYNCED=yes" in result.stdout
+    assert "MODEL=none" in result.stdout
 
 
-def test_sync_main_rebases_when_no_pushed_commits(tmp_path):
-    """When all fork-local commits are unpushed, rebase is safe."""
-    blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
-    fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
-
-    (fork / "unpushed.md").write_text("unpushed work")
-    subprocess.run(["git", "-C", str(fork), "add", "."], capture_output=True)
-    subprocess.run(["git", "-C", str(fork), "commit", "-m", "unpushed work"], capture_output=True, check=True)
-
-    (blessed / "upstream-advance.md").write_text("upstream")
-    subprocess.run(["git", "-C", str(blessed), "add", "."], capture_output=True)
-    subprocess.run(["git", "-C", str(blessed), "commit", "-m", "upstream"], capture_output=True, check=True)
-    subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"], capture_output=True, check=True)
-
+def test_sync_main_does_not_disturb_a_canonical_checkout_on_another_branch(tmp_path):
+    project, bare = _init_repo_with_bare(tmp_path, "project")
     workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
+    theirs = _someone_else_pushes(tmp_path, bare)
+    subprocess.run(["git", "-C", str(project), "checkout", "-q", "-b", "in-progress"], check=True)
+    (project / "draft.txt").write_text("uncommitted\n")
 
-    result = subprocess.run(
-        ["python3", str(BRANCH_CREATE), "sync-main",
-         str(fork), str(workspace), "base=main"],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0
-    assert "STRATEGY=merge" not in result.stdout, "Should rebase/ff, not merge — no shared commits"
-    assert (fork / "upstream-advance.md").exists()
-    assert (fork / "unpushed.md").exists()
+    result = _sync(project, workspace)
 
-
-class TestDuplicateDetection:
-    """Duplicate commit detection via message + patch-id."""
-
-    def test_get_patch_ids_returns_mapping(self, tmp_path):
-        project, bare = _init_repo_with_bare(tmp_path, "project")
-        (project / "file.txt").write_text("content")
-        subprocess.run(["git", "-C", str(project), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(project), "commit", "-m", "add file"],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(project), "push", "origin", "main"],
-                       capture_output=True)
-        from branch_create import _get_patch_ids
-        result = _get_patch_ids(str(project), "HEAD~1..HEAD")
-        assert len(result) == 1
-        sha = list(result.values())[0]
-        assert len(sha) >= 7
-
-    def test_find_duplicates_detects_cherry_pick(self, tmp_path):
-        """Cherry-picked commit has same patch-id but different SHA."""
-        blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
-        fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
-
-        (fork / "feature.txt").write_text("feature work")
-        subprocess.run(["git", "-C", str(fork), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(fork), "commit", "-m", "feat: add feature"],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(fork), "push", "origin", "main"],
-                       capture_output=True)
-
-        fork_sha = subprocess.run(
-            ["git", "-C", str(fork), "rev-parse", "HEAD"],
-            capture_output=True, text=True,
-        ).stdout.strip()
-        subprocess.run(["git", "-C", str(blessed), "fetch", str(fork_bare)],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(blessed), "cherry-pick", fork_sha],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"],
-                       capture_output=True)
-
-        subprocess.run(["git", "-C", str(fork), "fetch", "upstream"],
-                       capture_output=True)
-
-        from branch_create import _find_duplicate_commits
-        dupes = _find_duplicate_commits(
-            str(fork), "upstream/main..main", "main..upstream/main"
-        )
-        assert len(dupes) == 1
-        assert dupes[0][2] == "feat: add feature"
-
-    def test_find_duplicates_ignores_different_content(self, tmp_path):
-        """Same message but different content — not a duplicate."""
-        blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
-        fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
-
-        (fork / "file.txt").write_text("fork version")
-        subprocess.run(["git", "-C", str(fork), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(fork), "commit", "-m", "fix: update file"],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(fork), "push", "origin", "main"],
-                       capture_output=True)
-
-        (blessed / "file.txt").write_text("blessed version")
-        subprocess.run(["git", "-C", str(blessed), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(blessed), "commit", "-m", "fix: update file"],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"],
-                       capture_output=True)
-
-        subprocess.run(["git", "-C", str(fork), "fetch", "upstream"],
-                       capture_output=True)
-
-        from branch_create import _find_duplicate_commits
-        dupes = _find_duplicate_commits(
-            str(fork), "upstream/main..main", "main..upstream/main"
-        )
-        assert len(dupes) == 0
+    assert "STRATEGY=fast-forward repo=project" in result.stdout
+    assert _sha(project, "main") == theirs
+    head = subprocess.run(["git", "-C", str(project), "branch", "--show-current"],
+                          capture_output=True, text=True).stdout.strip()
+    assert head == "in-progress"
+    assert (project / "draft.txt").read_text() == "uncommitted\n"
 
 
-class TestSyncMainReconciliation:
-    """sync-main detects and reconciles duplicate commits."""
+class TestSyncMainInASlot:
+    def _slot(self, tmp_path):
+        canon, bare = _init_repo_with_bare(tmp_path, "project")
+        canon_ws, _ = _init_repo_with_bare(tmp_path, "workspace")
+        slot = tmp_path / "slots" / "4"
+        slot.mkdir(parents=True)
+        (slot / ".slot").write_text("# Slot 4\n")
+        clones = []
+        for source in (canon, canon_ws):
+            clone = slot / source.name
+            subprocess.run(["git", "clone", "-q", str(source), str(clone)],
+                           capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(clone), "config", "user.name", "Test"], capture_output=True)
+            subprocess.run(["git", "-C", str(clone), "config", "user.email", "t@test.com"], capture_output=True)
+            subprocess.run(["git", "-C", str(clone), "remote", "rename", "origin", "local"],
+                           capture_output=True, check=True)
+            clones.append(clone)
+        return canon, bare, clones[0], clones[1]
 
-    def test_reconciles_duplicate_commits(self, tmp_path):
-        blessed, blessed_bare = _init_repo_with_bare(tmp_path, "blessed")
-        fork, fork_bare = _make_fork_of(tmp_path, blessed_bare)
+    def test_slot_clone_follows_the_remote_through_canonical(self, tmp_path):
+        canon, bare, clone, clone_ws = self._slot(tmp_path)
+        theirs = _someone_else_pushes(tmp_path, bare)
 
-        # Fork adds a feature commit and pushes to its origin
-        (fork / "feature.txt").write_text("the feature")
-        subprocess.run(["git", "-C", str(fork), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(fork), "commit", "-m", "feat: the feature"],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(fork), "push", "origin", "main"],
-                       capture_output=True)
+        result = _sync(clone, clone_ws)
 
-        # Blessed adds an independent commit first (diverges history)
-        (blessed / "upstream-only.txt").write_text("upstream work")
-        subprocess.run(["git", "-C", str(blessed), "add", "."], capture_output=True)
-        subprocess.run(["git", "-C", str(blessed), "commit", "-m", "chore: upstream work"],
+        assert result.returncode == 0, result.stdout
+        assert _sha(canon) == theirs
+        assert _sha(clone) == theirs
+        assert _sha(clone, "local/main") == theirs
+        remotes = subprocess.run(["git", "-C", str(clone), "remote"],
+                                 capture_output=True, text=True).stdout.split()
+        assert remotes == ["local"]
+
+    def test_slot_clone_follows_what_landed_in_canonical_on_disk(self, tmp_path):
+        canon, bare, clone, clone_ws = self._slot(tmp_path)
+        landed = _local_commit(canon)
+
+        result = _sync(clone, clone_ws)
+
+        assert _sha(clone) == landed
+        assert "UNPUBLISHED=1 repo=project" in result.stdout
+
+    def test_stray_commits_on_the_clones_main_are_reported_and_kept(self, tmp_path):
+        canon, bare, clone, clone_ws = self._slot(tmp_path)
+        stray = _local_commit(clone, "stray.txt")
+
+        result = _sync(clone, clone_ws)
+
+        assert "STRAY=project state=ahead" in result.stdout
+        assert _sha(clone) == stray
+
+    def test_clone_with_no_canonical_is_a_warning_not_a_crash(self, tmp_path):
+        canon, bare, clone, clone_ws = self._slot(tmp_path)
+        subprocess.run(["git", "-C", str(clone), "remote", "remove", "local"],
                        capture_output=True, check=True)
 
-        # Then blessed cherry-picks the fork's commit (creates duplicate with different SHA)
-        fork_sha = subprocess.run(
-            ["git", "-C", str(fork), "rev-parse", "HEAD"],
-            capture_output=True, text=True,
-        ).stdout.strip()
-        subprocess.run(["git", "-C", str(blessed), "fetch", str(fork_bare)],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(blessed), "cherry-pick", fork_sha],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(blessed), "push", "origin", "main"],
-                       capture_output=True)
+        result = _sync(clone, clone_ws)
 
-        workspace, _ = _init_repo_with_bare(tmp_path, "workspace")
-
-        result = subprocess.run(
-            ["python3", str(BRANCH_CREATE), "sync-main",
-             str(fork), str(workspace), "base=main"],
-            capture_output=True, text=True,
-        )
         assert result.returncode == 0
-        assert "DUPLICATE_COMMITS=1" in result.stdout
-        assert "STRATEGY=reconcile" in result.stdout
-
-        log = subprocess.run(
-            ["git", "-C", str(fork), "log", "--oneline", "--grep=feat: the feature"],
-            capture_output=True, text=True,
-        )
-        lines = [l for l in log.stdout.strip().splitlines() if l.strip()]
-        assert len(lines) == 1, f"Expected 1 commit, got {len(lines)}: {log.stdout}"
+        assert "WARN=no_canonical_project" in result.stdout
+        assert "SYNCED=partial" in result.stdout
 
 
 # ---------------------------------------------------------------------------

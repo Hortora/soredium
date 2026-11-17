@@ -598,6 +598,29 @@ def _follow_in_clone(repo: Path, canon: Canonical) -> None:
             f"refs/heads/{canon.base}:refs/heads/{canon.base}")
 
 
+def follow(repo: Path | str, canon: Optional[Canonical] = None) -> str:
+    """Bring a slot clone's base branch up to canonical's, on disk. No network.
+
+    Returns "current", "fast-forward", "ahead" when the clone's base branch holds
+    commits canonical lacks (strays the next landing carries), "diverged" when
+    each has commits the other lacks (left as it is), or "canonical" when `repo`
+    is not a clone. The clone's local/* tracking refs are refreshed either way.
+    """
+    repo = Path(repo)
+    canon = canon or locate(repo)
+    if _same_store(repo, canon):
+        return "canonical"
+    git(repo, "fetch", "-q", "local")
+    target = _onto(repo, canon)
+    mine = _sha(repo, f"refs/heads/{canon.base}")
+    if not target or mine == target:
+        return "current"
+    if mine and not _is_ancestor(repo, mine, target):
+        return "ahead" if _is_ancestor(repo, target, mine) else "diverged"
+    _follow_in_clone(repo, canon)
+    return "fast-forward" if _sha(repo, f"refs/heads/{canon.base}") == target else "current"
+
+
 # --- landing ---
 
 def _prepare(repo: Path, branch: str, canon: Canonical) -> Optional[str]:

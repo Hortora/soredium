@@ -200,7 +200,7 @@ def create_branches(project: str, workspace: str, branch: str, base: str | None,
 
 
 def commit_scaffold(workspace: str, branch: str) -> int:
-    """Commit scaffold files and push."""
+    """Commit scaffold files; the canonical repo keeps a backup of the branch."""
     import os
 
     ws_path = Path(workspace)
@@ -236,8 +236,7 @@ def commit_scaffold(workspace: str, branch: str) -> int:
     status_ok, status_out = run_git(workspace, "diff", "--cached", "--quiet")
     if status_ok:
         print("COMMITTED=no_changes")
-        push_ok, _ = run_git(workspace, "push", "-u", "origin", branch)
-        print(f"PUSHED={'yes' if push_ok else 'no'}")
+        _back_up_branch(workspace, branch)
         return 0
 
     commit_msg = f"init({branch}): scaffold workspace branch"
@@ -246,289 +245,109 @@ def commit_scaffold(workspace: str, branch: str) -> int:
         print("ERROR=commit_failed")
         return 1
 
-    push_ok, _ = run_git(workspace, "push", "-u", "origin", branch)
-
     print("COMMITTED=yes")
-    print(f"PUSHED={'yes' if push_ok else 'no'}")
+    _back_up_branch(workspace, branch)
     return 0
 
 
-def _rev_count(repo: str, range_spec: str) -> int:
-    ok, out = run_git(repo, "rev-list", "--count", range_spec)
-    if ok and out.strip():
-        return int(out.strip())
-    return 0
-
-
-def _has_shared_fork_commits(repo: str, blessed_remote: str,
-                             origin_remote: str, base: str) -> int:
-    """Count commits on origin that aren't on the blessed remote.
-
-    These are fork-only commits already pushed. Rebase would rewrite
-    them with new SHAs, breaking any branch based on the old SHAs.
-    """
-    return _rev_count(repo, f"{blessed_remote}/{base}..{origin_remote}/{base}")
-
-
-def _get_patch_ids(repo: str, rev_range: str) -> dict[str, str]:
-    """Map patch-id -> commit SHA for commits in the given range."""
-    ok, log_out = run_git(repo, "log", "--format=%H", rev_range)
-    if not ok or not log_out.strip():
-        return {}
-    result = {}
-    for sha in log_out.strip().splitlines():
-        sha = sha.strip()
-        if not sha:
-            continue
-        diff_proc = subprocess.run(
-            ["git", "-C", repo, "diff-tree", "-p", sha],
-            capture_output=True, text=True,
-        )
-        if diff_proc.returncode != 0 or not diff_proc.stdout.strip():
-            continue
-        pid_proc = subprocess.run(
-            ["git", "patch-id", "--stable"],
-            input=diff_proc.stdout,
-            capture_output=True, text=True,
-        )
-        if pid_proc.returncode == 0 and pid_proc.stdout.strip():
-            parts = pid_proc.stdout.strip().split()
-            if len(parts) >= 1:
-                result[parts[0]] = sha
-    return result
-
-
-def _find_duplicate_commits(repo: str, local_range: str,
-                            remote_range: str) -> list[tuple[str, str, str]]:
-    """Find commits with identical content on both sides of a merge.
-
-    Two-stage: message pre-filter (fast) then patch-id confirmation (precise).
-    Returns [(local_sha, remote_sha, subject)] for confirmed duplicates.
-    """
-    ok, local_log = run_git(repo, "log", "--format=%H %s", local_range)
-    if not ok or not local_log.strip():
-        return []
-    ok, remote_log = run_git(repo, "log", "--format=%H %s", remote_range)
-    if not ok or not remote_log.strip():
-        return []
-
-    def parse_log(raw: str) -> list[tuple[str, str]]:
-        entries = []
-        for line in raw.strip().splitlines():
-            parts = line.split(" ", 1)
-            if len(parts) == 2:
-                entries.append((parts[0], parts[1]))
-        return entries
-
-    local_commits = parse_log(local_log)
-    remote_commits = parse_log(remote_log)
-
-    remote_by_subject: dict[str, list[str]] = {}
-    for sha, subj in remote_commits:
-        remote_by_subject.setdefault(subj, []).append(sha)
-
-    candidates = []
-    for local_sha, subj in local_commits:
-        if subj in remote_by_subject:
-            for remote_sha in remote_by_subject[subj]:
-                candidates.append((local_sha, remote_sha, subj))
-
-    if not candidates:
-        return []
-
-    local_patches = _get_patch_ids(repo, local_range)
-    remote_patches = _get_patch_ids(repo, remote_range)
-
-    local_sha_to_pid = {sha: pid for pid, sha in local_patches.items()}
-    remote_sha_to_pid = {sha: pid for pid, sha in remote_patches.items()}
-
-    confirmed = []
-    for local_sha, remote_sha, subj in candidates:
-        local_pid = local_sha_to_pid.get(local_sha)
-        remote_pid = remote_sha_to_pid.get(remote_sha)
-        if local_pid and remote_pid and local_pid == remote_pid:
-            confirmed.append((local_sha, remote_sha, subj))
-
-    return confirmed
-
-
-def _rebase_dropping(repo: str, blessed_remote: str, base: str,
-                     drop_shas: set[str]) -> bool:
-    """Rebase onto blessed, dropping commits whose SHAs are in drop_shas."""
-    import os
-    import tempfile
-
-    if not drop_shas:
-        ok, _ = run_git(repo, "rebase", f"{blessed_remote}/{base}")
-        return ok
-
-    short_shas = set()
-    for sha in drop_shas:
-        short_shas.add(sha[:7])
-
-    fd, script_path = tempfile.mkstemp(suffix=".py")
-    os.close(fd)
-    with open(script_path, "w") as f:
-        f.write("import sys\n")
-        f.write(f"drops = {short_shas!r}\n")
-        f.write("path = sys.argv[1]\n")
-        f.write("with open(path) as fh: lines = fh.readlines()\n")
-        f.write("kept = []\n")
-        f.write("for line in lines:\n")
-        f.write("    parts = line.split()\n")
-        f.write("    if len(parts) >= 2 and parts[0] == 'pick':\n")
-        f.write("        if any(parts[1].startswith(s) for s in drops):\n")
-        f.write("            continue\n")
-        f.write("    kept.append(line)\n")
-        f.write("with open(path, 'w') as fh: fh.writelines(kept)\n")
-
-    env = dict(os.environ)
-    env["GIT_SEQUENCE_EDITOR"] = f"python3 {script_path}"
+def _back_up_branch(repo: str, branch: str) -> None:
+    """The canonical repo keeps a copy of the new branch. Nothing is pushed. Never fatal."""
+    cs = _canonical_sync()
     try:
-        proc = subprocess.run(
-            ["git", "-C", repo, "rebase", "-i", f"{blessed_remote}/{base}"],
-            capture_output=True, text=True, env=env,
-        )
-        return proc.returncode == 0
-    finally:
-        os.unlink(script_path)
+        print(f"BACKED_UP={cs.backup(repo, branch)}")
+    except cs.SyncError as error:
+        print("BACKED_UP=no")
+        print(f"WARN={error.detail}")
 
 
-def _sync_repo(repo: str, blessed_remote: str, origin_remote: str,
-               base: str, warnings: list[str], label: str) -> str:
-    """Sync a single repo. Returns 'merged', 'rebased', 'fast-forward', 'reconciled', or 'skipped'."""
-    ok, _ = run_git(repo, "fetch", blessed_remote)
-    if not ok:
-        warnings.append(f"fetch_{label}_failed")
+def _canonical_sync():
+    project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if project_dir not in sys.path:
+        sys.path.insert(0, project_dir)
+    import canonical_sync
+    return canonical_sync
+
+
+def _sync_repo(repo: str, warnings: list[str], label: str) -> str:
+    """Bring one repo's starting point up to date, by fast-forward only.
+
+    The canonical repo's base branch fast-forwards from its remote when it can.
+    A slot clone's base branch then fast-forwards from canonical's. Nothing is
+    rebased, merged or pushed: canonical being ahead of its remote is landed
+    work awaiting publish, and a remote that has moved past unpublished commits
+    is settled by `canonical_sync.py publish`, not here.
+
+    Returns the strategy that applied: current, fast-forward, ahead, diverged,
+    offline or skipped.
+    """
+    cs = _canonical_sync()
+    name = Path(repo).name
+    try:
+        canon = cs.locate(repo)
+    except cs.SyncError as error:
+        warnings.append(f"no_canonical_{label}")
+        print(f"SYNC_DETAIL={error.detail}")
         return "skipped"
 
-    if origin_remote != blessed_remote:
-        run_git(repo, "fetch", origin_remote)
+    strategy = "current"
+    try:
+        with cs.landing_lock(canon):
+            before = cs._sha(canon.repo, f"refs/heads/{canon.base}")
+            after = cs.sync_base(canon)
+        if after != before:
+            strategy = "fast-forward"
+    except cs.SyncError as error:
+        if error.code == "fetch_failed":
+            warnings.append(f"fetch_{label}_failed")
+            strategy = "offline"
+        elif error.code == "diverged":
+            # Not a failure: work starts from canonical, and publishing settles it.
+            strategy = "diverged"
+            print(f"NOTE=diverged repo={name} detail=the remote moved while canonical holds "
+                  f"unpublished commits; publishing will put them on top")
+        else:
+            warnings.append(f"sync_{label}_{error.code}")
+            print(f"SYNC_DETAIL={error.detail}")
+            strategy = "skipped"
 
-    local_range = f"{blessed_remote}/{base}..{base}"
-    remote_range = f"{base}..{blessed_remote}/{base}"
-    duplicates = _find_duplicate_commits(repo, local_range, remote_range)
+    waiting = cs.unpublished(canon)
+    if waiting:
+        print(f"UNPUBLISHED={waiting} repo={name}")
+        if strategy == "current":
+            strategy = "ahead"
 
-    if duplicates:
-        for local_sha, remote_sha, subj in duplicates:
-            print(f"DUPLICATE_DETAIL={local_sha[:12]}:{remote_sha[:12]}:{subj[:60]}")
-        print(f"DUPLICATE_COMMITS={len(duplicates)} repo={Path(repo).name}")
+    state = cs.follow(repo, canon)
+    if state in ("ahead", "diverged"):
+        print(f"STRAY={name} state={state} detail=the clone's own {canon.base} holds commits "
+              f"canonical lacks; the next landing carries them")
 
-        blessed_patches = _get_patch_ids(repo, remote_range)
-        local_patches = _get_patch_ids(repo, local_range)
-        drop_shas = {sha for pid, sha in local_patches.items()
-                     if pid in blessed_patches}
-
-        ok = _rebase_dropping(repo, blessed_remote, base, drop_shas)
-        if not ok:
-            run_git(repo, "rebase", "--abort")
-            warnings.append(f"reconcile_{label}_failed")
-            return "skipped"
-
-        if origin_remote != blessed_remote:
-            run_git(repo, "push", origin_remote, base, "--force-with-lease", "--no-verify")
-
-        print(f"RECONCILED={len(drop_shas)} repo={Path(repo).name}")
-        print(f"STRATEGY=reconcile repo={Path(repo).name}")
-        return "reconciled"
-
-    if origin_remote != blessed_remote:
-        shared = _has_shared_fork_commits(repo, blessed_remote, origin_remote, base)
-        if shared > 0:
-            print(f"MERGE_REASON=shared_on_origin={shared} repo={Path(repo).name}")
-            ok, _ = run_git(repo, "merge", f"{blessed_remote}/{base}", "--no-edit")
-            if not ok:
-                run_git(repo, "merge", "--abort")
-                warnings.append(f"merge_{label}_failed")
-                return "skipped"
-            ok, _ = run_git(repo, "push", origin_remote, base, "--no-verify")
-            if not ok:
-                warnings.append(f"push_{label}_failed")
-            print(f"STRATEGY=merge repo={Path(repo).name}")
-            return "merged"
-
-    ok, _ = run_git(repo, "rebase", f"{blessed_remote}/{base}")
-    if not ok:
-        run_git(repo, "rebase", "--abort")
-        warnings.append(f"rebase_{label}_failed")
-        return "skipped"
-
-    if origin_remote != blessed_remote:
-        ok, _ = run_git(repo, "push", origin_remote, base, "--force-with-lease", "--no-verify")
-        if not ok:
-            warnings.append(f"push_{label}_failed")
-
-    behind = _rev_count(repo, f"{base}..{blessed_remote}/{base}")
-    strategy = "fast-forward" if behind == 0 else "rebase"
-    print(f"STRATEGY={strategy} repo={Path(repo).name}")
+    print(f"STRATEGY={strategy} repo={name}")
     return strategy
 
 
-def _verify_sync(repo: str, blessed_remote: str, base: str,
-                 warnings: list[str], label: str) -> None:
-    """Post-sync verification: local main must contain all blessed commits."""
-    behind = _rev_count(repo, f"{base}..{blessed_remote}/{base}")
-    if behind > 0:
-        warnings.append(f"verify_{label}_behind={behind}")
-        print(f"VERIFY_FAIL={label} behind_blessed={behind} repo={Path(repo).name}")
-
-
-def _check_orphaned_branches(repo: str, base: str, pre_sync_sha: str,
-                             warnings: list[str], label: str) -> None:
-    """Check if any feature branches lost their merge-base with main."""
-    ok, branches = run_git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
-    if not ok:
-        return
-    for branch in branches.splitlines():
-        branch = branch.strip()
-        if not branch or branch == base:
-            continue
-        ok, merge_base = run_git(repo, "merge-base", branch, base)
-        if not ok:
-            continue
-        ok, is_ancestor = run_git(repo, "merge-base", "--is-ancestor", merge_base.strip(), base)
-        if not ok:
-            warnings.append(f"orphaned_branch_{label}={branch}")
-            print(f"WARN=orphaned_branch repo={Path(repo).name} branch={branch}")
-
-
 def sync_main(project: str, workspace: str, base: str) -> int:
-    """Sync local base branch with remote before branch creation."""
+    """Bring the project's and workspace's starting point up to date before branching.
+
+    Fast-forward only, never fatal: an unreachable remote is a warning, and work
+    starts from what the canonical repo has on disk.
+    """
     warnings: list[str] = []
+    cs = _canonical_sync()
 
-    has_upstream, _ = run_git(project, "remote", "get-url", "upstream")
-    has_fork, _ = run_git(project, "remote", "get-url", "fork")
+    model = "none"
+    try:
+        canon = cs.locate(project)
+        if canon.blessed == "upstream":
+            model = "upstream"
+        elif canon.mirror:
+            model = "fork"
+        elif canon.blessed:
+            model = "single"
+    except cs.SyncError:
+        pass
 
-    pre_sha_ok, pre_sync_sha = run_git(project, "rev-parse", base)
-
-    if has_upstream:
-        model = "upstream"
-        _sync_repo(project, "upstream", "origin", base, warnings, "upstream")
-    elif has_fork:
-        model = "fork"
-        _sync_repo(project, "origin", "fork", base, warnings, "fork")
-    else:
-        model = "single"
-        _sync_repo(project, "origin", "origin", base, warnings, "origin")
-
-    blessed = "upstream" if has_upstream else "origin"
-    _verify_sync(project, blessed, base, warnings, "project")
-
-    if pre_sha_ok:
-        _check_orphaned_branches(project, base, pre_sync_sha, warnings, "project")
-
-    if has_upstream:
-        fork_ahead = _rev_count(project, f"upstream/{base}..origin/{base}")
-        upstream_ahead = _rev_count(project, f"origin/{base}..upstream/{base}")
-        if fork_ahead > 0:
-            print(f"DRIFT=fork_ahead={fork_ahead}")
-        if upstream_ahead > 0:
-            print(f"DRIFT=upstream_ahead={upstream_ahead}")
-        if fork_ahead > 10 or upstream_ahead > 10:
-            warnings.append("significant_drift")
-
-    _sync_repo(workspace, "origin", "origin", "main", warnings, "workspace")
-    _verify_sync(workspace, "origin", "main", warnings, "workspace")
+    _sync_repo(project, warnings, "project")
+    _sync_repo(workspace, warnings, "workspace")
 
     synced = "yes" if not warnings else "partial"
     print(f"SYNCED={synced}")
