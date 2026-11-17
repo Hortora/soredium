@@ -309,13 +309,10 @@ After selection, confirm the range with a one-line summary:
 Range: <resolved-range>  (<N> commits)
 ```
 
-**If pushed commits are in the selected range**, warn explicitly before proceeding:
-```
-⚠️  This range includes N commits already pushed to <remote>.
-    Squashing will require a force-push. Continue? (y/n)
-```
-
-Require explicit YES. Do not proceed silently.
+**If commits in the selected range are already on a remote's base branch**, stop:
+published history is not rewritten. Narrow the range to what is not published.
+A feature branch that was pushed to a remote by an older workflow can still be
+squashed locally; the remote copy is left as it is and nothing is force-pushed.
 
 ---
 
@@ -709,7 +706,10 @@ pick jkl0123 feat(engine): add CaseRepository
 python3 ~/.claude/skills/git-squash/rebase_exec.py multi <project> base=<base-sha> todo-file=<path-to-todo>
 ```
 Outputs `REBASED=yes`, `COMMITS_BEFORE=N`, `COMMITS_AFTER=M` on success.
-On failure, the script auto-aborts the rebase and prints `ERROR=rebase_failed` with detail.
+On failure, the script aborts the rebase it started and prints `ERROR=rebase_failed` with detail.
+`ERROR=dirty_worktree` (uncommitted changes to tracked files) and `ERROR=busy`
+(a rebase or merge already in progress) mean nothing was touched: tell the
+user; never stash, reset or abort to get past them.
 
 **Multi-issue reference preservation:**
 
@@ -808,7 +808,7 @@ STEP=$(( TOTAL / 5 ))  # 5 evenly-spaced samples
 
 python3 ~/.claude/skills/git-squash/ctx.py --compaction-targets <base> <work-branch> <STEP>
   subject=$(git log -1 --format="%s" "$compacted_sha")
-  original_sha=$(git log --format="%H %s" <backup-branch> 2>/dev/null | grep -F "$subject" | head -1 | awk '{print $1}')
+  original_sha=$(git log --format="%H %s" <backup-branch> 2>/dev/null | grep -F "$subject" | head -1 | cut -d' ' -f1)
   if [ -n "$original_sha" ]; then
     # Use printf not echo: echo "" | wc -l returns 1 (false positive for empty diff)
     diff_out=$(git diff "$original_sha" "$compacted_sha" -- ':!HANDOFF.md' ':!blog/' 2>/dev/null)
@@ -869,7 +869,7 @@ When run, assess surviving commit quality:
 ```bash
 # For each KEEP commit in the compacted range
 python3 ~/.claude/skills/git-squash/ctx.py --rebase-todo <base> <work-branch>
-  diff_lines=$(git show --stat --format="" $sha | awk '/changed/{sum+=$1} END{print sum}')
+  diff_lines=$(git show --stat --format="" $sha | grep -o '[0-9]* insertion' | cut -d' ' -f1)
   body=$(git log -1 --format="%b" $sha | grep -v '^$' | wc -l)
   echo "$sha $diff_lines $body $subject"
 done
@@ -899,10 +899,7 @@ Compare against original:
   git diff <orig-branch>...squash/wip-<branch>-<timestamp>
   git log --oneline <orig-branch>..squash/wip-<branch>-<timestamp>
 
-Push working branch for review by others? (YES / n)
-  YES — git push -u origin squash/wip-<branch>-<timestamp>
-
-Ready to swap? (YES / n / push-first)
+Ready to swap? (YES / n)
 ```
 
 Wait for explicit YES before proceeding to Step 8.
@@ -915,31 +912,27 @@ Wait for explicit YES before proceeding to Step 8.
 python3 ~/.claude/skills/git-squash/branch_swap.py <project> orig=<ORIG_BRANCH> work=<WORK_BRANCH>
 ```
 
-The script performs the full swap atomically:
-1. Creates backup: `git branch -m <orig> backup/pre-squash-<orig>-<YYYYMMDD>`
+The script swaps the branch names, locally:
+1. Keeps the original: `git branch -m <orig> backup/pre-squash-<orig>-<YYYYMMDD>`
 2. Renames work to orig: `git branch -m <work> <orig>`
-3. Sets upstream: `git branch --set-upstream-to=origin/<orig> <orig>`
-4. Force pushes: `git push --force-with-lease origin <orig>`
-5. Post-swap verify: checks working tree status and unpushed commits
+
+It pushes nothing and switches no checkout. A feature branch is never pushed
+to a remote: only the canonical repo publishes, and it publishes its base
+branch, through `project/canonical_sync.py`. Do not push the squashed branch
+yourself.
 
 Parse the output:
 - `SWAPPED=yes` — swap succeeded
 - `BACKUP=<name>` — backup branch name (always reported, even on partial failure)
+- `CHECKED_OUT=<branch>` — the branch the checkout is on; the swap does not change it
 - `STATUS_CLEAN=yes|no` — whether working tree is clean
-- `UNPUSHED=<count>` — unpushed commit count
-- `PUSH_FAILED=yes` (optional) — push failed, with `PUSH_ERROR=<detail>`
 
-**Post-swap checks (mandatory):**
+**Post-swap check (mandatory):**
 
 If `STATUS_CLEAN=no`, hard stop:
 > "⚠️  Swap complete but working tree is dirty — staged/unstaged changes remain.
 >  These will be invisible to the next session if not committed.
 >  Commit or discard before ending the session."
-
-If `UNPUSHED` > 0, warn:
-> "⚠️  Swap complete but $ORIG_BRANCH has N unpushed commits — push or note in handover."
-
-Do not consider the squash complete until the working tree is clean and the branch is pushed.
 
 Confirm:
 ```
@@ -947,14 +940,9 @@ Confirm:
   Active branch:  <orig-branch> (squashed history)
   Backup branch:  <BACKUP value> (original history)
 
-To push backup for off-machine safety:
-  git push origin <BACKUP value>
-
-To undo entirely:
-  git checkout <BACKUP value>
+To undo entirely (local renames, nothing to push):
   git branch -m <orig-branch> squash/wip-<orig-branch>-<timestamp>
   git branch -m <BACKUP value> <orig-branch>
-  git push --force-with-lease origin <orig-branch>
 ```
 
 ---
@@ -1014,7 +1002,8 @@ Range default in this context is **[U] Unpushed** — skip the range picker and 
 3. **Step 4:** Show summary
 4. **Step 5:** Show plan and get approval
 5. **Step 6:** Execute in-place
-6. **Push:** `git push` (no force needed)
+6. **Record the review** (Step 8b). Do not push: landing is `work end`, and
+   publishing is `canonical_sync.py publish`, run from neither a slot nor a feature branch.
 
 ---
 
@@ -1056,16 +1045,17 @@ Bypass with `git push --no-verify` after manually confirming history is clean.
 | Using `git rebase -i` without GIT_SEQUENCE_EDITOR | Opens interactive editor; blocks | Always use `GIT_SEQUENCE_EDITOR="cp $PLAN"` |
 | Merging commits with different scopes without warning | Violates single-responsibility | Scope drift check on all MERGE operations |
 | Squashing commits cherry-picked to other branches | Future merges will conflict | Cherry-pick detection before squashing |
-| Using `--force` instead of `--force-with-lease` | Overwrites concurrent pushes | Always use `--force-with-lease` |
+| Pushing a squashed branch, with or without force | Only the canonical repo publishes, and only its base branch | Never push from git-squash; land with `work end`, publish with `canonical_sync.py publish` |
+| Stashing or discarding uncommitted work to make room | The work belongs to whoever left it and is easily lost | `rebase_exec.py` refuses with `ERROR=dirty_worktree`; commit first |
 | Squashing commits with issue references | Loses traceability | Issue references are always KEEP — see policy |
 
 ---
 
 ## Skill Chaining
 
-**Invoked by:** User directly via `/git-squash`; `work-end` — Step 8j
-(mandatory squash before fork push); pre-push hook when squash candidates
-detected
+**Invoked by:** User directly via `/git-squash`; `work-end` — when
+`close.py` returns `ACTION=squash_review_needed`; pre-push hook when squash
+candidates detected
 
 **Reads:** `~/.claude/skills/git-squash/squash-policy.md` — the classification rules
 

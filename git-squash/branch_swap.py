@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-Handle branch rename and force push for git-squash Step 8.
+Swap a squashed working branch into place for git-squash Step 8. Local only.
 
 Usage: python3 branch_swap.py <project_path> orig=<branch> work=<branch>
 
 What it does:
-    1. Create backup: git branch -m <orig> backup/pre-squash-<orig>-<YYYYMMDD>
+    1. Keep the original: git branch -m <orig> backup/pre-squash-<orig>-<YYYYMMDD>
     2. Rename work to orig: git branch -m <work> <orig>
-    3. Set upstream: git branch --set-upstream-to=origin/<orig> <orig>
-    4. Force push: git push --force-with-lease origin <orig>
-    5. Post-swap verify: git status --short, git log unpushed
+
+It pushes nothing and switches no checkout. A feature branch is never pushed to
+a remote (Landing Rules: only the canonical repo publishes, through
+project/canonical_sync.py); an off-disk copy of a branch is canonical_sync.backup.
 
 Output (KEY=value lines):
     SWAPPED=yes
     BACKUP=backup/pre-squash-<orig>-<YYYYMMDD>
+    CHECKED_OUT=<branch the checkout is on, unchanged by the swap>
     STATUS_CLEAN=yes|no
-    UNPUSHED=<count>
 
 Error output:
     ERROR=swap_failed
@@ -89,45 +90,14 @@ def main() -> int:
     if r.returncode != 0:
         fail(f"work rename failed: {r.stderr.strip()}", backup=backup_name)
 
-    # Step 3: Set upstream (may fail if no remote — that's OK)
-    upstream_r = git(project, "branch", "--set-upstream-to", f"origin/{orig}", orig)
-    upstream_set = "yes" if upstream_r.returncode == 0 else "no"
-
-    # Step 3b: Checkout the target branch (swap may leave repo on main)
-    head_r = git(project, "rev-parse", "--abbrev-ref", "HEAD")
-    if head_r.returncode == 0 and head_r.stdout.strip() != orig:
-        git(project, "checkout", orig)
-
-    # Step 4: Force push
-    r = git(project, "push", "--force-with-lease", "origin", orig)
-    push_failed = r.returncode != 0
-
-    # Step 5: Post-swap verify
+    head = git(project, "branch", "--show-current").stdout.strip()
     status_r = git(project, "status", "--short")
     status_clean = "yes" if not status_r.stdout.strip() else "no"
 
-    log_r = git(project, "log", "--oneline", f"origin/{orig}..{orig}")
-    unpushed = 0
-    if log_r.returncode == 0 and log_r.stdout.strip():
-        unpushed = len(log_r.stdout.strip().splitlines())
-
-    # Report results
-    if push_failed:
-        # Swap succeeded locally, but push failed — report as success with warning
-        print("SWAPPED=yes")
-        print(f"BACKUP={backup_name}")
-        print(f"UPSTREAM_SET={upstream_set}")
-        print(f"STATUS_CLEAN={status_clean}")
-        print(f"UNPUSHED={unpushed}")
-        print("PUSH_FAILED=yes")
-        print(f"PUSH_ERROR={r.stderr.strip()}")
-    else:
-        print("SWAPPED=yes")
-        print(f"BACKUP={backup_name}")
-        print(f"UPSTREAM_SET={upstream_set}")
-        print(f"STATUS_CLEAN={status_clean}")
-        print(f"UNPUSHED={unpushed}")
-
+    print("SWAPPED=yes")
+    print(f"BACKUP={backup_name}")
+    print(f"CHECKED_OUT={head or 'DETACHED'}")
+    print(f"STATUS_CLEAN={status_clean}")
     return 0
 
 

@@ -38,17 +38,31 @@ def git(project: str, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def safety_stash(project: str, operation: str) -> bool:
-    status = git(project, "status", "--porcelain")
-    if status.returncode != 0 or not status.stdout.strip():
-        return False
-    msg = f"git-squash safety stash before {operation}"
-    result = git(project, "stash", "push", "-u", "-m", msg)
-    if result.returncode == 0:
-        print(f"SAFETY_STASH={operation}|msg={msg}")
-        return True
-    print(f"SAFETY_STASH_WARN=stash failed: {result.stderr.strip()}", file=sys.stderr)
-    return False
+_IN_PROGRESS = (
+    ("rebase-merge", "rebase"), ("rebase-apply", "rebase"), ("MERGE_HEAD", "merge"),
+    ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"),
+)
+
+
+def refuse_unless_ready(project: str) -> None:
+    """Exit unless the checkout can be rewritten without touching anyone's work.
+
+    Uncommitted changes to tracked files are never stashed out of the way, and
+    an operation already in progress is never aborted: both belong to whoever
+    left them. Untracked files are not affected by a squash and do not block.
+    """
+    for marker, operation in _IN_PROGRESS:
+        path = git(project, "rev-parse", "--git-path", marker).stdout.strip()
+        if path and os.path.exists(path if os.path.isabs(path) else os.path.join(project, path)):
+            print("ERROR=busy")
+            print(f"ERROR_DETAIL=a {operation} is already in progress; finish it first")
+            sys.exit(1)
+    status = git(project, "status", "--porcelain", "--untracked-files=no")
+    if status.returncode == 0 and status.stdout.strip():
+        print("ERROR=dirty_worktree")
+        print("ERROR_DETAIL=uncommitted changes to tracked files; commit them first: "
+              + ", ".join(line[3:] for line in status.stdout.splitlines()[:5]))
+        sys.exit(1)
 
 
 def count_commits(project: str, range_spec: str) -> int:
@@ -60,7 +74,7 @@ def count_commits(project: str, range_spec: str) -> int:
 
 def cmd_single(project: str) -> None:
     """Fast path: squash HEAD~1 into HEAD."""
-    safety_stash(project, "squash-single")
+    refuse_unless_ready(project)
     # Verify at least 2 commits exist
     r = git(project, "rev-parse", "HEAD~1")
     if r.returncode != 0:
@@ -99,7 +113,7 @@ def cmd_multi(project: str, args: list[str]) -> None:
         print("ERROR_DETAIL=base and todo-file are required")
         sys.exit(1)
 
-    safety_stash(project, "squash-multi")
+    refuse_unless_ready(project)
 
     # Count commits before
     head_sha = git(project, "rev-parse", "HEAD").stdout.strip()
@@ -114,7 +128,7 @@ def cmd_multi(project: str, args: list[str]) -> None:
     )
 
     if r.returncode != 0:
-        # Abort the rebase if it failed
+        # Abort the rebase this call started (refuse_unless_ready ruled out any other).
         git(project, "rebase", "--abort")
         print("ERROR=rebase_failed")
         print(f"ERROR_DETAIL={r.stderr.strip()}")

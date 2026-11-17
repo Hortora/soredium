@@ -383,6 +383,78 @@ class TestRebaseExecMulti:
         assert out["COMMITS_AFTER"] == "2"
 
 
+class TestRebaseExecLeavesWorkAlone:
+    """It used to stash uncommitted work out of the way. It refuses instead."""
+
+    def _two_commits(self, tmp_path):
+        repo = init_repo(tmp_path / "repo")
+        add_commit(repo, "a.txt", "a", "feat: a")
+        add_commit(repo, "b.txt", "b", "fix: b")
+        return repo
+
+    def _stashes(self, repo):
+        return subprocess.run(["git", "-C", str(repo), "stash", "list"],
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_single_refuses_with_uncommitted_changes_and_stashes_nothing(self, tmp_path):
+        repo = self._two_commits(tmp_path)
+        (repo / "a.txt").write_text("uncommitted\n")
+        head = get_sha(repo)
+
+        result = run_script(REBASE_EXEC, "single", str(repo))
+
+        assert result.returncode == 1
+        assert parse_kv(result).get("ERROR") == "dirty_worktree"
+        assert get_sha(repo) == head
+        assert (repo / "a.txt").read_text() == "uncommitted\n"
+        assert self._stashes(repo) == ""
+
+    def test_multi_refuses_with_uncommitted_changes_and_stashes_nothing(self, tmp_path):
+        repo = self._two_commits(tmp_path)
+        base = get_sha(repo, "HEAD~2")
+        todo = tmp_path / "todo"
+        todo.write_text(f"pick {get_sha(repo, 'HEAD~1')}\nfixup {get_sha(repo)}\n")
+        (repo / "untracked.txt").write_text("new work\n")
+        (repo / "a.txt").write_text("uncommitted\n")
+        head = get_sha(repo)
+
+        result = run_script(REBASE_EXEC, "multi", str(repo), f"base={base}", f"todo-file={todo}")
+
+        assert result.returncode == 1
+        assert parse_kv(result).get("ERROR") == "dirty_worktree"
+        assert get_sha(repo) == head
+        assert (repo / "untracked.txt").exists()
+        assert self._stashes(repo) == ""
+
+    def test_untracked_files_alone_do_not_block(self, tmp_path):
+        repo = self._two_commits(tmp_path)
+        (repo / "untracked.txt").write_text("new work\n")
+
+        result = run_script(REBASE_EXEC, "single", str(repo))
+
+        assert result.returncode == 0
+        assert (repo / "untracked.txt").read_text() == "new work\n"
+        assert self._stashes(repo) == ""
+
+    def test_multi_never_aborts_a_rebase_it_did_not_start(self, tmp_path):
+        repo = self._two_commits(tmp_path)
+        subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "clash", "HEAD~2"],
+                       capture_output=True, check=True)
+        add_commit(repo, "a.txt", "clash", "feat: clashing a")
+        subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "rebase", "clash"], capture_output=True)
+        assert (repo / ".git" / "rebase-merge").exists()
+        todo = tmp_path / "todo"
+        todo.write_text("noop\n")
+
+        result = run_script(REBASE_EXEC, "multi", str(repo), "base=clash", f"todo-file={todo}")
+
+        assert result.returncode == 1
+        assert parse_kv(result).get("ERROR") == "busy"
+        assert (repo / ".git" / "rebase-merge").exists()
+
+
 class TestRebaseExecAmendMessage:
 
     def test_amend_message(self, tmp_path):
@@ -509,32 +581,50 @@ class TestBranchSwap:
         assert out.get("ERROR") == "swap_failed"
         assert "BACKUP" in out  # backup was created before failure
 
-    def test_swap_push_failure_non_fatal(self, tmp_path):
-        """Push failure doesn't block the swap — reports PUSH_FAILED instead."""
+    def _swappable(self, tmp_path):
         repo = init_repo(tmp_path / "repo")
-        # No remote, so push will fail
-        subprocess.run(
-            ["git", "-C", str(repo), "checkout", "-b", "feat"],
-            capture_output=True, check=True,
-        )
+        remote = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(remote)], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(remote)],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feat"],
+                       capture_output=True, check=True)
         add_commit(repo, "a.txt", "a", "feat: a")
-        subprocess.run(
-            ["git", "-C", str(repo), "checkout", "-b", "squash/wip"],
-            capture_output=True, check=True,
-        )
+        subprocess.run(["git", "-C", str(repo), "push", "-q", "-u", "origin", "feat"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "checkout", "-b", "squash/wip"],
+                       capture_output=True, check=True)
         add_commit(repo, "b.txt", "b", "feat: b")
-        subprocess.run(
-            ["git", "-C", str(repo), "checkout", "main"],
-            capture_output=True, check=True,
-        )
+        subprocess.run(["git", "-C", str(repo), "checkout", "main"],
+                       capture_output=True, check=True)
+        return repo, remote
 
-        result = run_script(BRANCH_SWAP, str(repo),
-                          "orig=feat", "work=squash/wip")
+    def test_swap_never_pushes(self, tmp_path):
+        """#515: only the canonical repo publishes, and only through canonical_sync."""
+        repo, remote = self._swappable(tmp_path)
+        remote_before = get_sha(remote, "refs/heads/feat")
+
+        result = run_script(BRANCH_SWAP, str(repo), "orig=feat", "work=squash/wip")
+
         assert result.returncode == 0
         out = parse_kv(result)
         assert out["SWAPPED"] == "yes"
-        assert out["UPSTREAM_SET"] in ("yes", "no")
-        assert out.get("PUSH_FAILED") == "yes"
+        assert get_sha(remote, "refs/heads/feat") == remote_before
+        assert get_sha(repo, "feat") != remote_before
+        assert "PUSH_FAILED" not in out and "UNPUSHED" not in out and "UPSTREAM_SET" not in out
+
+    def test_swap_does_not_switch_the_checkout(self, tmp_path):
+        repo, _ = self._swappable(tmp_path)
+        (repo / "scratch.txt").write_text("uncommitted\n")
+
+        result = run_script(BRANCH_SWAP, str(repo), "orig=feat", "work=squash/wip")
+
+        assert result.returncode == 0
+        head = subprocess.run(["git", "-C", str(repo), "branch", "--show-current"],
+                              capture_output=True, text=True).stdout.strip()
+        assert head == "main"
+        assert (repo / "scratch.txt").read_text() == "uncommitted\n"
+        assert parse_kv(result)["CHECKED_OUT"] == "main"
 
     def test_status_clean_reported(self, tmp_path):
         """STATUS_CLEAN reflects working tree state."""
