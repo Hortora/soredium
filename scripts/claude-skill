@@ -42,6 +42,12 @@ PRETOOL_HOOKS = [
         "matcher": "Write",
         "command": "~/.claude/hooks/lifecycle-guard-write.sh",
     },
+    {
+        # Blocks git push from a slot clone or of a working branch (Landing Rules).
+        "source": "push-guard.py",
+        "matcher": "Bash",
+        "command": "~/.claude/hooks/push-guard.py",
+    },
 ]
 
 

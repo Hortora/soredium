@@ -798,6 +798,11 @@ Hortora/soredium#515, and the slot-layout follow-on is #512.
    never squashes, and lands a multi-commit branch only when that record equals the
    branch tip; otherwise it returns `ACTION=squash_review_needed`.
 
+`hooks/push-guard.py` (a PreToolUse hook installed by `sync-local`) blocks `git push`
+from a slot clone and of any working branch, and names `work end` and
+`canonical_sync.py publish` instead. A hook blocks only with exit code 2 and the
+reason on stderr; `tests/test_push_guard_hook.py` attempts the push to prove it.
+
 Canonical may be mid-work: never stash, reset or check out in a canonical repo, and
 never run `git rebase --abort` or `git merge --abort` on an operation you did not
 start — commits made while it was stopped belong to no branch and are discarded.
