@@ -82,21 +82,35 @@ def verify_content_landed(repo_path: Path, landed_sha: str,
 
 
 def verify_push(repo_path: Path, base_branch: str) -> Verification:
+    """Verify the base branch is where a close leaves it: in the canonical repo.
+
+    The name is historical. Landing is on disk and publishing is a separate
+    step, so a canonical repo ahead of its remote passes, with the count as
+    evidence. What fails is a slot clone whose base branch holds commits the
+    canonical repo lacks: that work has not landed.
+    """
+    from verification.repo_checks import _reference
     repo_name = Path(repo_path).name
-    result = _git(repo_path, "log", f"origin/{base_branch}..{base_branch}",
-                  "--oneline")
+    ref, kind = _reference(Path(repo_path))
+    if not ref:
+        return Verification("push", VerifyResult.PASS,
+                            {"method": "nothing_to_measure_against"}, repo_name)
+    result = _git(repo_path, "log", f"{ref}..{base_branch}", "--oneline")
     if result.returncode != 0:
         return Verification("push", VerifyResult.UNKNOWN,
-                            {"reason": "remote_unreachable",
+                            {"reason": "cannot_compare", "against": ref,
                              "stderr": result.stderr[:200] if result.stderr else ""},
                             repo_name)
-    unpushed = result.stdout.strip()
-    if unpushed:
-        count = len(unpushed.splitlines())
-        return Verification("push", VerifyResult.FAIL,
-                            {"unpushed_count": count}, repo_name)
+    count = len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0
+    if kind == "canonical":
+        if count:
+            return Verification("push", VerifyResult.FAIL,
+                                {"not_in_canonical": count, "against": ref}, repo_name)
+        return Verification("push", VerifyResult.PASS,
+                            {"method": "in_canonical"}, repo_name)
     return Verification("push", VerifyResult.PASS,
-                        {"method": "no_unpushed"}, repo_name)
+                        {"method": "landed_on_disk", "unpublished": count, "against": ref},
+                        repo_name)
 
 
 STAMP_PREFIX = "chore: branch closed"

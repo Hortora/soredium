@@ -18,6 +18,16 @@
         reported as OTHER_OWNER and left, so working branches are never sent
         to a remote other people share.
 
+    slot_backup_setup.py detach <family-root> [--apply]
+        Every slot clone under <family-root>/slots/<N>/ loses its GitHub remotes,
+        so the only place its work can go is its canonical repo. Before a remote
+        is removed, every local branch of the clone is copied into the canonical
+        repo (refs/backup/<slot>/<branch>); if any copy fails the clone is left
+        exactly as it is. A clone whose `origin` is a local path to its canonical
+        repo and that has no `local` remote gets `origin` renamed to `local`.
+        Remotes that are local paths or non-GitHub URLs are kept. A clone that
+        cannot name a canonical repo is left alone and reported.
+
 Without --apply nothing is changed: each line says what would be done.
 Output is one KEY=value line per repo and a SUMMARY line. Remote URLs are
 printed without any credentials embedded in them.
@@ -107,6 +117,78 @@ def cmd_hooks(family_root: Path, apply: bool) -> int:
     return 0
 
 
+def _is_hosted(url: str) -> bool:
+    """A remote on a hosting service, as opposed to a path on this machine or a
+    private transport. Only hosted remotes are removed from a slot clone."""
+    return bool(re.match(r"^(https?://|git@|ssh://|git://)", url))
+
+
+def _local_branches(clone: Path) -> list[str]:
+    return [b for b in _git(clone, "for-each-ref", "--format=%(refname:short)",
+                            "refs/heads").splitlines() if b]
+
+
+def cmd_detach(family_root: Path, apply: bool) -> int:
+    counts: dict[str, int] = {}
+
+    def tally(action: str, line: str) -> None:
+        print(line)
+        counts[action] = counts.get(action, 0) + 1
+
+    for clone in slot_clones(family_root):
+        label = f"{clone.parent.name}/{clone.name}"
+        remotes = {name: _git(clone, "remote", "get-url", name)
+                   for name in _git(clone, "remote").split()}
+
+        rename = False
+        if "local" not in remotes:
+            origin = remotes.get("origin", "")
+            if origin and not _is_hosted(origin) and Path(origin).is_dir() \
+                    and (Path(origin) / ".git").exists():
+                rename = True
+            else:
+                tally("NO_CANONICAL", f"NO_CANONICAL={label} remotes={','.join(remotes) or 'none'}")
+                continue
+
+        hosted = sorted(name for name, url in remotes.items()
+                        if name != "local" and _is_hosted(url) and not (rename and name == "origin"))
+        if not hosted and not rename:
+            tally("OK", f"OK={label}")
+            continue
+
+        plan = ([f"rename origin->local"] if rename else []) + [f"remove {name}" for name in hosted]
+        if not apply:
+            tally("DETACH", f"DETACH={label} {'; '.join(plan)} branches={len(_local_branches(clone))}")
+            continue
+
+        if rename:
+            subprocess.run(["git", "-C", str(clone), "remote", "rename", "origin", "local"],
+                           capture_output=True)
+        failed = []
+        for branch in _local_branches(clone):
+            try:
+                canonical_sync.backup(clone, branch)
+            except canonical_sync.SyncError as error:
+                failed.append(f"{branch}: {error.detail}")
+        if failed:
+            # Nothing is removed from a clone whose work is not safely in canonical.
+            if rename:
+                subprocess.run(["git", "-C", str(clone), "remote", "rename", "local", "origin"],
+                               capture_output=True)
+            tally("BACKUP_FAILED", f"BACKUP_FAILED={label} {failed[0]}")
+            continue
+        for name in hosted:
+            subprocess.run(["git", "-C", str(clone), "remote", "remove", name], capture_output=True)
+        base = canonical_sync.locate(clone).base
+        subprocess.run(["git", "-C", str(clone), "fetch", "-q", "local"], capture_output=True)
+        if _git(clone, "rev-parse", "--verify", "-q", f"refs/heads/{base}"):
+            subprocess.run(["git", "-C", str(clone), "branch", f"--set-upstream-to=local/{base}", base],
+                           capture_output=True)
+        tally("DETACHED", f"DETACHED={label} {'; '.join(plan)}")
+    print("SUMMARY=" + (", ".join(f"{k}:{v}" for k, v in sorted(counts.items())) or "no slot clones"))
+    return 0
+
+
 def workspace_repos(root: Path, depth: int = 3) -> list[Path]:
     found: list[Path] = []
 
@@ -158,13 +240,15 @@ def main(argv: list[str] | None = None) -> int:
     apply = "--apply" in args
     owner = next((a[len("owner="):] for a in args if a.startswith("owner=")), "")
     args = [a for a in args if a != "--apply" and not a.startswith("owner=")]
-    if len(args) != 2 or args[0] not in ("hooks", "remotes") or not Path(args[1]).is_dir():
-        print("usage: slot_backup_setup.py <hooks|remotes> <directory> [owner=<name>] [--apply]",
+    if len(args) != 2 or args[0] not in ("hooks", "remotes", "detach") or not Path(args[1]).is_dir():
+        print("usage: slot_backup_setup.py <hooks|remotes|detach> <directory> [owner=<name>] [--apply]",
               file=sys.stderr)
         return 2
     print("MODE=" + ("apply" if apply else "dry-run"))
     if args[0] == "hooks":
         return cmd_hooks(Path(args[1]), apply)
+    if args[0] == "detach":
+        return cmd_detach(Path(args[1]), apply)
     return cmd_remotes(Path(args[1]), apply, owner)
 
 

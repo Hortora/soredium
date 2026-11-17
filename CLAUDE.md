@@ -460,6 +460,7 @@ python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root> --dry-run  # 
 # Slot backup setup (#515): dry run unless --apply
 python3 scripts/slot_backup_setup.py hooks <family-root>               # old push hook -> canonical backup hook
 python3 scripts/slot_backup_setup.py remotes <root> owner=<github-user>  # backup remote for single-remote workspace repos
+python3 scripts/slot_backup_setup.py detach <family-root>              # existing slot clones lose their GitHub remotes
 
 # Slot state migration (backfill state: field in .slot files)
 python3 scripts/migrate_slot_state.py <family-root>           # dry-run: shows what needs changing
@@ -791,6 +792,10 @@ Hortora/soredium#515, and the slot-layout follow-on is #512.
 2. **Canonical is the sync point.** The repos directly under `~/claude/<family>/` are
    canonical. Work reaches canonical before it reaches anything else.
 3. **Only canonical publishes.** Slots, clones and feature branches never push to GitHub.
+   A slot clone's only remote is `local`, its canonical repo: it has no `origin` or
+   `upstream`, so there is nowhere for a push to go. Checks measure a slot against
+   canonical and a canonical repo against its remote (`canonical_sync.reference`).
+   A canonical repo ahead of its remote is landed work awaiting publish: normal, not an error.
    Landing and publishing are separate: `work end` lands on disk, and
    `project/canonical_sync.py publish <repo>` pushes canonical's base branch when asked.
 4. **No direct squashes.** Squashing happens only through the `git-squash` skill, which

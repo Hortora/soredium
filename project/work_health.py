@@ -131,19 +131,33 @@ def check_workspace_integrity(project, workspace):
     return "CHECK=workspace_integrity STATUS=ok"
 
 
+def _reference(repo):
+    import canonical_sync
+    return canonical_sync.reference(repo)
+
+
 def check_main_divergence(project, workspace):
+    """Warn about what needs attention, not about landed work awaiting publish.
+
+    A slot clone ahead of or behind its canonical repo is worth a warning. A
+    canonical repo ahead of its remote is the normal state between landing and
+    publishing and is not reported here; behind its remote is.
+    """
     warnings = []
     for label, repo in [("project", project), ("workspace", workspace)]:
-        ahead, rc = _git(repo, "log", "origin/main..main", "--oneline")
+        ref, kind = _reference(repo)
+        if not ref:
+            continue
+        ahead, rc = _git(repo, "log", f"{ref}..main", "--oneline")
         if rc != 0:
             continue
-        if ahead:
+        if ahead and kind == "canonical":
             count = len(ahead.splitlines())
-            warnings.append(f"{label} {count} commit(s) ahead of origin/main")
-        behind, rc = _git(repo, "log", "main..origin/main", "--oneline")
+            warnings.append(f"{label} {count} commit(s) on main that canonical lacks")
+        behind, rc = _git(repo, "log", f"main..{ref}", "--oneline")
         if rc == 0 and behind:
             count = len(behind.splitlines())
-            warnings.append(f"{label} {count} commit(s) behind origin/main")
+            warnings.append(f"{label} {count} commit(s) behind {ref}")
     if warnings:
         return f"CHECK=main_divergence STATUS=warn DETAIL={'; '.join(warnings)}"
     return "CHECK=main_divergence STATUS=ok"
@@ -411,11 +425,15 @@ def check_close_gate(project, workspace, branch):
         return "CHECK=close_gate STATUS=error DETAIL=no branch specified"
     state = is_closed(str(project), branch, workspace=str(workspace))
     if state == ClosureState.CLOSED:
-        ahead, _ = _git(project, "log", "origin/main..main", "--oneline")
-        if ahead:
-            count = len(ahead.splitlines())
+        ref, kind = _reference(project)
+        ahead = _git(project, "log", f"{ref}..main", "--oneline")[0] if ref else ""
+        count = len(ahead.splitlines()) if ahead else 0
+        if count and kind == "canonical":
             return (f"CHECK=close_gate STATUS=fail "
-                    f"DETAIL=branch CLOSED but main {count} commit(s) ahead of origin")
+                    f"DETAIL=branch CLOSED but {count} commit(s) on main never reached canonical")
+        if count:
+            # Landed on disk; publishing is a separate step and not part of closing.
+            return f"CHECK=close_gate STATUS=pass VERIFIED=yes UNPUBLISHED={count}"
         return "CHECK=close_gate STATUS=pass VERIFIED=yes"
     return f"CHECK=close_gate STATUS=fail DETAIL=branch state is {state.value} VERIFIED=no"
 

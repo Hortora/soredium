@@ -45,8 +45,24 @@ def check_fork_divergence(repo_path: Path) -> list[Finding]:
     return findings
 
 
+def _reference(repo_path: Path) -> tuple[str, str]:
+    """(ref, kind) the repo's base branch is measured against; see canonical_sync.reference."""
+    import sys
+    project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if project_dir not in sys.path:
+        sys.path.insert(0, project_dir)
+    import canonical_sync
+    return canonical_sync.reference(repo_path)
+
+
 def check_unpushed_main(repo_path: Path) -> list[Finding]:
-    """Detect unpushed commits on main, behind-origin, and dirty working tree."""
+    """Where main stands against what it is measured against, and whether it is dirty.
+
+    A slot clone is measured against its canonical repo: commits canonical lacks
+    are work that has not landed (ERROR). A canonical repo is measured against
+    its remote: commits the remote lacks are landed work awaiting publish, which
+    is normal (INFO), and a remote that has moved is settled by publishing.
+    """
     findings: list[Finding] = []
     if not repo_path.exists() or not is_git_repo(repo_path):
         return findings
@@ -55,29 +71,37 @@ def check_unpushed_main(repo_path: Path) -> list[Finding]:
     if branch != "main":
         return findings
 
-    r = git(repo_path, "log", "--oneline", "origin/main..main")
-    if r.returncode == 0 and r.stdout.strip():
-        count = len(r.stdout.strip().splitlines())
-        findings.append(Finding(
-            "ERROR", "unpushed-main",
-            f"{count} unpushed commits on main",
-        ))
-
-    r_behind = git(repo_path, "log", "--oneline", "main..origin/main")
-    if r_behind.returncode == 0 and r_behind.stdout.strip():
-        behind_count = len(r_behind.stdout.strip().splitlines())
-        r_ahead = git(repo_path, "log", "--oneline", "origin/main..main")
-        ahead_count = len(r_ahead.stdout.strip().splitlines()) if r_ahead.returncode == 0 and r_ahead.stdout.strip() else 0
-        if ahead_count > 0:
-            findings.append(Finding(
-                "ERROR", "fork-diverged",
-                f"main diverged from origin — {ahead_count} ahead, {behind_count} behind",
-            ))
+    ref, kind = _reference(repo_path)
+    if ref:
+        r_ahead = git(repo_path, "log", "--oneline", f"{ref}..main")
+        ahead = len(r_ahead.stdout.strip().splitlines()) if r_ahead.returncode == 0 else 0
+        r_behind = git(repo_path, "log", "--oneline", f"main..{ref}")
+        behind = len(r_behind.stdout.strip().splitlines()) if r_behind.returncode == 0 else 0
+        if kind == "canonical":
+            if ahead:
+                findings.append(Finding(
+                    "ERROR", "not-in-canonical",
+                    f"{ahead} commit(s) on main that the canonical repo lacks — land them "
+                    f"with work end",
+                ))
+            if behind:
+                findings.append(Finding(
+                    "WARN", "behind-canonical",
+                    f"main is {behind} commit(s) behind the canonical repo",
+                ))
         else:
-            findings.append(Finding(
-                "WARN", "behind-origin",
-                f"main is {behind_count} commits behind origin/main",
-            ))
+            if ahead:
+                findings.append(Finding(
+                    "INFO", "unpublished",
+                    f"{ahead} landed commit(s) not published to {ref} yet "
+                    f"(canonical_sync.py publish)",
+                ))
+            if behind:
+                findings.append(Finding(
+                    "WARN", "remote-moved" if ahead else "behind-remote",
+                    f"{ref} has {behind} commit(s) main lacks"
+                    + (" — publishing puts the unpublished commits on top" if ahead else ""),
+                ))
 
     r_dirty = git(repo_path, "status", "--short")
     if r_dirty.returncode == 0 and r_dirty.stdout.strip():

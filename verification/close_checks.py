@@ -86,15 +86,25 @@ def check_on_main(repo_path: Path) -> list[Finding]:
 
 
 def check_main_pushed(repo_path: Path, base: str = "main") -> list[Finding]:
-    result = git(repo_path, "log", f"origin/{base}..{base}", "--oneline")
-    if result.returncode != 0:
+    """Has the base branch reached where it should have after a close?
+
+    After a close the work must be in the canonical repo; that is what "landed"
+    means. A slot clone holding commits canonical lacks is an ERROR. A canonical
+    repo ahead of its remote is landed work awaiting publish: INFO, not a fault.
+    """
+    from verification.repo_checks import _reference
+    ref, kind = _reference(repo_path)
+    if not ref:
         return []
-    unpushed = result.stdout.strip()
-    if unpushed:
-        count = len(unpushed.splitlines())
-        return [Finding("ERROR", "unpushed-main",
-                         f"{count} commits ahead of origin/{base}")]
-    return []
+    result = git(repo_path, "log", f"{ref}..{base}", "--oneline")
+    if result.returncode != 0 or not result.stdout.strip():
+        return []
+    count = len(result.stdout.strip().splitlines())
+    if kind == "canonical":
+        return [Finding("ERROR", "not-in-canonical",
+                        f"{count} commit(s) on {base} that the canonical repo lacks")]
+    return [Finding("INFO", "unpublished",
+                    f"{count} landed commit(s) not published to {ref} yet")]
 
 
 def check_landed_marker(slot_dir: Path) -> list[Finding]:

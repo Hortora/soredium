@@ -1261,10 +1261,9 @@ class TestCreateSlotRemoteConfig:
             ["git", "-C", str(clone), "remote", "get-url", "local"])
         assert rc == 0
 
-        rc, origin_url, _ = slot_core.run_cmd(
-            ["git", "-C", str(clone), "remote", "get-url", "origin"])
-        assert rc == 0
-        assert origin_url.strip() == "https://github.com/user/engine.git"
+        # #515 stage 2: the clone's only remote is its canonical repo.
+        rc, names, _ = slot_core.run_cmd(["git", "-C", str(clone), "remote"])
+        assert names.split() == ["local"]
 
         rc, value, _ = slot_core.run_cmd(
             ["git", "-C", str(repo), "config", "receive.denyCurrentBranch"])
@@ -1293,11 +1292,11 @@ class TestMigrateRemotes:
             ["git", "-C", str(clone), "remote", "get-url", "local"])
         assert rc == 0
 
-        bare_path = family / ".engine-bare.git"
         rc, url, _ = slot_core.run_cmd(
-            ["git", "-C", str(clone), "remote", "get-url", "origin"])
-        assert rc == 0
-        assert str(bare_path) in url.strip()
+            ["git", "-C", str(clone), "remote", "get-url", "local"])
+        assert Path(url.strip()).resolve() == canonical.resolve()
+        rc, names, _ = slot_core.run_cmd(["git", "-C", str(clone), "remote"])
+        assert names.split() == ["local"]      # no GitHub remote is added
 
     def test_skips_archived_slots(self, tmp_path):
         family = tmp_path / "family"

@@ -111,56 +111,70 @@ class TestExcludeSymlinks:
 
 
 class TestConfigureSlotRemotes:
-    def test_direct_model_renames_origin_adds_github(self, tmp_path):
+    """#515 stage 2: a slot clone's only remote is its canonical repo."""
+
+    def _remotes(self, clone):
+        rc, out, _ = slot_core.run_cmd(["git", "-C", str(clone), "remote"])
+        return sorted(out.split())
+
+    def _clone_of(self, tmp_path, remotes: dict[str, str]):
         canonical = init_repo(tmp_path / "canonical")
-        subprocess.run(["git", "-C", str(canonical), "remote", "add", "origin",
-                        "https://github.com/user/repo.git"], capture_output=True)
+        for name, url in remotes.items():
+            subprocess.run(["git", "-C", str(canonical), "remote", "add", name, url],
+                           capture_output=True)
         clone = tmp_path / "clone"
         subprocess.run(["git", "clone", str(canonical), str(clone)], capture_output=True)
+        return canonical, clone
+
+    def test_clone_has_only_local_even_when_canonical_has_github(self, tmp_path):
+        canonical, clone = self._clone_of(tmp_path, {"origin": "https://github.com/user/repo.git"})
 
         result = slot_git.configure_slot_remotes(clone, canonical)
 
+        assert self._remotes(clone) == ["local"]
         rc, local_url, _ = slot_core.run_cmd(
             ["git", "-C", str(clone), "remote", "get-url", "local"])
-        assert rc == 0
-        assert str(canonical) in local_url.strip()
+        assert Path(local_url.strip()).resolve() == canonical.resolve()
+        assert result == {"origin": "", "upstream": "", "local": str(canonical)}
 
-        rc, origin_url, _ = slot_core.run_cmd(
-            ["git", "-C", str(clone), "remote", "get-url", "origin"])
-        assert rc == 0
-        assert origin_url.strip() == "https://github.com/user/repo.git"
+    def test_fork_model_canonical_still_gives_only_local(self, tmp_path):
+        canonical, clone = self._clone_of(tmp_path, {
+            "origin": "https://github.com/mdproctor/repo.git",
+            "upstream": "https://github.com/casehubio/repo.git"})
 
-        assert result["upstream"] == ""
+        slot_git.configure_slot_remotes(clone, canonical)
 
-    def test_fork_model_adds_upstream(self, tmp_path):
-        canonical = init_repo(tmp_path / "canonical")
-        subprocess.run(["git", "-C", str(canonical), "remote", "add", "origin",
-                        "https://github.com/mdproctor/repo.git"], capture_output=True)
-        subprocess.run(["git", "-C", str(canonical), "remote", "add", "upstream",
-                        "https://github.com/casehubio/repo.git"], capture_output=True)
-        clone = tmp_path / "clone"
-        subprocess.run(["git", "clone", str(canonical), str(clone)], capture_output=True)
+        assert self._remotes(clone) == ["local"]
 
-        result = slot_git.configure_slot_remotes(clone, canonical)
+    def test_canonical_without_remotes_still_gets_local(self, tmp_path):
+        """It used to return early here and leave the clone with `origin` and no
+        `local`, so the clone could not say which canonical repo it belonged to."""
+        canonical, clone = self._clone_of(tmp_path, {})
 
-        rc, origin_url, _ = slot_core.run_cmd(
-            ["git", "-C", str(clone), "remote", "get-url", "origin"])
-        assert origin_url.strip() == "https://github.com/mdproctor/repo.git"
+        slot_git.configure_slot_remotes(clone, canonical)
 
-        rc, upstream_url, _ = slot_core.run_cmd(
-            ["git", "-C", str(clone), "remote", "get-url", "upstream"])
-        assert rc == 0
-        assert upstream_url.strip() == "https://github.com/casehubio/repo.git"
+        assert self._remotes(clone) == ["local"]
 
-        assert result["upstream"] == "https://github.com/casehubio/repo.git"
+    def test_base_branch_tracks_canonical(self, tmp_path):
+        canonical, clone = self._clone_of(tmp_path, {"origin": "https://github.com/user/repo.git"})
+        slot_git.configure_slot_remotes(clone, canonical)
+        rc, upstream, _ = slot_core.run_cmd(
+            ["git", "-C", str(clone), "rev-parse", "--abbrev-ref", "main@{upstream}"])
+        assert upstream.strip() == "local/main"
 
-    def test_no_remotes_on_canonical_skips(self, tmp_path):
-        canonical = init_repo(tmp_path / "canonical")
-        clone = tmp_path / "clone"
-        subprocess.run(["git", "clone", str(canonical), str(clone)], capture_output=True)
+    def test_is_idempotent(self, tmp_path):
+        canonical, clone = self._clone_of(tmp_path, {"origin": "https://github.com/user/repo.git"})
+        slot_git.configure_slot_remotes(clone, canonical)
+        slot_git.configure_slot_remotes(clone, canonical)
+        assert self._remotes(clone) == ["local"]
 
-        result = slot_git.configure_slot_remotes(clone, canonical)
-        assert result["origin"] == ""
+    def test_a_push_from_the_clone_has_nowhere_to_go(self, tmp_path):
+        canonical, clone = self._clone_of(tmp_path, {"origin": "https://github.com/user/repo.git"})
+        slot_git.configure_slot_remotes(clone, canonical)
+        pushed = subprocess.run(["git", "-C", str(clone), "push", "origin", "HEAD"],
+                                capture_output=True, text=True)
+        assert pushed.returncode != 0
+        assert "origin" in pushed.stderr
 
 
 

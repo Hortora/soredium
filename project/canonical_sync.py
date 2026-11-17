@@ -502,6 +502,35 @@ def ahead_of_canonical(repo: Path | str, branch: str) -> int:
     return int(count) if count.isdigit() else 0
 
 
+def reference(repo: Path | str) -> tuple[str, str]:
+    """What `repo`'s base branch is measured against: (ref, kind).
+
+    A slot clone is measured against its canonical repo on disk
+    ("local/<base>", "canonical"); the tracking ref is refreshed first, because
+    a stale one reports commits that have in fact landed. A canonical repo is
+    measured against its remote as last fetched ("<remote>/<base>", "remote").
+    ("", "") when there is nothing to measure against.
+
+    Being ahead means different things. A clone ahead of canonical holds work
+    that has not landed. A canonical repo ahead of its remote holds landed work
+    awaiting publish, which is a normal state, not a fault.
+    """
+    repo = Path(repo)
+    try:
+        canon = locate(repo)
+    except SyncError:
+        return "", ""
+    if not _same_store(repo, canon):
+        git(repo, "fetch", "-q", "local")
+        ref = f"local/{canon.base}"
+        return (ref, "canonical") if _sha(repo, f"refs/remotes/{ref}") else ("", "")
+    if canon.blessed:
+        ref = f"{canon.blessed}/{canon.base}"
+        if _sha(canon.repo, f"refs/remotes/{ref}"):
+            return ref, "remote"
+    return "", ""
+
+
 def unpublished(canon: Canonical) -> int:
     """Commits on canonical's base branch that the blessed remote, as last fetched, lacks."""
     if not canon.blessed:

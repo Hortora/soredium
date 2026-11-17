@@ -1057,7 +1057,12 @@ def remove_slot(family_root: Path, slot_num: int, force: bool = False,
 
 
 def migrate_remotes(family_root: Path) -> int:
-    """Add GitHub remotes + updateInstead to all active (non-archived) slots."""
+    """Give every active slot clone that lacks one a `local` remote naming its canonical
+    repo, and no GitHub remote. Returns how many clones were changed.
+
+    For clones made before slots carried `local`. Clones that still hold GitHub
+    remotes alongside `local` are handled by `scripts/slot_backup_setup.py detach`,
+    which backs their branches up into canonical first."""
     migrated = 0
     for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
         slots_dir = family_root / dir_name
@@ -1073,8 +1078,10 @@ def migrate_remotes(family_root: Path) -> int:
                 if rc == 0:
                     continue
                 canonical = resolve_canonical_repo(clone)
-                result = configure_slot_remotes(clone, canonical)
-                if result["origin"]:
+                configure_slot_remotes(clone, canonical)
+                rc, _, _ = run_cmd(
+                    ["git", "-C", str(clone), "remote", "get-url", "local"])
+                if rc == 0:
                     migrated += 1
                 configure_update_instead(canonical)
     print(f"MIGRATED={migrated}")

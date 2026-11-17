@@ -113,8 +113,11 @@ def resolve_canonical_repo(repo_path: Path) -> Path:
 
 
 def _get_clone_origin(clone_path: Path) -> str | None:
-    """Get the origin URL of a git clone, or None if not a git repo."""
-    rc, stdout, _ = run_cmd(["git", "-C", str(clone_path), "remote", "get-url", "origin"])
+    """Where a clone came from: its `local` remote (the canonical repo), or `origin`
+    for a clone made before slots stopped carrying one. None if not a git repo."""
+    rc, stdout, _ = run_cmd(["git", "-C", str(clone_path), "remote", "get-url", "local"])
+    if rc != 0 or not stdout.strip():
+        rc, stdout, _ = run_cmd(["git", "-C", str(clone_path), "remote", "get-url", "origin"])
     return stdout.strip() if rc == 0 else None
 
 

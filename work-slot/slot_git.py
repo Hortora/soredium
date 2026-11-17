@@ -25,36 +25,35 @@ except ImportError:
 
 
 def configure_slot_remotes(clone_path: Path, canonical_path: Path) -> dict[str, str]:
-    """Reconfigure clone remotes: local=clone-source, origin=fork, upstream=blessed."""
-    if _detect_topology is None:
-        return {"origin": "", "upstream": "", "local": str(canonical_path)}
+    """Give a fresh slot clone one remote: `local`, its canonical repo.
 
-    fork_remote, blessed_remote = _detect_topology(str(canonical_path))
-    if not fork_remote:
-        return {"origin": "", "upstream": "", "local": str(canonical_path)}
+    A slot never talks to GitHub. Work reaches the canonical repo with `work
+    end`, and only the canonical repo publishes (Landing Rules), so a clone has
+    no `origin` or `upstream`: there is nowhere for a stray push to go. The
+    clone's base branch tracks `local/<base>`.
 
-    rc, fork_url, _ = run_cmd(
-        ["git", "-C", str(canonical_path), "remote", "get-url", fork_remote])
-    if rc != 0:
-        return {"origin": "", "upstream": "", "local": str(canonical_path)}
-    fork_url = fork_url.strip()
-
-    run_cmd(["git", "-C", str(clone_path), "remote", "rename", "origin", "local"])
-    run_cmd(["git", "-C", str(clone_path), "remote", "add", "origin", fork_url])
-    run_cmd(["git", "-C", str(clone_path), "fetch", "origin"])
-    run_cmd(["git", "-C", str(clone_path), "branch",
-             "--set-upstream-to=origin/main", "main"])
-
-    upstream_url = ""
-    if blessed_remote:
-        rc, blessed_url, _ = run_cmd(
-            ["git", "-C", str(canonical_path), "remote", "get-url", blessed_remote])
+    Returns {"local": <canonical path>, "origin": "", "upstream": ""}; the two
+    empty keys are kept for callers that still read them.
+    """
+    rc, existing, _ = run_cmd(["git", "-C", str(clone_path), "remote"])
+    names = existing.split() if rc == 0 else []
+    if "local" not in names and "origin" in names:
+        run_cmd(["git", "-C", str(clone_path), "remote", "rename", "origin", "local"])
+    elif "local" not in names:
+        run_cmd(["git", "-C", str(clone_path), "remote", "add", "local", str(canonical_path)])
+    rc, existing, _ = run_cmd(["git", "-C", str(clone_path), "remote"])
+    for stray in ("origin", "upstream"):
+        if rc == 0 and stray in existing.split():
+            run_cmd(["git", "-C", str(clone_path), "remote", "remove", stray])
+    run_cmd(["git", "-C", str(clone_path), "fetch", "-q", "local"])
+    for base in ("main", "master"):
+        rc, _, _ = run_cmd(["git", "-C", str(clone_path), "rev-parse", "--verify", "-q",
+                            f"refs/heads/{base}"])
         if rc == 0:
-            upstream_url = blessed_url.strip()
-            run_cmd(["git", "-C", str(clone_path), "remote", "add",
-                     "upstream", upstream_url])
-
-    return {"origin": fork_url, "upstream": upstream_url, "local": str(canonical_path)}
+            run_cmd(["git", "-C", str(clone_path), "branch",
+                     f"--set-upstream-to=local/{base}", base])
+            break
+    return {"origin": "", "upstream": "", "local": str(canonical_path)}
 
 
 def configure_update_instead(canonical_path: Path) -> None:

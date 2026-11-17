@@ -46,12 +46,20 @@ def find_slot_by_branch(family_root: Path, branch: str) -> tuple[int, bool] | No
 
 
 def get_repo_stats(repo_path: Path) -> dict:
+    """Commits and diff size of a slot repo's work, measured against its canonical repo."""
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    import canonical_sync
+    ref, _ = canonical_sync.reference(repo_path)
+    if not ref:
+        return {"commits": 0, "diff": ""}
     rc, log_out, _ = run_cmd(
-        ["git", "-C", str(repo_path), "log", "--oneline", "origin/main..HEAD"]
+        ["git", "-C", str(repo_path), "log", "--oneline", f"{ref}..HEAD"]
     )
     commits = len(log_out.strip().splitlines()) if rc == 0 and log_out.strip() else 0
     rc, stat_out, _ = run_cmd(
-        ["git", "-C", str(repo_path), "diff", "--shortstat", "origin/main..HEAD"]
+        ["git", "-C", str(repo_path), "diff", "--shortstat", f"{ref}..HEAD"]
     )
     diff = stat_out.strip() if rc == 0 else ""
     return {"commits": commits, "diff": diff}

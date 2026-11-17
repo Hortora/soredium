@@ -176,5 +176,103 @@ class TestRemotes:
         assert lines(capsys)[-1] == "SUMMARY=no workspace repos"
 
 
+class TestDetach:
+    """Existing slot clones lose their GitHub remotes, after their branches are safe in canonical."""
+
+    def _slot(self, tmp_path):
+        root = tmp_path / "family"
+        canon = init(root / "engine")
+        slot = root / "slots" / "7"
+        slot.mkdir(parents=True)
+        (slot / ".slot").write_text("# Slot 7\n")
+        clone = slot / "engine"
+        subprocess.run(["git", "clone", "-q", str(canon), str(clone)], capture_output=True, check=True)
+        g(clone, "config", "user.name", "T")
+        g(clone, "config", "user.email", "t@t")
+        g(clone, "remote", "rename", "origin", "local")
+        g(clone, "remote", "add", "origin", "https://tok3n@github.com/me/engine.git")
+        g(clone, "remote", "add", "upstream", "https://github.com/org/engine.git")
+        g(clone, "checkout", "-q", "-b", "issue-1")
+        (clone / "work.txt").write_text("work\n")
+        g(clone, "add", ".")
+        g(clone, "commit", "-q", "-m", "feat: work")
+        return root, canon, clone
+
+    def test_dry_run_lists_and_changes_nothing(self, tmp_path, capsys):
+        root, canon, clone = self._slot(tmp_path)
+
+        assert setup.main(["detach", str(root)]) == 0
+
+        out = capsys.readouterr().out
+        assert "DETACH=7/engine remove origin; remove upstream branches=2" in out
+        assert "tok3n" not in out
+        assert sorted(g(clone, "remote").split()) == ["local", "origin", "upstream"]
+
+    def test_apply_backs_up_every_branch_then_removes_the_remotes(self, tmp_path, capsys):
+        root, canon, clone = self._slot(tmp_path)
+        tip = g(clone, "rev-parse", "issue-1")
+
+        assert setup.main(["detach", str(root), "--apply"]) == 0
+
+        assert g(clone, "remote").split() == ["local"]
+        assert g(canon, "rev-parse", "refs/backup/7/issue-1") == tip
+        assert g(canon, "rev-parse", "refs/backup/7/main") == g(clone, "rev-parse", "main")
+        assert g(clone, "rev-parse", "issue-1") == tip                  # the work is untouched
+        assert g(clone, "rev-parse", "--abbrev-ref", "main@{upstream}") == "local/main"
+        assert "DETACHED=7/engine" in capsys.readouterr().out
+
+    def test_nothing_is_removed_when_a_branch_cannot_be_backed_up(self, tmp_path, capsys, monkeypatch):
+        root, canon, clone = self._slot(tmp_path)
+
+        def refuse(repo, branch):
+            raise setup.canonical_sync.SyncError("backup_failed", "disk full")
+
+        monkeypatch.setattr(setup.canonical_sync, "backup", refuse)
+
+        setup.main(["detach", str(root), "--apply"])
+
+        assert sorted(g(clone, "remote").split()) == ["local", "origin", "upstream"]
+        assert "BACKUP_FAILED=7/engine" in capsys.readouterr().out
+
+    def test_origin_that_is_the_canonical_path_becomes_local(self, tmp_path, capsys):
+        root = tmp_path / "family"
+        canon = init(root / "wsp-notes")
+        slot = root / "slots" / "7"
+        slot.mkdir(parents=True)
+        clone = slot / "wsp-notes"
+        subprocess.run(["git", "clone", "-q", str(canon), str(clone)], capture_output=True, check=True)
+
+        setup.main(["detach", str(root), "--apply"])
+
+        assert g(clone, "remote").split() == ["local"]
+        assert Path(g(clone, "remote", "get-url", "local")).resolve() == canon.resolve()
+        assert "DETACHED=7/wsp-notes rename origin->local" in capsys.readouterr().out
+
+    def test_non_github_remotes_and_local_paths_are_kept(self, tmp_path, capsys):
+        root, canon, clone = self._slot(tmp_path)
+        g(clone, "remote", "add", "hub", "isx://hub/home/agent/engine")
+        g(clone, "remote", "add", "sibling", str(canon))
+
+        setup.main(["detach", str(root), "--apply"])
+
+        assert sorted(g(clone, "remote").split()) == ["hub", "local", "sibling"]
+
+    def test_clone_with_no_way_to_name_canonical_is_left_alone(self, tmp_path, capsys):
+        root, canon, clone = self._slot(tmp_path)
+        g(clone, "remote", "remove", "local")
+
+        setup.main(["detach", str(root), "--apply"])
+
+        assert sorted(g(clone, "remote").split()) == ["origin", "upstream"]
+        assert "NO_CANONICAL=7/engine" in capsys.readouterr().out
+
+    def test_running_again_finds_nothing_to_do(self, tmp_path, capsys):
+        root, canon, clone = self._slot(tmp_path)
+        setup.main(["detach", str(root), "--apply"])
+        capsys.readouterr()
+        setup.main(["detach", str(root), "--apply"])
+        assert capsys.readouterr().out.splitlines()[-1] == "SUMMARY=OK:1"
+
+
 def test_usage_error():
     assert setup.main(["hooks"]) == 2
