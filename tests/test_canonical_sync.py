@@ -139,6 +139,31 @@ class TestLocate:
         found = cs.locate(fam.canon)
         assert (found.blessed, found.mirror) == ("", "")
 
+    def test_origin_with_a_fork_publishes_to_origin_and_mirrors_to_fork(self, fam):
+        g(fam.canon, "remote", "rename", "upstream", "hub-main")
+        g(fam.canon, "remote", "rename", "origin", "fork")
+        g(fam.canon, "remote", "rename", "hub-main", "origin")
+        g(fam.canon, "remote", "add", "slot207", str(fam.slot))
+        found = cs.locate(fam.slot)
+        assert (found.blessed, found.mirror) == ("origin", "fork")
+
+    def test_slot_clone_without_a_local_remote_is_refused(self, fam):
+        g(fam.slot, "remote", "remove", "local")
+        with pytest.raises(SyncError) as raised:
+            cs.locate(fam.slot)
+        assert raised.value.code == "no_canonical"
+
+    def test_local_remote_that_is_not_a_repo_is_refused(self, fam):
+        g(fam.slot, "remote", "set-url", "local", str(fam.root))
+        with pytest.raises(SyncError) as raised:
+            cs.land(fam.slot, "feat")
+        assert raised.value.code == "no_canonical"
+
+    def test_command_line_reports_a_missing_canonical(self, fam, capsys):
+        g(fam.slot, "remote", "remove", "local")
+        assert cs.main(["status", str(fam.slot)]) == 1
+        assert "ERROR=no_canonical" in capsys.readouterr().out
+
     def test_linked_worktree_of_canonical(self, fam):
         tree = fam.root / "linked"
         g(fam.canon, "worktree", "add", "-q", "-b", "side", str(tree))

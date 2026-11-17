@@ -523,3 +523,27 @@ class TestLandsOnDiskOnly:
         assert failed
         assert _git(proj, "branch", "--show-current").stdout.strip() == "other-work"
         assert not (proj / ".git" / "rebase-merge").exists()
+
+    def test_slot_clone_with_no_canonical_is_refused_before_anything_changes(self, repos, tmp_path):
+        proj, ws = repos
+        slot = tmp_path / "slot"
+        slot.mkdir()
+        (slot / ".slot").write_text("# Slot\n")
+        clone = slot / "project"
+        subprocess.run(["git", "clone", "-q", str(proj), str(clone)],
+                       capture_output=True, check=True)
+        _git(clone, "config", "user.email", "test@test.com")
+        _git(clone, "config", "user.name", "Test")
+        _git(clone, "remote", "remove", "origin")
+        _branch(clone, "issue-1-a", {"a.txt": "a", ".close-state": "x"})
+        tip = _git(clone, "rev-parse", "issue-1-a").stdout.strip()
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+
+        with patch("close.discover_repo_topology") as m, \
+             patch("close._detect_slot_root", return_value=None):
+            m.return_value = [(clone, "main", "two-hop", None, "origin", "")]
+            result = close(ws)
+
+        assert not result.success
+        assert any("no `local` remote" in e for e in result.errors)
+        assert _git(clone, "rev-parse", "issue-1-a").stdout.strip() == tip

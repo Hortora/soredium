@@ -109,17 +109,36 @@ def _base_branch(repo: Path) -> str:
     return "main"
 
 
+def _is_repo(path: Path) -> bool:
+    return path.is_dir() and git(path, "rev-parse", "--git-dir").returncode == 0
+
+
 def locate(repo: Path | str) -> Canonical:
     """Find the canonical repo behind `repo` and where it publishes.
 
     A slot clone names its canonical repo with a `local` remote. Anything else
     (a canonical checkout, or one of its linked worktrees) is canonical itself.
+    A clone inside a slot with no usable `local` remote is an error: treating
+    it as its own canonical would "land" work that never leaves the slot.
+
+    Remotes, by the two conventions in use: `upstream` is published to and
+    `origin` mirrors it; otherwise `origin` is published to and `fork`, when
+    present, mirrors it.
     """
     repo = Path(repo)
     canonical = repo
     url = _out(repo, "remote", "get-url", "local")
-    if url and Path(url).is_dir():
+    if url:
+        if not _is_repo(Path(url)):
+            raise SyncError(
+                "no_canonical",
+                f"{repo.name}: its `local` remote names {url}, which is not a git repo")
         canonical = Path(url).resolve()
+    elif (repo.parent / ".slot").exists():
+        raise SyncError(
+            "no_canonical",
+            f"{repo.name}: a slot clone with no `local` remote; it cannot say which "
+            f"canonical repo its work lands in")
     else:
         common = _git_dir(repo, "--git-common-dir")
         if common.name == ".git":
@@ -128,7 +147,7 @@ def locate(repo: Path | str) -> Canonical:
     if "upstream" in remotes:
         blessed, mirror = "upstream", ("origin" if "origin" in remotes else "")
     elif "origin" in remotes:
-        blessed, mirror = "origin", ""
+        blessed, mirror = "origin", ("fork" if "fork" in remotes else "")
     else:
         blessed, mirror = "", ""
     return Canonical(canonical, _base_branch(canonical), blessed, mirror)

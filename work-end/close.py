@@ -363,6 +363,11 @@ def preflight(targets: list[CloseTarget]) -> dict:
             errors.append(f"{t.repo.name}: uncommitted changes")
         if not _branch_exists(t.repo, t.base_branch):
             errors.append(f"{t.repo.name}: no {t.base_branch} branch")
+        try:
+            canonical_sync.locate(t.repo)
+        except SyncError as error:
+            # Refused before anything is touched: the work would have nowhere to land.
+            errors.append(error.detail)
         if not _remote_reachable(t.repo, t.push_target):
             pass
 
