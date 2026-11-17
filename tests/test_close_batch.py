@@ -357,7 +357,7 @@ class TestLocalBaseAheadOfRemote:
         assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1"]
         assert _git(proj, "show", "main:local-only.txt").stdout == "x"
 
-    def test_remote_ahead_of_local_main_still_lands(self, repos, tmp_path):
+    def test_remote_ahead_of_local_main_lands_without_fetching_it(self, repos, tmp_path):
         proj, ws = repos
         bare = _with_remote(tmp_path, proj)
         _branch(proj, "b1", {"one.txt": "1"})
@@ -373,12 +373,13 @@ class TestLocalBaseAheadOfRemote:
 
         result = _close(proj, ws)
 
+        # Landing is on disk: the remote's new commit arrives when publishing, not here.
         assert result.success, result.errors
-        assert _git(proj, "show", "main:remote-only.txt").stdout == "r"
         assert _git(proj, "show", "main:one.txt").stdout == "1"
-        assert _merge_commits(proj, "HEAD~2") == 0
+        assert _git(proj, "show", "main:remote-only.txt", check=False).returncode != 0
+        assert _merge_commits(proj, "HEAD~1") == 0
 
-    def test_diverged_local_and_remote_base_is_refused_untouched(self, repos, tmp_path):
+    def test_diverged_local_and_remote_base_lands_then_publish_settles_it(self, repos, tmp_path):
         proj, ws = repos
         bare = _with_remote(tmp_path, proj)
         _branch(proj, "b1", {"one.txt": "1"})
@@ -396,12 +397,20 @@ class TestLocalBaseAheadOfRemote:
         pre = _main(proj)
         _queue(ws, [("R#1", "b1")])
 
-        with pytest.raises(RuntimeError, match="diverged"):
-            _close(proj, ws)
+        result = _close(proj, ws)
 
-        assert _main(proj) == pre
-        assert _state(ws)["R#1"] == (False, False, "b1")
-        assert _git(proj, "branch", "--show-current").stdout.strip() == "main"
+        # Landing does not look at the remote; publishing puts the unpublished
+        # commits on top of what the remote gained.
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1"]
+        import canonical_sync
+        published = canonical_sync.publish_base(proj)
+        assert published.rebased == 2
+        assert _git(proj, "show", "main:remote-only.txt").stdout == "r"
+        assert _git(proj, "show", "main:local-only.txt").stdout == "x"
+        assert _git(proj, "show", "main:one.txt").stdout == "1"
+        assert _git(bare, "rev-parse", "main").stdout.strip() == _main(proj)
+        assert _git(proj, "rev-list", "--merges", "--count", "main").stdout.strip() == "0"
 
 
 class TestLandsOnDiskOnly:

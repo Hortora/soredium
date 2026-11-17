@@ -186,12 +186,25 @@ After `ACTION=complete`:
    python3 ~/.claude/skills/project/canonical_sync.py publish <canonical repo>
    ```
 
-   Read the output: `PUBLISHED=<remote>` and `PUSHED=<N>` on success;
-   `MIRRORED=failed` with a `WARN=` line means the main remote has the work
-   and only the mirror is behind. `ERROR=diverged` means the remote moved
-   while canonical held unpublished commits: stop and tell the user; do not
-   force, reset or rebase the base branch. On no, say the commits stay on
-   disk and can be published later with the same command.
+   Publishing fetches the main remote, puts canonical's unpublished commits
+   on top of it if it moved, pushes them to the fork as the branch
+   `publish/<base>`, pushes to the main remote (never forced), and lets the
+   fork's base branch follow. Read the output:
+   - `PUBLISHED=<remote>` and `PUSHED=<N>`: done. `REBASED=<N>` above zero
+     means the remote had moved and N unpublished commits were replayed on
+     top of it; say so. `STAGED=failed` or `MIRRORED=failed`, each with a
+     `WARN=` line, mean the main remote has the work and only the fork is
+     behind.
+   - `ERROR=rebase_conflict`: the unpublished commits conflict with what the
+     remote gained. Nothing was changed. Tell the user which files; do not
+     force, reset or rebase the base branch yourself.
+   - `ERROR=rebase_refused`: the base branch's checkout in the canonical
+     repo has uncommitted changes. Nothing was changed. Tell the user.
+   - `ERROR=fetch_failed` or `ERROR=publish_failed`: the remote could not
+     be reached. The commits stay landed on disk; publish again later.
+
+   On no, say the commits stay on disk and can be published later with the
+   same command.
    `canonical_sync.py status <repo>` prints `UNPUBLISHED=<N>` at any time.
    Never push with `git push` from a slot or a feature branch.
 

@@ -509,17 +509,105 @@ class TestPublish:
         assert canon_state(fam.canon) == before
         assert fam.remote_main(fam.blessed) == before[0]
 
-    def test_remote_moved_since_landing_is_a_divergence_and_nothing_is_forced(self, fam):
+    def test_fork_gets_the_work_first_as_a_branch(self, fam, monkeypatch):
+        cs.land(fam.slot, "feat")
+        tip = sha(fam.canon, "refs/heads/main")
+        mirror_main = fam.remote_main(fam.mirror)
+
+        def blessed_refuses(canon):
+            raise SyncError("publish_failed", "blessed is down")
+
+        monkeypatch.setattr(cs, "_push_base", blessed_refuses)
+        with pytest.raises(SyncError):
+            cs.publish_base(fam.canon)
+
+        assert sha(fam.mirror, "refs/heads/publish/main") == tip     # off the machine already
+        assert fam.remote_main(fam.mirror) == mirror_main             # fork main only follows
+        assert fam.remote_main(fam.blessed) != tip
+
+    def test_publish_reports_where_it_staged(self, fam):
+        cs.land(fam.slot, "feat")
+        result = cs.publish_base(fam.canon)
+        assert result.staged == "origin/publish/main"
+        assert sha(fam.mirror, "refs/heads/publish/main") == result.sha
+        assert result.rebased == 0
+
+    def test_remote_moved_since_landing_rebases_only_the_unpublished_commits(self, fam):
         cs.land(fam.slot, "feat")
         theirs = fam.someone_else_pushes({"e.txt": "e1\n"})
-        before = canon_state(fam.canon)
+
+        result = cs.publish_base(fam.canon)
+
+        assert result.rebased == 2 and result.pushed == 2
+        g(fam.blessed, "merge-base", "--is-ancestor", theirs, "main")
+        assert g(fam.blessed, "log", "--format=%s", "-3", "main").splitlines() == [
+            "feat: add d", "feat: change a, add c", "other work"]
+        tip = sha(fam.canon, "refs/heads/main")
+        assert tip == fam.remote_main(fam.blessed) == fam.remote_main(fam.mirror)
+        assert sha(fam.mirror, "refs/heads/publish/main") == tip
+        assert merges(fam.canon) == 0
+        assert (fam.canon / "e.txt").read_text() == "e1\n"
+        assert g(fam.canon, "status", "--porcelain") == ""
+
+    def test_rebase_at_publish_leaves_a_canonical_checkout_on_another_branch_alone(self, fam):
+        cs.land(fam.slot, "feat")
+        fam.someone_else_pushes({"e.txt": "e1\n"})
+        on_dirty_work_branch(fam.canon)
+        _, head, status = canon_state(fam.canon)
+
+        result = cs.publish_base(fam.canon)
+
+        assert result.rebased == 2
+        assert canon_state(fam.canon) == (fam.remote_main(fam.blessed), head, status)
+        assert len(g(fam.canon, "worktree", "list").splitlines()) == 1
+
+    def test_conflict_with_the_moved_remote_refuses_and_changes_nothing(self, fam):
+        cs.land(fam.slot, "feat")
+        theirs = fam.someone_else_pushes({"a.txt": "theirs\n"})
+        main_before = sha(fam.canon, "refs/heads/main")
 
         with pytest.raises(SyncError) as raised:
             cs.publish_base(fam.canon)
 
-        assert raised.value.code == "diverged"
+        assert raised.value.code == "rebase_conflict"
+        assert "a.txt" in raised.value.detail
+        assert sha(fam.canon, "refs/heads/main") == main_before
         assert fam.remote_main(fam.blessed) == theirs
-        assert canon_state(fam.canon) == before
+        assert g(fam.canon, "status", "--porcelain") == ""
+        assert not (fam.canon / ".git" / "rebase-merge").exists()
+
+    def test_uncommitted_changes_on_the_base_checkout_refuse_the_rebase(self, fam):
+        cs.land(fam.slot, "feat")
+        theirs = fam.someone_else_pushes({"e.txt": "e1\n"})
+        (fam.canon / "b.txt").write_text("uncommitted\n")
+        main_before = sha(fam.canon, "refs/heads/main")
+
+        with pytest.raises(SyncError) as raised:
+            cs.publish_base(fam.canon)
+
+        assert raised.value.code == "rebase_refused"
+        assert sha(fam.canon, "refs/heads/main") == main_before
+        assert (fam.canon / "b.txt").read_text() == "uncommitted\n"
+        assert fam.remote_main(fam.blessed) == theirs
+
+    def test_commits_already_upstream_under_new_shas_drop_out(self, fam):
+        """What a rebase-merged pull request leaves: the same changes, different SHAs."""
+        cs.land(fam.slot, "feat")
+        other = fam.root / "merger"
+        subprocess.run(["git", "clone", "-q", str(fam.blessed), str(other)],
+                       capture_output=True, check=True)
+        g(other, "fetch", "-q", str(fam.canon), "main")
+        g(other, "-c", "user.name=Merger", "-c", "user.email=m@m",
+          "cherry-pick", "HEAD..FETCH_HEAD")
+        g(other, "push", "-q", "origin", "HEAD:main")
+        upstream = fam.remote_main(fam.blessed)
+        assert upstream != sha(fam.canon, "refs/heads/main")
+
+        result = cs.publish_base(fam.canon)
+
+        assert sha(fam.canon, "refs/heads/main") == upstream == fam.remote_main(fam.blessed)
+        assert result.pushed == 0
+        assert merges(fam.canon) == 0
 
     def test_remote_ahead_with_nothing_local_just_catches_canonical_up(self, fam):
         theirs = fam.someone_else_pushes({"e.txt": "e1\n"})
@@ -535,8 +623,8 @@ class TestPublish:
 
         result = cs.publish_base(fam.canon)
 
-        assert (result.published, result.mirrored) == ("upstream", "failed")
-        assert "mirror" in result.warnings[0]
+        assert (result.published, result.staged, result.mirrored) == ("upstream", "failed", "failed")
+        assert len(result.warnings) == 2
         assert fam.remote_main(fam.blessed) == sha(fam.canon, "refs/heads/main")
 
     def test_blessed_unreachable_is_an_error_and_nothing_changes(self, fam):
@@ -569,14 +657,15 @@ class TestPublish:
         assert cs.main(["publish", str(fam.slot)]) == 0
         out = capsys.readouterr().out
         assert "PUBLISHED=upstream" in out and "PUSHED=2" in out and "MIRRORED=origin" in out
+        assert "STAGED=origin/publish/main" in out and "REBASED=0" in out
         assert fam.remote_main(fam.blessed) == sha(fam.canon, "refs/heads/main")
 
-    def test_command_line_reports_a_divergence_as_an_error(self, fam, capsys):
+    def test_command_line_reports_a_conflict_as_an_error(self, fam, capsys):
         cs.land(fam.slot, "feat")
-        fam.someone_else_pushes({"e.txt": "e1\n"})
+        fam.someone_else_pushes({"a.txt": "theirs\n"})
 
         assert cs.main(["publish", str(fam.canon)]) == 1
-        assert "ERROR=diverged" in capsys.readouterr().out
+        assert "ERROR=rebase_conflict" in capsys.readouterr().out
 
 
 class TestLandAll:

@@ -15,8 +15,18 @@ branch, on disk. It never touches the network:
   advance  canonical's base branch fast-forwards to the held ref
 
 Publishing (`publish_base`, or `canonical_sync.py publish <repo>`) is a step of
-its own: canonical's base branch is pushed to the blessed remote with a plain
-push, then to the mirror. Between the two, canonical is ahead of the remote.
+its own, and the only one that uses the network:
+
+  fetch    the blessed remote's base branch
+  settle   canonical base fast-forwards to it; or, when canonical holds commits
+           of its own and the remote has moved, those unpublished commits are
+           rebased onto the remote's (nothing anyone else has is rewritten)
+  stage    canonical base is pushed to the fork as the branch publish/<base>
+  publish  plain push to the blessed remote's base branch; never forced
+  mirror   the fork's base branch follows the blessed remote's
+
+The fork gets the work first and as a branch, which is what a pull request
+needs; when publishing moves to pull requests only the publish step changes.
 
 Canonical may be mid-work. Nothing here stashes, resets or checks out in a
 canonical repo, and the only rebase it ever aborts is one it started itself.
@@ -37,6 +47,7 @@ from typing import Iterator, Optional
 from git_util import git
 
 LANDING_REF = "refs/landing"
+STAGING_BRANCH = "publish"
 BACKUP_REF = "refs/backup"
 PUBLISH_ATTEMPTS = 3
 LOCK_TIMEOUT = 120.0
@@ -76,7 +87,9 @@ class PublishResult:
     repo: Path
     sha: str = ""
     pushed: int = 0             # commits the blessed remote gained
+    rebased: int = 0            # unpublished commits rewritten onto a remote that had moved
     published: str = "none"     # blessed remote name, or "none" when the repo has no remote
+    staged: str = "none"        # "<fork>/publish/<base>", "none", or "failed"
     mirrored: str = "none"      # mirror remote name, "none", or "failed"
     warnings: list[str] = field(default_factory=list)
 
@@ -273,27 +286,30 @@ def advance(canon: Canonical, ref: str) -> None:
             f"{result.stderr.strip()}")
 
 
-def sync_base(canon: Canonical) -> str:
-    """Bring canonical's base branch up to the blessed remote. Returns base's SHA.
-
-    Canonical ahead of the remote is fine: those commits are published with the
-    next landing. Canonical and the remote each holding commits the other lacks
-    is a divergence, and nothing is changed.
-    """
-    local_ref = f"refs/heads/{canon.base}"
-    if not canon.blessed:
-        return _sha(canon.repo, local_ref)
+def _fetch_blessed(canon: Canonical) -> str:
+    """Fetch the blessed remote's base branch. Returns its SHA, "" if it has none yet."""
     fetched = git(canon.repo, "fetch", "-q", canon.blessed, canon.base,
                   timeout=_NETWORK_TIMEOUT)
-    remote_ref = f"refs/remotes/{canon.blessed}/{canon.base}"
-    remote = _sha(canon.repo, remote_ref)
     if fetched.returncode != 0:
         if "couldn't find remote ref" in fetched.stderr.lower():
-            return _sha(canon.repo, local_ref)     # the remote has no base branch yet
+            return ""
         raise SyncError(
             "fetch_failed",
             f"{canon.repo.name}: cannot fetch {canon.base} from {canon.blessed}: "
             f"{fetched.stderr.strip()}")
+    return _sha(canon.repo, f"refs/remotes/{canon.blessed}/{canon.base}")
+
+
+def sync_base(canon: Canonical) -> str:
+    """Fast-forward canonical's base branch to the blessed remote. Returns base's SHA.
+
+    Canonical ahead of the remote is left alone. Each holding commits the other
+    lacks is a divergence: nothing is changed (`settle_base` is what resolves it).
+    """
+    local_ref = f"refs/heads/{canon.base}"
+    if not canon.blessed:
+        return _sha(canon.repo, local_ref)
+    remote = _fetch_blessed(canon)
     local = _sha(canon.repo, local_ref)
     if not remote or remote == local or (local and _is_ancestor(canon.repo, remote, local)):
         return local
@@ -301,9 +317,35 @@ def sync_base(canon: Canonical) -> str:
         raise SyncError(
             "diverged",
             f"{canon.repo.name}: local {canon.base} and {canon.blessed}/{canon.base} "
-            f"have diverged; resolve it by hand, landing cannot")
-    advance(canon, remote_ref)
+            f"have diverged")
+    advance(canon, f"refs/remotes/{canon.blessed}/{canon.base}")
     return remote
+
+
+def settle_base(canon: Canonical) -> int:
+    """Make canonical's base branch sit on top of the blessed remote's. Publishing only.
+
+    Fast-forwards when canonical has nothing of its own. When it has, and the
+    remote moved, its unpublished commits are rebased onto the remote's and the
+    count is returned. Only commits no remote holds are rewritten. Refuses, with
+    nothing changed, on a conflict or when the base branch's checkout has
+    uncommitted changes to tracked files.
+    """
+    remote = _fetch_blessed(canon)
+    local = _sha(canon.repo, f"refs/heads/{canon.base}")
+    if not remote or remote == local or _is_ancestor(canon.repo, remote, local):
+        return 0
+    remote_ref = f"refs/remotes/{canon.blessed}/{canon.base}"
+    if _is_ancestor(canon.repo, local, remote):
+        advance(canon, remote_ref)
+        return 0
+    busy = _base_being_rebased(canon)
+    if busy:
+        raise SyncError(
+            "base_busy", f"{canon.repo.name}: {canon.base} is being rebased in {busy}")
+    count = _out(canon.repo, "rev-list", "--count", f"{remote}..{local}")
+    _rebase_where_checked_out(canon.repo, canon.base, remote, f"{canon.blessed}/{canon.base}")
+    return int(count) if count.isdigit() else 0
 
 
 def _onto(repo: Path, canon: Canonical) -> str:
@@ -363,6 +405,27 @@ def checked_out(repo: Path | str, branch: str) -> Iterator[Path]:
         git(repo, "worktree", "prune")
 
 
+def _rebase_where_checked_out(repo: Path, branch: str, onto: str, onto_name: str) -> None:
+    """Rebase `branch` onto `onto` without switching any existing checkout.
+
+    A conflict aborts the rebase this call started; the branch is left as it was.
+    """
+    with checked_out(repo, branch) as worktree:
+        result = git(worktree, "rebase", "-q", onto, timeout=_NETWORK_TIMEOUT)
+        if result.returncode != 0:
+            if _rebase_in_progress(worktree) is not None:
+                files = _conflicted(worktree)
+                git(worktree, "rebase", "--abort")      # the rebase this call started
+                raise SyncError(
+                    "rebase_conflict",
+                    f"{repo.name}: {branch} conflicts with {onto_name} in "
+                    f"{', '.join(files) or 'unknown files'}")
+            raise SyncError(
+                "rebase_refused",
+                f"{repo.name}: {branch} could not be rebased: "
+                f"{(result.stderr or result.stdout).strip()}")
+
+
 def rebase(repo: Path | str, branch: str, canon: Optional[Canonical] = None) -> str:
     """Rebase `branch` onto canonical's base branch. Returns the new tip.
 
@@ -380,20 +443,7 @@ def rebase(repo: Path | str, branch: str, canon: Optional[Canonical] = None) -> 
         raise SyncError("no_base", f"{canon.repo.name}: no {canon.base} branch")
     if _is_ancestor(repo, onto, tip):
         return tip
-    with checked_out(repo, branch) as worktree:
-        result = git(worktree, "rebase", "-q", onto, timeout=_NETWORK_TIMEOUT)
-        if result.returncode != 0:
-            if _rebase_in_progress(worktree) is not None:
-                files = _conflicted(worktree)
-                git(worktree, "rebase", "--abort")      # the rebase this call started
-                raise SyncError(
-                    "rebase_conflict",
-                    f"{repo.name}: {branch} conflicts with {canon.base} in "
-                    f"{', '.join(files) or 'unknown files'}")
-            raise SyncError(
-                "rebase_refused",
-                f"{repo.name}: {branch} could not be rebased: "
-                f"{(result.stderr or result.stdout).strip()}")
+    _rebase_where_checked_out(repo, branch, onto, canon.base)
     return _sha(repo, f"refs/heads/{branch}")
 
 
@@ -470,12 +520,23 @@ def _push_base(canon: Canonical) -> None:
         f"{canon.repo.name}: push to {canon.blessed} failed: {result.stderr.strip()}")
 
 
-def publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> PublishResult:
-    """Publish canonical's base branch: the standalone step after one or more landings.
+def _stage_on_fork(canon: Canonical) -> str:
+    """Push canonical's base branch to the fork as publish/<base>. A branch of our own
+    on our own fork, so it may be overwritten when publishing rebases."""
+    if not canon.mirror:
+        return "none"
+    target = f"{STAGING_BRANCH}/{canon.base}"
+    result = git(canon.repo, "push", "-q", canon.mirror,
+                 f"+refs/heads/{canon.base}:refs/heads/{target}", timeout=_NETWORK_TIMEOUT)
+    return f"{canon.mirror}/{target}" if result.returncode == 0 else "failed"
 
-    Syncs first, so a remote that moved is fast-forwarded in when canonical has
-    nothing of its own, and reported as `diverged` when it has. Nothing is ever
-    forced. A mirror failure is a warning: the blessed remote is what counts.
+
+def publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> PublishResult:
+    """Publish canonical's base branch: fetch, settle, stage on the fork, push, mirror.
+
+    The standalone step after one or more landings. The blessed remote is never
+    force-pushed. A failure to reach the fork is a warning: the blessed remote
+    is what counts.
     """
     canon = locate(repo)
     result = PublishResult(repo=canon.repo)
@@ -485,8 +546,9 @@ def publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> Publis
             result.warnings.append(f"{canon.repo.name}: no remote to publish to")
             return result
         for attempt in range(1, PUBLISH_ATTEMPTS + 1):
-            sync_base(canon)
+            result.rebased += settle_base(canon)
             result.pushed = unpublished(canon)
+            result.staged = _stage_on_fork(canon)
             try:
                 _push_base(canon)
                 break
@@ -495,11 +557,15 @@ def publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> Publis
                     raise
         result.published = canon.blessed
         result.sha = _sha(canon.repo, f"refs/heads/{canon.base}")
+        if result.staged == "failed":
+            result.warnings.append(
+                f"{canon.repo.name}: push to {canon.mirror} failed; "
+                f"{canon.blessed} has the work")
         result.mirrored = mirror(canon)
         if result.mirrored == "failed":
             result.warnings.append(
-                f"{canon.repo.name}: push to mirror {canon.mirror} failed; "
-                f"it catches up on the next publish")
+                f"{canon.repo.name}: {canon.mirror}/{canon.base} could not follow "
+                f"{canon.blessed}/{canon.base}; it catches up on the next publish")
     return result
 
 
@@ -638,6 +704,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         result = publish_base(repo)
         print(f"PUBLISHED={result.published}")
         print(f"PUSHED={result.pushed}")
+        print(f"REBASED={result.rebased}")
+        print(f"STAGED={result.staged}")
         print(f"MIRRORED={result.mirrored}")
         print(f"SHA={result.sha}")
         for warning in result.warnings:
