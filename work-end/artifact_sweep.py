@@ -52,8 +52,30 @@ DEST_PREFIX = {
     "snapshots": "",
 }
 
+PROMOTABLE_CATEGORIES = frozenset(("specs", "adr", "blog"))
 
 GATED_CATEGORIES = ("specs", "adr", "blog")
+
+
+def _map_dest_rel(source_rel: str, category: str, dest_prefix: str) -> str:
+    """Map workspace-relative path to project destination, preserving subdirectories."""
+    if not dest_prefix:
+        return source_rel
+
+    roots = [category] + CATEGORIES.get(category, {}).get("alt_paths", [])
+    for root in roots:
+        if source_rel.startswith(root + "/"):
+            inner = source_rel[len(root) + 1:]
+            return f"{dest_prefix}/{inner}"
+
+    cat_name = Path(roots[0]).name
+    parts = Path(source_rel).parts
+    for i, part in enumerate(parts):
+        if part == cat_name:
+            inner = "/".join(parts[i + 1:])
+            return f"{dest_prefix}/{inner}"
+
+    return f"{dest_prefix}/{Path(source_rel).name}"
 
 
 def _quiet_scan(workspace: Path) -> dict[str, list[str]]:
@@ -115,6 +137,8 @@ def find_gaps(workspace: Path, project: Path, quiet: bool = False) -> list[dict]
     gaps: list[dict] = []
 
     for category, sources in artifacts.items():
+        if category not in PROMOTABLE_CATEGORIES:
+            continue
         dest_prefix = DEST_PREFIX.get(category, category)
 
         for source_rel in sources:
@@ -122,19 +146,8 @@ def find_gaps(workspace: Path, project: Path, quiet: bool = False) -> list[dict]
             if not source_path.exists():
                 continue
 
-            filename = Path(source_rel).name
-            if dest_prefix:
-                dest_rel = f"{dest_prefix}/{filename}"
-            else:
-                dest_rel = source_rel
-
+            dest_rel = _map_dest_rel(source_rel, category, dest_prefix)
             dest_path = project / dest_rel
-
-            if category in ("specs",):
-                parent_dir = Path(source_rel).parent.name
-                if parent_dir != category and parent_dir != "docs":
-                    dest_rel = f"{dest_prefix}/{parent_dir}/{filename}"
-                    dest_path = project / dest_rel
 
             if not dest_path.exists():
                 gaps.append({
