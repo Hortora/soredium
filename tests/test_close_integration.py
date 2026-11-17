@@ -289,15 +289,31 @@ def _setup_slot(tmp_path, repos: list[str], branch: str,
         f"# Slot 42 — test\n\n## Issue\nR#1\n\n## Repos\n{repo_lines}\n"
     )
 
-    ws = _init_repo(slot_dir / ws_name)
+    ws = _slot_clone(tmp_path, slot_dir, ws_name)
     (ws / ".workspace").write_text(f"project: {slot_dir / repos[0]}\n")
 
     repo_paths = []
     for name in repos:
-        repo = _init_repo(slot_dir / name)
-        repo_paths.append(repo)
+        repo_paths.append(_slot_clone(tmp_path, slot_dir, name))
 
     return slot_dir, repo_paths
+
+
+def _canonical(tmp_path: Path, name: str) -> Path:
+    """The canonical repo a slot clone lands in."""
+    return tmp_path / "canonical" / name
+
+
+def _slot_clone(tmp_path: Path, slot_dir: Path, name: str) -> Path:
+    """A slot repo as slots really are: a clone whose `local` remote is its canonical repo."""
+    canonical = _init_repo(_canonical(tmp_path, name))
+    clone = slot_dir / name
+    subprocess.run(["git", "clone", "-q", str(canonical), str(clone)],
+                   capture_output=True, check=True)
+    _git(clone, "config", "user.email", "test@test.com")
+    _git(clone, "config", "user.name", "Test")
+    _git(clone, "remote", "rename", "origin", "local")
+    return clone
 
 
 class TestSlotSingleRepo:
@@ -320,6 +336,25 @@ class TestSlotSingleRepo:
         assert _file_on_main(repo, "issue-1-feat-file0.txt")
         assert _on_branch(repo) == "main"
         assert _is_clean(repo)
+
+    def test_slot_work_reaches_canonical_and_canonical_checkout_is_untouched(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        ws = slot_dir / "wsp-test"
+        canonical = _canonical(tmp_path, "engine")
+        _git(canonical, "checkout", "-b", "someone-elses-work")
+        (canonical / "wip.txt").write_text("uncommitted\n")
+        _add_commits(repo, "issue-1-feat", 3)
+        _add_commits(ws, "issue-1-feat", 1)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, f"ceremony failed: {result.errors}"
+        assert result.landed["engine"] == _main_head(canonical) == _main_head(repo)
+        assert _file_on_main(canonical, "issue-1-feat-file2.txt")
+        assert _on_branch(canonical) == "someone-elses-work"
+        assert (canonical / "wip.txt").read_text() == "uncommitted\n"
+        assert _git(canonical, "rev-list", "--merges", "--count", "main").stdout.strip() == "0"
 
     def test_slot_queue_at_root(self, tmp_path):
         """Queue at slot root (not inside workspace) is found."""
