@@ -53,9 +53,65 @@ DEST_PREFIX = {
 }
 
 
-def find_gaps(workspace: Path, project: Path) -> list[dict]:
+GATED_CATEGORIES = ("specs", "adr", "blog")
+
+
+def _quiet_scan(workspace: Path) -> dict[str, list[str]]:
+    """scan() without its per-image warnings on stderr, which drown a ceremony's output."""
+    import contextlib
+    import io
+    with contextlib.redirect_stderr(io.StringIO()):
+        return scan(workspace)
+
+
+def touched_artifacts(workspace: Path) -> set[str]:
+    """Workspace paths this work added or changed: what one close is answerable for.
+
+    Everything the checked-out branch holds that the canonical workspace's base
+    branch lacks (in a slot that includes commits made directly on the clone's
+    main), plus anything not committed yet. Older artifacts that were never
+    promoted are a backlog, not this close's doing, and are not in the set.
+    """
+    import canonical_sync
+    names: set[str] = set()
+    try:
+        canon = canonical_sync.locate(workspace)
+        base = canonical_sync._onto(Path(workspace), canon)
+    except canonical_sync.SyncError:
+        base = ""
+    if base:
+        diff = subprocess.run(
+            ["git", "-C", str(workspace), "diff", "--name-only", "--no-renames",
+             "--diff-filter=AM", "-z", base, "HEAD"],
+            capture_output=True, text=True)
+        names.update(n for n in diff.stdout.split("\0") if n)
+    status = subprocess.run(
+        ["git", "-C", str(workspace), "status", "--porcelain", "-z", "--untracked-files=all"],
+        capture_output=True, text=True)
+    for entry in status.stdout.split("\0"):
+        if len(entry) > 3 and entry[0] != "D" and entry[1] != "D":
+            names.add(entry[3:])
+    return names
+
+
+def branch_gaps(workspace: Path, project: Path) -> list[dict]:
+    """Documents this work added to the workspace that the project does not hold yet.
+
+    Markdown only, in the categories that have a place in the project (specs,
+    ADRs, blog): images travel with the document that refers to them.
+    """
+    touched = touched_artifacts(workspace)
+    if not touched:
+        return []
+    return [gap for gap in find_gaps(workspace, project, quiet=True)
+            if gap["category"] in GATED_CATEGORIES
+            and gap["source_rel"].endswith(".md")
+            and gap["source_rel"] in touched]
+
+
+def find_gaps(workspace: Path, project: Path, quiet: bool = False) -> list[dict]:
     """Compare workspace artifacts against project. Returns list of gap dicts."""
-    artifacts = scan(workspace)
+    artifacts = _quiet_scan(workspace) if quiet else scan(workspace)
     gaps: list[dict] = []
 
     for category, sources in artifacts.items():
@@ -144,10 +200,14 @@ def promote_gaps(gaps: list[dict], project: Path,
                     issue_ref = f"  Refs #{nums[0]}"
 
             msg = f"docs: promote {promoted} artifact(s) from workspace{issue_ref}"
-            subprocess.run(
+            committed = subprocess.run(
                 ["git", "-C", str(project), "commit", "-m", msg],
-                capture_output=True,
+                capture_output=True, text=True,
             )
+            if committed.returncode != 0:
+                # Copied and staged but not committed is not promoted. Say so.
+                return {"promoted": 0, "by_category": {},
+                        "error": " ".join((committed.stderr or committed.stdout).split())}
 
     if promoted > 0 and not dry_run:
         broken = verify_images(project)
@@ -174,6 +234,7 @@ def main() -> int:
 
     covers = params.get("covers", "")
     dry_run = params.get("dry_run", "no") == "yes"
+    branch_only = params.get("scope", "all") == "branch"
 
     if not workspace.is_dir():
         print(f"ERROR=workspace_not_found:{workspace}")
@@ -182,7 +243,7 @@ def main() -> int:
         print(f"ERROR=project_not_found:{project}")
         return 1
 
-    gaps = find_gaps(workspace, project)
+    gaps = branch_gaps(workspace, project) if branch_only else find_gaps(workspace, project)
     print(f"GAPS={len(gaps)}")
 
     if not gaps:
@@ -193,12 +254,22 @@ def main() -> int:
         print(f"GAP={gap['category']}:{gap['source_rel']}")
 
     result = promote_gaps(gaps, project, covers=covers, dry_run=dry_run)
+    if result.get("error"):
+        print("ERROR=commit_failed")
+        print(f"ERROR_DETAIL={result['error']}")
+        print("PROMOTED=0")
+        return 1
     print(f"PROMOTED={result['promoted']}")
     for cat, count in result.get("by_category", {}).items():
         print(f"CATEGORY_{cat}={count}")
 
     if dry_run:
         print("DRY_RUN=yes")
+
+    if branch_only:
+        left = branch_gaps(workspace, project)
+        print(f"REMAINING={len(left)}")
+        return 1 if left and not dry_run else 0
 
     # Also sweep canonical workspace→project promotion gaps
     # (catches content written to workspace main that was never promoted)

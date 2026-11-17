@@ -540,3 +540,143 @@ class TestLandsOnDiskOnly:
         assert not result.success
         assert any("no `local` remote" in e for e in result.errors)
         assert _git(clone, "rev-parse", "issue-1-a").stdout.strip() == tip
+
+
+class TestPromotionGate:
+    """A branch is not closed while documents it wrote are still only in the workspace."""
+
+    def _workspace_doc(self, ws: Path, branch: str, rel: str, text: str = "content\n") -> None:
+        _git(ws, "checkout", "-q", "-b", branch)
+        path = ws / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        _git(ws, "add", ".")
+        _git(ws, "commit", "-q", "-m", f"docs: {rel} Refs #1")
+
+    def _on_branches(self, proj: Path, ws: Path, branch: str, doc: str):
+        _git(proj, "checkout", "-q", "-b", branch)
+        (proj / "code.txt").write_text("code")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-q", "-m", "feat: code Refs #1")
+        self._workspace_doc(ws, branch, doc)
+        _queue(ws, [("R#1", "")], active="R#1", branch=branch)
+
+    def test_refuses_and_names_the_document_and_the_command(self, repos):
+        proj, ws = repos
+        self._on_branches(proj, ws, "issue-1-a", "blog/2026-01-01-entry.md")
+        main_before = _git(proj, "rev-parse", "main").stdout.strip()
+
+        result = _close(proj, ws)
+
+        assert not result.success
+        assert result.unpromoted == [
+            "workspace/blog/2026-01-01-entry.md -> project/docs/blog/2026-01-01-entry.md"]
+        lines = render(result)
+        assert lines[0] == "ACTION=promotion_needed"
+        assert any(l.startswith("PROMOTE=python3 ") and "scope=branch" in l for l in lines)
+        assert _git(proj, "rev-parse", "main").stdout.strip() == main_before
+        assert _state(ws)["R#1"][0] is False
+
+    def test_running_the_named_command_then_closing_lands_the_document(self, repos):
+        proj, ws = repos
+        self._on_branches(proj, ws, "issue-1-a", "blog/2026-01-01-entry.md")
+        command = [l for l in render(_close(proj, ws)) if l.startswith("PROMOTE=")][0]
+
+        promoted = subprocess.run(command[len("PROMOTE="):].split(), capture_output=True, text=True)
+        assert promoted.returncode == 0, promoted.stdout + promoted.stderr
+        assert "PROMOTED=1" in promoted.stdout and "REMAINING=0" in promoted.stdout
+        squash_marker.mark(proj, "issue-1-a")
+
+        result = _close(proj, ws)
+
+        assert result.success, (result.errors, result.unpromoted, result.squash_review)
+        assert _git(proj, "show", "main:docs/blog/2026-01-01-entry.md").stdout == "content\n"
+
+    def test_spec_in_a_subdirectory_is_gated_too(self, repos):
+        proj, ws = repos
+        self._on_branches(proj, ws, "issue-1-a", "specs/issue-1-a/design.md")
+
+        result = _close(proj, ws)
+
+        assert result.unpromoted == [
+            "workspace/specs/issue-1-a/design.md -> project/docs/specs/issue-1-a/design.md"]
+
+    def test_backlog_from_before_this_work_does_not_block(self, repos):
+        proj, ws = repos
+        (ws / "blog").mkdir()
+        (ws / "blog" / "2020-old-entry.md").write_text("never promoted\n")
+        _git(ws, "add", ".")
+        _git(ws, "commit", "-q", "-m", "docs: old entry Refs #1")
+        _branch(proj, "issue-1-a", {"a.txt": "a"})
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+
+        result = _close(proj, ws)
+
+        assert result.success, (result.errors, result.unpromoted)
+
+    def test_document_already_in_the_project_passes(self, repos):
+        proj, ws = repos
+        self._on_branches(proj, ws, "issue-1-a", "blog/2026-01-01-entry.md")
+        (proj / "docs" / "blog").mkdir(parents=True)
+        (proj / "docs" / "blog" / "2026-01-01-entry.md").write_text("content\n")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-q", "-m", "docs: promote entry Refs #1")
+        squash_marker.mark(proj, "issue-1-a")
+
+        result = _close(proj, ws)
+
+        assert result.success, (result.errors, result.unpromoted, result.squash_review)
+
+    def test_plans_and_images_alone_do_not_block(self, repos):
+        proj, ws = repos
+        _git(proj, "checkout", "-q", "-b", "issue-1-a")
+        (proj / "code.txt").write_text("code")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-q", "-m", "feat: code Refs #1")
+        self._workspace_doc(ws, "issue-1-a", "plans/2026-01-01-plan.md")
+        (ws / "blog" / "images").mkdir(parents=True)
+        (ws / "blog" / "images" / "pic.svg").write_text("<svg/>")
+        _git(ws, "add", ".")
+        _git(ws, "commit", "-q", "-m", "docs: image Refs #1")
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+
+        result = _close(proj, ws)
+
+        assert result.unpromoted == []
+
+    def test_promotion_is_asked_for_before_the_squash_review(self, repos):
+        """Promoting adds a commit; the review must be of the branch as it will land."""
+        proj, ws = repos
+        _git(proj, "checkout", "-q", "-b", "issue-1-a")
+        for name in ("a.txt", "b.txt"):
+            (proj / name).write_text(name)
+            _git(proj, "add", ".")
+            _git(proj, "commit", "-q", "-m", f"feat: {name} Refs #1")
+        self._workspace_doc(ws, "issue-1-a", "blog/2026-01-01-entry.md")
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+
+        result = _close(proj, ws)
+
+        assert render(result)[0] == "ACTION=promotion_needed"
+
+
+class TestSweepReportsFailure:
+    def test_a_rejected_promotion_commit_is_an_error_not_a_silent_success(self, repos):
+        proj, ws = repos
+        hook = proj / ".git" / "hooks" / "commit-msg"
+        hook.write_text("#!/bin/sh\necho 'commit needs an issue reference' >&2\nexit 1\n")
+        hook.chmod(0o755)
+        _git(ws, "checkout", "-q", "-b", "issue-1-a")
+        (ws / "blog").mkdir()
+        (ws / "blog" / "2026-01-01-entry.md").write_text("content\n")
+        _git(ws, "add", ".")
+        _git(ws, "commit", "-q", "-m", "docs: entry")
+        sweep = Path(__file__).parent.parent / "work-end" / "artifact_sweep.py"
+
+        result = subprocess.run([sys.executable, str(sweep), str(ws), str(proj), "scope=branch"],
+                                capture_output=True, text=True)
+
+        assert result.returncode == 1
+        assert "ERROR=commit_failed" in result.stdout
+        assert "issue reference" in result.stdout
+        assert "PROMOTED=0" in result.stdout

@@ -60,6 +60,10 @@ class CloseResult:
     next_item: Optional[QueueItem] = None
     rescued: dict = field(default_factory=dict)
     squash_review: list[str] = field(default_factory=list)
+    # Documents this work added to a workspace that its project does not hold yet,
+    # and the command that promotes each workspace's share.
+    unpromoted: list[str] = field(default_factory=list)
+    promote_commands: list[str] = field(default_factory=list)
     workspace_landed: dict = field(default_factory=dict)
     slot_ready: str = ""
     # Queue items this ceremony closed, in the order they landed, and each one's branch.
@@ -492,6 +496,55 @@ def carry_strays(slot_dir: Path, covered: set) -> tuple[dict, dict]:
     return carried, not_landed
 
 
+def promotion_pairs(workspace: Path) -> list[tuple[Path, Path]]:
+    """(workspace repo, project repo) pairs this ceremony covers.
+
+    Outside a slot: the workspace and the project its proj/ symlink names. In a
+    slot: every workspace clone, with the project named in its .workspace marker.
+    """
+    pairs: list[tuple[Path, Path]] = []
+    slot_dir = _slot_dir_of(workspace)
+    if slot_dir is None:
+        project = _resolve_project(workspace)
+        if project and project.is_dir() and project.resolve() != workspace.resolve():
+            pairs.append((workspace, project))
+        return pairs
+    from slot_core import get_all_slot_repos
+    for name in get_all_slot_repos(slot_dir):
+        clone = slot_dir / name
+        marker = clone / ".workspace"
+        if not marker.exists():
+            continue
+        for line in marker.read_text().splitlines():
+            if line.startswith("project:"):
+                project = Path(line.split(":", 1)[1].strip())
+                if project.is_dir():
+                    pairs.append((clone, project))
+                break
+    return pairs
+
+
+def unpromoted_artifacts(workspace: Path, covers: str = "") -> tuple[list[str], list[str]]:
+    """Documents this work added to a workspace that are not in the project yet.
+
+    Returns (findings, commands). Checked before anything lands: a branch must not
+    be reported closed while what it wrote is still only in the workspace.
+    """
+    import artifact_sweep
+    findings: list[str] = []
+    commands: list[str] = []
+    sweep = Path(__file__).resolve().parent / "artifact_sweep.py"
+    for ws_repo, project in promotion_pairs(workspace):
+        gaps = artifact_sweep.branch_gaps(ws_repo, project)
+        if not gaps:
+            continue
+        findings += [f"{ws_repo.name}/{gap['source_rel']} -> {project.name}/{gap['dest_rel']}"
+                     for gap in gaps]
+        commands.append(f"python3 {sweep} {ws_repo} {project} scope=branch"
+                        + (f" covers={covers}" if covers else ""))
+    return findings, commands
+
+
 # --- stamp ---
 
 def _is_stamp_commit(repo: Path, branch: str) -> bool:
@@ -717,6 +770,14 @@ def close(workspace: Path) -> CloseResult:
             errors=["no targets found — branch may not exist or has no commits"],
         )
 
+    # Promotion first: promoting adds a commit to the project branch, and the squash
+    # review below has to be of the branch as it will land.
+    unpromoted, promote_commands = unpromoted_artifacts(
+        workspace, queue.state.covers if queue else "")
+    if unpromoted:
+        return CloseResult(success=False, unpromoted=unpromoted,
+                           promote_commands=promote_commands)
+
     # Checked before anything is rebased: the ceremony's own rebase changes every SHA.
     # One branch that needs review holds back the whole batch, so nothing lands out of order.
     review_needed = []
@@ -873,6 +934,10 @@ def render(result: CloseResult) -> list[str]:
         return lines
     if result.squash_review:
         return ["ACTION=squash_review_needed"] + [f"SQUASH_REVIEW={r}" for r in result.squash_review]
+    if result.unpromoted:
+        return (["ACTION=promotion_needed"]
+                + [f"UNPROMOTED={u}" for u in result.unpromoted]
+                + [f"PROMOTE={c}" for c in result.promote_commands])
     return ["ACTION=error"] + [f"ERROR={e}" for e in result.errors]
 
 
@@ -893,7 +958,7 @@ def main() -> int:
         print(line)
     if result.success:
         return 0
-    return 2 if result.squash_review else 1
+    return 2 if (result.squash_review or result.unpromoted) else 1
 
 
 if __name__ == "__main__":

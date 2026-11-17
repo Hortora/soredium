@@ -461,6 +461,50 @@ class TestSlotCarriesEverything:
         assert result.carried == {} and result.not_landed == {}
 
 
+class TestSlotPromotionGate:
+    """In a slot the workspace clone is worked on directly on main; its documents are gated too."""
+
+    def _slot_with_blog(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        ws = slot_dir / "wsp-test"
+        (ws / "blog").mkdir()
+        (ws / "blog" / "2026-01-01-entry.md").write_text("an entry\n")
+        _git(ws, "add", "blog")
+        _git(ws, "commit", "-m", "docs: entry Refs #1")
+        _add_commits(repo, "issue-1-feat", 1)
+        _make_queue(slot_dir, "issue-1-feat")
+        return slot_dir, repo, ws
+
+    def test_slot_close_refuses_until_the_workspace_document_is_promoted(self, tmp_path):
+        from close import render
+        slot_dir, repo, ws = self._slot_with_blog(tmp_path)
+        canonical = _canonical(tmp_path, "engine")
+        before = _main_head(canonical)
+
+        result = close(slot_dir)
+
+        assert not result.success
+        assert result.unpromoted == [
+            "wsp-test/blog/2026-01-01-entry.md -> engine/docs/blog/2026-01-01-entry.md"]
+        assert render(result)[0] == "ACTION=promotion_needed"
+        assert _main_head(canonical) == before
+        assert not (slot_dir / ".landed").exists()
+
+    def test_promoted_document_lands_in_canonical_with_the_branch(self, tmp_path):
+        from close import render
+        slot_dir, repo, ws = self._slot_with_blog(tmp_path)
+        command = [l for l in render(close(slot_dir)) if l.startswith("PROMOTE=")][0]
+        done = subprocess.run(command[len("PROMOTE="):].split(), capture_output=True, text=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        squash_marker.mark(repo, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, (result.errors, result.unpromoted, result.squash_review)
+        assert _file_on_main(_canonical(tmp_path, "engine"), "docs/blog/2026-01-01-entry.md")
+        assert _file_on_main(_canonical(tmp_path, "wsp-test"), "blog/2026-01-01-entry.md")
+
+
 class TestSlotMultiRepo:
     """Slot with 2+ repos on the same branch."""
 
