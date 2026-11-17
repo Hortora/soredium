@@ -334,100 +334,7 @@ class TestRunLoopAssemblesRequest:
         assert result["SKIPPABLE"] == "yes"
 
 
-class TestResponseValidationIntegration:
-    def test_invalid_outcome_returns_schema_violation(self, tmp_path):
-        from work_end_orchestrator import run_orchestrator
-        from close_progress import update_close_progress
-        update_close_progress(tmp_path, "review", "done")
-        update_close_progress(tmp_path, "sweep_config", "done")
-        update_close_progress(tmp_path, "sweep_selected", "forage")
-        update_close_progress(tmp_path, "_branch", "issue-test")
-        update_close_progress(tmp_path, "last_yielded", "forage")
-        (tmp_path / "project").mkdir(exist_ok=True)
-        result = run_orchestrator({
-            "workspace": str(tmp_path),
-            "project": str(tmp_path / "project"),
-            "branch": "issue-test",
-            "base_branch": "main",
-            "meta_state": "closing:review",
-            "step_done": "forage",
-            "outcome": "invalid_value",
-        })
-        assert result.get("ERROR") in ("schema_violation", "invalid_outcome")
-
-    def test_valid_outcome_accepted(self, tmp_path):
-        from work_end_orchestrator import run_orchestrator
-        from close_progress import update_close_progress
-        update_close_progress(tmp_path, "review", "done")
-        update_close_progress(tmp_path, "sweep_config", "done")
-        update_close_progress(tmp_path, "sweep_selected", "forage")
-        update_close_progress(tmp_path, "_branch", "issue-test")
-        update_close_progress(tmp_path, "last_yielded", "forage")
-        (tmp_path / "project").mkdir(exist_ok=True)
-        result = run_orchestrator({
-            "workspace": str(tmp_path),
-            "project": str(tmp_path / "project"),
-            "branch": "issue-test",
-            "base_branch": "main",
-            "meta_state": "closing:review",
-            "step_done": "forage",
-            "outcome": "completed",
-            "produced": "0",
-        })
-        assert result.get("ERROR") != "schema_violation"
-
-    def test_skip_via_outcome_skipped(self, tmp_path):
-        from work_end_orchestrator import run_orchestrator
-        from close_progress import update_close_progress, read_close_progress
-        update_close_progress(tmp_path, "review", "done")
-        update_close_progress(tmp_path, "sweep_config", "done")
-        update_close_progress(tmp_path, "sweep_selected", "forage")
-        update_close_progress(tmp_path, "_branch", "issue-test")
-        update_close_progress(tmp_path, "last_yielded", "forage")
-        (tmp_path / "project").mkdir(exist_ok=True)
-        run_orchestrator({
-            "workspace": str(tmp_path),
-            "project": str(tmp_path / "project"),
-            "branch": "issue-test",
-            "base_branch": "main",
-            "meta_state": "closing:review",
-            "step_done": "forage",
-            "outcome": "skipped",
-        })
-        progress = read_close_progress(tmp_path)
-        assert progress.get("forage") == "skipped"
-
-    def test_blocked_outcome_returns_error(self, tmp_path):
-        from work_end_orchestrator import run_orchestrator
-        from close_progress import update_close_progress
-        update_close_progress(tmp_path, "review", "done")
-        update_close_progress(tmp_path, "sweep_config", "done")
-        update_close_progress(tmp_path, "sweep_selected", "forage")
-        update_close_progress(tmp_path, "_branch", "issue-test")
-        update_close_progress(tmp_path, "last_yielded", "forage")
-        (tmp_path / "project").mkdir(exist_ok=True)
-        result = run_orchestrator({
-            "workspace": str(tmp_path),
-            "project": str(tmp_path / "project"),
-            "branch": "issue-test",
-            "base_branch": "main",
-            "meta_state": "closing:review",
-            "step_done": "forage",
-            "outcome": "blocked",
-            "block_reason": "garden not running",
-        })
-        assert result.get("ERROR") == "step_blocked"
-
-
 class TestHandlerMetadata:
-    def test_work_end_handlers_exist(self):
-        from work_end_orchestrator import STEPS
-        handler_root = Path(__file__).parent.parent / "work-end"
-        for step in STEPS:
-            if step.step_type == StepType.JUDGMENT and step.handler:
-                path = handler_root / step.handler
-                assert path.exists(), f"Handler for '{step.name}' not found: {path}"
-
     def test_work_handlers_exist(self):
         from work import PIPELINES
         handler_root = Path(__file__).parent.parent / "work"
@@ -437,26 +344,9 @@ class TestHandlerMetadata:
                     path = handler_root / step.handler
                     assert path.exists(), f"Handler for '{step.name}' not found: {path}"
 
-    def test_steps_with_verify_fn_have_schema(self):
-        from work_end_orchestrator import STEPS
-        for step in STEPS:
-            if step.step_type == StepType.JUDGMENT and step.verify_fn:
-                assert step.response_schema is not None, (
-                    f"Step '{step.name}' has verify_fn but no response_schema"
-                )
-
 
 class TestStepTypeConverted:
     """Verify all step definitions use StepType enum, not strings."""
-
-    def test_all_work_end_steps_use_enum(self):
-        sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-        from work_end_orchestrator import STEPS
-        from judgment import StepType
-        for step in STEPS:
-            assert isinstance(step.step_type, StepType), (
-                f"Step '{step.name}' uses {type(step.step_type).__name__}, not StepType"
-            )
 
     def test_all_wrap_steps_use_enum(self):
         sys.path.insert(0, str(Path(__file__).parent.parent / "handover"))

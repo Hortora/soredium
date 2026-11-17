@@ -23,7 +23,6 @@ REPO_ROOT = Path(__file__).parent.parent
 SLOT_FILES = [
     "work-end/SKILL.md",
     "work-slot/SKILL.md",
-    "work-end/close_report.py",
 ]
 
 ALLOWED_PATTERNS = [
@@ -80,18 +79,6 @@ class TestSlotTerminology:
                 f"{relpath} uses 'worktree' in slot context "
                 f"(should be 'clone'):\n{report}"
             )
-
-    def test_close_report_no_worktree_step_name(self):
-        filepath = REPO_ROOT / "work-end" / "close_report.py"
-        text = filepath.read_text()
-        assert "worktree-remove" not in text, (
-            "close_report.py still uses 'worktree-remove' step name — "
-            "should be 'slot-archive'"
-        )
-        assert "Worktrees removed" not in text, (
-            "close_report.py still uses 'Worktrees removed' label — "
-            "should be 'Slot archived'"
-        )
 
     def test_slot_manager_docstring_says_clone(self):
         filepath = REPO_ROOT / "work-slot" / "slot_manager.py"

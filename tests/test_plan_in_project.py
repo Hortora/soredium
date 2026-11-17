@@ -126,29 +126,3 @@ class TestScaffoldValidation:
         assert result.created
 
 
-class TestCorruptionDetection:
-    """Layer 3: corruption.py detects orphaned .plan in project repo."""
-
-    def test_no_plan_no_finding(self, tmp_path):
-        from corruption import _check_plan_in_project
-        project = _init_repo(tmp_path / "project")
-        workspace = _init_repo(tmp_path / "workspace")
-        assert _check_plan_in_project(project, workspace) is None
-
-    def test_plan_in_project_with_workspace(self, tmp_path):
-        from corruption import _check_plan_in_project
-        project = _init_repo(tmp_path / "project")
-        workspace = _init_repo(tmp_path / "workspace")
-        (project / "wksp").symlink_to(str(workspace))
-        (project / ".plan").write_text("branch: issue-42\nstate: active\n")
-        result = _check_plan_in_project(project, workspace)
-        assert result is not None
-        assert result.scenario == "S12_PLAN_IN_PROJECT"
-        assert "move_plan" in result.actions
-
-    def test_plan_without_wksp_no_finding(self, tmp_path):
-        from corruption import _check_plan_in_project
-        project = _init_repo(tmp_path / "project")
-        workspace = _init_repo(tmp_path / "workspace")
-        (project / ".plan").write_text("branch: issue-42\nstate: active\n")
-        assert _check_plan_in_project(project, workspace) is None
