@@ -3,8 +3,9 @@ name: git-squash
 description: >
   Use when the commit history contains noise — fixup commits, revert
   chains, docs wording chores, tiny cleanups — that obscures meaningful
-  history. Also triggered when the pre-push hook flags squash candidates,
-  or invoked on demand via /git-squash on any commit range.
+  history. Also triggered when work end reports that a branch needs a
+  squash review before it can land, or invoked on demand via /git-squash
+  on any commit range.
 ---
 
 # Git Squash
@@ -15,28 +16,35 @@ history. Author approves every change — nothing is applied automatically.
 
 The full policy is in `squash-policy.md` alongside this skill.
 
+**Where it sits.** A branch is reviewed here before it lands. `work end`
+refuses to land a branch with more than one commit of its own until this
+skill has recorded a review at the branch's exact tip
+(`ACTION=squash_review_needed`). Nothing in this skill pushes, and no hook
+judges history at push time: by the time commits reach a base branch they
+have been through this review.
+
 **Two modes:**
-- **On-demand** (`/git-squash`): full workflow with branch isolation, filter-repo,
-  intelligent classification, review gate, and branch swap. Can handle pushed commits safely.
-- **Pre-push hook**: in-place squash on unpushed commits only. Fast, no branch
-  creation, no force-push. Never runs filter-repo.
+- **In place** (the usual case): the branch has not landed. Squash its own
+  commits where they are, then record the review. No working branch, no
+  filter-repo, no swap.
+- **Full** (`/git-squash` on a larger or older range): branch isolation,
+  filter-repo, classification, review gate and a local branch swap.
 
 ---
 
 ## When to Use
 
-- **Before pushing:** run on unpushed commits to clean history before it's shared.
-  The pre-push hook operates on unpushed commits only — in-place, no force-push needed.
+- **`work end` asked for it:** `ACTION=squash_review_needed` names the
+  branches. Run the in-place workflow on each, then run `work end` again.
 - **On demand:** clean up any commit range at any point (`/git-squash`).
-  All work happens on an isolated working branch — pushed commits can be included safely.
-- **After the hook fires:** the pre-push hook detected squash candidates; run this to resolve them.
-- **Pre-PR review:** branch is pushed but no PR exists yet. On-demand mode handles
-  this with branch isolation and a review gate before the swap.
-- **Full branch compaction / reconstruction:** compact an entire feature branch before
-  merging, or reconstruct a squash-merged branch for review.
-  Range syntax: `upstream/main..feat/some-feature` or `origin/main..HEAD`.
+  Work happens on an isolated working branch.
+- **Full branch compaction / reconstruction:** compact an entire feature branch
+  before it lands, or reconstruct a squash-merged branch for review.
   This is the primary use case for reconstruction work — `/git-squash` handles the
   full range; do not use ad-hoc git commands outside the skill.
+
+Published history is never rewritten. Commits already on a remote's base
+branch are out of range.
 
 **git-squash is the single entrypoint for all compaction.** Do not reach for
 `git reset --soft HEAD~1 && git commit --amend` or `git rebase -i` directly —
@@ -154,7 +162,7 @@ GROUPING_STRATEGY = "A" | "B" | "C" | "D" | "E"
 
 ### Step 1 — Filter-repo Q&A (on-demand only)
 
-**Never run filter-repo from the pre-push hook or any automatic trigger.**
+**Never run filter-repo from the in-place workflow or any automatic trigger.**
 **Always runs on the working branch, never on the original.**
 
 #### 1a — Resolve project artifacts
@@ -302,7 +310,7 @@ Present the choice:
 ```
 Squash range?
 
-  [U] Unpushed only      — <N> commits  (not yet on origin/<branch>)
+  [U] Unpublished only   — <N> commits  (not yet on the remote's base branch)
   [S] Largest safe       ← default — <N> commits  (<safe-label>)
   [A] All                — <N> commits  (<all-label>)
   [C] Custom             — enter range manually
@@ -997,43 +1005,45 @@ Only delete on explicit user confirmation.
 
 ---
 
-## Pre-Push Workflow (fast — unpushed commits only)
+## In-Place Workflow (a branch that has not landed)
 
-When invoked in response to the pre-push hook, skip Steps 0, 1, 7, 8, and 9.
-In-place squash is safe — history hasn't been shared yet.
-Range default in this context is **[U] Unpushed** — skip the range picker and use `@{u}..HEAD` directly.
+Used when `work end` reports `ACTION=squash_review_needed`, and for any
+branch that has not landed. Skip Steps 0, 1, 7, 8 and 9: there is no working
+branch, no filter-repo and no swap.
 
-1. **Step 2:** Resolve unpushed range (`@{u}..HEAD`)
+1. **Step 2:** the range is the branch's own commits. Run `ctx.py` and use
+   `SAFE_RANGE`; for a stacked branch it starts at `OWN_BASE`, never at the
+   base branch.
 2. **Step 3:** Classify per policy (run all analysis passes, including temporal
    grouping, file-overlap, and conventional commit detection — skip cherry-pick
-   detection and PR integration as they add friction to the fast path)
+   detection and PR integration as they add friction here)
 3. **Step 4:** Show summary
 4. **Step 5:** Show plan and get approval
-5. **Step 6:** Execute in-place
-6. **Record the review** (Step 8b). Do not push: landing is `work end`, and
-   publishing is `canonical_sync.py publish`, run from neither a slot nor a feature branch.
+5. **Step 6:** Execute in place
+6. **Record the review** (Step 8b), including when the review concluded that
+   nothing needed changing. Do not push: landing is `work end`, and publishing
+   is `canonical_sync.py publish`.
 
 ---
 
-## Installing the pre-push hook
+## The pre-push hook
 
-The pre-push hook checks unpushed commits for obvious squash candidates and exits 1
-if found, prompting the user to run `/git-squash` first. It never runs filter-repo.
+`hooks/pre-push` is a git hook a repo can install. It has nothing to do with
+squashing any more: it checks only what can be decided from the commits being
+pushed. A push to `main` or `master` must not add a merge commit, must be a
+fast-forward of what the remote has, and must not delete the branch. It does
+not look at commit subjects and it never asks for a squash; that is this
+skill's review, enforced by `work end`.
+
+Earlier versions refused pushes whose subjects looked like noise, or refused
+every push until `--no-verify` was used. Both stopped
+`canonical_sync.py publish`, which pushes without `--no-verify`. To replace an
+old copy in a repo:
 
 ```bash
-HOOK_SRC="$HOME/.claude/skills/git-squash/hooks/pre-push"
-HOOK_DEST="$(git rev-parse --git-dir)/hooks/pre-push"
-
-if [ -f "$HOOK_DEST" ]; then
-  echo "⚠️  pre-push hook already exists at $HOOK_DEST — skipping."
-else
-  cp "$HOOK_SRC" "$HOOK_DEST"
-  chmod +x "$HOOK_DEST"
-  echo "✅ pre-push hook installed."
-fi
+python3 scripts/install_linear_pre_push.py <directory-of-repos>            # dry run
+python3 scripts/install_linear_pre_push.py <directory-of-repos> --apply
 ```
-
-Bypass with `git push --no-verify` after manually confirming history is clean.
 
 ---
 
@@ -1048,7 +1058,7 @@ Bypass with `git push --no-verify` after manually confirming history is clean.
 | Dropping commits with file changes | Silent data loss | Use Phase 1 filter-repo to strip files first; only drop truly empty commits |
 | Squashing a KEEP/MERGE commit from a different author | Rewrites attribution | Cross-author squash only for SQUASH-classified noise |
 | Using fast-path reset for non-HEAD squash pairs | Amends the wrong commit | Fast path only when squash pair is HEAD←HEAD~1 |
-| Running filter-repo from pre-push hook | Destructive rewrite must be deliberate | filter-repo on-demand only, never automatic |
+| Running filter-repo in the in-place workflow | Destructive rewrite must be deliberate | filter-repo in the full workflow only, never automatic |
 | Skipping Project Artifacts check | May filter project history | Always resolve Project Artifacts before scanning |
 | Using `git rebase -i` without GIT_SEQUENCE_EDITOR | Opens interactive editor; blocks | Always use `GIT_SEQUENCE_EDITOR="cp $PLAN"` |
 | Merging commits with different scopes without warning | Violates single-responsibility | Scope drift check on all MERGE operations |
@@ -1062,8 +1072,7 @@ Bypass with `git push --no-verify` after manually confirming history is clean.
 ## Skill Chaining
 
 **Invoked by:** User directly via `/git-squash`; `work-end` — when
-`close.py` returns `ACTION=squash_review_needed`; pre-push hook when squash
-candidates detected
+`close.py` returns `ACTION=squash_review_needed`
 
 **Reads:** `~/.claude/skills/git-squash/squash-policy.md` — the classification rules
 

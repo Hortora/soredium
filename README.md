@@ -127,6 +127,7 @@ Local work lifecycle tracking and enriched backlog for what-next recommendations
 | `scripts/query_worklog.py` | Audit tool for inspecting worklog state |
 | `scripts/migrate_slot_state.py` | Backfill `state:` field in existing .slot files |
 | `scripts/slot_backup_setup.py` | Move existing slot clones and single-remote workspace repos onto the canonical backup path (dry run unless `--apply`) |
+| `scripts/install_linear_pre_push.py` | Replace the old squash-candidate and always-prompt pre-push hooks with the one that checks linear history only (dry run unless `--apply`) |
 
 ## Developer Setup
 
