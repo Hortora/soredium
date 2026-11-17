@@ -30,6 +30,7 @@ from queue_io import read_queue, write_queue, Queue, QueueItem
 import squash_marker
 import canonical_sync
 from canonical_sync import SyncError
+import branch_base
 
 
 LIFECYCLE_FILES = [
@@ -439,10 +440,14 @@ def land_targets(targets: list[CloseTarget]) -> dict:
 
     Project and workspace repos take the same linear path: rebase, then
     fast-forward the canonical base branch. No network is used and nothing is pushed.
+    Only a branch's own commits are replayed: what it was stacked on has landed
+    with its own item.
     """
+    own_bases = {target: branch_base.base_of(target.repo, target.branch) for target in targets}
     for target in targets:
         strip_lifecycle_files(target.repo, target.branch, LIFECYCLE_FILES)
-    results = canonical_sync.land_all([(target.repo, target.branch) for target in targets])
+    results = canonical_sync.land_all(
+        [(target.repo, target.branch, own_bases[target]) for target in targets])
     landed = dict(zip(targets, results))
     for target, result in landed.items():
         verify_content_landed(target, result.sha)
@@ -543,6 +548,92 @@ def unpromoted_artifacts(workspace: Path, covers: str = "") -> tuple[list[str], 
         commands.append(f"python3 {sweep} {ws_repo} {project} scope=branch"
                         + (f" covers={covers}" if covers else ""))
     return findings, commands
+
+
+def _branch_landed(repo: Path, branch: str, base: str) -> bool:
+    """A branch that is gone, stamped closed, or wholly on the base branch has landed."""
+    if not _branch_exists(repo, branch):
+        return True
+    return _is_stamp_commit(repo, branch) or _is_ancestor(repo, branch, base)
+
+
+def order_entries(entries: list[BatchEntry]) -> tuple[list[BatchEntry], list[str]]:
+    """Put a batch in an order that is safe to land, derived from the repos themselves.
+
+    An entry lands after the entry whose branch it was stacked on. That comes
+    from each repo's record of what a branch was cut from; for branches cut
+    before records existed it comes from ancestry (a branch whose tip is inside
+    another's history lands first). Queue order only breaks ties.
+
+    Returns (ordered entries, errors). Errors: a branch stacked on one that has
+    not landed and is not in this batch; a record the branch no longer sits on;
+    repos that disagree about the order.
+    """
+    errors: list[str] = []
+    owner: dict[str, int] = {}
+    for index, entry in enumerate(entries):
+        for branch in entry.branches:
+            owner.setdefault(branch, index)
+
+    after: dict[int, set[int]] = {i: set() for i in range(len(entries))}
+    why: dict[tuple[int, int], str] = {}
+
+    def depend(later: int, earlier: int, reason: str) -> None:
+        if later != earlier:
+            after[later].add(earlier)
+            why.setdefault((later, earlier), reason)
+
+    for index, entry in enumerate(entries):
+        for target in entry.targets:
+            name = f"{target.repo.name}:{target.branch}"
+            if branch_base.record_is_stale(target.repo, target.branch):
+                errors.append(
+                    f"{name} no longer sits on the commit it was recorded as cut from, so its "
+                    f"own commits cannot be told apart from what it was stacked on. Nothing was "
+                    f"landed. Rebase it back onto its parent, or clear the record if it was "
+                    f"deliberately rebuilt.")
+                continue
+            parent = branch_base.parent_of(target.repo, target.branch)
+            if parent:
+                if parent in owner:
+                    depend(index, owner[parent], f"{name} was stacked on {parent}")
+                elif not _branch_landed(target.repo, parent, target.base_branch):
+                    errors.append(
+                        f"{name} was stacked on {parent}, which has not landed and is not part "
+                        f"of this close. Nothing was landed. Land {parent} first, or mark its "
+                        f"item done so that it lands in this batch.")
+                continue
+            # No record: fall back to what the commits themselves say.
+            for other_index, other in enumerate(entries):
+                if other_index == index:
+                    continue
+                for other_target in other.targets:
+                    if other_target.repo != target.repo:
+                        continue
+                    mine = _rev_parse(target.repo, target.branch)
+                    theirs = _rev_parse(target.repo, other_target.branch)
+                    if mine and theirs and mine != theirs and \
+                            _is_ancestor(target.repo, theirs, mine):
+                        depend(index, other_index,
+                               f"{name} contains {other_target.branch}")
+
+    if errors:
+        return entries, errors
+
+    ordered: list[int] = []
+    remaining = list(range(len(entries)))
+    while remaining:
+        ready = [i for i in remaining if not (after[i] - set(ordered))]
+        if not ready:
+            names = ", ".join(entries[i].issue or entry_branch(entries[i]) for i in remaining)
+            reasons = "; ".join(sorted({why[(a, b)] for a in remaining for b in after[a]
+                                        if b in remaining and (a, b) in why}))
+            return entries, [
+                f"the repos disagree about the order to land {names} in ({reasons}). "
+                f"Nothing was landed."]
+        ordered.append(ready[0])            # queue order breaks ties
+        remaining.remove(ready[0])
+    return [entries[i] for i in ordered], []
 
 
 # --- stamp ---
@@ -753,6 +844,10 @@ def close(workspace: Path) -> CloseResult:
     if missing:
         return CloseResult(success=False, errors=missing)
 
+    entries, order_errors = order_entries(entries)
+    if order_errors:
+        return CloseResult(success=False, errors=order_errors)
+
     targets = [t for entry in entries for t in entry.targets]
     done_entries = [e for e in entries if e.done]
 
@@ -836,6 +931,8 @@ def close(workspace: Path) -> CloseResult:
             for target in entry.targets:
                 stamp(target, landed[target], issue)
                 squash_marker.clear(target.repo, target.branch)
+                # The branch now sits on the base branch: the record has done its job.
+                branch_base.clear(target.repo, target.branch)
             if entry.done:
                 # Checked only now, so a later failure leaves the rest done-but-not-closed.
                 complete_item(workspace, entry.issue)
@@ -848,7 +945,8 @@ def close(workspace: Path) -> CloseResult:
             item = advance(workspace, closing_issue) if active_landed else None
             if active_landed and closing_issue:
                 closed.append(closing_issue)
-                closed_branches[closing_issue] = entry_branch(entries[-1])
+                active_entry = next((e for e in entries if not e.done), entries[-1])
+                closed_branches[closing_issue] = entry_branch(active_entry)
             if done_entries:
                 item = settle_queue(workspace)
             return item

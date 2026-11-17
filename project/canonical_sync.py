@@ -405,13 +405,17 @@ def checked_out(repo: Path | str, branch: str) -> Iterator[Path]:
         git(repo, "worktree", "prune")
 
 
-def _rebase_where_checked_out(repo: Path, branch: str, onto: str, onto_name: str) -> None:
+def _rebase_where_checked_out(repo: Path, branch: str, onto: str, onto_name: str,
+                              own_base: str = "") -> None:
     """Rebase `branch` onto `onto` without switching any existing checkout.
 
-    A conflict aborts the rebase this call started; the branch is left as it was.
+    With `own_base`, only the commits after it are replayed: the branch's own
+    work, not what it was stacked on. A conflict aborts the rebase this call
+    started; the branch is left as it was.
     """
     with checked_out(repo, branch) as worktree:
-        result = git(worktree, "rebase", "-q", onto, timeout=_NETWORK_TIMEOUT)
+        args = ["rebase", "-q", "--onto", onto, own_base] if own_base else ["rebase", "-q", onto]
+        result = git(worktree, *args, timeout=_NETWORK_TIMEOUT)
         if result.returncode != 0:
             if _rebase_in_progress(worktree) is not None:
                 files = _conflicted(worktree)
@@ -426,12 +430,19 @@ def _rebase_where_checked_out(repo: Path, branch: str, onto: str, onto_name: str
                 f"{(result.stderr or result.stdout).strip()}")
 
 
-def rebase(repo: Path | str, branch: str, canon: Optional[Canonical] = None) -> str:
+def rebase(repo: Path | str, branch: str, canon: Optional[Canonical] = None,
+           own_base: str = "") -> str:
     """Rebase `branch` onto canonical's base branch. Returns the new tip.
 
     Runs where the branch is checked out; otherwise in a temporary worktree, so
     no existing checkout is switched. A conflict aborts the rebase this call
     started and leaves the branch exactly as it was.
+
+    `own_base` is the commit the branch was cut from (project/branch_base.py).
+    With it, only the branch's own commits are replayed. That matters for a
+    stacked branch whose parent was squashed before landing: the parent's old
+    commits are still under the branch, and replaying them onto the squashed
+    parent would conflict or duplicate.
     """
     repo = Path(repo)
     canon = canon or locate(repo)
@@ -443,7 +454,9 @@ def rebase(repo: Path | str, branch: str, canon: Optional[Canonical] = None) -> 
         raise SyncError("no_base", f"{canon.repo.name}: no {canon.base} branch")
     if _is_ancestor(repo, onto, tip):
         return tip
-    _rebase_where_checked_out(repo, branch, onto, canon.base)
+    if own_base and (not _sha(repo, own_base) or not _is_ancestor(repo, own_base, tip)):
+        own_base = ""        # not this branch's history: fall back to a plain rebase
+    _rebase_where_checked_out(repo, branch, onto, canon.base, own_base)
     return _sha(repo, f"refs/heads/{branch}")
 
 
@@ -623,7 +636,7 @@ def follow(repo: Path | str, canon: Optional[Canonical] = None) -> str:
 
 # --- landing ---
 
-def _prepare(repo: Path, branch: str, canon: Canonical) -> Optional[str]:
+def _prepare(repo: Path, branch: str, canon: Canonical, own_base: str = "") -> Optional[str]:
     """Rebase the branch onto canonical's base as it is on disk.
 
     Returns None when the branch has already landed. No remote is consulted:
@@ -639,17 +652,20 @@ def _prepare(repo: Path, branch: str, canon: Canonical) -> Optional[str]:
     base_in_repo = _onto(repo, canon)
     if base_in_repo and _is_ancestor(repo, tip, base_in_repo):
         return None
-    return rebase(repo, branch, canon)
+    return rebase(repo, branch, canon, own_base)
 
 
-def land_all(work: list[tuple[Path, str]],
+def land_all(work: list[tuple],
              lock_timeout: float = LOCK_TIMEOUT) -> list[LandResult]:
-    """Land several (repo, branch) pairs in canonical, on disk. No network, no push.
+    """Land several branches in canonical, on disk. No network, no push.
 
-    Every branch is rebased before any base branch moves, because rebase is the
-    only step that can conflict.
+    Each entry is (repo, branch) or (repo, branch, own_base); see `rebase` for
+    `own_base`. Every branch is rebased before any base branch moves, because
+    rebase is the only step that can conflict.
     """
-    items = [(Path(repo), branch, locate(repo)) for repo, branch in work]
+    entries = [(Path(e[0]), e[1], e[2] if len(e) > 2 else "") for e in work]
+    own_bases = {(str(repo), branch): own for repo, branch, own in entries}
+    items = [(repo, branch, locate(repo)) for repo, branch, _ in entries]
     canonicals = {str(canon.repo.resolve()): canon for _, _, canon in items}
     with ExitStack() as stack:
         for key in sorted(canonicals):
@@ -658,7 +674,7 @@ def land_all(work: list[tuple[Path, str]],
         ready = []
         for repo, branch, canon in items:
             result = LandResult(repo=repo, branch=branch)
-            if _prepare(repo, branch, canon) is None:
+            if _prepare(repo, branch, canon, own_bases[(str(repo), branch)]) is None:
                 result.already_landed = True
             ready.append((repo, branch, canon, result))
         for repo, branch, canon, result in ready:
@@ -673,9 +689,10 @@ def land_all(work: list[tuple[Path, str]],
         return results
 
 
-def land(repo: Path | str, branch: str, lock_timeout: float = LOCK_TIMEOUT) -> LandResult:
+def land(repo: Path | str, branch: str, lock_timeout: float = LOCK_TIMEOUT,
+         own_base: str = "") -> LandResult:
     """Land one branch in canonical: rebase, hold, advance. No network, no push."""
-    return land_all([(Path(repo), branch)], lock_timeout)[0]
+    return land_all([(Path(repo), branch, own_base)], lock_timeout)[0]
 
 
 # --- the other callers' needs ---

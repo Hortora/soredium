@@ -97,6 +97,19 @@ except Exception:
     safe_count = "0"
     safe_range = f"origin/{base_branch}..HEAD"
 
+# A stacked branch answers only for its own commits: everything after the commit it
+# was cut from (project/branch_base.py). When that is recorded it is the range to
+# squash and the base to rebase on, whatever the branch sits on top of.
+own_base = git("rev-parse", "--verify", "-q", f"refs/soredium/base/{orig_branch}")
+if own_base and subprocess.run(["git", "merge-base", "--is-ancestor", own_base, "HEAD"],
+                               capture_output=True).returncode != 0:
+    own_base = ""           # the branch no longer sits on the recorded commit
+stacked_on = git("symbolic-ref", "-q", f"refs/soredium/parent/{orig_branch}").removeprefix("refs/heads/")
+if own_base:
+    own_lines = git("log", "--oneline", f"{own_base}..HEAD")
+    safe_count = str(len(own_lines.splitlines())) if own_lines else "0"
+    safe_range = f"{own_base}..HEAD"
+
 if meta_sha:
     all_lines = git("log", "--oneline", f"{meta_sha}..HEAD")
     all_count = str(len(all_lines.splitlines())) if all_lines else "0"
@@ -120,3 +133,5 @@ print(f"SAFE_RANGE={safe_range}")
 print(f"ALL_COUNT={all_count}")
 print(f"ALL_RANGE={all_range}")
 print(f"ALL_LABEL={all_label}")
+print(f"OWN_BASE={own_base}")
+print(f"STACKED_ON={stacked_on}")

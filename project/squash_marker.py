@@ -58,11 +58,28 @@ def clear(repo: Path, branch: str) -> None:
         _git(repo, "update-ref", "-d", marker_ref(branch))
 
 
+def _own_base(repo: Path, branch: str, base: str) -> str:
+    """Where the branch's own commits begin: the commit it was cut from when that is
+    recorded (a stacked branch does not answer for what it was stacked on), else `base`."""
+    try:
+        import branch_base
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import branch_base
+    return branch_base.base_of(repo, branch) or base
+
+
 def review_status(repo: Path, branch: str, base: str) -> Optional[str]:
-    """Return None when the branch may land, otherwise the reason a squash review is needed."""
+    """Return None when the branch may land, otherwise the reason a squash review is needed.
+
+    Only the branch's own commits count. A branch stacked on another carries
+    that branch's commits underneath it, and they are reviewed with their own
+    branch.
+    """
     tip = _rev(repo, f"refs/heads/{branch}")
     if not tip:
         raise RuntimeError(f"{repo}: branch '{branch}' does not exist")
+    base = _own_base(repo, branch, base)
     r = _git(repo, "rev-list", "--count", f"{base}..{tip}")
     if r.returncode != 0:
         raise RuntimeError(f"{repo}: cannot count commits on '{branch}' ahead of '{base}': "

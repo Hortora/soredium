@@ -124,6 +124,16 @@ Read the output:
   than one commit it will ask for the squash review next.
   Only documents this work added are checked. Older ones that were never
   promoted are a backlog for a separate recovery, not this close.
+**Order and stacked branches.** The ceremony works out the landing order
+itself, from what each branch was cut from; the queue's order only breaks
+ties. A branch stacked on another lands after it and contributes only its
+own commits. You do not choose or change the order. If it reports that a
+branch was stacked on one that "has not landed and is not part of this
+close", that a branch "no longer sits on the commit it was recorded as cut
+from", or that "the repos disagree about the order", nothing was landed:
+show the `ERROR=` line to the user and stop. Do not rebase or reorder
+branches to get past it.
+
 - `ACTION=squash_review_needed` — nothing was changed. Each
   `SQUASH_REVIEW=<repo>:<branch>: <reason>` line names a branch that has
   not been reviewed at its current tip (never reviewed, commits added

@@ -289,6 +289,14 @@ python3 ~/.claude/skills/git-squash/ctx.py base-branch=<BASE_BRANCH from project
 ```
 Use `UNPUSHED_COUNT`/`UNPUSHED_RANGE`, `SAFE_COUNT`/`SAFE_RANGE`, `ALL_COUNT`/`ALL_RANGE`/`ALL_LABEL` from the output.
 
+**Stacked branches.** When the output has a non-empty `OWN_BASE`, the branch
+was stacked on another (`STACKED_ON=<branch>`) and answers only for its own
+commits. `SAFE_RANGE` is already `<OWN_BASE>..HEAD`: use it as it is, and pass
+`base=<OWN_BASE>` to `rebase_exec.py multi`. Never widen the range to the base
+branch: the commits below `OWN_BASE` belong to the branch it was stacked on and
+are reviewed there. Squashing them here would rewrite another item's work and
+break the record the close ceremony lands by.
+
 Present the choice:
 
 ```

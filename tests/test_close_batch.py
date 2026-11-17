@@ -680,3 +680,242 @@ class TestSweepReportsFailure:
         assert "ERROR=commit_failed" in result.stdout
         assert "issue reference" in result.stdout
         assert "PROMOTED=0" in result.stdout
+
+
+import branch_base  # noqa: E402
+
+
+def _stack(repo: Path, name: str, parent: str, files: dict[str, str], reviewed: bool = True) -> None:
+    """Cut `name` from `parent` the way work start does, recording what it was cut from."""
+    start = _git(repo, "rev-parse", parent).stdout.strip()
+    _git(repo, "checkout", "-q", "-b", name, start)
+    branch_base.record(repo, name, start, "" if parent == "main" else parent)
+    for fname, content in files.items():
+        (repo / fname).write_text(content)
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-m", f"feat: {name} adds {fname} Refs #1")
+    if reviewed:
+        squash_marker.mark(repo, name)
+    _git(repo, "checkout", "-q", "main")
+
+
+def _squash_in_place(repo: Path, name: str, onto: str, message: str) -> None:
+    """What a squash review leaves: one commit, same branch name, same base."""
+    _git(repo, "checkout", "-q", name)
+    _git(repo, "reset", "-q", "--soft", onto)
+    _git(repo, "commit", "-q", "-m", message)
+    squash_marker.mark(repo, name)
+    _git(repo, "checkout", "-q", "main")
+
+
+class TestStackedBranches:
+    """#539: order comes from what each branch was cut from, not from the queue;
+    a branch lands only its own commits."""
+
+    def test_stacked_items_land_in_order_with_each_commit_once(self, repos):
+        proj, ws = repos
+        pre = _main(proj)
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _stack(proj, "b3", "b2", {"three.txt": "3"})
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2"), ("R#3", "b3")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1",
+                                        "feat: b2 adds two.txt Refs #1",
+                                        "feat: b3 adds three.txt Refs #1"]
+        assert _merge_commits(proj, pre) == 0
+        assert result.closed_items == ["R#1", "R#2", "R#3"]
+
+    def test_order_comes_from_the_records_when_the_queue_is_in_another_order(self, repos):
+        proj, ws = repos
+        pre = _main(proj)
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _stack(proj, "b3", "b2", {"three.txt": "3"})
+        _queue(ws, [("R#3", "b3"), ("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert result.closed_items == ["R#1", "R#2", "R#3"]
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1",
+                                        "feat: b2 adds two.txt Refs #1",
+                                        "feat: b3 adds three.txt Refs #1"]
+
+    def test_parent_squashed_after_the_child_was_stacked(self, repos):
+        """The usual case at wrap: each branch is squashed, so the child still sits on
+        the parent's old commits. Only the child's own commits are replayed."""
+        proj, ws = repos
+        pre = _main(proj)
+        _stack(proj, "b1", "main", {"one.txt": "1", "shared.txt": "from b1"})
+        _stack(proj, "b2", "b1", {"shared.txt": "from b1, then b2"})
+        _squash_in_place(proj, "b1", "main", "feat: b1 squashed Refs #1")
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 squashed Refs #1",
+                                        "feat: b2 adds shared.txt Refs #1"]
+        assert _git(proj, "show", "main:shared.txt").stdout == "from b1, then b2"
+        assert _git(proj, "show", "main:one.txt").stdout == "1"
+        assert _merge_commits(proj, pre) == 0
+
+    def test_parent_that_changed_a_file_twice_then_was_squashed(self, repos):
+        """Replaying the parent's old commits onto its squashed form conflicts here: the
+        first old commit sets the file to a value the squash has already moved past.
+        Landing only the child's own commits never replays them."""
+        proj, ws = repos
+        pre = _main(proj)
+        _git(proj, "checkout", "-q", "-b", "b1")
+        branch_base.record(proj, "b1", pre, "")
+        for text in ("first draft", "second draft"):
+            (proj / "shared.txt").write_text(text)
+            _git(proj, "add", ".")
+            _git(proj, "commit", "-q", "-m", f"feat: b1 writes {text} Refs #1")
+        _git(proj, "checkout", "-q", "main")
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _squash_in_place(proj, "b1", "main", "feat: b1 squashed Refs #1")
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 squashed Refs #1",
+                                        "feat: b2 adds two.txt Refs #1"]
+        assert _git(proj, "show", "main:shared.txt").stdout == "second draft"
+        assert not (proj / ".git" / "rebase-merge").exists()
+
+    def test_child_squashed_too(self, repos):
+        proj, ws = repos
+        pre = _main(proj)
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        b1_tip = _git(proj, "rev-parse", "b1").stdout.strip()
+        _stack(proj, "b2", "b1", {"two.txt": "2", "three.txt": "3"}, reviewed=False)
+        _squash_in_place(proj, "b2", b1_tip, "feat: b2 squashed Refs #1")
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1", "feat: b2 squashed Refs #1"]
+
+    def test_squash_review_counts_only_the_branchs_own_commits(self, repos):
+        proj, ws = repos
+        _stack(proj, "b1", "main", {"one.txt": "1", "uno.txt": "1"})          # 2 commits, reviewed
+        _stack(proj, "b2", "b1", {"two.txt": "2"}, reviewed=False)            # 1 own commit
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert result.success, (result.errors, result.squash_review)
+
+    def test_squash_review_is_still_asked_for_two_own_commits(self, repos):
+        proj, ws = repos
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2", "dos.txt": "2"}, reviewed=False)
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert not result.success
+        assert len(result.squash_review) == 1 and "project:b2" in result.squash_review[0]
+        assert "2 commits" in result.squash_review[0]
+
+    def test_child_of_an_unlanded_branch_outside_the_batch_is_refused(self, repos):
+        proj, ws = repos
+        pre = _main(proj)
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _queue(ws, [("R#2", "b2")])                       # b1 is not in the queue at all
+
+        result = _close(proj, ws)
+
+        assert not result.success
+        assert "stacked on b1" in result.errors[0] and "has not landed" in result.errors[0]
+        assert _main(proj) == pre
+
+    def test_child_lands_alone_once_its_parent_has_landed(self, repos):
+        proj, ws = repos
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _queue(ws, [("R#1", "b1"), ("R#2", "")], active="R#1", branch="b1")
+        _git(proj, "checkout", "-q", "b1")
+        assert _close(proj, ws).success
+        pre = _main(proj)
+        _queue(ws, [("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b2 adds two.txt Refs #1"]
+
+    def test_record_the_branch_no_longer_sits_on_is_refused(self, repos):
+        proj, ws = repos
+        pre = _main(proj)
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _git(proj, "checkout", "-q", "b2")
+        _git(proj, "rebase", "-q", "--onto", "main", "b1")       # rebuilt by hand, record untouched
+        _git(proj, "checkout", "-q", "main")
+        _queue(ws, [("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert not result.success
+        assert "no longer sits on the commit it was recorded as cut from" in result.errors[0]
+        assert _main(proj) == pre
+
+    def test_repos_that_disagree_about_the_order_stop_the_ceremony(self, repos):
+        proj, ws = repos
+        pre_proj, pre_ws = _main(proj), _main(ws)
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _stack(ws, "b2", "main", {"notes-two.md": "2"})
+        _stack(ws, "b1", "b2", {"notes-one.md": "1"})            # the other way round
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        result = _close(proj, ws)
+
+        assert not result.success
+        assert "disagree about the order" in result.errors[0]
+        assert (_main(proj), _main(ws)) == (pre_proj, pre_ws)
+
+    def test_unrecorded_branches_are_ordered_by_ancestry(self, repos):
+        """Branches cut before records existed: the one inside the other's history lands first."""
+        proj, ws = repos
+        pre = _main(proj)
+        _branch(proj, "b1", {"one.txt": "1"})
+        _branch(proj, "b2", {"two.txt": "2"}, start="b1")
+        _queue(ws, [("R#2", "b2"), ("R#1", "b1")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert result.closed_items == ["R#1", "R#2"]
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1",
+                                        "feat: b2 adds two.txt Refs #1"]
+
+    def test_unrelated_branches_keep_queue_order(self, repos):
+        proj, ws = repos
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "main", {"two.txt": "2"})
+        _queue(ws, [("R#2", "b2"), ("R#1", "b1")])
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert result.closed_items == ["R#2", "R#1"]
+
+    def test_the_record_is_cleared_once_the_branch_has_landed(self, repos):
+        proj, ws = repos
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2")])
+
+        assert _close(proj, ws).success
+
+        assert _git(proj, "for-each-ref", "refs/soredium").stdout == ""
