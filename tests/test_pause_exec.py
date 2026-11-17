@@ -20,6 +20,7 @@ def clean_git_repo(tmp_path):
     (repo / "README.md").write_text("test")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True)
+    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True, capture_output=True)
     return repo
 
 
@@ -131,26 +132,48 @@ def test_push_and_stack_happy_path(workspace_with_stack, clean_git_repo, tmp_pat
         text=True
     )
 
-    # Should succeed even though push fails (no remotes)
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stdout
     assert "STACKED=yes" in result.stdout
-    assert "PROJECT_PUSHED=no" in result.stdout  # no remote
-    assert "WORKSPACE_PUSHED=no" in result.stdout  # no remote
+    assert "PROJECT_BACKED_UP=refs/backup/repo/issue-1-test" in result.stdout
+    assert "WORKSPACE_BACKED_UP=refs/backup/workspace/issue-1-test" in result.stdout
+    assert "PUSHED" not in result.stdout
 
     # Verify stack entry was added
-    stack_file = workspace / "design" / ".pause-stack"
+    stack_file = workspace / ".pause-stack"
     stack_content = stack_file.read_text()
     assert "branch: issue-1-test" in stack_content
     assert "issue: 1" in stack_content
 
 
-def test_push_and_stack_push_failures_non_fatal(workspace_with_stack, clean_git_repo):
-    """push-and-stack succeeds even when push to origin fails."""
+def _bare_remote(tmp_path, repo, name="remote.git"):
+    bare = tmp_path / name
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(bare)], check=True)
+    subprocess.run(["git", "-C", str(repo), "push", "-q", "origin", "HEAD:main"], check=True,
+                   capture_output=True)
+    return bare
+
+
+def _refs(repo):
+    return subprocess.run(["git", "-C", str(repo), "for-each-ref", "--format=%(refname)"],
+                          capture_output=True, text=True).stdout.split()
+
+
+def test_push_and_stack_pushes_nothing(workspace_with_stack, clean_git_repo, tmp_path):
+    """#515: pausing never sends a branch or the stack to a remote."""
     workspace = workspace_with_stack
     project = clean_git_repo
+    subprocess.run(["git", "-C", str(project), "branch", "-M", "main"], check=True, capture_output=True)
+    project_remote = _bare_remote(tmp_path, project, "project.git")
+    workspace_remote = _bare_remote(tmp_path, workspace, "workspace.git")
+    remote_main = subprocess.run(["git", "-C", str(workspace_remote), "rev-parse", "main"],
+                                 capture_output=True, text=True).stdout.strip()
 
     subprocess.run(["git", "-C", str(workspace), "checkout", "-b", "issue-2-test"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(project), "checkout", "-b", "issue-2-test"], check=True, capture_output=True)
+    (project / "work.txt").write_text("work")
+    subprocess.run(["git", "-C", str(project), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(project), "commit", "-m", "work"], check=True, capture_output=True)
 
     result = subprocess.run(
         ["python3", str(PAUSE_EXEC), "push-and-stack",
@@ -160,11 +183,13 @@ def test_push_and_stack_push_failures_non_fatal(workspace_with_stack, clean_git_
         text=True
     )
 
-    # Push failures are non-fatal
-    assert result.returncode == 0
-    assert "PROJECT_PUSHED=no" in result.stdout
-    assert "WORKSPACE_PUSHED=no" in result.stdout
+    assert result.returncode == 0, result.stdout
     assert "STACKED=yes" in result.stdout
+    assert _refs(project_remote) == ["refs/heads/main"]
+    assert _refs(workspace_remote) == ["refs/heads/main"]
+    assert subprocess.run(["git", "-C", str(workspace_remote), "rev-parse", "main"],
+                          capture_output=True, text=True).stdout.strip() == remote_main
+    assert "refs/backup/repo/issue-2-test" in _refs(project)
 
 
 def test_push_and_stack_missing_branch_arg():
@@ -245,7 +270,14 @@ def test_push_and_stack_dirty_workspace(workspace_with_stack, clean_git_repo):
 
     assert result.returncode == 0, f"push-and-stack failed: {result.stdout}"
     assert "STACKED=yes" in result.stdout
-    assert "STASHED=" in result.stdout
+    assert "STASHED=" not in result.stdout
+    assert "LATE_WIP=workspace" in result.stdout
+    assert subprocess.run(["git", "-C", str(workspace), "stash", "list"],
+                          capture_output=True, text=True).stdout == ""
+    on_branch = subprocess.run(
+        ["git", "-C", str(workspace), "show", "issue-7-test:.work-progress"],
+        capture_output=True, text=True)
+    assert on_branch.stdout == "code_review=done\n"       # kept, on the branch it belongs to
 
     ws_branch = subprocess.run(
         ["git", "-C", str(workspace), "branch", "--show-current"],
@@ -284,6 +316,10 @@ def test_push_and_stack_dirty_project(workspace_with_stack, clean_git_repo):
         capture_output=True, text=True
     ).stdout.strip()
     assert proj_branch == "main"
+    assert subprocess.run(["git", "-C", str(project), "stash", "list"],
+                          capture_output=True, text=True).stdout == ""
+    assert subprocess.run(["git", "-C", str(project), "show", "issue-8-test:uncommitted.txt"],
+                          capture_output=True, text=True).stdout == "dirty"
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +396,7 @@ def slot_clone_setup(tmp_path):
     # Create slot directory
     slot_dir = family / "worktrees" / "3"
     slot_dir.mkdir(parents=True)
+    (slot_dir / ".slot").write_text("# Slot 3\n")
 
     # Clone project into slot
     slot_project = slot_dir / "project"
@@ -369,6 +406,8 @@ def slot_clone_setup(tmp_path):
     )
     subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=slot_project, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=slot_project, check=True)
+    subprocess.run(["git", "-C", str(slot_project), "remote", "rename", "origin", "local"],
+                   check=True, capture_output=True)
     subprocess.run(["git", "-C", str(slot_project), "checkout", "-b", "issue-50-feature"],
                    check=True, capture_output=True)
 
@@ -380,6 +419,8 @@ def slot_clone_setup(tmp_path):
     )
     subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=slot_workspace, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=slot_workspace, check=True)
+    subprocess.run(["git", "-C", str(slot_workspace), "remote", "rename", "origin", "local"],
+                   check=True, capture_output=True)
     subprocess.run(["git", "-C", str(slot_workspace), "checkout", "-b", "issue-50-feature"],
                    check=True, capture_output=True)
     # Ensure design dir exists in workspace clone
@@ -411,10 +452,41 @@ def test_pause_in_slot_writes_to_original_workspace(slot_clone_setup):
     assert result.returncode == 0
     assert "STACKED=yes" in result.stdout
 
-    # Stack entry should be on the ORIGINAL workspace, not the clone
-    orig_stack = s["orig_workspace"] / "design" / ".pause-stack"
+    # The entry reaches the ORIGINAL workspace, where every session reads the stack
+    orig_stack = s["orig_workspace"] / ".pause-stack"
     orig_content = orig_stack.read_text()
     assert "branch: issue-50-feature" in orig_content
+    assert "PROJECT_BACKED_UP=refs/backup/3/issue-50-feature" in result.stdout
+    assert "refs/backup/3/issue-50-feature" in _refs(s["orig_project"])
+    merges = subprocess.run(["git", "-C", str(s["orig_workspace"]), "rev-list", "--merges", "--count", "main"],
+                            capture_output=True, text=True).stdout.strip()
+    assert merges == "0"
+
+
+def test_pause_in_slot_leaves_a_busy_canonical_workspace_alone(slot_clone_setup):
+    """The canonical workspace may be on another branch with uncommitted work. Pausing a
+    slot used to check out main there and pull."""
+    s = slot_clone_setup
+    canon = s["orig_workspace"]
+    subprocess.run(["git", "-C", str(canon), "checkout", "-q", "-b", "someone-elses-work"], check=True)
+    (canon / "draft.md").write_text("uncommitted\n")
+
+    result = subprocess.run(
+        ["python3", str(PAUSE_EXEC), "push-and-stack",
+         str(s["slot_workspace"]), str(s["slot_project"]),
+         "branch=issue-50-feature", "issue=50", "base-branch=main"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout
+    head = subprocess.run(["git", "-C", str(canon), "branch", "--show-current"],
+                          capture_output=True, text=True).stdout.strip()
+    assert head == "someone-elses-work"
+    assert (canon / "draft.md").read_text() == "uncommitted\n"
+    on_main = subprocess.run(["git", "-C", str(canon), "show", "main:.pause-stack"],
+                             capture_output=True, text=True).stdout
+    assert "branch: issue-50-feature" in on_main
 
 
 def test_pause_in_slot_includes_slot_path(slot_clone_setup):
@@ -429,7 +501,7 @@ def test_pause_in_slot_includes_slot_path(slot_clone_setup):
         text=True,
     )
 
-    orig_stack = s["orig_workspace"] / "design" / ".pause-stack"
+    orig_stack = s["orig_workspace"] / ".pause-stack"
     orig_content = orig_stack.read_text()
     assert f"slot: {s['slot_dir']}" in orig_content
 
@@ -452,8 +524,9 @@ def test_pause_outside_slot_has_no_slot_field(workspace_with_stack, clean_git_re
         text=True,
     )
 
-    stack_file = workspace / "design" / ".pause-stack"
+    stack_file = workspace / ".pause-stack"
     content = stack_file.read_text()
+    assert "branch: issue-1-test" in content
     assert "slot:" not in content
 
 
@@ -468,7 +541,7 @@ class TestPauseIntent:
         )
         assert result.returncode == 0
         assert "INTENT=written" in result.stdout
-        intent = (workspace / "design" / ".pausing").read_text()
+        intent = (workspace / ".pausing").read_text()
         assert "branch: issue-42-foo" in intent
         assert "wip_project: pending" in intent
         assert "checkout_main: pending" in intent
@@ -487,7 +560,7 @@ class TestPauseIntent:
             capture_output=True, text=True,
         )
         assert result.returncode == 0
-        intent = (workspace / "design" / ".pausing").read_text()
+        intent = (workspace / ".pausing").read_text()
         assert "wip_project: done" in intent
         assert "wip_workspace: pending" in intent
 
@@ -499,13 +572,13 @@ class TestPauseIntent:
              str(workspace), "branch=issue-42-foo"],
             capture_output=True, text=True, check=True,
         )
-        assert (workspace / "design" / ".pausing").exists()
+        assert (workspace / ".pausing").exists()
         result = subprocess.run(
             ["python3", str(PAUSE_EXEC), "clear-intent", str(workspace)],
             capture_output=True, text=True,
         )
         assert result.returncode == 0
-        assert not (workspace / "design" / ".pausing").exists()
+        assert not (workspace / ".pausing").exists()
 
     def test_update_intent_noop_when_no_file(self, tmp_path):
         workspace = tmp_path / "workspace"

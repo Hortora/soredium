@@ -2,6 +2,10 @@
 """
 pause_exec.py — Externalized operations for work-pause
 
+Pausing never pushes, pulls or stashes. The paused branch is backed up by the
+canonical repo (project/canonical_sync.py); in a slot the stack entry is landed
+in the canonical workspace the same way any other work is.
+
 Usage:
     python3 pause_exec.py commit-wip <repo> message=<msg>
     python3 pause_exec.py push-and-stack <workspace> <project> branch=<name> issue=<N> base-branch=<base>
@@ -111,15 +115,12 @@ def commit_wip(repo: str, message: str) -> int:
     return 0
 
 
-def _resolve_clone_origin(repo: str) -> Path | None:
-    """If repo is a git clone whose origin points to a local directory, return that path."""
-    ok, url = run_git(repo, "remote", "get-url", "origin")
-    if not ok:
-        return None
-    origin_path = Path(url)
-    if origin_path.is_dir() and (origin_path / ".git").exists():
-        return origin_path.resolve()
-    return None
+def _canonical_sync():
+    project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if project_dir not in sys.path:
+        sys.path.insert(0, project_dir)
+    import canonical_sync
+    return canonical_sync
 
 
 def _resolve_slot_dir(clone_path: Path) -> Path | None:
@@ -135,47 +136,68 @@ def _resolve_slot_dir(clone_path: Path) -> Path | None:
     return None
 
 
-def _stash_if_dirty(repo: str) -> bool:
-    """Stash uncommitted changes if the working tree is dirty. Returns True if stashed."""
+def _commit_leftovers(repo: str, branch: str) -> bool:
+    """Commit anything still uncommitted onto the paused branch.
+
+    Files written after the WIP commit (progress logs, hook output) used to be
+    stashed before the checkout, where they were easy to lose. They go into a
+    commit on the branch they belong to instead.
+    """
     ok, status_out = run_git(repo, "status", "--short")
     if not ok or not status_out.strip():
         return False
-    stash_ok, _ = run_git(repo, "stash", "-u")
-    if stash_ok:
-        print(f"STASHED={Path(repo).name}")
-    return stash_ok
+    run_git(repo, "add", "-A")
+    committed, _ = run_git(repo, "commit", "-m", f"WIP: pause {branch} (late changes)")
+    if committed:
+        print(f"LATE_WIP={Path(repo).name}")
+    return committed
+
+
+def _back_up(cs, repo: str, branch: str, label: str) -> None:
+    """Ask the canonical repo to keep a copy of the paused branch. Never fatal, never silent."""
+    try:
+        ref = cs.backup(repo, branch)
+        print(f"{label}_BACKED_UP={ref}")
+        if cs.is_clone(repo):
+            try:
+                where = cs.backup_offsite(cs.locate(repo), ref)
+                print(f"{label}_OFFSITE={where}")
+            except cs.SyncError as error:
+                print(f"{label}_OFFSITE=failed")
+                print(f"WARN={error.detail}")
+    except cs.SyncError as error:
+        print(f"{label}_BACKED_UP=no")
+        print(f"WARN={error.detail}")
 
 
 def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_branch: str) -> int:
     """
-    Push project/workspace branches, checkout base, pull, add stack entry.
+    Back the paused branch up, put both checkouts on the base branch, add the stack entry.
 
-    Push failures are non-fatal. Stack push MUST succeed.
-
-    When workspace is a slot clone (origin points to a local directory),
-    the stack entry is written to the original workspace's pause stack
-    with a slot= field pointing to the slot directory.
+    Nothing is pushed, pulled or stashed, and no checkout but the session's own
+    is switched. In a slot clone the stack entry is committed in the clone's
+    workspace and landed in the canonical workspace through canonical_sync, so
+    every session sees it, with a slot= field pointing at the slot directory.
 
     Output:
         STACKED=yes
-        PROJECT_PUSHED=yes|no
-        WORKSPACE_PUSHED=yes|no
+        PROJECT_BACKED_UP=<ref>|no      (the canonical repo's copy of the branch)
+        WORKSPACE_BACKED_UP=<ref>|no
+        *_OFFSITE=<remote>|none|failed  (slot clones only)
+        LATE_WIP=<repo>                 (leftover changes committed onto the branch)
+        WARN=<detail>
     """
-    # Detect slot context: is workspace a clone of a local repo?
-    original_workspace = _resolve_clone_origin(workspace)
-    slot_dir: Path | None = None
-    stack_workspace: str  # repo where the stack entry gets committed
-    if original_workspace is not None:
-        slot_dir = _resolve_slot_dir(Path(workspace))
-        stack_workspace = str(original_workspace)
-    else:
-        stack_workspace = workspace
+    cs = _canonical_sync()
+    try:
+        workspace_is_clone = cs.is_clone(workspace)
+    except cs.SyncError as error:
+        print("ERROR=no_canonical")
+        print(f"ERROR_DETAIL={error.detail}")
+        return 1
+    slot_dir: Path | None = _resolve_slot_dir(Path(workspace)) if workspace_is_clone else None
 
     # WIP-commit sibling repos in slot mode
     if slot_dir is not None:
-        _project_dir = str(Path(__file__).resolve().parent.parent / "project")
-        if _project_dir not in sys.path:
-            sys.path.insert(0, _project_dir)
         from git_util import collect_slot_repos
         for repo_path, label in collect_slot_repos(str(slot_dir), project, workspace):
             if repo_path in (project, workspace):
@@ -186,64 +208,33 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
                 run_git(repo_path, "commit", "-m", f"WIP: pause {branch}")
                 print(f"SIBLING_COMMITTED={label}")
 
-    # Push project branch (non-fatal)
-    # In slot mode, origin is a local path — do two-hop push
-    original_project = _resolve_clone_origin(project)
-    project_push_ok, _ = run_git(project, "push", "origin", branch)
-    if project_push_ok and original_project is not None:
-        run_git(str(original_project), "push", "origin", branch)
-    print(f"PROJECT_PUSHED={'yes' if project_push_ok else 'no'}")
+    _commit_leftovers(project, branch)
+    _commit_leftovers(workspace, branch)
 
-    # Push workspace branch (non-fatal)
-    workspace_push_ok, _ = run_git(workspace, "push", "origin", branch)
-    if workspace_push_ok and original_workspace is not None:
-        run_git(str(original_workspace), "push", "origin", branch)
-    print(f"WORKSPACE_PUSHED={'yes' if workspace_push_ok else 'no'}")
+    _back_up(cs, project, branch, "PROJECT")
+    _back_up(cs, workspace, branch, "WORKSPACE")
 
-    # Checkout base in project (stash dirty files first)
-    _stash_if_dirty(project)
+    # The session's own checkouts go to the base branch.
     checkout_ok, _ = run_git(project, "checkout", base_branch)
     if not checkout_ok:
         print("ERROR=project_checkout_failed")
         return 1
-
-    # Checkout main in workspace clone (stash dirty files first)
-    _stash_if_dirty(workspace)
     ws_checkout_ok, _ = run_git(workspace, "checkout", "main")
     if not ws_checkout_ok:
         print("ERROR=workspace_checkout_failed")
         return 1
 
-    # Pull project (skip if no upstream configured)
-    has_upstream, _ = run_git(project, "rev-parse", "--abbrev-ref", "@{u}")
-    if has_upstream:
-        pull_ok, _ = run_git(project, "pull", "--rebase")
-        if not pull_ok:
-            print("ERROR=project_pull_failed")
+    # A slot clone's main may be behind the canonical workspace, which holds the
+    # stack every session reads. Bring it up to date before adding to it.
+    if workspace_is_clone:
+        try:
+            cs.rebase(workspace, "main")
+        except cs.SyncError as error:
+            print("ERROR=workspace_not_current")
+            print(f"ERROR_DETAIL={error.detail}")
             return 1
 
-    # For stack operations, ensure we're on main in the stack workspace
-    if original_workspace is not None:
-        checkout_ok, _ = run_git(stack_workspace, "checkout", "main")
-        if not checkout_ok:
-            print("ERROR=original_workspace_checkout_failed")
-            return 1
-        has_remote, _ = run_git(stack_workspace, "remote", "get-url", "origin")
-        if has_remote:
-            pull_ok, _ = run_git(stack_workspace, "pull", "--rebase", "origin", "main")
-            if not pull_ok:
-                print("ERROR=original_workspace_pull_failed")
-                return 1
-    else:
-        has_remote, _ = run_git(workspace, "remote", "get-url", "origin")
-        if has_remote:
-            ws_pull_ok, _ = run_git(workspace, "pull", "--rebase", "origin", "main")
-            if not ws_pull_ok:
-                print("ERROR=workspace_pull_failed")
-                return 1
-
-    # Push stack entry to the stack workspace (original if slot, else workspace)
-    stack_file = Path(stack_workspace) / ".pause-stack"
+    stack_file = Path(workspace) / ".pause-stack"
     repo_stack = Path(__file__).resolve().parent.parent / "project" / "stack.py"
     installed_stack = Path.home() / ".claude" / "skills" / "project" / "stack.py"
     stack_script = repo_stack if repo_stack.exists() else installed_stack
@@ -273,63 +264,54 @@ def push_and_stack(workspace: str, project: str, branch: str, issue: str, base_b
         pass
 
     try:
-        result = subprocess.run(
-            push_args,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        # Parse STACK_DEPTH from output
-        depth = None
-        for line in result.stdout.splitlines():
-            if line.startswith("STACK_DEPTH="):
-                depth = line.split("=")[1]
-                break
-
-        if depth is None:
-            print("ERROR=stack_depth_missing")
-            return 1
-
-        # Add, commit, push stack change on the stack workspace
-        add_ok, _ = run_git(stack_workspace, "add", ".pause-stack")
-        if not add_ok:
-            print("ERROR=stack_add_failed")
-            return 1
-
-        commit_msg = f"chore: pause {branch} — stack depth {depth}"
-        commit_ok, _ = run_git(stack_workspace, "commit", "-m", commit_msg)
-        if not commit_ok:
-            print("ERROR=stack_commit_failed")
-            return 1
-
-        # Push stack commit (only if remote is configured)
-        has_ws_remote, _ = run_git(stack_workspace, "remote", "get-url", "origin")
-        if has_ws_remote:
-            push_stack_ok, _ = run_git(stack_workspace, "push")
-            if not push_stack_ok:
-                # If stack push fails, abort by popping the entry
-                subprocess.run(
-                    ["python3", str(stack_script), "pop", str(stack_file), branch],
-                    check=False
-                )
-                print("ERROR=stack_push_failed")
-                return 1
-
-        print("STACKED=yes")
-
-        if _wl:
-            try:
-                _conn = _wl.connect()
-                _wl.record_work_pause(_conn, branch, project)
-                _conn.close()
-            except Exception:
-                pass
-
-        return 0
-
+        result = subprocess.run(push_args, capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError:
         print("ERROR=stack_script_failed")
         return 1
+
+    depth = None
+    for line in result.stdout.splitlines():
+        if line.startswith("STACK_DEPTH="):
+            depth = line.split("=")[1]
+            break
+    if depth is None:
+        print("ERROR=stack_depth_missing")
+        return 1
+
+    add_ok, _ = run_git(workspace, "add", ".pause-stack")
+    if not add_ok:
+        print("ERROR=stack_add_failed")
+        return 1
+    commit_ok, _ = run_git(workspace, "commit", "-m",
+                           f"chore: pause {branch} — stack depth {depth}",
+                           "-m", "no-issue: pause stack bookkeeping")
+    if not commit_ok:
+        subprocess.run(["python3", str(stack_script), "pop", str(stack_file), branch], check=False)
+        run_git(workspace, "reset", "-q", "--", ".pause-stack")
+        print("ERROR=stack_commit_failed")
+        return 1
+
+    if workspace_is_clone:
+        try:
+            cs.land(workspace, "main")
+        except cs.SyncError as error:
+            # The entry is committed in the slot's workspace and will be carried to
+            # canonical by the next landing; other sessions cannot see it until then.
+            print("ERROR=stack_not_landed")
+            print(f"ERROR_DETAIL={error.detail}")
+            return 1
+
+    print("STACKED=yes")
+
+    if _wl:
+        try:
+            _conn = _wl.connect()
+            _wl.record_work_pause(_conn, branch, project)
+            _conn.close()
+        except Exception:
+            pass
+
+    return 0
 
 
 PAUSE_STEPS = ["wip_project", "wip_workspace", "stack_push", "checkout_main"]
