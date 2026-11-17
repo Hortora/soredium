@@ -99,7 +99,7 @@ def test_lifecycle_state_from_db(tmp_path):
         "INSERT INTO work_items (id, branch, repo_id, state, created_at) "
         "VALUES (1, 'feature', 1, 'active', datetime('now'))",
     )
-    metadata = json.dumps({"from_state": "idle", "to_state": "active"})
+    metadata = json.dumps({"from": "idle", "to": "active"})
     conn.execute(
         "INSERT INTO events (timestamp, event_type, work_item_id, metadata) "
         "VALUES (datetime('now'), 'activate', 1, ?)",

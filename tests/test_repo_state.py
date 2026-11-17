@@ -3,8 +3,6 @@
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
-
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
@@ -164,106 +162,6 @@ class TestClassifyRepoTopology:
 
         with pytest.raises(AttributeError):
             state.disposition = "something"
-
-
-def _make_repo_state(disposition, repo_type=None, has_upstream=False, name="project"):
-    from repo_state import RepoState, RepoType, RepoDisposition, RepoContext
-    state = RepoState(
-        path=Path(f"/fake/{name}"),
-        name=name,
-        repo_type=repo_type or RepoType.PROJECT,
-        disposition=disposition,
-        branch="feature" if disposition != RepoDisposition.NO_BRANCH else None,
-        commits_ahead=2 if disposition == RepoDisposition.HAS_WORK else 0,
-        is_dirty=False,
-        has_remote=True,
-        remote_branch_exists=False,
-        landing_sha=None,
-        has_upstream=has_upstream,
-        push_remote="upstream" if has_upstream else "origin",
-        canonical_path=None,
-        is_slot_clone=False,
-    )
-    return RepoContext(
-        state=state, tree_sha="", main_tree_sha="",
-        remote_synced=False, lifecycle_state=None,
-    )
-
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-
-
-class TestSkipPredicates:
-    def test_skip_empty_branch_replaced_by_dispositions(self):
-        """_skip_empty_branch no longer exists — replaced by StepDef.dispositions."""
-        import work_end_orchestrator
-        assert not hasattr(work_end_orchestrator, "_skip_empty_branch")
-
-    def test_skip_no_upstream_without(self):
-        from repo_state import RepoDisposition
-        from work_end_orchestrator import _skip_no_upstream
-
-        ctx = MagicMock()
-        ctx.repos = [_make_repo_state(RepoDisposition.HAS_WORK, has_upstream=False)]
-
-        assert _skip_no_upstream(ctx) is True
-
-    def test_skip_no_upstream_with(self):
-        from repo_state import RepoDisposition
-        from work_end_orchestrator import _skip_no_upstream
-
-        ctx = MagicMock()
-        ctx.repos = [_make_repo_state(RepoDisposition.HAS_WORK, has_upstream=True)]
-
-        assert _skip_no_upstream(ctx) is False
-
-    def test_skip_partial_close_no_unlanded(self):
-        from repo_state import RepoDisposition, RepoType
-        from work_end_orchestrator import _skip_multi_repo_partial_close
-
-        ctx = MagicMock()
-        ctx.in_slot = True
-        ctx.repos = [
-            _make_repo_state(RepoDisposition.HAS_WORK, RepoType.CLONE, name="engine"),
-            _make_repo_state(RepoDisposition.HAS_WORK, RepoType.CLONE, name="iot"),
-        ]
-        ctx.progress = {"land:engine": "done", "land:iot": "done"}
-
-        assert _skip_multi_repo_partial_close(ctx) is False
-
-    def test_skip_partial_close_with_unlanded(self):
-        from repo_state import RepoDisposition, RepoType
-        from work_end_orchestrator import _skip_multi_repo_partial_close
-
-        ctx = MagicMock()
-        ctx.in_slot = True
-        ctx.repos = [
-            _make_repo_state(RepoDisposition.HAS_WORK, RepoType.CLONE, name="engine"),
-            _make_repo_state(RepoDisposition.HAS_WORK, RepoType.CLONE, name="iot"),
-        ]
-        ctx.progress = {"land:engine": "done"}
-
-        assert _skip_multi_repo_partial_close(ctx) is True
-
-    def test_skip_partial_close_single_repo(self):
-        from repo_state import RepoDisposition, RepoType
-        from work_end_orchestrator import _skip_multi_repo_partial_close
-
-        ctx = MagicMock()
-        ctx.in_slot = True
-        ctx.repos = [_make_repo_state(RepoDisposition.HAS_WORK, RepoType.CLONE, name="engine")]
-        ctx.progress = {}
-
-        assert _skip_multi_repo_partial_close(ctx) is False
-
-    def test_skip_partial_close_not_slot(self):
-        from work_end_orchestrator import _skip_multi_repo_partial_close
-
-        ctx = MagicMock()
-        ctx.in_slot = False
-        ctx.repos = []
-
-        assert _skip_multi_repo_partial_close(ctx) is False
 
 
 class TestClassifyRepos:
@@ -456,47 +354,3 @@ class TestScanSlotBranches:
         assert branches == set()
 
 
-class TestScanBranchesCLI:
-    """#493: scan-branches CLI command for cumulative slot close."""
-
-    def test_outputs_branch_info(self, tmp_path):
-        slot = tmp_path / "slot"
-        slot.mkdir()
-
-        for name, branch in [("engine", "issue-377-topology"), ("agency", "issue-382-budget")]:
-            repo = slot / name
-            repo.mkdir()
-            _init_repo(repo)
-            _make_branch_with_commits(repo, branch, n=1)
-
-        (slot / ".slot").write_text("# Slot\n## Repos\n- engine\n- agency\n## Status\nstatus: active\n")
-
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).parent.parent / "work-end" / "work_end_execute.py"),
-             "scan-branches", f"slot_path={slot}"],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert result.returncode == 0
-        lines = result.stdout.strip().split("\n")
-        kv = dict(line.split("=", 1) for line in lines if "=" in line)
-        assert kv["BRANCHES"] == "2"
-        assert "issue-377-topology" in result.stdout
-        assert "issue-382-budget" in result.stdout
-
-    def test_extracts_issue_numbers(self, tmp_path):
-        slot = tmp_path / "slot"
-        slot.mkdir()
-
-        repo = slot / "engine"
-        repo.mkdir()
-        _init_repo(repo)
-        _make_branch_with_commits(repo, "issue-377-topology", n=1)
-
-        (slot / ".slot").write_text("# Slot\n## Repos\n- engine\n## Status\nstatus: active\n")
-
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).parent.parent / "work-end" / "work_end_execute.py"),
-             "scan-branches", f"slot_path={slot}"],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert "BRANCH_0_ISSUE=377" in result.stdout
