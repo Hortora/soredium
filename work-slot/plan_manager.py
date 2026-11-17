@@ -58,6 +58,8 @@ class QueueItem:
     tasks: list[TaskItem] = field(default_factory=list)
     # Done but not closed: finished on this branch, close ceremony not yet run.
     done_branch: str = ""
+    # Its branch starts from the base branch, not stacked on the item before it.
+    from_main: bool = False
 
 
 @dataclass
@@ -92,6 +94,7 @@ class LeafItem:
     parent_epic: IssueRef | None
     batch: str | None
     done_branch: str = ""
+    from_main: bool = False
 
 
 @dataclass
@@ -111,6 +114,7 @@ _ITEM_RE = re.compile(
 _EPIC_MARKER_RE = re.compile(r'\(epic\)')
 _ACTIVE_MARKER_RE = re.compile(r'(?:←|<-)\s*active')
 _DONE_MARKER_RE = re.compile(r'(?:←|<-)\s*done on (\S+)')
+_FROM_MAIN_MARKER_RE = re.compile(r'\s*\(from main\)')
 _BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*(?:←|<-)\s*current)?$')
 _DEFERRED_RE = re.compile(
     r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]*)\](?:\s+—\s+(.+))?$'
@@ -322,6 +326,8 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
             title = _EPIC_MARKER_RE.sub("", title_raw).strip()
             title = _ACTIVE_MARKER_RE.sub("", title).strip()
             title = _DONE_MARKER_RE.sub("", title).strip()
+            from_main = bool(_FROM_MAIN_MARKER_RE.search(title))
+            title = _FROM_MAIN_MARKER_RE.sub("", title).strip()
             is_epic = bool(_EPIC_MARKER_RE.search(item_m.group(0)))
             active = bool(_ACTIVE_MARKER_RE.search(item_m.group(0)))
             done_m = _DONE_MARKER_RE.search(item_m.group(0))
@@ -334,6 +340,7 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
                 is_epic=is_epic,
                 batch=current_batch,
                 done_branch=done_m.group(1) if done_m and not completed else "",
+                from_main=from_main,
             )
 
             if is_epic:
@@ -437,6 +444,7 @@ def _flatten_items(items: list[QueueItem], result: list[LeafItem],
                 parent_epic=parent_epic,
                 batch=item.batch,
                 done_branch=item.done_branch,
+                from_main=item.from_main,
             ))
 
 
@@ -521,7 +529,8 @@ def _write_item(item: QueueItem, lines: list[str], indent: int) -> None:
     active_marker = " ← active" if item.active else ""
     if item.done_branch and not item.completed and not item.active:
         active_marker = f" ← done on {item.done_branch}"
-    lines.append(f"{prefix}- [{check}] {item.ref} — {item.title}{epic_marker}{active_marker}")
+    base_marker = " (from main)" if item.from_main else ""
+    lines.append(f"{prefix}- [{check}] {item.ref} — {item.title}{base_marker}{epic_marker}{active_marker}")
 
     if item.is_epic and item.children:
         current_batch = None
@@ -1447,8 +1456,13 @@ def main() -> int:
             print("ERROR=issues is required (format: 42:title,43:title)",
                   file=_sys.stderr)
             return 1
+        from_main = opts.get("base", "stack") == "main"
+        if opts.get("base", "stack") not in ("stack", "main"):
+            print("ERROR=base must be stack or main", file=_sys.stderr)
+            return 1
         items = []
-        for entry in issues_str.split(","):
+        # Split only where the next entry begins, so a comma inside a title is kept.
+        for entry in re.split(r',(?=\s*[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#\d+\s*:)', issues_str):
             entry = entry.strip()
             if ":" not in entry:
                 continue
@@ -1462,6 +1476,7 @@ def main() -> int:
             items.append(QueueItem(
                 ref=IssueRef(m.group(1), int(m.group(2))),
                 title=title.strip(),
+                from_main=from_main,
             ))
         if not items:
             print("ERROR=no valid items parsed", file=_sys.stderr)
@@ -1499,6 +1514,33 @@ def main() -> int:
             print(f"SKIPPED_DUPLICATES={len(items) - len(added)}")
         if position is not None:
             print(f"POSITION={position}")
+        return 0
+
+    elif command == "set-base":
+        wanted = opts.get("ref", "")
+        base = opts.get("base", "")
+        if not wanted or base not in ("stack", "main"):
+            print("ERROR=usage: set-base <queue> ref=<owner/repo#N> base=<stack|main>",
+                  file=_sys.stderr)
+            return 1
+        tree = parse_plan(plan_path)
+
+        def _find(items):
+            for candidate in items:
+                if str(candidate.ref).lower() == wanted.lower():
+                    return candidate
+                found = _find(candidate.children)
+                if found:
+                    return found
+            return None
+
+        target = _find(tree.queue)
+        if target is None:
+            print(f"ERROR=no_such_item ref={wanted}")
+            return 1
+        target.from_main = base == "main"
+        rewrite_plan(plan_path, tree)
+        print(f"SET_BASE={target.ref} base={base}")
         return 0
 
     elif command == "set-state":

@@ -60,38 +60,80 @@ class CreateResult:
     project_created: bool
     workspace_created: bool
     error: str | None = None
+    stacked_on: str = ""        # the branch it was stacked on; "" when cut from the base branch
+    reason: str = ""            # why it starts there
+    cut_from: dict | None = None  # {repo name: what its branch was cut from}
 
 
 def create_branches_typed(project: str, workspace: str, branch: str,
                           base: str | None = None,
                           slot_path: str = "") -> CreateResult:
-    """Create branches in project and workspace (and slot siblings) atomically."""
-    if base:
-        ok, err = run_git(project, "checkout", "-b", branch, base)
-    else:
-        ok, err = run_git(project, "checkout", "-b", branch)
+    """Create branches in project and workspace (and slot siblings) atomically.
 
+    Every repo starts the branch from the same place. The queue decides where:
+    stacked on the branch of the item just before this one when that item is
+    finished but not closed, otherwise from the base branch. Each repo records
+    what its branch was cut from (project/branch_base.py), which is what the
+    close ceremony and the squash review later read.
+    """
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in sys.path:
+        sys.path.insert(0, _project_dir)
+    import branch_base
+    from git_util import collect_slot_repos
+
+    where = branch_base.start_point(Path(workspace))
+    cut_from: dict[str, str] = {}
+
+    def _base_branch(repo: str, wanted: str | None) -> str:
+        if wanted and branch_base.branch_exists(repo, wanted):
+            return wanted
+        for candidate in ("main", "master"):
+            if branch_base.branch_exists(repo, candidate):
+                return candidate
+        return wanted or "main"
+
+    def _cut(repo: str, wanted_base: str | None, is_workspace: bool = False) -> tuple[bool, str]:
+        # A workspace repo holds the queue and continues from the previous item's
+        # branch even when the item is marked (from main); see branch_base.
+        parent = where.carry if is_workspace else where.parent
+        if not parent:
+            _follow_canonical(repo)
+        ok, detail = branch_base.cut(repo, branch, _base_branch(repo, wanted_base), parent)
+        if ok:
+            cut_from[Path(repo).name] = detail
+        return ok, detail
+
+    ok, err = _cut(project, base)
     if not ok:
         return CreateResult(branch, False, False, f"project_branch_failed:{err}")
 
-    ok, err = run_git(workspace, "checkout", "-b", branch)
+    ok, err = _cut(workspace, None, is_workspace=True)
     if not ok:
         run_git(project, "checkout", "-")
         run_git(project, "branch", "-D", branch)
+        branch_base.clear(project, branch)
         return CreateResult(branch, False, False, f"workspace_branch_failed:{err}")
 
     if slot_path:
-        _project_dir = str(Path(__file__).resolve().parent.parent / "project")
-        if _project_dir not in sys.path:
-            sys.path.insert(0, _project_dir)
-        from git_util import collect_slot_repos
         for repo_path, label in collect_slot_repos(slot_path, project, workspace):
             if repo_path in (project, workspace):
                 continue
-            run_git(repo_path, "checkout", "-b", branch)
+            _cut(repo_path, None, is_workspace=(Path(repo_path) / ".workspace").exists())
 
     _slot_reentry_cleanup(Path(project).parent)
-    return CreateResult(branch, True, True)
+    return CreateResult(branch, True, True, stacked_on=where.parent, reason=where.reason,
+                        cut_from=cut_from)
+
+
+def _follow_canonical(repo: str) -> None:
+    """Before cutting from the base branch in a slot clone, bring that branch up to
+    the canonical repo's, so "from main" means canonical main as it is on disk."""
+    try:
+        cs = _canonical_sync()
+        cs.follow(repo)
+    except Exception:
+        pass        # no canonical behind this repo: cut from what it has
 
 
 _SLOT_ROOT_MARKERS = [".landed", ".phase-a-complete", ".execute-progress"]
@@ -196,6 +238,11 @@ def create_branches(project: str, workspace: str, branch: str, base: str | None,
         print(f"ERROR={result.error}")
         return 1
     print("CREATED=yes")
+    print(f"STACKED={'yes' if result.stacked_on else 'no'}")
+    print(f"STACKED_ON={result.stacked_on or 'none'}")
+    print(f"START_REASON={result.reason}")
+    for repo_name, origin in (result.cut_from or {}).items():
+        print(f"CUT_FROM={repo_name}:{origin}")
     return 0
 
 

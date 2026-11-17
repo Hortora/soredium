@@ -19,6 +19,8 @@ class QueueItem:
     active: bool
     # Done but not closed: finished on this branch, close ceremony not yet run.
     done_branch: str = ""
+    # Its branch starts from the base branch, not stacked on the item before it.
+    from_main: bool = False
 
 
 @dataclass
@@ -88,6 +90,7 @@ _ITEM_RE = re.compile(
     r"(.+?)(?:\s+← active)?$"
 )
 _DONE_RE = re.compile(r"\s*(?:←|<-)\s*done on (\S+)")
+_FROM_MAIN_RE = re.compile(r"\s*\(from main\)")
 _REF_TITLE_RE = re.compile(r"^(.+?) — (.+)$")
 _SUB_TASK_RE = re.compile(r"^\s+- \[[ x]\] ")
 
@@ -105,12 +108,15 @@ def _parse_item(line: str) -> Optional[QueueItem]:
     done_branch = done_m.group(1) if done_m and not completed else ""
     rest = _DONE_RE.sub("", rest).strip()
     rest = re.sub(r"\s*\(epic\)\s*", "", rest).strip()
+    from_main = bool(_FROM_MAIN_RE.search(rest))
+    rest = _FROM_MAIN_RE.sub("", rest).strip()
     tm = _REF_TITLE_RE.match(rest)
     if tm:
         return QueueItem(ref=tm.group(1), title=tm.group(2),
-                         completed=completed, active=active, done_branch=done_branch)
+                         completed=completed, active=active, done_branch=done_branch,
+                         from_main=from_main)
     return QueueItem(ref=rest, title="", completed=completed, active=active,
-                     done_branch=done_branch)
+                     done_branch=done_branch, from_main=from_main)
 
 
 _KNOWN_STATE_FIELDS = {"branch", "issue-repo", "status", "covers"}
@@ -197,10 +203,11 @@ def write_queue(workspace: Path, queue: Queue) -> None:
         marker = "        ← active" if item.active else ""
         if item.done_branch and not item.completed and not item.active:
             marker = f" ← done on {item.done_branch}"
+        base = " (from main)" if item.from_main else ""
         if item.title:
-            lines.append(f"- [{check}] {item.ref} — {item.title}{marker}")
+            lines.append(f"- [{check}] {item.ref} — {item.title}{base}{marker}")
         else:
-            lines.append(f"- [{check}] {item.ref}{marker}")
+            lines.append(f"- [{check}] {item.ref}{base}{marker}")
         if i in queue.sub_task_lines:
             lines.extend(queue.sub_task_lines[i])
     lines.append("")

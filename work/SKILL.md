@@ -135,9 +135,16 @@ User picks → route to the matching pipeline or skill.
 **Mid-session issue completion (D4):** When an issue completes during
 a session, run `work next`. It marks the item done on its branch, leaves the
 issue open, and prints `OFFER=wrap_or_continue`. Present that decision every
-time. "Continue" means `work start` on the next item, on a new branch cut
-from the base branch (or stacked on the done branch only when the next issue
-needs its code). "Wrap" means one `work end`, which closes every done item.
+time. "Continue" means `work start` on the next item. Where its branch starts
+is decided by the queue, not by you: `create-branches` stacks it on the branch
+just finished, in every repo, unless the item is marked `(from main)`, and
+prints `STACKED=`, `STACKED_ON=`, `START_REASON=` and one `CUT_FROM=<repo>:<origin>`
+per repo. Relay those; never pick a start point or run `git checkout -b`
+yourself. An item that must stand alone is marked before it starts:
+`plan_manager.py set-base <queue> ref=<owner/repo#N> base=main` (or
+`append ... base=main`). Its code then starts from the base branch; the
+workspace still continues from the previous branch, because the queue file
+lives there. "Wrap" means one `work end`, which closes every done item.
 Never suggest work-end per issue.
 
 **Wrap-vs-continue decision:**
