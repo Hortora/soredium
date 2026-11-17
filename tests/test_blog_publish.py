@@ -71,7 +71,7 @@ def test_copy_entry_source_not_found():
 
 
 def test_commit_destination_success():
-    """Test commit-destination adds, commits, and attempts push."""
+    """Test commit-destination adds, commits, and publishes through canonical_sync."""
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = Path(tmpdir) / "repo"
         repo.mkdir()
@@ -97,8 +97,8 @@ def test_commit_destination_success():
         assert result.returncode == 0
         lines = result.stdout.strip().splitlines()
         assert "COMMITTED=yes" in lines
-        # Push will fail (no remote), but that's non-fatal
-        assert "PUSHED=no" in lines
+        # A repo with no remote has nowhere to publish to; that is not an error.
+        assert "PUBLISHED=none" in lines
 
         # Verify commit exists
         log_result = subprocess.run(
@@ -144,79 +144,8 @@ def test_commit_destination_multiple_files():
         assert status_result.stdout == ""  # Clean working tree
 
 
-def test_remove_source_success():
-    """Test remove-source removes files and commits."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo = Path(tmpdir) / "repo"
-        repo.mkdir()
-
-        # Initialize repo with files
-        subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"],
-                       check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.com"],
-                       check=True, capture_output=True)
-
-        entry = repo / "entry.md"
-        entry.write_text("# Entry")
-        subprocess.run(["git", "-C", str(repo), "add", "entry.md"],
-                       check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(repo), "commit", "-m", "initial"],
-                       check=True, capture_output=True)
-
-        # Remove the file
-        result = subprocess.run(
-            ["python3", str(SCRIPT), "remove-source", str(repo), "files=entry.md"],
-            capture_output=True,
-            text=True,
-        )
-
-        assert result.returncode == 0
-        assert "REMOVED=1" in result.stdout
-
-        # Verify file removed from working tree
-        assert not entry.exists()
-
-        # Verify removal committed
-        log_result = subprocess.run(
-            ["git", "-C", str(repo), "log", "--oneline"],
-            capture_output=True,
-            text=True,
-        )
-        assert "remove published blog entries" in log_result.stdout
-
-
-def test_remove_source_multiple_files():
-    """Test remove-source handles multiple files."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo = Path(tmpdir) / "repo"
-        repo.mkdir()
-
-        subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"],
-                       check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.com"],
-                       check=True, capture_output=True)
-
-        # Create and commit multiple files
-        (repo / "entry1.md").write_text("# Entry 1")
-        (repo / "entry2.md").write_text("# Entry 2")
-        subprocess.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(repo), "commit", "-m", "initial"],
-                       check=True, capture_output=True)
-
-        result = subprocess.run(
-            ["python3", str(SCRIPT), "remove-source", str(repo),
-             "files=entry1.md,entry2.md"],
-            capture_output=True,
-            text=True,
-        )
-
-        assert result.returncode == 0
-        assert "REMOVED=2" in result.stdout
-
-        assert not (repo / "entry1.md").exists()
-        assert not (repo / "entry2.md").exists()
+# remove-source is covered in tests/test_publish_verified.py: it removes nothing until
+# every named destination is verified to hold the entry (#483).
 
 
 def test_invalid_subcommand():

@@ -52,8 +52,17 @@ if _skills_root not in sys.path:
     sys.path.insert(0, _skills_root)
 
 
+class ImageNotPromoted(Exception):
+    """An image the source has did not arrive with the document that refers to it."""
+
+
 def _copromote_images(md_source: Path, md_dest: Path, repo_cwd: str) -> int:
-    """Copy images referenced by a .md file from source to destination."""
+    """Copy images referenced by a .md file from source to destination, and prove it.
+
+    A reference the source itself cannot resolve is skipped: nothing can be lost.
+    An image the source has must be at the destination afterwards, identical and
+    staged; otherwise ImageNotPromoted is raised and the caller must not commit.
+    """
     from verification.repo_checks import extract_image_refs
 
     if md_source.suffix != ".md":
@@ -62,21 +71,35 @@ def _copromote_images(md_source: Path, md_dest: Path, repo_cwd: str) -> int:
     dest_repo = Path(repo_cwd)
     copied = 0
     for raw_ref, resolved_src in extract_image_refs(md_source):
-        if not resolved_src.exists():
+        if not resolved_src.is_file():
             continue
         if raw_ref.startswith("/"):
             img_dest = dest_repo / raw_ref.lstrip("/")
         else:
             img_dest = md_dest.parent / raw_ref
-        img_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(resolved_src), str(img_dest))
+        try:
+            img_dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(resolved_src), str(img_dest))
+            arrived = img_dest.read_bytes() == resolved_src.read_bytes()
+        except OSError as error:
+            raise ImageNotPromoted(f"{raw_ref} (for {md_source.name}): {error}") from error
+        if not arrived:
+            raise ImageNotPromoted(f"{raw_ref} (for {md_source.name}): destination differs")
         try:
             img_rel = str(img_dest.relative_to(dest_repo))
         except ValueError:
-            continue
-        git(repo_cwd, "add", img_rel)
+            raise ImageNotPromoted(
+                f"{raw_ref} (for {md_source.name}): resolves outside {dest_repo.name}")
+        if git(repo_cwd, "add", img_rel).returncode != 0:
+            raise ImageNotPromoted(f"{raw_ref} (for {md_source.name}): could not be staged")
         copied += 1
     return copied
+
+
+def _abandon_staged(repo_cwd: str) -> None:
+    """Unstage what a failed promotion staged. The copied files stay in the working tree
+    as untracked files: nothing is deleted, and nothing half-promoted is committed."""
+    git(repo_cwd, "reset", "-q")
 
 
 def _land_or_report(cwd: str) -> None:
@@ -153,7 +176,14 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
             else:
                 shutil.copy2(str(src), str(dst))
             git(str(wt), "add", artifact)
-            _copromote_images(src, dst, str(wt))
+            try:
+                _copromote_images(src, dst, str(wt))
+            except ImageNotPromoted as error:
+                _abandon_staged(str(wt))
+                print("ERROR=image_not_promoted")
+                print(f"ERROR_DETAIL={error}")
+                print("PROMOTED=0")
+                return 1
             promoted += 1
 
         if promoted > 0:
@@ -230,7 +260,14 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
         r = git(project, "add", dst_rel)
         if r.returncode == 0:
             promoted += 1
-            _copromote_images(src, dst, project)
+            try:
+                _copromote_images(src, dst, project)
+            except ImageNotPromoted as error:
+                _abandon_staged(project)
+                print("ERROR=image_not_promoted")
+                print(f"ERROR_DETAIL={error}")
+                print("PROMOTED=0")
+                return 1
         else:
             skipped.append(artifact)
             print(f"SKIP_DETAIL={artifact}: {r.stderr.strip()}", file=sys.stderr)

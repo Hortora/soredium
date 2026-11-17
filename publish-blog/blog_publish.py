@@ -3,25 +3,47 @@
 Blog publishing operations for publish-blog skill.
 
 Externalised from SKILL.md Step 6, 7, 8 OPERATION blocks.
+
+Three rules hold throughout (#483, #515):
+  - an image the source has travels with the document that refers to it, and the
+    copy fails if it does not arrive;
+  - nothing is removed from a source until every named destination is verified
+    to hold it, committed, byte for byte, images included;
+  - no checkout is switched, and the only thing that reaches a remote is the
+    destination's base branch, through project/canonical_sync.py.
 """
 
+import shutil
 import sys
 import subprocess
 from pathlib import Path
 
+_skills_root = Path(__file__).resolve().parent.parent
+for _entry in (str(_skills_root), str(_skills_root / "project")):
+    if _entry not in sys.path:
+        sys.path.insert(0, _entry)
+
+from verification.repo_checks import extract_image_refs  # noqa: E402
+import canonical_sync  # noqa: E402
+from canonical_sync import SyncError  # noqa: E402
+
+
+def _image_dest(md_dest_dir: Path, raw_ref: str) -> Path:
+    return md_dest_dir / raw_ref.lstrip("/")
+
 
 def copy_entry(source_path: str, dest_dir: str) -> None:
     """
-    Copy a single blog entry file to destination directory.
-
-    Args:
-        source_path: Path to source blog entry file
-        dest_dir: Destination directory path
+    Copy a single blog entry file, and the images it refers to, to a destination directory.
 
     Output:
         COPIED=yes on success
+        IMAGE_COPIED=<ref> for each image written
+        IMAGES_VERIFIED=<n> images the source has that are now at the destination
+        WARN=image_not_found: <ref> for a reference the source itself does not have
         ERROR=source_not_found if source doesn't exist
         ERROR=copy_failed on copy error
+        ERROR=image_not_copied: <ref> when an image the source has did not arrive
     """
     src = Path(source_path)
     if not src.exists():
@@ -29,32 +51,36 @@ def copy_entry(source_path: str, dest_dir: str) -> None:
         sys.exit(1)
 
     dest = Path(dest_dir)
-    dest.mkdir(parents=True, exist_ok=True)
-
-    dest_file = dest / src.name
     try:
+        dest.mkdir(parents=True, exist_ok=True)
+        dest_file = dest / src.name
         dest_file.write_bytes(src.read_bytes())
-
-        # Co-publish referenced images alongside the .md
-        try:
-            from verification.repo_checks import extract_image_refs
-            for raw_ref, resolved_src in extract_image_refs(src):
-                if not resolved_src.exists():
-                    print(f"WARN=image_not_found: {raw_ref}", flush=True)
-                    continue
-                img_dest = dest / raw_ref
-                img_dest.parent.mkdir(parents=True, exist_ok=True)
-                if not img_dest.exists():
-                    import shutil
-                    shutil.copy2(str(resolved_src), str(img_dest))
-                    print(f"IMAGE_COPIED={raw_ref}", flush=True)
-        except ImportError:
-            pass  # verification module not available — skip image co-publishing
-
-        print("COPIED=yes", flush=True)
     except Exception as e:
         print(f"ERROR=copy_failed: {e}", flush=True)
         sys.exit(1)
+
+    verified = 0
+    for raw_ref, resolved_src in extract_image_refs(src):
+        if not resolved_src.is_file():
+            # Nothing to lose: the source never had it (example syntax, or never drawn).
+            print(f"WARN=image_not_found: {raw_ref}", flush=True)
+            continue
+        img_dest = _image_dest(dest, raw_ref)
+        try:
+            img_dest.parent.mkdir(parents=True, exist_ok=True)
+            if not img_dest.is_file() or img_dest.read_bytes() != resolved_src.read_bytes():
+                shutil.copy2(str(resolved_src), str(img_dest))
+                print(f"IMAGE_COPIED={raw_ref}", flush=True)
+        except Exception as e:
+            print(f"ERROR=image_not_copied: {raw_ref}: {e}", flush=True)
+            sys.exit(1)
+        if not img_dest.is_file() or img_dest.read_bytes() != resolved_src.read_bytes():
+            print(f"ERROR=image_not_copied: {raw_ref}", flush=True)
+            sys.exit(1)
+        verified += 1
+
+    print(f"IMAGES_VERIFIED={verified}", flush=True)
+    print("COPIED=yes", flush=True)
 
 
 def _current_branch(repo: str) -> str:
@@ -67,32 +93,34 @@ def _current_branch(repo: str) -> str:
 
 def commit_destination(dest_repo: str, files_csv: str, message: str) -> None:
     """
-    Add, commit, and push files in destination git repo.
-    Verifies the destination is on main before committing.
+    Add and commit files in the destination repo, then publish its base branch.
 
-    Args:
-        dest_repo: Path to destination git repository
-        files_csv: Comma-separated list of files to add (relative to repo)
-        message: Commit message
+    The destination must already be on its base branch: the entries were copied
+    into its working tree, and switching branches underneath them is not this
+    script's call. Publishing goes through canonical_sync (fetch, settle on the
+    remote, plain push; never forced).
 
     Output:
-        COMMITTED=yes, PUSHED=yes/no
+        COMMITTED=yes
+        PUBLISHED=<remote>|none|no     (none: the repo has no remote)
+        ERROR=dest_not_on_main branch=<name>
+        ERROR=publish_failed: <detail>  (the commit is kept)
     """
     repo_path = Path(dest_repo)
     files = [f.strip() for f in files_csv.split(",") if f.strip()]
 
+    try:
+        base = canonical_sync.locate(dest_repo).base
+    except SyncError as error:
+        print(f"ERROR=no_canonical: {error.detail}", flush=True)
+        sys.exit(1)
     branch = _current_branch(dest_repo)
-    if branch and branch != "main":
-        print(f"WARN=dest_not_on_main branch={branch} — switching to main", flush=True)
-        rc = subprocess.run(
-            ["git", "-C", dest_repo, "checkout", "main"],
-            capture_output=True,
-        )
-        if rc.returncode != 0:
-            print(f"ERROR=checkout_main_failed branch={branch}", flush=True)
-            sys.exit(1)
+    if branch != base:
+        print(f"ERROR=dest_not_on_main branch={branch or 'DETACHED'}", flush=True)
+        print(f"ERROR_DETAIL={repo_path.name} must be on {base} to receive published entries; "
+              f"it was not switched", flush=True)
+        sys.exit(1)
 
-    # Add each file
     for file in files:
         result = subprocess.run(
             ["git", "-C", str(repo_path), "add", file],
@@ -103,79 +131,137 @@ def commit_destination(dest_repo: str, files_csv: str, message: str) -> None:
             print(f"ERROR=git_add_failed: {result.stderr}", flush=True)
             sys.exit(1)
 
-    # Commit
     result = subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", message],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        print(f"ERROR=git_commit_failed: {result.stderr}", flush=True)
+        print(f"ERROR=git_commit_failed: {result.stderr or result.stdout}", flush=True)
         sys.exit(1)
-
-    # Push (non-fatal if fails)
-    result = subprocess.run(
-        ["git", "-C", str(repo_path), "push"],
-        capture_output=True,
-        text=True,
-    )
-    pushed = "yes" if result.returncode == 0 else "no"
     print("COMMITTED=yes", flush=True)
-    print(f"PUSHED={pushed}", flush=True)
+
+    try:
+        published = canonical_sync.publish_base(dest_repo)
+    except SyncError as error:
+        print("PUBLISHED=no", flush=True)
+        print(f"ERROR=publish_failed: {error.detail}", flush=True)
+        sys.exit(1)
+    print(f"PUBLISHED={published.published}", flush=True)
+    for warning in published.warnings:
+        print(f"WARN={warning}", flush=True)
 
 
-def remove_source(source_repo: str, files_csv: str) -> None:
+def _committed_bytes(path: Path) -> bytes | None:
+    """The bytes git has committed for `path` at HEAD of the repo it is in, None when it
+    is not committed there (missing, untracked, or only staged)."""
+    top = subprocess.run(["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+                         capture_output=True, text=True)
+    if top.returncode != 0:
+        return None
+    try:
+        rel = path.resolve().relative_to(Path(top.stdout.strip()).resolve())
+    except ValueError:
+        return None
+    shown = subprocess.run(["git", "-C", top.stdout.strip(), "show", f"HEAD:{rel.as_posix()}"],
+                           capture_output=True)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def unverified(source_file: Path, destinations: list[Path]) -> list[str]:
+    """Why `source_file` may not be removed yet: one line per shortfall, empty when every
+    destination holds it and its images, committed and identical."""
+    problems: list[str] = []
+    content = source_file.read_bytes()
+    images = [(ref, src) for ref, src in extract_image_refs(source_file) if src.is_file()]
+    for dest_dir in destinations:
+        copy = dest_dir / source_file.name
+        if not dest_dir.is_dir() or not copy.is_file():
+            problems.append(f"{source_file.name}: missing from {dest_dir}")
+            continue
+        committed = _committed_bytes(copy)
+        if committed is None:
+            problems.append(f"{source_file.name}: not committed in {dest_dir}")
+        elif committed != content:
+            problems.append(f"{source_file.name}: differs from the copy in {dest_dir}")
+        for raw_ref, src in images:
+            image_copy = _image_dest(dest_dir, raw_ref)
+            image_committed = _committed_bytes(image_copy) if image_copy.is_file() else None
+            if image_committed is None:
+                problems.append(f"{source_file.name}: image {raw_ref} missing or not "
+                                f"committed in {dest_dir}")
+            elif image_committed != src.read_bytes():
+                problems.append(f"{source_file.name}: image {raw_ref} differs in {dest_dir}")
+    return problems
+
+
+def remove_source(source_repo: str, files_csv: str, verified_in: str = "") -> None:
     """
-    Remove published blog entries from source repo.
-    Verifies the source is on main before removing.
+    Remove published entries from the source repo, once every named destination is
+    verified to hold them.
 
     Args:
         source_repo: Path to source git repository
         files_csv: Comma-separated list of files to remove (relative to repo)
+        verified_in: Comma-separated destination directories that must each hold
+            every file, committed and byte-identical, with the images it refers to
+
+    If any file falls short anywhere, nothing at all is removed. The removal is a
+    commit on the source repo's base branch, made without switching its checkout.
 
     Output:
         REMOVED=<count>
+        ERROR=not_verified, with one NOT_VERIFIED=<reason> line per shortfall
+        ERROR=verified_in_required
     """
     repo_path = Path(source_repo)
     files = [f.strip() for f in files_csv.split(",") if f.strip()]
+    destinations = [Path(d.strip()) for d in verified_in.split(",") if d.strip()]
+    if not destinations:
+        print("ERROR=verified_in_required", flush=True)
+        print("ERROR_DETAIL=name the destination directories that hold the entries: "
+              "verified-in=<dir>[,<dir>]. Nothing was removed.", flush=True)
+        sys.exit(1)
 
-    branch = _current_branch(source_repo)
-    if branch and branch != "main":
-        print(f"WARN=source_not_on_main branch={branch} — switching to main", flush=True)
-        rc = subprocess.run(
-            ["git", "-C", source_repo, "checkout", "main"],
-            capture_output=True,
-        )
-        if rc.returncode != 0:
-            print(f"ERROR=checkout_main_failed branch={branch}", flush=True)
-            sys.exit(1)
-
-    # Remove each file with git rm
-    removed_count = 0
+    problems: list[str] = []
     for file in files:
-        result = subprocess.run(
-            ["git", "-C", str(repo_path), "rm", file],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(f"ERROR=git_rm_failed: {result.stderr}", flush=True)
-            sys.exit(1)
-        removed_count += 1
+        source_file = repo_path / file
+        if not source_file.is_file():
+            problems.append(f"{file}: not found in {repo_path.name}")
+            continue
+        problems += unverified(source_file, destinations)
+    if problems:
+        print("ERROR=not_verified", flush=True)
+        for problem in problems:
+            print(f"NOT_VERIFIED={problem}", flush=True)
+        print("ERROR_DETAIL=nothing was removed", flush=True)
+        sys.exit(1)
 
-    # Commit the removals
-    if removed_count > 0:
-        result = subprocess.run(
-            ["git", "-C", str(repo_path), "commit", "-m",
-             "chore: remove published blog entries"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(f"ERROR=git_commit_failed: {result.stderr}", flush=True)
-            sys.exit(1)
+    try:
+        base = canonical_sync.locate(source_repo).base
+        with canonical_sync.checked_out(source_repo, base) as tree:
+            result = subprocess.run(["git", "-C", str(tree), "rm", "-q", "--", *files],
+                                    capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"ERROR=git_rm_failed: {result.stderr}", flush=True)
+                sys.exit(1)
+            result = subprocess.run(
+                ["git", "-C", str(tree), "commit", "-m", "chore: remove published blog entries",
+                 "-m", "no-issue: verified present in every destination before removal"],
+                capture_output=True, text=True)
+            if result.returncode != 0:
+                # Put back exactly what this call removed; nothing else is touched.
+                subprocess.run(["git", "-C", str(tree), "reset", "-q", "HEAD", "--", *files],
+                               capture_output=True)
+                subprocess.run(["git", "-C", str(tree), "checkout", "-q", "--", *files],
+                               capture_output=True)
+                print(f"ERROR=git_commit_failed: {result.stderr or result.stdout}", flush=True)
+                sys.exit(1)
+    except SyncError as error:
+        print(f"ERROR={error.code}: {error.detail}", flush=True)
+        sys.exit(1)
 
-    print(f"REMOVED={removed_count}", flush=True)
+    print(f"REMOVED={len(files)}", flush=True)
 
 
 def check_present_fn(entry_path: str, dest_dir: str) -> bool:
@@ -238,7 +324,8 @@ def main() -> None:
         print("  copy-entry <source-path> <dest-dir>", file=sys.stderr)
         print("  commit-destination <dest-repo> files=<csv> message=<msg>",
               file=sys.stderr)
-        print("  remove-source <source-repo> files=<csv>", file=sys.stderr)
+        print("  remove-source <source-repo> files=<csv> verified-in=<dir>[,<dir>]",
+              file=sys.stderr)
         sys.exit(1)
 
     subcommand = sys.argv[1]
@@ -270,8 +357,9 @@ def main() -> None:
         commit_destination(dest_repo, files_csv, message)
 
     elif subcommand == "remove-source":
-        if len(sys.argv) != 4:
-            print("Usage: remove-source <source-repo> files=<csv>", file=sys.stderr)
+        if len(sys.argv) not in (4, 5):
+            print("Usage: remove-source <source-repo> files=<csv> verified-in=<dir>[,<dir>]",
+                  file=sys.stderr)
             sys.exit(1)
         source_repo = sys.argv[2]
         files_arg = sys.argv[3]
@@ -279,9 +367,15 @@ def main() -> None:
         if not files_arg.startswith("files="):
             print("ERROR: Second arg must be files=<csv>", file=sys.stderr)
             sys.exit(1)
+        verified_in = ""
+        if len(sys.argv) == 5:
+            if not sys.argv[4].startswith("verified-in="):
+                print("ERROR: Third arg must be verified-in=<dir>[,<dir>]", file=sys.stderr)
+                sys.exit(1)
+            verified_in = sys.argv[4][len("verified-in="):]
 
         files_csv = files_arg[6:]  # Strip "files="
-        remove_source(source_repo, files_csv)
+        remove_source(source_repo, files_csv, verified_in)
 
     elif subcommand == "check-present":
         if len(sys.argv) != 4:

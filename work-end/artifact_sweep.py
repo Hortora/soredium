@@ -23,7 +23,7 @@ sys.path.insert(0, str(_script_dir))
 sys.path.insert(0, str(_script_dir.parent / "project"))
 
 from workspace_artifacts import scan, CATEGORIES
-from artifact_promote import _copromote_images
+from artifact_promote import _copromote_images, ImageNotPromoted
 
 
 def verify_images(project: Path) -> list[str]:
@@ -175,7 +175,13 @@ def promote_gaps(gaps: list[dict], project: Path,
         else:
             shutil.copy2(src, dst)
             if src.suffix == ".md":
-                _copromote_images(src, dst, str(project))
+                try:
+                    _copromote_images(src, dst, str(project))
+                except ImageNotPromoted as error:
+                    subprocess.run(["git", "-C", str(project), "reset", "-q"],
+                                   capture_output=True)
+                    return {"promoted": 0, "by_category": {},
+                            "error": f"image not promoted: {error}"}
 
         subprocess.run(
             ["git", "-C", str(project), "add", gap["dest_rel"]],

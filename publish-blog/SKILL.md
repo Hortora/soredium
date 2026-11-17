@@ -172,17 +172,16 @@ python3 ~/.claude/skills/publish-blog/blog_publish.py copy-entry \
 Expected output: `COPIED=yes`
 Error cases: `ERROR=source_not_found`, `ERROR=copy_failed`
 
-2. Copy referenced images alongside the entry:
-```python
-from verification.repo_checks import extract_image_refs
-import shutil
+The script copies the images the entry refers to along with it and checks
+each one arrived. Read its output:
+- `IMAGES_VERIFIED=<n>`: that many images are at the destination, identical.
+- `WARN=image_not_found: <ref>`: the entry refers to an image the source
+  does not have either (example syntax, or never drawn). Nothing was lost;
+  tell the user.
+- `ERROR=image_not_copied: <ref>`: an image the source has did not arrive.
+  The copy failed. Do not commit this destination; show the error.
 
-for raw_ref, resolved in extract_image_refs(Path(entry_path)):
-    if resolved.exists():
-        dest = Path(target_dir) / raw_ref
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(resolved), str(dest))
-```
+Do not copy images yourself.
 
 **Git staging is handled separately in Step 7 — do not manually `git add` here.**
 
@@ -195,7 +194,7 @@ First, verify remote exists:
 git -C "<dest_path>" remote get-url origin 2>/dev/null && echo "has-remote"
 ```
 
-Then commit and push the copied files:
+Then commit the copied files and publish the destination's base branch:
 ```bash
 python3 ~/.claude/skills/publish-blog/blog_publish.py commit-destination \
   "<dest_path>" \
@@ -203,13 +202,16 @@ python3 ~/.claude/skills/publish-blog/blog_publish.py commit-destination \
   "message=chore: publish blog entries from soredium"
 ```
 
-Expected output: `COMMITTED=yes, PUSHED=yes` (or `PUSHED=no` if push fails)
+Expected output: `COMMITTED=yes` then `PUBLISHED=<remote>` (`PUBLISHED=none`
+when the destination has no remote).
 
-If `PUSHED=no`, report with resolution command:
-```
-❌ Push failed for 'personal-blog'. Run manually:
-   git -C ~/blog push
-```
+- `ERROR=dest_not_on_main`: the destination repo is on another branch. It was
+  not switched. Tell the user; do not check out its base branch yourself.
+- `PUBLISHED=no` with `ERROR=publish_failed: <detail>`: the commit is kept in
+  the destination and nothing reached the remote. Report it; publishing can be
+  retried with
+  `python3 ~/.claude/skills/project/canonical_sync.py publish <dest_path>`.
+  Never `git push`.
 
 ### Step 8 — Source entries are retained
 
@@ -220,16 +222,27 @@ in destination repos are for readers — the source stays permanently.
 Workspace copies (if publishing from a workspace `blog/` dir) are handled
 by work-end artifact promotion, not by this skill.
 
+If the user explicitly asks for published entries to be removed from a source
+repo, the only way is:
+```bash
+python3 ~/.claude/skills/publish-blog/blog_publish.py remove-source \
+  "<source_repo>" "files=<path1>,<path2>" "verified-in=<dest_dir1>,<dest_dir2>"
+```
+It removes nothing unless every destination named holds every entry, committed
+and byte-identical, with the images it refers to. `ERROR=not_verified` lists
+each shortfall as `NOT_VERIFIED=<reason>` and nothing is removed. Never delete
+entries with `git rm` or `rm`.
+
 ### Step 9 — Summary
 
 ```
 Publishing complete
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ personal-blog   — 2 entries published, committed, pushed
+✅ personal-blog   — 2 entries copied, committed, published
 ✅ quarkus-blog    — 1 entry published, committed (no remote)
-❌ project-blog    — push failed (run: git -C ~/project push)
+❌ project-blog    — publish failed (commit kept; retry: canonical_sync.py publish ~/project)
 
-Source cleanup: 2 entries removed from workspace (1 retained — destination failed)
+Source entries: retained
 ```
 
 ---
@@ -322,7 +335,7 @@ written before the convention change without requiring bulk frontmatter updates.
 - [ ] No inline `<svg>` tags in any entry (must be separate `.svg` files)
 - [ ] Referenced `.svg` files copied alongside entries to each destination
 - [ ] Entries copied to each resolved destination
-- [ ] Git destinations committed; remote destinations pushed (or failure reported)
+- [ ] Git destinations committed; destinations with a remote published through `canonical_sync` (or failure reported)
 - [ ] Source entries retained in project `docs/blog/` (not deleted)
 - [ ] Summary shows per-destination outcome (✅ / ❌)
 
