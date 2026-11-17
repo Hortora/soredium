@@ -650,7 +650,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `security-audit` -- Java/TS/Python OWASP audit, same pattern; escalated by branch-audit Robustness dimension
 - `dependency-update` -- Maven/npm/pip management via `maven.md`, `npm.md`, `pip.md`
 - `git-commit` -- routes to `java.md`, `custom.md`, or generic
-- `quick-fix` -- lands small changes on main via ephemeral branch; auto-detects rescue for unpushed commits; used by fix-ci
+- `quick-fix` -- commits a small change on the base branch and lands it on disk through `project/canonical_sync.py`; never stashes, resets or pushes; used by fix-ci
 - `update-design` -- ARC42STORIES.MD sync via `java.md`, `typescript.md`, `python.md`
 - `project-health` -- universal checks + per-type content files
 

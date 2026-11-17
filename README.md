@@ -66,7 +66,7 @@ Development workflow and knowledge garden skills for Claude Code.
 |-------|-------------|
 | `git-commit` | Conventional commits with project-type routing and doc sync |
 | `git-squash` | Branch history compaction with review gate and backup |
-| `quick-fix` | Land small changes on main via ephemeral branch — rescue for unpushed commits |
+| `quick-fix` | Commit a small change on the base branch and land it on disk — publishing is offered separately |
 | `update-claude-md` | CLAUDE.md sync on convention changes |
 | `update-design` | ARC42STORIES.MD sync on architecture changes |
 | `implementation-doc-sync` | Session-scoped doc sweep after implementation |
@@ -126,6 +126,7 @@ Local work lifecycle tracking and enriched backlog for what-next recommendations
 | `scripts/worklog_mcp_server.py` | MCP server exposing worklog queries |
 | `scripts/query_worklog.py` | Audit tool for inspecting worklog state |
 | `scripts/migrate_slot_state.py` | Backfill `state:` field in existing .slot files |
+| `scripts/slot_backup_setup.py` | Move existing slot clones and single-remote workspace repos onto the canonical backup path (dry run unless `--apply`) |
 
 ## Developer Setup
 

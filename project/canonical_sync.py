@@ -451,6 +451,13 @@ def _same_store(repo: Path, canon: Canonical) -> bool:
     return _git_dir(repo, "--git-common-dir") == _git_dir(canon.repo, "--git-common-dir")
 
 
+def is_clone(repo: Path | str, canon: Optional[Canonical] = None) -> bool:
+    """True when `repo` is a separate clone of its canonical repo (a slot clone),
+    False when it is the canonical checkout or one of its worktrees."""
+    repo = Path(repo)
+    return not _same_store(repo, canon or locate(repo))
+
+
 def hold(repo: Path, branch: str, canon: Canonical) -> str:
     """Take `branch` into canonical as refs/landing/<branch>. Returns its SHA."""
     ref = f"{LANDING_REF}/{branch}"

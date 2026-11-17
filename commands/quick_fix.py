@@ -1,4 +1,4 @@
-"""Quick-fix command — ephemeral branch landing."""
+"""Quick-fix command — commit a small change on the base branch and land it on disk."""
 from __future__ import annotations
 
 import sys
@@ -11,7 +11,7 @@ from commands.registry import resolve_context, derive_actions
 
 def execute(message: str = "", cwd: str | None = None,
             decide_fn: Callable | None = None, **_kwargs) -> list:
-    """Land a quick fix on main via ephemeral branch."""
+    """Commit a quick fix on the base branch and land it on disk; nothing is pushed."""
     events: list = []
     ctx = resolve_context(cwd)
 

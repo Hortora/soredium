@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 """
-Land changes on main via an ephemeral branch — avoids committing directly.
+Land a small change on the base branch, on disk.
 
 Usage:
     python3 quick_fix.py <project> message="commit message"
 
-Detects state automatically:
-  - Dirty tree on main        -> create branch, commit, rebase, land
-  - Unpushed commits on main  -> rescue: move to branch, rebase, land
-  - Dirty + unpushed          -> rescue with uncommitted changes
-  - Not on main / nothing     -> error
+The uncommitted changes in <project>, which must be on its base branch, become
+one commit on that branch. In a slot clone the commit is then landed in the
+canonical repo through project/canonical_sync.py. Nothing is pushed: publishing
+is `canonical_sync.py publish <repo>`, offered here when canonical holds commits
+its remote lacks.
+
+Commits already on the base branch that the remote lacks are landed work
+awaiting publish. They are left exactly as they are.
+
+Never stashes, resets, switches a checkout or uses the network.
 
 Output (KEY=value lines):
-    MODE=normal|rescue
-    BRANCH=<ephemeral branch name>
-    COMMITTED=yes
-    REBASED=yes|skipped
+    COMMITTED=yes|skipped
     LANDED=yes
-    PUSHED=yes|failed|skipped
-    MIRRORED=yes|failed|skipped|na
-    CLEANED=yes
+    SHA=<canonical base branch tip>
+    UNPUBLISHED=<commits canonical's base branch holds that its remote lacks>
+    OFFER=publish            (only when UNPUBLISHED is above zero)
 
 Error output:
     ERROR=<code>
@@ -33,17 +35,24 @@ Exit codes:
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
-from common import detect_topology, parse_args
+sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
+from common import parse_args
+import canonical_sync
+from canonical_sync import SyncError
+
+_IN_PROGRESS = (
+    ("rebase-merge", "rebase"), ("rebase-apply", "rebase"), ("MERGE_HEAD", "merge"),
+    ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"),
+)
 
 
 def git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", repo, *args],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=60,
     )
 
 
@@ -57,18 +66,25 @@ def _is_dirty(project: str) -> bool:
     return bool(r.stdout.strip()) if r.returncode == 0 else False
 
 
-def _commits_ahead(project: str, remote: str, base: str) -> int:
-    r = git(project, "rev-list", f"{remote}/{base}..HEAD", "--count")
-    if r.returncode != 0:
-        return 0
-    try:
-        return int(r.stdout.strip())
-    except ValueError:
-        return 0
+def _in_progress(project: str) -> str:
+    for marker, operation in _IN_PROGRESS:
+        path = git(project, "rev-parse", "--git-path", marker).stdout.strip()
+        if path and (Path(path) if Path(path).is_absolute() else Path(project) / path).exists():
+            return operation
+    return ""
 
 
-def _make_branch_name() -> str:
-    return f"quick-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+def _fail(code: str, detail: str) -> int:
+    print(f"ERROR={code}")
+    print(f"ERROR_DETAIL={detail}")
+    return 1
+
+
+def _report_unpublished(canon: canonical_sync.Canonical) -> None:
+    count = canonical_sync.unpublished(canon)
+    print(f"UNPUBLISHED={count}")
+    if count:
+        print("OFFER=publish")
 
 
 # ---------------------------------------------------------------------------
@@ -92,157 +108,44 @@ class QuickFixResult:
 def run(project: str, message: str, base_branch: str = "main") -> int:
     branch = _current_branch(project)
     if branch != base_branch:
-        print("ERROR=NOT_ON_MAIN")
-        print(f"ERROR_DETAIL=on '{branch}', not '{base_branch}' — quick-fix only works from {base_branch}")
-        return 1
+        return _fail("NOT_ON_MAIN",
+                     f"on '{branch}', not '{base_branch}' — quick-fix only works from {base_branch}")
 
-    dirty = _is_dirty(project)
+    operation = _in_progress(project)
+    if operation:
+        return _fail("BUSY", f"a {operation} is in progress in {project}; finish it first")
 
-    fork_remote, blessed_remote = detect_topology(project)
-    push_remote = blessed_remote if blessed_remote else fork_remote
-    mirror_remote = fork_remote if blessed_remote else ""
+    try:
+        canon = canonical_sync.locate(project)
+        is_clone = canonical_sync.is_clone(project, canon)
+        dirty = _is_dirty(project)
+        waiting = canonical_sync.ahead_of_canonical(project, base_branch) if is_clone else 0
 
-    if not push_remote:
-        print("ERROR=NO_REMOTE")
-        print("ERROR_DETAIL=no remote configured")
-        return 1
-
-    git(project, "fetch", push_remote, base_branch)
-
-    ahead = _commits_ahead(project, push_remote, base_branch)
-
-    if not dirty and ahead == 0:
-        print("ERROR=NOTHING_TO_DO")
-        print("ERROR_DETAIL=no changes and no unpushed commits on main")
-        return 1
-
-    ephemeral = _make_branch_name()
-    print(f"BRANCH={ephemeral}")
-
-    if ahead > 0:
-        print("MODE=rescue")
-        return _rescue(project, ephemeral, message, dirty, ahead,
-                        base_branch, push_remote, mirror_remote)
-    else:
-        print("MODE=normal")
-        return _normal(project, ephemeral, message,
-                        base_branch, push_remote, mirror_remote)
-
-
-def _normal(project: str, ephemeral: str, message: str,
-            base_branch: str, push_remote: str, mirror_remote: str) -> int:
-    r = git(project, "checkout", "-b", ephemeral)
-    if r.returncode != 0:
-        print("ERROR=BRANCH_FAILED")
-        print(f"ERROR_DETAIL={r.stderr.strip()}")
-        return 1
-
-    git(project, "add", "-A")
-    r = git(project, "commit", "-m", message)
-    if r.returncode != 0:
-        git(project, "checkout", base_branch)
-        git(project, "branch", "-D", ephemeral)
-        print("ERROR=COMMIT_FAILED")
-        print(f"ERROR_DETAIL={r.stderr.strip()}")
-        return 1
-    print("COMMITTED=yes")
-
-    r = git(project, "rebase", f"{push_remote}/{base_branch}")
-    if r.returncode != 0:
-        git(project, "rebase", "--abort")
-        print("REBASED=conflict")
-        print(f"REBASE_DETAIL={r.stderr.strip()}")
-        git(project, "checkout", base_branch)
-        git(project, "branch", "-D", ephemeral)
-        print("ERROR=REBASE_CONFLICT")
-        print("ERROR_DETAIL=rebase conflict — resolve manually or use a feature branch")
-        return 1
-    print("REBASED=yes")
-
-    return _land_and_push(project, ephemeral, base_branch, push_remote, mirror_remote)
-
-
-def _rescue(project: str, ephemeral: str, message: str,
-            dirty: bool, ahead: int,
-            base_branch: str, push_remote: str, mirror_remote: str) -> int:
-    if dirty:
-        git(project, "stash", "push", "-u", "-m", "quick-fix rescue stash")
-
-    r = git(project, "checkout", "-b", ephemeral)
-    if r.returncode != 0:
-        if dirty:
-            git(project, "stash", "pop")
-        print("ERROR=BRANCH_FAILED")
-        print(f"ERROR_DETAIL={r.stderr.strip()}")
-        return 1
-
-    git(project, "checkout", base_branch)
-    git(project, "reset", "--hard", f"{push_remote}/{base_branch}")
-
-    git(project, "checkout", ephemeral)
-
-    if dirty:
-        git(project, "stash", "pop")
-        git(project, "add", "-A")
-        r = git(project, "commit", "-m", message)
-        if r.returncode != 0:
-            print("ERROR=COMMIT_FAILED")
-            print(f"ERROR_DETAIL={r.stderr.strip()}")
+        if not dirty and not waiting:
+            print("ERROR=NOTHING_TO_DO")
+            print(f"ERROR_DETAIL=no uncommitted changes on {base_branch}")
+            _report_unpublished(canon)
             return 1
-        print("COMMITTED=yes")
-    else:
-        print("COMMITTED=skipped")
 
-    r = git(project, "rebase", f"{push_remote}/{base_branch}")
-    if r.returncode != 0:
-        git(project, "rebase", "--abort")
-        print("REBASED=conflict")
-        print("ERROR=REBASE_CONFLICT")
-        print("ERROR_DETAIL=rebase conflict during rescue — resolve manually")
-        return 1
-    print("REBASED=yes")
-
-    return _land_and_push(project, ephemeral, base_branch, push_remote, mirror_remote)
-
-
-def _land_and_push(project: str, ephemeral: str,
-                   base_branch: str, push_remote: str, mirror_remote: str) -> int:
-    r = git(project, "checkout", base_branch)
-    if r.returncode != 0:
-        print("ERROR=CHECKOUT_FAILED")
-        print(f"ERROR_DETAIL={r.stderr.strip()}")
-        return 1
-
-    r = git(project, "merge", "--ff-only", f"{push_remote}/{base_branch}")
-    if r.returncode != 0:
-        pass
-
-    r = git(project, "merge", "--ff-only", ephemeral)
-    if r.returncode != 0:
-        print("ERROR=MERGE_FAILED")
-        print(f"ERROR_DETAIL=cannot fast-forward {base_branch} to {ephemeral}: {r.stderr.strip()}")
-        return 1
-    print("LANDED=yes")
-
-    r = git(project, "push", push_remote, base_branch)
-    if r.returncode != 0:
-        print("PUSHED=failed")
-        print(f"PUSH_DETAIL={r.stderr.strip()}")
-    else:
-        print("PUSHED=yes")
-
-    if mirror_remote:
-        r = git(project, "push", mirror_remote, base_branch, "--force-with-lease")
-        if r.returncode != 0:
-            print("MIRRORED=failed")
+        if dirty:
+            git(project, "add", "-A")
+            r = git(project, "commit", "-m", message)
+            if r.returncode != 0:
+                git(project, "reset", "-q")      # unstage only; the changes stay in the tree
+                return _fail("COMMIT_FAILED",
+                             " ".join((r.stderr or r.stdout).strip().split()))
+            print("COMMITTED=yes")
         else:
-            print("MIRRORED=yes")
-    else:
-        print("MIRRORED=na")
+            print("COMMITTED=skipped")
 
-    git(project, "branch", "-D", ephemeral)
-    print("CLEANED=yes")
-    return 0
+        if is_clone:
+            canonical_sync.land(project, base_branch)
+        print("LANDED=yes")
+        print(f"SHA={git(str(canon.repo), 'rev-parse', base_branch).stdout.strip()}")
+        _report_unpublished(canon)
+        return 0
+    except SyncError as error:
+        return _fail(error.code.upper(), error.detail)
 
 
 def main() -> int:

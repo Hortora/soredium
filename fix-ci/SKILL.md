@@ -161,21 +161,31 @@ Do not push until the full local build is green.
 
 ## Step 6 — Land via quick-fix
 
-Use `quick-fix` to land changes on main via an ephemeral branch instead of
-committing and pushing directly. This keeps main tracking the blessed repo.
+Use `quick-fix` to commit the fix on the base branch and land it on disk:
 
 ```bash
 python3 ~/.claude/skills/quick-fix/quick_fix.py <project> message="fix(ci): <description>"
 ```
 
-Read the KEY=value output. If `LANDED=yes` and `PUSHED=yes`, proceed to Step 7.
+Read the KEY=value output. `LANDED=yes` means the fix is on the canonical
+repo's base branch, on disk. CI only runs on what is published, so tell the
+user how many commits are waiting (`UNPUBLISHED=<N>`) and ask whether to
+publish. On yes:
+
+```bash
+python3 ~/.claude/skills/project/canonical_sync.py publish <project>
+```
+
+`PUBLISHED=<remote>` means CI can now pick it up: proceed to Step 7. Never
+`git push` yourself. If the user says no, stop here and report that the fix is
+landed and unpublished.
 If `ERROR=REBASE_CONFLICT`, resolve the conflict and retry.
 
 ---
 
 ## Step 7 — Poll CI until green (or new failures)
 
-After pushing, poll CI in a loop until it completes. Do NOT return to
+After publishing, poll CI in a loop until it completes. Do NOT return to
 the user and wait — stay in the loop.
 
 **Initial wait:** check CLAUDE.md for `ci-build-time-minutes` under
@@ -231,7 +241,7 @@ navigation and reference search when investigating failures.
 **Invoked by:** User saying "fix CI", "CI is red", "is CI green?" after
 a push, or when a pre-push hook or CI check fails.
 
-**Invokes:** `quick-fix` — lands CI fixes on main via ephemeral branch (Step 6).
+**Invokes:** `quick-fix` — lands CI fixes on the base branch, on disk; publishing follows when the user agrees (Step 6).
 
 **Complements:** `java-dev`, `ts-dev`, `python-dev` for the actual code
 fixes; `git-commit` for committing the fixes;
