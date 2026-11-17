@@ -11,6 +11,17 @@ import pytest
 
 SOREDIUM_ROOT = Path(__file__).parent.parent
 
+# Pin the repo's own directories at the front of sys.path so that
+# imports always resolve to the code under test, not to the installed
+# copies under ~/.claude/skills/.  worklog.py (from ~/.claude/lib/)
+# can add ~/.claude/skills/project/ at import time — this block
+# ensures the repo's versions shadow it.
+for _dir_name in ("project", "work-end", "work-slot", "verification", "scripts"):
+    _dir = str(SOREDIUM_ROOT / _dir_name)
+    if _dir in sys.path:
+        sys.path.remove(_dir)
+    sys.path.insert(0, _dir)
+
 
 def _register_skill_package(dir_name: str, module_name: str) -> None:
     skill_dir = SOREDIUM_ROOT / dir_name
