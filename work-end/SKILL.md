@@ -101,7 +101,7 @@ Read the output:
   because a workspace can share its directory name with the project.
   **Landed means on disk.** Every branch is now on its canonical repo's
   base branch (the repo under `~/claude/<family>/`); from a slot, the work
-  has reached canonical. Nothing was pushed. Each
+  has reached canonical. Landing uses no network and pushes nothing. Each
   `UNPUBLISHED=<canonical repo> commits=<N>` line names a canonical repo
   whose base branch holds commits its remote lacks. `WARN=` lines are
   shown to the user as they are.
@@ -112,10 +112,6 @@ Read the output:
   the ceremony again. Do not work around this by landing manually.
 - `ACTION=error` — ceremony failed. Read `ERROR=` lines, diagnose, and
   report to user.
-  If an error says the remote could not be fetched and names
-  `offline=yes`, tell the user the remote is unreachable and ask whether to
-  land without checking it; only then rerun with
-  `close.py <workspace> offline=yes`. Never add it on your own.
   If an error says a rebase, merge or other operation is in progress, or
   that HEAD is detached, stop and tell the user. Do not run
   `git rebase --abort` or `git merge --abort` yourself: commits made while

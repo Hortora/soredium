@@ -7,9 +7,8 @@ Rules this module enforces:
   3. Only canonical publishes: nothing is pushed to a remote from a slot clone.
 
 Landing and publishing are separate. Landing puts a branch on canonical's base
-branch, on disk, and pushes nothing:
+branch, on disk. It never touches the network:
 
-  sync     canonical base fast-forwards from the blessed remote (stop if diverged)
   rebase   the branch is rebased onto canonical base, where it is checked out or
            in a temporary worktree; canonical's own checkout is never switched
   hold     canonical takes the branch into refs/landing/<branch>
@@ -493,9 +492,14 @@ def _release(canon: Canonical, branch: str) -> None:
 
 
 def _follow_in_clone(repo: Path, canon: Canonical) -> None:
-    """Best effort: a slot clone's own base branch follows canonical's."""
+    """Best effort: a slot clone's own base branch and its `local/*` refs follow canonical.
+
+    The tracking refs matter: a stale `local/main` makes every later
+    "ahead of canonical" check report commits that have in fact landed.
+    """
     if _same_store(repo, canon):
         return
+    git(repo, "fetch", "-q", "local")
     checked_out = _worktree_of(repo, canon.base)
     if checked_out is not None:
         if git(repo, "fetch", "-q", str(canon.repo), f"refs/heads/{canon.base}").returncode == 0:
@@ -507,21 +511,16 @@ def _follow_in_clone(repo: Path, canon: Canonical) -> None:
 
 # --- landing ---
 
-def _prepare(repo: Path, branch: str, canon: Canonical, offline: bool,
-             warnings: list[str]) -> Optional[str]:
-    """Sync canonical and rebase the branch. Returns None when it has already landed."""
+def _prepare(repo: Path, branch: str, canon: Canonical) -> Optional[str]:
+    """Rebase the branch onto canonical's base as it is on disk.
+
+    Returns None when the branch has already landed. No remote is consulted:
+    bringing canonical up to date with a remote is publishing's job.
+    """
     blocked = _base_being_rebased(canon)
     if blocked:
         raise SyncError(
             "base_busy", f"{canon.repo.name}: {canon.base} is being rebased in {blocked}")
-    try:
-        sync_base(canon)
-    except SyncError as error:
-        if error.code != "fetch_failed" or not offline:
-            raise
-        warnings.append(
-            f"{canon.repo.name}: {canon.blessed} was not checked (offline); if it has moved, "
-            f"publishing will report a divergence")
     tip = _sha(repo, f"refs/heads/{branch}")
     if not tip:
         raise SyncError("no_branch", f"{repo.name}: branch {branch} does not exist")
@@ -531,12 +530,12 @@ def _prepare(repo: Path, branch: str, canon: Canonical, offline: bool,
     return rebase(repo, branch, canon)
 
 
-def land_all(work: list[tuple[Path, str]], lock_timeout: float = LOCK_TIMEOUT,
-             offline: bool = False) -> list[LandResult]:
-    """Land several (repo, branch) pairs in canonical, on disk. Nothing is pushed.
+def land_all(work: list[tuple[Path, str]],
+             lock_timeout: float = LOCK_TIMEOUT) -> list[LandResult]:
+    """Land several (repo, branch) pairs in canonical, on disk. No network, no push.
 
     Every branch is rebased before any base branch moves, because rebase is the
-    only step that can conflict. `offline` lands without checking the remote.
+    only step that can conflict.
     """
     items = [(Path(repo), branch, locate(repo)) for repo, branch in work]
     canonicals = {str(canon.repo.resolve()): canon for _, _, canon in items}
@@ -547,7 +546,7 @@ def land_all(work: list[tuple[Path, str]], lock_timeout: float = LOCK_TIMEOUT,
         ready = []
         for repo, branch, canon in items:
             result = LandResult(repo=repo, branch=branch)
-            if _prepare(repo, branch, canon, offline, result.warnings) is None:
+            if _prepare(repo, branch, canon) is None:
                 result.already_landed = True
             ready.append((repo, branch, canon, result))
         for repo, branch, canon, result in ready:
@@ -562,10 +561,9 @@ def land_all(work: list[tuple[Path, str]], lock_timeout: float = LOCK_TIMEOUT,
         return results
 
 
-def land(repo: Path | str, branch: str, lock_timeout: float = LOCK_TIMEOUT,
-         offline: bool = False) -> LandResult:
-    """Land one branch in canonical: sync, rebase, hold, advance. Nothing is pushed."""
-    return land_all([(Path(repo), branch)], lock_timeout, offline)[0]
+def land(repo: Path | str, branch: str, lock_timeout: float = LOCK_TIMEOUT) -> LandResult:
+    """Land one branch in canonical: rebase, hold, advance. No network, no push."""
+    return land_all([(Path(repo), branch)], lock_timeout)[0]
 
 
 # --- the other callers' needs ---

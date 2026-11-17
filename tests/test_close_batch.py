@@ -476,33 +476,17 @@ class TestLandsOnDiskOnly:
         assert _git(proj, "ls-tree", "--name-only", "main", "--", ".close-state").stdout == ""
         assert (proj / "a.txt").exists()
 
-    def test_unreachable_remote_refuses_and_names_the_offline_option(self, published, tmp_path):
-        proj, ws, remote = published
-        _git(proj, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
-        _branch(proj, "issue-1-a", {"a.txt": "a"})
-        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
-        main_before = _git(proj, "rev-parse", "main").stdout.strip()
-
-        with pytest.raises(RuntimeError, match="offline=yes"):
-            _close(proj, ws)
-
-        assert _git(proj, "rev-parse", "main").stdout.strip() == main_before
-
-    def test_offline_lands_with_a_warning(self, published, tmp_path):
+    def test_unreachable_remote_makes_no_difference_to_landing(self, published, tmp_path):
         proj, ws, remote = published
         _git(proj, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
         _branch(proj, "issue-1-a", {"a.txt": "a"})
         _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
 
-        with patch("close.discover_repo_topology") as m, \
-             patch("close._detect_slot_root", return_value=None):
-            m.return_value = [(proj, "main", "direct", None, "origin", ""),
-                              (ws, "main", "direct", None, "origin", "")]
-            result = close(ws, offline=True)
+        result = _close(proj, ws)
 
         assert result.success, result.errors
-        assert any("not checked" in w for w in result.warnings)
-        assert any(line.startswith("WARN=") for line in render(result))
+        assert result.warnings == []
+        assert _git(proj, "rev-parse", "main").stdout.strip() == result.landed["project"]
 
     def test_a_failed_landing_leaves_every_checkout_where_it_was(self, repos):
         proj, ws = repos

@@ -113,6 +113,17 @@ def canon_state(canon: Path) -> tuple[str, str, str]:
     return sha(canon, "refs/heads/main"), head, g(canon, "status", "--porcelain")
 
 
+def canon_moves(fam: "Family", files: dict[str, str]) -> str:
+    """Canonical's base branch gains a commit on disk (as another landing would leave it)."""
+    current = g(fam.canon, "symbolic-ref", "-q", "--short", "HEAD", must=False)
+    if current != "main":
+        g(fam.canon, "checkout", "-q", "main")
+    tip = commit(fam.canon, files, "main moved on disk")
+    if current and current != "main":
+        g(fam.canon, "checkout", "-q", current)
+    return tip
+
+
 def on_dirty_work_branch(canon: Path) -> None:
     g(canon, "checkout", "-q", "-b", "work")
     (canon / "a.txt").write_text("uncommitted\n")
@@ -250,31 +261,28 @@ class TestLandFromSlot:
         assert merges(fam.canon) == 0
 
 
-class TestRemoteMoved:
-    def test_remote_ahead_is_pulled_in_and_the_branch_rebased(self, fam):
+class TestLandingIgnoresTheRemote:
+    """Landing is an on-disk operation. Bringing canonical up to a remote is publishing's job."""
+
+    def test_remote_ahead_is_not_fetched(self, fam):
         theirs = fam.someone_else_pushes({"e.txt": "e1\n"})
+        remote_ref = sha(fam.canon, "refs/remotes/upstream/main")
 
         result = cs.land(fam.slot, "feat")
 
-        g(fam.canon, "merge-base", "--is-ancestor", theirs, "main")
-        assert g(fam.canon, "rev-list", "--count", f"{theirs}..main") == "2"
-        assert result.sha == sha(fam.canon, "refs/heads/main")
-        assert result.unpublished == 2
+        assert result.sha == sha(fam.slot, "feat") == sha(fam.canon, "refs/heads/main")
+        assert not (fam.canon / "e.txt").exists()
+        assert sha(fam.canon, "refs/remotes/upstream/main") == remote_ref
         assert fam.remote_main(fam.blessed) == theirs
-        assert merges(fam.canon) == 0
 
-    def test_diverged_canonical_stops_with_nothing_changed(self, fam):
-        commit(fam.canon, {"local.txt": "only here\n"}, "local only")
-        fam.someone_else_pushes({"e.txt": "e1\n"})
-        before = canon_state(fam.canon)
-        branch_before = sha(fam.slot, "feat")
+    def test_unreachable_remote_makes_no_difference(self, fam):
+        g(fam.canon, "remote", "set-url", "upstream", str(fam.root / "gone.git"))
+        g(fam.canon, "remote", "set-url", "origin", str(fam.root / "gone-too.git"))
 
-        with pytest.raises(SyncError) as raised:
-            cs.land(fam.slot, "feat")
+        result = cs.land(fam.slot, "feat")
 
-        assert raised.value.code == "diverged"
-        assert canon_state(fam.canon) == before
-        assert sha(fam.slot, "feat") == branch_before
+        assert result.sha == sha(fam.slot, "feat") == sha(fam.canon, "refs/heads/main")
+        assert result.warnings == []
 
     def test_canonical_ahead_of_remote_lands_on_top_of_its_own_commits(self, fam):
         local_only = commit(fam.canon, {"local.txt": "unpublished\n"}, "local only")
@@ -285,37 +293,33 @@ class TestRemoteMoved:
         assert result.unpublished == 3
         assert merges(fam.canon) == 0
 
-    def test_unreachable_remote_refuses_unless_offline(self, fam):
-        g(fam.canon, "remote", "set-url", "upstream", str(fam.root / "gone.git"))
-        before = canon_state(fam.canon)
+    def test_canonical_base_moved_on_disk_is_rebased_onto(self, fam):
+        g(fam.canon, "checkout", "-q", "-b", "work")
+        other = fam.root / "family" / "slots" / "7" / "second"
+        subprocess.run(["git", "clone", "-q", "--shared", str(fam.canon), str(other)],
+                       capture_output=True, check=True)
+        g(other, "remote", "rename", "origin", "local")
+        g(other, "checkout", "-q", "-b", "first", "local/main")
+        first = commit(other, {"e.txt": "e1\n"}, "feat: e")
+        cs.land(other, "first")
 
-        with pytest.raises(SyncError) as raised:
-            cs.land(fam.slot, "feat")
+        result = cs.land(fam.slot, "feat")
 
-        assert raised.value.code == "fetch_failed"
-        assert canon_state(fam.canon) == before
+        g(fam.canon, "merge-base", "--is-ancestor", first, "main")
+        assert g(fam.canon, "rev-list", "--count", f"{first}..main") == "2"
+        assert result.sha == sha(fam.slot, "feat")
+        assert merges(fam.canon) == 0
 
-    def test_offline_lands_and_says_the_remote_was_not_checked(self, fam):
-        g(fam.canon, "remote", "set-url", "upstream", str(fam.root / "gone.git"))
-
-        result = cs.land(fam.slot, "feat", offline=True)
-
-        assert result.sha == sha(fam.slot, "feat") == sha(fam.canon, "refs/heads/main")
-        assert "not checked" in result.warnings[0]
-
-    def test_offline_does_not_hide_a_divergence(self, fam):
-        commit(fam.canon, {"local.txt": "only here\n"}, "local only")
-        fam.someone_else_pushes({"e.txt": "e1\n"})
-
-        with pytest.raises(SyncError) as raised:
-            cs.land(fam.slot, "feat", offline=True)
-
-        assert raised.value.code == "diverged"
+    def test_slot_tracking_refs_follow_canonical_after_landing(self, fam):
+        cs.land(fam.slot, "feat")
+        assert sha(fam.slot, "refs/remotes/local/main") == sha(fam.canon, "refs/heads/main")
+        assert g(fam.slot, "rev-list", "--count", "local/main..feat") == "0"
 
 
 class TestRebase:
     def test_conflict_aborts_its_own_rebase_and_changes_nothing(self, fam):
-        fam.someone_else_pushes({"a.txt": "theirs\n"})
+        canon_moves(fam, {"a.txt": "theirs\n"})
+        canon_before = sha(fam.canon, "refs/heads/main")
         branch_before = sha(fam.slot, "feat")
 
         with pytest.raises(SyncError) as raised:
@@ -327,7 +331,7 @@ class TestRebase:
         assert g(fam.slot, "status", "--porcelain") == ""
         assert g(fam.slot, "symbolic-ref", "--short", "HEAD") == "feat"
         assert not (fam.slot / ".git" / "rebase-merge").exists()
-        assert g(fam.canon, "rev-list", "--count", "upstream/main..main") == "0"
+        assert sha(fam.canon, "refs/heads/main") == canon_before
 
     def test_rebase_already_in_progress_is_never_aborted(self, fam):
         g(fam.slot, "checkout", "-q", "-b", "clash", "main")
@@ -335,7 +339,7 @@ class TestRebase:
         g(fam.slot, "checkout", "-q", "feat")
         g(fam.slot, "rebase", "clash", must=False)
         assert (fam.slot / ".git" / "rebase-merge").exists()
-        fam.someone_else_pushes({"e.txt": "e1\n"})
+        canon_moves(fam, {"e.txt": "e1\n"})
 
         with pytest.raises(SyncError) as raised:
             cs.land(fam.slot, "feat")
@@ -346,7 +350,7 @@ class TestRebase:
     def test_branch_not_checked_out_is_rebased_without_switching_anything(self, fam):
         g(fam.slot, "checkout", "-q", "-b", "elsewhere", "main")
         (fam.slot / "b.txt").write_text("uncommitted in slot\n")
-        fam.someone_else_pushes({"e.txt": "e1\n"})
+        canon_moves(fam, {"e.txt": "e1\n"})
 
         result = cs.land(fam.slot, "feat")
 
@@ -356,7 +360,7 @@ class TestRebase:
         assert len(g(fam.slot, "worktree", "list").splitlines()) == 1
 
     def test_dirty_checkout_of_the_branch_refuses_and_changes_nothing(self, fam):
-        fam.someone_else_pushes({"e.txt": "e1\n"})
+        canon_moves(fam, {"e.txt": "e1\n"})
         (fam.slot / "a.txt").write_text("uncommitted\n")
         before = sha(fam.slot, "feat")
 
@@ -395,7 +399,7 @@ class TestWorkInCanonicalItself:
         tree = fam.root / "linked"
         g(fam.canon, "worktree", "add", "-q", "-b", "fix", str(tree))
         commit(tree, {"f.txt": "f1\n"}, "fix: f")
-        fam.someone_else_pushes({"e.txt": "e1\n"})
+        canon_moves(fam, {"e.txt": "e1\n"})
         on_dirty_work_branch(fam.canon)
         _, head, status = canon_state(fam.canon)
 
@@ -409,7 +413,7 @@ class TestWorkInCanonicalItself:
     def test_branch_checked_out_nowhere_while_canonical_is_dirty_elsewhere(self, fam):
         self._branch_in_canon(fam)
         g(fam.canon, "checkout", "-q", "main")
-        fam.someone_else_pushes({"e.txt": "e1\n"})
+        canon_moves(fam, {"e.txt": "e1\n"})
         on_dirty_work_branch(fam.canon)
         _, head, status = canon_state(fam.canon)
 
@@ -630,7 +634,7 @@ class TestLock:
         assert sha(fam.canon, "refs/heads/main") == before
 
     def test_lock_is_released_after_a_failed_landing(self, fam):
-        fam.someone_else_pushes({"a.txt": "theirs\n"})
+        canon_moves(fam, {"a.txt": "theirs\n"})
         with pytest.raises(SyncError):
             cs.land(fam.slot, "feat")
         with cs.landing_lock(cs.locate(fam.slot), timeout=0.5):

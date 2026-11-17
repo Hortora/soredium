@@ -8,7 +8,8 @@ committed state.
 Landing goes through project/canonical_sync.py: every branch ends on the
 canonical repo's base branch by fast-forward, on disk. Nothing is pushed here;
 publishing is `canonical_sync.py publish <repo>`, which the ceremony offers when
-canonical holds commits its remote lacks. No checkout is switched while landing.
+canonical holds commits its remote lacks. Landing uses no network, and no
+checkout is switched while it runs.
 """
 from __future__ import annotations
 
@@ -425,16 +426,15 @@ def verify_content_landed(target: CloseTarget, landed_sha: str) -> None:
             f"(branch {tip[:12]}, base {base_tip[:12]})")
 
 
-def land_targets(targets: list[CloseTarget], offline: bool = False) -> dict:
+def land_targets(targets: list[CloseTarget]) -> dict:
     """Land every target in canonical, on disk. Returns {target: LandResult}.
 
     Project and workspace repos take the same linear path: rebase, then
-    fast-forward the canonical base branch. Nothing is pushed.
+    fast-forward the canonical base branch. No network is used and nothing is pushed.
     """
     for target in targets:
         strip_lifecycle_files(target.repo, target.branch, LIFECYCLE_FILES)
-    results = canonical_sync.land_all(
-        [(target.repo, target.branch) for target in targets], offline=offline)
+    results = canonical_sync.land_all([(target.repo, target.branch) for target in targets])
     landed = dict(zip(targets, results))
     for target, result in landed.items():
         verify_content_landed(target, result.sha)
@@ -630,7 +630,7 @@ def mark_slot_landed(slot_dir: Path, branch: str, project_shas: dict[str, str]) 
 
 # --- close orchestration ---
 
-def close(workspace: Path, offline: bool = False) -> CloseResult:
+def close(workspace: Path) -> CloseResult:
     busy = check_repos_idle(workspace)
     if busy:
         return CloseResult(success=False, errors=busy)
@@ -716,11 +716,9 @@ def close(workspace: Path, offline: bool = False) -> CloseResult:
                 continue  # the active item was never started: it stays active
             issue = entry.issue or covers_issue
             try:
-                results = land_targets(entry.targets, offline)
+                results = land_targets(entry.targets)
             except SyncError as error:
-                hint = (" — rerun with offline=yes to land without checking the remote"
-                        if error.code == "fetch_failed" else "")
-                raise RuntimeError(f"{error.detail}{hint}") from error
+                raise RuntimeError(error.detail) from error
             for target, outcome in results.items():
                 landed[target] = outcome.sha
                 warnings.extend(outcome.warnings)
@@ -830,9 +828,8 @@ def main() -> int:
     if not workspace.is_dir():
         print(f"ERROR=workspace_not_found:{workspace}")
         return 1
-    offline = any(arg in ("offline=yes", "--offline") for arg in sys.argv[2:])
     try:
-        result = close(workspace, offline=offline)
+        result = close(workspace)
     except Exception as e:
         print(f"ACTION=error\nERROR={e}")
         return 1
