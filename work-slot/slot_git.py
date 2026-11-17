@@ -63,14 +63,38 @@ def configure_update_instead(canonical_path: Path) -> None:
              "receive.denyCurrentBranch", "updateInstead"])
 
 
+_OLD_PUSH_HOOK = "#!/bin/sh\ngit push -u origin HEAD 2>/dev/null || true\n"
+
+
+def _canonical_sync_script() -> str:
+    override = os.environ.get("SOREDIUM_CANONICAL_SYNC")
+    if override:
+        return override
+    return str(Path.home() / ".claude" / "skills" / "project" / "canonical_sync.py")
+
+
 def install_post_commit_hook(clone_path: Path) -> None:
-    """Install a post-commit hook that pushes to origin after every commit."""
+    """Install the post-commit hook that backs every commit up through canonical.
+
+    A slot never pushes. The canonical repo takes a copy of the branch into
+    refs/backup/<slot>/<branch> and sends that ref to the backup remote. A
+    failure is printed to the committer and remembered in the clone's git
+    directory; nothing is redirected away or swallowed.
+
+    The earlier hook, which pushed the branch to origin and hid every failure,
+    is replaced. Any other existing hook is left alone.
+    """
     hooks_dir = clone_path / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     hook_file = hooks_dir / "post-commit"
-    if hook_file.exists():
+    if hook_file.exists() and hook_file.read_text() != _OLD_PUSH_HOOK:
         return
-    hook_file.write_text("#!/bin/sh\ngit push -u origin HEAD 2>/dev/null || true\n")
+    script = _canonical_sync_script()
+    hook_file.write_text(
+        "#!/bin/sh\n"
+        "# soredium slot backup hook: canonical takes a copy of every commit.\n"
+        f"python3 '{script}' backup \"$(git rev-parse --show-toplevel)\" offsite=yes >/dev/null\n"
+    )
     hook_file.chmod(0o755)
 
 

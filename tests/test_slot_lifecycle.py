@@ -1655,7 +1655,7 @@ class TestAllocateSlotReuse:
 class TestCreateSlotInstallsHook:
     @patch("slot_lifecycle.run_cmd")
     def test_create_slot_installs_post_commit_hook(self, mock_cmd, tmp_path):
-        """create_slot installs post-commit push hook in each repo clone."""
+        """create_slot installs the post-commit backup hook in each repo clone."""
         family = tmp_path / "casehub"
         family.mkdir()
         init_repo_with_workspace(family / "engine")
@@ -1675,7 +1675,8 @@ class TestCreateSlotInstallsHook:
         slot_dir = family / "slots" / str(result["slot_number"])
         hook = slot_dir / "engine" / ".git" / "hooks" / "post-commit"
         assert hook.exists()
-        assert "git push" in hook.read_text()
+        assert "canonical_sync.py" in hook.read_text()
+        assert "git push" not in hook.read_text()
 
 
 def _create_merge_test_repos(tmp_path, repo_names):

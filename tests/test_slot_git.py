@@ -279,17 +279,26 @@ class TestInstallPostCommitHook:
         hook = clone / ".git" / "hooks" / "post-commit"
         assert hook.exists()
         assert os.access(hook, os.X_OK)
-        content = hook.read_text()
-        assert "git push" in content
 
-    def test_hook_pushes_to_origin(self, tmp_path):
-        """The hook content pushes to origin HEAD."""
+    def test_hook_backs_up_through_canonical_and_never_pushes(self, tmp_path):
+        """#515: a slot never pushes; canonical takes a copy, and failures are not hidden."""
         clone = init_repo(tmp_path / "engine")
         slot_git.install_post_commit_hook(clone)
+        content = (clone / ".git" / "hooks" / "post-commit").read_text()
+        assert "canonical_sync.py" in content and "backup" in content
+        assert "git push" not in content
+        assert "|| true" not in content
+        assert "2>/dev/null" not in content
+
+    def test_old_push_hook_is_replaced(self, tmp_path):
+        clone = init_repo(tmp_path / "engine")
         hook = clone / ".git" / "hooks" / "post-commit"
-        content = hook.read_text()
-        assert "origin" in content
-        assert "HEAD" in content
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/sh\ngit push -u origin HEAD 2>/dev/null || true\n")
+        hook.chmod(0o755)
+        slot_git.install_post_commit_hook(clone)
+        assert "git push" not in hook.read_text()
+        assert "canonical_sync.py" in hook.read_text()
 
     def test_hook_is_idempotent(self, tmp_path):
         """Calling install twice doesn't duplicate or corrupt the hook."""

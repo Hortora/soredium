@@ -683,15 +683,83 @@ def backup(repo: Path | str, branch: str) -> str:
     return ref
 
 
+BACKUP_FAILED_MARKER = "soredium-backup-failed"
+
+
+def backup_remote(canon: Canonical) -> str:
+    """The remote that receives off-machine copies of working branches, "" for none.
+
+    `git config soredium.backupRemote <name>` in the canonical repo decides. By
+    default it is the fork (the mirror): never a blessed remote other people
+    share, so a repo with a single remote gets no off-machine copy until told to.
+    """
+    configured = _out(canon.repo, "config", "--get", "soredium.backupRemote")
+    if configured:
+        return configured if configured in _out(canon.repo, "remote").split() else ""
+    return canon.mirror
+
+
+def backup_offsite(canon: Canonical, ref: str) -> str:
+    """Push one backup ref from canonical to the backup remote, under the same name.
+
+    The ref is not a branch, so it does not show up as one. Returns the remote
+    name, "none" when there is nowhere to send it; raises when the push fails.
+    """
+    remote = backup_remote(canon)
+    if not remote:
+        return "none"
+    result = git(canon.repo, "push", "-q", remote, f"+{ref}:{ref}", timeout=60)
+    if result.returncode != 0:
+        raise SyncError(
+            "backup_offsite_failed",
+            f"{canon.repo.name}: backup of {ref} was not copied to {remote}: "
+            f"{result.stderr.strip()}")
+    return remote
+
+
+def _backup_marker(repo: Path) -> Path:
+    return _git_dir(repo) / BACKUP_FAILED_MARKER
+
+
+def _run_backup(repo: Path, offsite: bool) -> int:
+    """The post-commit hook's entry: back up the checked-out branch, hide nothing."""
+    marker = _backup_marker(repo)
+    branch = _out(repo, "symbolic-ref", "-q", "--short", "HEAD")
+    if not branch:
+        print("BACKUP_REF=none")
+        return 0
+    try:
+        ref = backup(repo, branch)
+        print(f"BACKUP_REF={ref}")
+        where = backup_offsite(locate(repo), ref) if offsite else "skipped"
+        print(f"BACKUP_OFFSITE={where}")
+    except SyncError as error:
+        if error.code == "backup_offsite_failed":
+            print("BACKUP_OFFSITE=failed")
+        else:
+            print(f"ERROR={error.code}")
+            print(f"ERROR_DETAIL={error.detail}")
+        print(f"soredium: BACKUP FAILED for {repo.name}:{branch} - {error.detail}",
+              file=sys.stderr)
+        marker.write_text(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {branch}: {error.detail}\n")
+        return 1
+    if marker.exists():
+        marker.unlink()
+    return 0
+
+
 # --- command line ---
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """canonical_sync.py status <repo> | publish <repo>"""
+    """canonical_sync.py status <repo> | publish <repo> | backup <repo> [offsite=yes]"""
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 2 or args[0] not in ("status", "publish"):
-        print("usage: canonical_sync.py <status|publish> <repo>", file=sys.stderr)
+    if len(args) < 2 or args[0] not in ("status", "publish", "backup"):
+        print("usage: canonical_sync.py <status|publish|backup> <repo> [offsite=yes]",
+              file=sys.stderr)
         return 2
     command, repo = args[0], Path(args[1])
+    if command == "backup":
+        return _run_backup(repo, "offsite=yes" in args[2:])
     try:
         canon = locate(repo)
         print(f"CANONICAL={canon.repo}")
@@ -700,6 +768,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"MIRROR={canon.mirror or 'none'}")
         if command == "status":
             print(f"UNPUBLISHED={unpublished(canon)}")
+            print(f"BACKUP_REMOTE={backup_remote(canon) or 'none'}")
+            marker = _backup_marker(repo)
+            if marker.exists():
+                print(f"BACKUP_FAILED={marker.read_text().strip()}")
             return 0
         result = publish_base(repo)
         print(f"PUBLISHED={result.published}")

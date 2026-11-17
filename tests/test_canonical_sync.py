@@ -758,3 +758,107 @@ class TestBackup:
         cs.backup(fam.slot, "feat")
         assert g(fam.blessed, "for-each-ref", "--format=%(refname)") == "refs/heads/main"
         assert g(fam.mirror, "for-each-ref", "--format=%(refname)") == "refs/heads/main"
+
+
+class TestBackupCommand:
+    """What the slot post-commit hook runs: `canonical_sync.py backup <repo> offsite=yes`."""
+
+    def _marker(self, fam) -> Path:
+        return fam.slot / ".git" / "soredium-backup-failed"
+
+    def test_backs_up_the_checked_out_branch_into_canonical(self, fam, capsys):
+        assert cs.main(["backup", str(fam.slot)]) == 0
+        out = capsys.readouterr().out
+        assert "BACKUP_REF=refs/backup/7/feat" in out
+        assert sha(fam.canon, "refs/backup/7/feat") == sha(fam.slot, "feat")
+
+    def test_offsite_goes_to_the_fork_as_a_ref_that_is_not_a_branch(self, fam, capsys):
+        assert cs.main(["backup", str(fam.slot), "offsite=yes"]) == 0
+        out = capsys.readouterr().out
+        assert "BACKUP_OFFSITE=origin" in out
+        assert sha(fam.mirror, "refs/backup/7/feat") == sha(fam.slot, "feat")
+        assert g(fam.mirror, "for-each-ref", "--format=%(refname)", "refs/heads") == "refs/heads/main"
+        assert g(fam.blessed, "for-each-ref", "--format=%(refname)") == "refs/heads/main"
+
+    def test_offsite_failure_is_reported_and_remembered_not_swallowed(self, fam, capsys):
+        g(fam.canon, "remote", "set-url", "origin", str(fam.root / "gone.git"))
+
+        assert cs.main(["backup", str(fam.slot), "offsite=yes"]) == 1
+
+        captured = capsys.readouterr()
+        assert "BACKUP_OFFSITE=failed" in captured.out
+        assert "backup" in captured.err.lower() and "origin" in captured.err
+        assert sha(fam.canon, "refs/backup/7/feat") == sha(fam.slot, "feat")   # on disk regardless
+        assert self._marker(fam).exists()
+        assert cs.main(["status", str(fam.slot)]) == 0
+        assert "BACKUP_FAILED=" in capsys.readouterr().out
+
+    def test_next_success_clears_the_failure(self, fam, capsys):
+        good = g(fam.canon, "remote", "get-url", "origin")
+        g(fam.canon, "remote", "set-url", "origin", str(fam.root / "gone.git"))
+        cs.main(["backup", str(fam.slot), "offsite=yes"])
+        g(fam.canon, "remote", "set-url", "origin", good)
+
+        assert cs.main(["backup", str(fam.slot), "offsite=yes"]) == 0
+
+        assert not self._marker(fam).exists()
+        capsys.readouterr()
+        cs.main(["status", str(fam.slot)])
+        assert "BACKUP_FAILED=" not in capsys.readouterr().out
+
+    def test_single_remote_gets_no_offsite_copy_unless_configured(self, fam, capsys):
+        g(fam.canon, "remote", "remove", "origin")           # only the blessed remote is left
+        g(fam.canon, "remote", "rename", "upstream", "origin")
+
+        assert cs.main(["backup", str(fam.slot), "offsite=yes"]) == 0
+        assert "BACKUP_OFFSITE=none" in capsys.readouterr().out
+        assert sha(fam.blessed, "refs/backup/7/feat") == ""
+
+        g(fam.canon, "config", "soredium.backupRemote", "origin")
+        assert cs.main(["backup", str(fam.slot), "offsite=yes"]) == 0
+        assert "BACKUP_OFFSITE=origin" in capsys.readouterr().out
+        assert sha(fam.blessed, "refs/backup/7/feat") == sha(fam.slot, "feat")
+
+    def test_detached_head_is_not_an_error(self, fam, capsys):
+        g(fam.slot, "checkout", "-q", "--detach")
+        assert cs.main(["backup", str(fam.slot), "offsite=yes"]) == 0
+        assert "BACKUP_REF=none" in capsys.readouterr().out
+
+    def test_slot_with_no_canonical_fails_loudly(self, fam, capsys):
+        g(fam.slot, "remote", "remove", "local")
+        assert cs.main(["backup", str(fam.slot)]) == 1
+        captured = capsys.readouterr()
+        assert "ERROR=no_canonical" in captured.out
+        assert self._marker(fam).exists()
+
+
+class TestPostCommitHook:
+    """The hook as git runs it, end to end."""
+
+    def _install(self, fam, monkeypatch):
+        sys.path.insert(0, str(Path(__file__).parent.parent / "work-slot"))
+        import slot_git
+        monkeypatch.setenv("SOREDIUM_CANONICAL_SYNC", str(Path(cs.__file__)))
+        slot_git.install_post_commit_hook(fam.slot)
+
+    def test_a_commit_in_the_slot_is_copied_to_canonical_and_the_fork(self, fam, monkeypatch):
+        self._install(fam, monkeypatch)
+
+        tip = commit(fam.slot, {"new.txt": "n\n"}, "feat: new")
+
+        assert sha(fam.canon, "refs/backup/7/feat") == tip
+        assert sha(fam.mirror, "refs/backup/7/feat") == tip
+        assert g(fam.mirror, "for-each-ref", "--format=%(refname)", "refs/heads") == "refs/heads/main"
+
+    def test_a_failed_backup_is_visible_to_the_committer(self, fam, monkeypatch):
+        self._install(fam, monkeypatch)
+        g(fam.canon, "remote", "set-url", "origin", str(fam.root / "gone.git"))
+        (fam.slot / "new.txt").write_text("n\n")
+        g(fam.slot, "add", "-A")
+
+        result = subprocess.run(["git", "-C", str(fam.slot), "commit", "-m", "feat: new"],
+                                capture_output=True, text=True)
+
+        assert result.returncode == 0                      # the commit itself stands
+        assert "backup" in result.stderr.lower()
+        assert (fam.slot / ".git" / "soredium-backup-failed").exists()
