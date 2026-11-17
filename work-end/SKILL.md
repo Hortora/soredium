@@ -105,6 +105,13 @@ Read the output:
   `UNPUBLISHED=<canonical repo> commits=<N>` line names a canonical repo
   whose base branch holds commits its remote lacks. `WARN=` lines are
   shown to the user as they are.
+  In a slot the ceremony also carries everything else the slot holds:
+  `CARRIED=<repo>:<branch> commits=<N>` is work outside the queue's branch
+  (a workspace clone's commits, usually) that it landed in canonical.
+  `NOT_LANDED=<repo>:<branch> reason=<why>` is work it could not land;
+  the slot is then not marked ready for archive. Report every
+  `NOT_LANDED` line to the user and fix the cause (uncommitted changes or
+  a conflict in that repo), then run the ceremony again.
 - `ACTION=squash_review_needed` — nothing was changed. Each
   `SQUASH_REVIEW=<repo>:<branch>: <reason>` line names a branch that has
   not been reviewed at its current tip (never reviewed, commits added

@@ -65,6 +65,10 @@ class CloseResult:
     # Queue items this ceremony closed, in the order they landed, and each one's branch.
     closed_items: list[str] = field(default_factory=list)
     closed_branches: dict = field(default_factory=dict)
+    # Slot repos whose own commits, outside the queue's branches, were carried to
+    # canonical: {"repo:branch": commits}. And those that could not be: {"repo:branch": why}.
+    carried: dict = field(default_factory=dict)
+    not_landed: dict = field(default_factory=dict)
     # Canonical repos holding commits their remote lacks: {canonical path: count}.
     unpublished: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -446,6 +450,48 @@ def land(target: CloseTarget, issue: str = "") -> str:
     return land_targets([target])[target].sha
 
 
+def slot_strays(slot_dir: Path, covered: set) -> list[tuple[Path, str, int]]:
+    """Commits in a slot that no queue branch carries and canonical lacks.
+
+    Workspace clones are worked on directly, on their base branch or whatever
+    they have checked out, and an earlier ceremony may have left work on a
+    clone's own base branch. Both are (repo, branch, commits) here, so that
+    nothing in the slot is left behind when its issue closes.
+    """
+    from slot_core import get_all_slot_repos, is_workspace_clone
+    strays = []
+    for name in get_all_slot_repos(slot_dir):
+        repo = slot_dir / name
+        branches = [_get_base_branch(repo)]
+        current = _current_branch(repo)
+        if is_workspace_clone(repo) and current and current not in branches:
+            branches.append(current)
+        for branch in branches:
+            if (repo, branch) in covered or _is_stamp_commit(repo, branch):
+                continue
+            try:
+                count = canonical_sync.ahead_of_canonical(repo, branch)
+            except SyncError:
+                continue      # no canonical behind this clone: reported by preflight for targets
+            if count:
+                strays.append((repo, branch, count))
+    return strays
+
+
+def carry_strays(slot_dir: Path, covered: set) -> tuple[dict, dict]:
+    """Land every stray in canonical. Returns (carried, not_landed), keyed "repo:branch"."""
+    carried: dict[str, int] = {}
+    not_landed: dict[str, str] = {}
+    for repo, branch, count in slot_strays(slot_dir, covered):
+        key = f"{repo.name}:{branch}"
+        try:
+            canonical_sync.land(repo, branch)
+            carried[key] = count
+        except SyncError as error:
+            not_landed[key] = error.detail
+    return carried, not_landed
+
+
 # --- stamp ---
 
 def _is_stamp_commit(repo: Path, branch: str) -> bool:
@@ -760,7 +806,13 @@ def close(workspace: Path) -> CloseResult:
 
         slot_ready = ""
         slot_dir = _slot_dir_of(workspace)
-        if slot_dir is not None and next_item is None:
+        carried: dict = {}
+        not_landed: dict = {}
+        if slot_dir is not None:
+            carried, not_landed = carry_strays(
+                slot_dir, {(t.repo, t.branch) for t in targets})
+        # A slot with anything still stranded in it is not ready to archive.
+        if slot_dir is not None and next_item is None and not not_landed:
             mark_slot_landed(
                 slot_dir, queue.state.branch if queue else "",
                 {t.repo.name: sha for t, sha in landed.items() if not t.is_workspace})
@@ -780,6 +832,8 @@ def close(workspace: Path) -> CloseResult:
             closed_branches=closed_branches,
             unpublished=unpublished,
             warnings=list(dict.fromkeys(warnings)),
+            carried=carried,
+            not_landed=not_landed,
         )
     except Exception:
         # Nothing was switched while landing, so no checkout needs putting back.
@@ -807,6 +861,8 @@ def render(result: CloseResult) -> list[str]:
                   for ref in result.closed_items]
         if result.next_item:
             lines.append(f"NEXT_ITEM={result.next_item.ref}")
+        lines += [f"CARRIED={key} commits={count}" for key, count in result.carried.items()]
+        lines += [f"NOT_LANDED={key} reason={why}" for key, why in result.not_landed.items()]
         lines += [f"WARN={warning}" for warning in result.warnings]
         lines += [f"UNPUBLISHED={repo} commits={count}"
                   for repo, count in result.unpublished.items()]

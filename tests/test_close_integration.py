@@ -367,6 +367,100 @@ class TestSlotSingleRepo:
         assert q.state.branch == "issue-1-feat"
 
 
+class TestSlotCarriesEverything:
+    """Workspace clones are worked on directly on main; nothing in a slot is left behind."""
+
+    def _ws_commit(self, ws: Path, name: str) -> str:
+        (ws / name).write_text("workspace content\n")
+        _git(ws, "add", name)
+        _git(ws, "commit", "-m", f"docs: {name} Refs #1")
+        return _git(ws, "rev-parse", "HEAD").stdout.strip()
+
+    def test_workspace_commits_on_main_reach_the_canonical_workspace(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        ws = slot_dir / "wsp-test"
+        _git(ws, "add", ".workspace")
+        _git(ws, "commit", "-m", "chore: marker Refs #1")
+        tip = self._ws_commit(ws, "blog-entry.md")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(slot_dir, "issue-1-feat")
+        canonical_ws = _canonical(tmp_path, "wsp-test")
+
+        result = close(slot_dir)
+
+        assert result.success, result.errors
+        assert _main_head(canonical_ws) == tip
+        assert _file_on_main(canonical_ws, "blog-entry.md")
+        assert result.carried == {"wsp-test:main": 2}
+        assert result.not_landed == {}
+        from close import render
+        assert "CARRIED=wsp-test:main commits=2" in render(result)
+
+    def test_workspace_clone_on_its_own_branch_is_carried_too(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        ws = slot_dir / "wsp-test"
+        _git(ws, "add", ".workspace")
+        _git(ws, "commit", "-m", "chore: marker Refs #1")
+        _git(ws, "checkout", "-b", "notes")
+        self._ws_commit(ws, "notes.md")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, result.errors
+        assert _file_on_main(_canonical(tmp_path, "wsp-test"), "notes.md")
+        assert "wsp-test:notes" in result.carried
+
+    def test_stranded_workspace_content_blocks_ready_for_archive(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        ws = slot_dir / "wsp-test"
+        _git(ws, "add", ".workspace")
+        _git(ws, "commit", "-m", "chore: marker Refs #1")
+        self._ws_commit(ws, "blog-entry.md")
+        canonical_ws = _canonical(tmp_path, "wsp-test")
+        (canonical_ws / "blog-entry.md").write_text("a different entry already here\n")
+        _git(canonical_ws, "add", ".")
+        _git(canonical_ws, "commit", "-m", "docs: conflicting entry Refs #1")
+        canonical_before = _main_head(canonical_ws)
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, result.errors          # the issue's code did land
+        assert "wsp-test:main" in result.not_landed
+        assert result.slot_ready == ""
+        assert not (slot_dir / ".landed").exists()
+        assert _main_head(canonical_ws) == canonical_before
+        from close import render
+        assert any(line.startswith("NOT_LANDED=wsp-test:main") for line in render(result))
+
+    def test_work_left_on_a_project_clones_own_main_is_carried(self, tmp_path):
+        slot_dir, [engine, agency] = _setup_slot(tmp_path, ["engine", "agency"], "issue-1-feat")
+        (agency / "earlier.txt").write_text("landed only in the clone by an older ceremony\n")
+        _git(agency, "add", ".")
+        _git(agency, "commit", "-m", "feat: earlier Refs #1")
+        _add_commits(engine, "issue-1-feat", 2)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, result.errors
+        assert _file_on_main(_canonical(tmp_path, "agency"), "earlier.txt")
+        assert result.carried == {"agency:main": 1}
+
+    def test_nothing_stray_means_nothing_carried(self, tmp_path):
+        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(slot_dir, "issue-1-feat")
+
+        result = close(slot_dir)
+
+        assert result.success, result.errors
+        assert result.carried == {} and result.not_landed == {}
+
+
 class TestSlotMultiRepo:
     """Slot with 2+ repos on the same branch."""
 

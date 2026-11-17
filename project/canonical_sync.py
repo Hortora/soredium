@@ -416,6 +416,22 @@ def hold(repo: Path, branch: str, canon: Canonical) -> str:
     return held
 
 
+def ahead_of_canonical(repo: Path | str, branch: str) -> int:
+    """Commits on `branch` in `repo` that canonical's base branch, on disk, lacks.
+
+    Read from canonical itself, never from a tracking ref, which can be stale.
+    """
+    repo = Path(repo)
+    canon = locate(repo)
+    if not _sha(repo, f"refs/heads/{branch}"):
+        return 0
+    onto = _onto(repo, canon)
+    if not onto:
+        return 0
+    count = _out(repo, "rev-list", "--count", f"{onto}..refs/heads/{branch}")
+    return int(count) if count.isdigit() else 0
+
+
 def unpublished(canon: Canonical) -> int:
     """Commits on canonical's base branch that the blessed remote, as last fetched, lacks."""
     if not canon.blessed:
