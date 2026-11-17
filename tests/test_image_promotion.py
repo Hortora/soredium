@@ -39,7 +39,7 @@ class TestToProjectImageCopromotion:
 
         from artifact_promote import to_project
 
-        with patch("artifact_promote._push_or_report"):
+        with patch("artifact_promote._land_or_report"):
             rc = to_project(str(proj), str(ws), {
                 "artifacts": "docs/blog/entry.md",
                 "covers": "",
@@ -64,7 +64,7 @@ class TestToProjectImageCopromotion:
 
         from artifact_promote import to_project
 
-        with patch("artifact_promote._push_or_report"):
+        with patch("artifact_promote._land_or_report"):
             rc = to_project(str(proj), str(ws), {
                 "artifacts": "docs/blog/entry.md",
                 "covers": "",
@@ -93,7 +93,7 @@ class TestToProjectImageCopromotion:
 
         from artifact_promote import to_project
 
-        with patch("artifact_promote._push_or_report"):
+        with patch("artifact_promote._land_or_report"):
             rc = to_project(str(proj), str(ws), {
                 "artifacts": "specs/feature/design.md",
                 "covers": "",
@@ -115,7 +115,7 @@ class TestToProjectImageCopromotion:
 
         from artifact_promote import to_project
 
-        with patch("artifact_promote._push_or_report"):
+        with patch("artifact_promote._land_or_report"):
             rc = to_project(str(proj), str(ws), {
                 "artifacts": "data.json",
                 "covers": "",

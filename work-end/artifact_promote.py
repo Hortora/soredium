@@ -10,10 +10,15 @@ Subcommands:
     close-issues       <repo> covers=<comma-sep-issue-numbers>
     archive-plans      <workspace> branch=<name>
 
+Nothing here pushes or pulls. A promotion is a commit; when it is made on the
+base branch of a slot clone it is landed in the canonical repo through
+project/canonical_sync.py, and publishing is `canonical_sync.py publish`.
+
 Output (KEY=value lines):
     PROMOTED=<count>   (for to-workspace-main, to-project)
-    PUSHED=yes|failed|skipped
-    PUSH_VERIFIED=yes|failed  (after successful push, verifies artifacts on origin/main)
+    LANDED=yes         the commit is on the canonical repo's base branch, on disk
+    LANDED=branch      the commit is on a working branch and lands when that branch does
+    LANDED=no          it could not be landed in canonical (LAND_ERROR= says why)
     CLOSED=<count>     (for close-issues)
 
 Error output:
@@ -33,13 +38,18 @@ from pathlib import Path
 _project_dir = str(Path(__file__).resolve().parent.parent / "project")
 if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
-from common import parse_args, detect_topology
+from common import parse_args
 from git_util import git
 from plan_io import parse_covers_qualified
+import canonical_sync
+from canonical_sync import SyncError
 
-_verification_dir = str(Path(__file__).resolve().parent.parent / "verification")
-if _verification_dir not in sys.path:
-    sys.path.insert(0, _verification_dir)
+# `verification` is imported as a package, so its parent directory goes on the path.
+# (The package directory itself was added here before, and every promotion of a
+# markdown file died with ModuleNotFoundError after staging it, before the commit.)
+_skills_root = str(Path(__file__).resolve().parent.parent)
+if _skills_root not in sys.path:
+    sys.path.insert(0, _skills_root)
 
 
 def _copromote_images(md_source: Path, md_dest: Path, repo_cwd: str) -> int:
@@ -69,38 +79,28 @@ def _copromote_images(md_source: Path, md_dest: Path, repo_cwd: str) -> int:
     return copied
 
 
-def _has_remote(cwd: str) -> bool:
-    r = git(cwd, "remote")
-    return r.returncode == 0 and bool(r.stdout.strip())
+def _land_or_report(cwd: str) -> None:
+    """Say where the commit just made in `cwd` stands, and land it when that is possible.
 
-
-def _resolve_push_remote(cwd: str) -> str:
-    """Return the push target: upstream (blessed) if present, else origin."""
-    _, blessed = detect_topology(cwd)
-    return blessed if blessed else "origin"
-
-
-def _push_or_report(cwd: str) -> None:
-    if not _has_remote(cwd):
-        print("PUSHED=skipped")
-        return
-    remote = _resolve_push_remote(cwd)
-    r = git(cwd, "push", "--no-verify", remote, "main")
-    if r.returncode == 0:
-        print("PUSHED=yes")
-        print(f"PUSH_REMOTE={remote}")
-    else:
-        branch = subprocess.run(
-            ["git", "-C", cwd, "branch", "--show-current"],
-            capture_output=True, text=True,
-        ).stdout.strip()
-        r2 = git(cwd, "push", "--no-verify", "-u", remote, branch)
-        if r2.returncode == 0:
-            print("PUSHED=yes")
-            print(f"PUSH_REMOTE={remote}")
-        else:
-            print("PUSHED=failed")
-            print(f"PUSH_ERROR={r2.stderr.strip()}")
+    Never pushes. A commit on the base branch of the canonical repo is landed
+    already. A commit on a slot clone's base branch is landed in canonical now.
+    A commit on a working branch lands when the branch does.
+    """
+    branch = subprocess.run(
+        ["git", "-C", cwd, "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    try:
+        canon = canonical_sync.locate(cwd)
+        if branch != canon.base:
+            print("LANDED=branch")
+            return
+        if canonical_sync.is_clone(cwd, canon):
+            canonical_sync.land(cwd, branch)
+        print("LANDED=yes")
+    except SyncError as error:
+        print("LANDED=no")
+        print(f"LAND_ERROR={error.detail}")
 
 
 def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
@@ -128,18 +128,11 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
         print(f"ERROR_DETAIL=Workspace directory not found: {workspace}")
         return 1
 
-    wt = ws / ".promote-tmp"
-    r = git(workspace, "worktree", "add", str(wt), "main")
-    if r.returncode != 0:
-        print("ERROR=worktree_failed")
-        print(f"ERROR_DETAIL=Failed to create worktree for main: {r.stderr.strip()}")
-        return 1
-
+    promoted = 0
+    skipped: list[str] = []
     try:
-        git(str(wt), "pull", "--rebase", "origin", "main")
-
-        promoted = 0
-        skipped: list[str] = []
+      with canonical_sync.checked_out(workspace, "main") as wt:
+        wt = Path(wt)
         for artifact in artifacts:
             if source_dir:
                 src = Path(source_dir) / artifact
@@ -151,7 +144,9 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
                 continue
             dst = wt / artifact
             dst.parent.mkdir(parents=True, exist_ok=True)
-            if src.is_dir():
+            if src.resolve() == dst.resolve():
+                pass        # the workspace is on main: the artifact is already in place
+            elif src.is_dir():
                 if dst.exists():
                     shutil.rmtree(dst)
                 shutil.copytree(str(src), str(dst))
@@ -169,16 +164,11 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
                     print(f"ERROR_DETAIL=Failed to commit: {r.stderr.strip()}")
                     return 1
 
-            _push_or_report(str(wt))
-    finally:
-        r = git(workspace, "worktree", "remove", str(wt), "--force")
-        if r.returncode != 0:
-            if wt.exists():
-                shutil.rmtree(wt, ignore_errors=True)
-                git(workspace, "worktree", "prune")
-
-    # Switch back to branch
-    git(workspace, "checkout", branch)
+            _land_or_report(str(wt))
+    except SyncError as error:
+        print("ERROR=worktree_failed")
+        print(f"ERROR_DETAIL={error.detail}")
+        return 1
 
     print(f"PROMOTED={promoted}")
     if skipped:
@@ -260,7 +250,7 @@ def to_project(project: str, workspace: str, params: dict[str, str]) -> int:
                     print(f"ERROR_DETAIL=Failed to commit: {r.stderr.strip()}")
                     return 1
 
-            _push_or_report(project)
+            _land_or_report(project)
 
     print(f"PROMOTED={promoted}")
     if skipped:
@@ -329,31 +319,16 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
         print("ARCHIVED=0")
         return 0
 
-    current_branch = subprocess.run(
-        ["git", "-C", workspace, "branch", "--show-current"],
-        capture_output=True, text=True,
-    ).stdout.strip()
-    on_main = current_branch == "main"
-
-    if on_main:
-        target = ws
-    else:
-        wt = ws / ".promote-tmp"
-        r = git(workspace, "worktree", "add", str(wt), "main")
-        if r.returncode != 0:
-            print("ERROR=worktree_failed")
-            print(f"ERROR_DETAIL=Failed to create worktree for main: {r.stderr.strip()}")
-            return 1
-        target = wt
-
+    archived = 0
+    skipped: list[str] = []
     try:
-        if not on_main:
-            git(str(target), "pull", "--rebase", "origin", "main")
+      with canonical_sync.checked_out(workspace, "main") as target:
+        target = Path(target)
+        on_main = target.resolve() == ws.resolve()
 
         target_plans = target / "plans"
         target_plans.mkdir(parents=True, exist_ok=True)
 
-        skipped: list[str] = []
         if not on_main:
             for pf in plan_files:
                 src = pf if source_dir else (ws / pf.relative_to(scan_root))
@@ -366,7 +341,6 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
 
         attic_dir = target_plans / "attic" / branch
         attic_dir.mkdir(parents=True, exist_ok=True)
-        archived = 0
         for pf in plan_files:
             if pf.name in skipped:
                 continue
@@ -384,14 +358,11 @@ def archive_plans(workspace: str, params: dict[str, str]) -> int:
                     print(f"ERROR_DETAIL={r.stderr.strip()}")
                     return 1
 
-            _push_or_report(str(target))
-    finally:
-        if not on_main:
-            r = git(workspace, "worktree", "remove", str(wt), "--force")
-            if r.returncode != 0:
-                if wt.exists():
-                    shutil.rmtree(wt, ignore_errors=True)
-                    git(workspace, "worktree", "prune")
+            _land_or_report(str(target))
+    except SyncError as error:
+        print("ERROR=worktree_failed")
+        print(f"ERROR_DETAIL={error.detail}")
+        return 1
 
     print(f"ARCHIVED={archived}")
     if skipped:
@@ -445,7 +416,7 @@ def sweep_promotion_gaps(project: str, workspace: str, params: dict[str, str]) -
                 refs = parse_covers_qualified(covers) if covers else []
                 issue_ref = f"  Refs #{refs[0].number}" if refs else ""
                 git(project, "commit", "-m", f"docs(work-end): sweep-promote {len(actions)} workspace artifacts{issue_ref}")
-                _push_or_report(project)
+                _land_or_report(project)
 
     print(f"SWEPT={len(actions)}")
     return 0
