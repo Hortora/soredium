@@ -457,6 +457,10 @@ python3 scripts/place_workspace_markers.py <family-root>         # bootstrap .wo
 python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root>  # migrate old-structure slot to per-repo workspaces
 python3 scripts/migrate_slot_workspace.py <slot-dir> <family-root> --dry-run  # preview migration
 
+# Slot backup setup (#515): dry run unless --apply
+python3 scripts/slot_backup_setup.py hooks <family-root>               # old push hook -> canonical backup hook
+python3 scripts/slot_backup_setup.py remotes <root> owner=<github-user>  # backup remote for single-remote workspace repos
+
 # Slot state migration (backfill state: field in .slot files)
 python3 scripts/migrate_slot_state.py <family-root>           # dry-run: shows what needs changing
 python3 scripts/migrate_slot_state.py <family-root> --apply   # apply state field to .slot files
