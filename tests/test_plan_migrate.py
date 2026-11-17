@@ -102,7 +102,7 @@ class TestMigrateMetaAlone:
         assert tree.state["branch"] == "issue-99-solo"
         assert tree.state["state"] == "active"
         assert len(tree.queue) == 1
-        assert tree.queue[0].issue_number == 99
+        assert tree.queue[0].ref.number == 99
         assert tree.queue[0].active is True
 
     def test_creates_plan_from_multi_issue_meta(self, tmp_path):
@@ -122,10 +122,10 @@ class TestMigrateMetaAlone:
         plan = design / ".plan"
         tree = plan_manager.parse_plan(plan)
         assert len(tree.queue) == 3
-        assert tree.queue[0].issue_number == 42
+        assert tree.queue[0].ref.number == 42
         assert tree.queue[0].active is True
-        assert tree.queue[1].issue_number == 43
-        assert tree.queue[2].issue_number == 44
+        assert tree.queue[1].ref.number == 43
+        assert tree.queue[2].ref.number == 44
 
     def test_preserves_lifecycle_state(self, tmp_path):
         design = tmp_path / "design"
@@ -203,7 +203,7 @@ class TestMigrateWithEpic:
         assert tree.state["branch"] == "issue-50-epic"
         assert len(tree.queue) == 3
         assert tree.queue[0].completed is True
-        assert tree.queue[0].issue_number == 51
+        assert tree.queue[0].ref.number == 51
         has_active = any(q.active for q in tree.queue)
         assert has_active
 

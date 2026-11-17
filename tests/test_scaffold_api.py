@@ -47,7 +47,9 @@ def test_scaffold_does_not_overwrite_existing():
         (ws / "JOURNAL.md").write_text("existing journal\n")
         result = scaffold(ws, branch="issue-42", project_sha="abc123")
         assert result.created is False
-        assert (ws / ".plan").read_text() == "existing plan\n"
+        content = (ws / ".plan").read_text()
+        assert "existing plan" in content
+        assert "branch: issue-42" in content
 
 
 def test_scaffold_force_overwrites():
@@ -112,7 +114,7 @@ def test_scaffold_plan_is_parseable():
         assert tree.state["branch"] == "issue-42-fix"
         assert tree.state["state"] == "scaffolded"
         assert len(tree.queue) == 1
-        assert tree.queue[0].issue_number == 42
+        assert tree.queue[0].ref.number == 42
         assert tree.queue[0].active is True
 
 
