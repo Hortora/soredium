@@ -16,11 +16,28 @@ SOREDIUM_ROOT = Path(__file__).parent.parent
 # copies under ~/.claude/skills/.  worklog.py (from ~/.claude/lib/)
 # can add ~/.claude/skills/project/ at import time — this block
 # ensures the repo's versions shadow it.
-for _dir_name in ("project", "work-end", "work-slot", "verification", "scripts"):
+_REPO_DIRS = ("project", "work-end", "work-slot", "verification", "scripts")
+_repo_prefixes = []
+for _dir_name in _REPO_DIRS:
     _dir = str(SOREDIUM_ROOT / _dir_name)
     if _dir in sys.path:
         sys.path.remove(_dir)
     sys.path.insert(0, _dir)
+    _repo_prefixes.append(_dir + os.sep)
+
+# Evict modules already cached from outside this repo (e.g. from the
+# installed skills).  sys.path alone isn't enough: once a module is in
+# sys.modules, Python returns the cached version regardless of path order.
+_repo_root_str = str(SOREDIUM_ROOT) + os.sep
+for _name in list(sys.modules):
+    _mod = sys.modules[_name]
+    _file = getattr(_mod, "__file__", None)
+    if _file and not _file.startswith(_repo_root_str):
+        if any(_file.startswith(p) for p in (
+            str(Path.home() / ".claude" / "skills"),
+            str(Path.home() / ".claude" / "lib"),
+        )):
+            del sys.modules[_name]
 
 
 def _register_skill_package(dir_name: str, module_name: str) -> None:
