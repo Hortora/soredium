@@ -1339,3 +1339,66 @@ class TestStampReferenceNamesTheRightRepository:
         assert close_module._issue_trailer("") .startswith("no-issue")
         assert close_module._issue_trailer("not a ref").startswith("no-issue")
         assert close_module._issue_trailer("42") == "Refs #42"
+
+
+class TestUnpublishedCountsEveryCoveredRepo:
+    """#559: the publish offer counts base-branch commits the ceremony did not land."""
+
+    def _ahead(self, repo: Path) -> int:
+        return int(_git(repo, "rev-list", "--count", "origin/main..main").stdout.strip())
+
+    def _ready(self, tmp_path, commits=2):
+        repo = _init_repo(tmp_path / "repo")
+        _publish_as(repo, tmp_path, "Owner/repo")
+        _add_commits(repo, "issue-1-feat", commits)
+        _make_queue(repo, "issue-1-feat", issue_repo="Owner/repo")
+        _git(repo, "add", ".queue")
+        _git(repo, "commit", "-m", "chore: queue Refs #1")
+        squash_marker.mark(repo, "issue-1-feat")
+        return repo
+
+    def test_the_queue_commit_is_counted(self, tmp_path):
+        repo = self._ready(tmp_path)
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        ahead = self._ahead(repo)
+        assert "advance queue" in _git(repo, "log", "-1", "--format=%s", "main").stdout
+        assert ahead == 4  # two work commits, the queue commit on the branch, the advance
+        assert result.unpublished == {str(repo.resolve()): ahead}
+
+    def test_commits_made_on_the_base_branch_before_the_ceremony_are_counted(self, tmp_path):
+        repo = self._ready(tmp_path)
+        _git(repo, "checkout", "main")
+        (repo / "HANDOFF.md").write_text("notes")
+        _git(repo, "add", "HANDOFF.md")
+        _git(repo, "commit", "-m", "docs: handoff Refs #1")
+        _git(repo, "checkout", "issue-1-feat")
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        assert result.unpublished == {str(repo.resolve()): self._ahead(repo)}
+        assert self._ahead(repo) == 5
+
+    def test_a_repo_with_no_remote_is_not_reported(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-1-feat", 1)
+        _make_queue(repo, "issue-1-feat")
+        _git(repo, "add", ".queue")
+        _git(repo, "commit", "-m", "chore: queue Refs #1")
+        squash_marker.mark(repo, "issue-1-feat")
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        assert result.unpublished == {}
+
+    def test_the_offer_names_the_repo_and_its_count(self, tmp_path):
+        import close as close_module
+        repo = self._ready(tmp_path)
+        result = _close_single(repo)
+        lines = close_module.render(result)
+        assert f"UNPUBLISHED={repo.resolve()} commits={self._ahead(repo)}" in lines
+        assert "OFFER=publish" in lines

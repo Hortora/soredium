@@ -1001,6 +1001,23 @@ def close(workspace: Path) -> CloseResult:
             commit_and_push_queue(workspace, ", ".join(closed) or closing_issue,
                                   closed[-1] if closed else covers_issue)
 
+        # Counted again now that the queue commit exists, and for the workspace
+        # even when it had no branch to land: commits made straight onto a base
+        # branch (queue, handoff, diary) are unpublished work too (#559).
+        covered = [t.repo for t in targets]
+        if (workspace / ".git").exists():
+            covered.append(workspace)
+        for repo in covered:
+            try:
+                canon = canonical_sync.locate(repo)
+            except SyncError:
+                continue
+            count = canonical_sync.unpublished(canon)
+            if count:
+                unpublished[str(canon.repo)] = count
+            else:
+                unpublished.pop(str(canon.repo), None)
+
         _remove_close_state(workspace)
 
         slot_ready = ""
