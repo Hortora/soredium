@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "work-end"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
+from judgment import StepType
 from shared_steps import (
     StepDef,
     PipelineMode,
@@ -37,8 +39,13 @@ class TestSweepDeselected:
         check = _is_sweep_deselected("write_content")
         assert check(ctx) is True
 
-    def test_empty_selected_means_nothing_deselected(self):
+    def test_empty_selected_means_everything_deselected(self):
         ctx = FakeCtx({"sweep_selected": ""})
+        check = _is_sweep_deselected("forage")
+        assert check(ctx) is True
+
+    def test_missing_key_means_not_deselected(self):
+        ctx = FakeCtx({})
         check = _is_sweep_deselected("forage")
         assert check(ctx) is False
 
@@ -77,7 +84,7 @@ class TestMakeSteps:
         step = make_forage_step("wrapping", "wrap_sweep_selected")
         assert step.name == "forage"
         assert step.phase == "wrapping"
-        assert step.step_type == "judgment"
+        assert step.step_type == StepType.JUDGMENT
 
     def test_garden_feedback_step(self):
         step = make_garden_feedback_step("wrapping")

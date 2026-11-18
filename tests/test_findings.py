@@ -203,12 +203,14 @@ class TestCompactFindings:
         assert compact_findings(path, archive) == 0
 
     def test_keeps_recent_resolved(self, tmp_path):
+        from datetime import datetime, timezone, timedelta
         path = tmp_path / "findings.jsonl"
         archive = tmp_path / "findings-archive.jsonl"
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         recent = {
             "category": "audit", "check": "a", "detail": "x",
             "status": "resolved", "resolution": "fixed",
-            "timestamp": "2026-08-19T10:00:00Z",
+            "timestamp": yesterday,
         }
         path.write_text(json.dumps(recent) + "\n")
         archived = compact_findings(path, archive)

@@ -250,8 +250,13 @@ through `project/work.py`.
 ## Skill Chaining
 
 **Routes to:**
+- `work-start` — for `start` and initial `work` commands
+- `work-pause` — for `pause` command
+- `work-resume` — for `resume` command
 - `work-end` (close.py) — for `end` and `sync` commands
 - `handover` — when user picks "wrap" from contextual options
+
+**Complements:** `quick-fix` — lands small changes on the base branch without a feature branch
 
 **Uses:**
 - `project/work.py` — Python-driven pipeline for start/continue/pause/resume/next/find

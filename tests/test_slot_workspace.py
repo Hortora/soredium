@@ -143,10 +143,13 @@ class TestDiscoverWorkspace:
 
 class TestRepointSymlinks:
     def test_repoints_wksp_in_repo(self, tmp_path):
-        repo_wt = tmp_path / "slot" / "engine"
+        slot = tmp_path / "family" / "slots" / "1"
+        slot.mkdir(parents=True)
+        (slot / ".slot").write_text("# Slot\n")
+        repo_wt = slot / "engine"
         repo_wt.mkdir(parents=True)
         (repo_wt / "wksp").symlink_to("/original/workspace/engine")
-        ws_wt = tmp_path / "slot" / "work"
+        ws_wt = slot / "work"
         (ws_wt / "engine").mkdir(parents=True)
 
         slot_workspace.repoint_wksp(repo_wt, ws_wt / "engine")
@@ -168,10 +171,13 @@ class TestRepointSymlinks:
         assert "engine" in str(target)
 
     def test_repoint_replaces_existing(self, tmp_path):
-        repo_wt = tmp_path / "slot" / "engine"
+        slot = tmp_path / "family" / "slots" / "1"
+        slot.mkdir(parents=True)
+        (slot / ".slot").write_text("# Slot\n")
+        repo_wt = slot / "engine"
         repo_wt.mkdir(parents=True)
         (repo_wt / "wksp").symlink_to("/old/target")
-        new_target = tmp_path / "slot" / "work" / "engine"
+        new_target = slot / "work" / "engine"
         new_target.mkdir(parents=True)
 
         slot_workspace.repoint_wksp(repo_wt, new_target)

@@ -28,7 +28,9 @@ def _make_slot(family_root, slot_num, repos, workspaces, attic=False):
     for r in repos:
         init_repo(slot_dir / r)
     for w in workspaces:
-        init_repo(slot_dir / w)
+        ws = init_repo(slot_dir / w)
+        if repos:
+            (ws / "proj").symlink_to(str(slot_dir / repos[0]))
     return slot_dir
 
 

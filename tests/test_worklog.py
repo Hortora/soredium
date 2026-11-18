@@ -884,7 +884,7 @@ class TestV3Migration:
         db = tmp_path / "worklog.db"
         conn = worklog.connect(str(db))
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 3
+        assert ver == 4
         conn.close()
 
     def test_resolution_column_exists(self, tmp_path):
@@ -909,7 +909,7 @@ class TestV3Migration:
         conn.close()
         conn = worklog.connect(str(db))
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 3
+        assert ver == 4
         row = conn.execute("SELECT resolution FROM slots WHERE slot_number=1").fetchone()
         assert row["resolution"] is None
         conn.close()

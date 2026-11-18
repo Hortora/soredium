@@ -13,6 +13,12 @@
       "version": "1.0.0"
     },
     {
+      "name": "branch-audit",
+      "source": "./branch-audit",
+      "description": "Use when reviewing a full branch diff at lifecycle gates (work-end, handover) — holistic review across conformance, ...",
+      "version": "1.0.0"
+    },
+    {
       "name": "code-review",
       "source": "./code-review",
       "description": "Use when the user says \"review the code\", \"check these changes\", \"review this\", \"look at staged changes\", or invokes ...",

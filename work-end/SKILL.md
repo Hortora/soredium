@@ -238,4 +238,6 @@ After `ACTION=complete`:
 `update-claude-md`, `implementation-doc-sync`, `adr`, `write-content`,
 `git-squash` (semantic squash; records the reviewed tip that close.py checks)
 
+**Complements:** `work-slot` — slot sessions close through this skill's ceremony
+
 **Uses:** `work-end/close.py` — atomic close ceremony

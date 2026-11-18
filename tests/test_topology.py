@@ -385,8 +385,8 @@ class TestFindDesignFile:
         result = topology.find_design_file(".plan", topo)
         assert result is None
 
-    def test_design_subdir_takes_precedence(self, tmp_path):
-        """design/.meta preferred over bare .meta at same level."""
+    def test_root_meta_takes_precedence_over_design_subdir(self, tmp_path):
+        """Root .meta is returned even when design/.meta exists."""
         project = init_repo(tmp_path / "project")
         workspace = init_repo(tmp_path / "workspace")
         (project / "wksp").symlink_to(workspace)
@@ -397,7 +397,7 @@ class TestFindDesignFile:
         importlib.reload(topology)
         topo = topology.resolve(str(project))
         result = topology.find_design_file(".meta", topo)
-        assert result == workspace / "design" / ".meta"
+        assert result == workspace / ".meta"
 
 
 class TestCloneDetection:

@@ -31,3 +31,21 @@ The step-by-step logic previously in this file now lives in:
 - `work-start/branch_create.py` — sync-main, create-branches, commit-scaffold. sync-main only fast-forwards (the canonical repo from its remote, a slot clone from canonical); it never rebases, merges or pushes, and an unreachable remote is a warning. commit-scaffold pushes nothing: the canonical repo keeps a backup of the new branch
 - `work-start/scaffold.py` — .plan and JOURNAL.md creation
 - `work-start/flyway_scan.py` — Flyway version scan
+
+## Skill Chaining
+
+**Invoked by:**
+- `work` — routes new work or existing-branch continuation to `project/work.py start`
+
+**Invokes:**
+- `project` — Step 0 setup gate before path resolution
+- `issue-workflow` — Phase 1 to create an issue before coding begins
+
+**Complements:**
+- `brainstorming` — explores design before implementation begins
+- `using-git-worktrees` — provides isolated workspace for feature work
+- `work-slot` — parallel slot-based work sessions
+
+**Chains to:**
+- `work-end` — closes the branch this skill creates
+- `work-pause` — saves the branch state mid-work

@@ -56,6 +56,6 @@ delete, and restructure freely.
 
 ## Skill Chaining
 
-**Invoked by:** [`code-review`] when auth/payment/PII code is identified; user explicit request
+**Invoked by:** [`code-review`] when auth/payment/PII code is identified; [`branch-audit`] Robustness dimension escalation; user explicit request
 
 **Does NOT invoke:** other skills automatically — findings are reported only

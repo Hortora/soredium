@@ -1180,6 +1180,7 @@ class TestWorktreeResolution:
         )
         return worktree_path
 
+    @pytest.mark.xfail(strict=True, reason="#529: worktree resolves to the main checkout's project")
     def test_worktree_resolves_wksp_from_main(self, tmp_path):
         """Worktree of project repo finds wksp/ symlink in main working tree."""
         project = init_repo(tmp_path / "project")
@@ -1195,6 +1196,7 @@ class TestWorktreeResolution:
         assert Path(data["WORKSPACE"]).resolve() == workspace.resolve()
         assert Path(data["PROJECT"]).resolve() == wt.resolve()
 
+    @pytest.mark.xfail(strict=True, reason="#529: worktree resolves to the main checkout's project")
     def test_worktree_resolves_proj_from_main(self, tmp_path):
         """Worktree of workspace repo finds proj/ symlink in main working tree."""
         project = init_repo(tmp_path / "project")

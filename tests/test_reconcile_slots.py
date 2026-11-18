@@ -15,10 +15,8 @@ import reconcile_slots
 
 
 @pytest.fixture
-def db(tmp_path, monkeypatch):
-    db_path = tmp_path / "test.db"
-    monkeypatch.setattr(worklog, "DEFAULT_DB", str(db_path))
-    conn = worklog.connect(str(db_path))
+def db():
+    conn = worklog.connect()
     yield conn
     conn.close()
 

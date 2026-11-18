@@ -20,3 +20,11 @@ The step-by-step logic previously in this file now lives in:
 ## Existing externalized scripts (unchanged)
 
 - `work-pause/pause_exec.py` — commit-wip, push-and-stack, intent tracking
+
+## Skill Chaining
+
+**Invoked by:**
+- `work` — routes the `pause` command to `project/work.py pause`
+
+**Pairs with:**
+- `work-resume` — restores a paused branch from the stack

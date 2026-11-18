@@ -343,8 +343,7 @@ written before the convention change without requiring bulk frontmatter updates.
 
 ## Skill Chaining
 
-**Invoked by:** User directly — "publish blog", "cross-post entries", `/publish-blog`;
-`work-end` — Step 8g (publishes workspace blog entries to destination)
+**Invoked by:** User directly — "publish blog", "cross-post entries", `/publish-blog`
 
 **Reads output of:** [`write-content`] — the blog entries in the resolved `$BLOG_DIR`
 

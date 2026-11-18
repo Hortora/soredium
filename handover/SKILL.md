@@ -100,4 +100,7 @@ The orchestrator's `ACTION=complete` output is the summary. Print it.
 
 **Invoked by:** User ("wrap", "end of session", "create a handover")
 
-**Invokes:** forage, protocol, write-content, update-claude-md (via orchestrator)
+**Invokes:** `forage`, `protocol`, `write-content`, `update-claude-md` (via wrap checklist),
+`implementation-doc-sync`
+
+**Complements:** `work-slot` — slot sessions use handover for HANDOFF.md

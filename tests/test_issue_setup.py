@@ -303,11 +303,11 @@ class TestCreateIssue:
         captured = capsys.readouterr()
         assert "ISSUE_NUMBER=43" in captured.out
 
-        # Verify labels were passed correctly
-        call_args = mock_gh.call_args[0][0]
-        assert "--label" in call_args
-        # Count how many times --label appears (should be 3)
-        label_count = call_args.count("--label")
+        # Verify labels were passed in the create call (first call, not the
+        # subsequent API call that fetches the issue ID)
+        create_call_args = mock_gh.call_args_list[0][0][0]
+        assert "--label" in create_call_args
+        label_count = create_call_args.count("--label")
         assert label_count == 3
 
 

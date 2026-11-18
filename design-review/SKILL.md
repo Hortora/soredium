@@ -641,6 +641,7 @@ delegate to other skills
 **Complements:**
 - `brainstorming` — brainstorming creates the spec; design-review validates it
   (pre-review mode for approach, spec-review mode for detail)
+- `receiving-code-review` — design-review dispatches the review; receiving-code-review handles incoming feedback
 - `branch-audit` — fills the post-implementation lifecycle point with a
   simpler execution model. Shares four-dimension vocabulary.
 - `code-review` — different scope. design-review is multi-round adversarial

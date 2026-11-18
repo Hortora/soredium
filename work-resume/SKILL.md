@@ -24,3 +24,11 @@ The step-by-step logic previously in this file now lives in:
 ## Existing externalized scripts (unchanged)
 
 - `work-resume/resume_exec.py` — checkout-branches, rebase, reset-wip, intent tracking
+
+## Skill Chaining
+
+**Invoked by:**
+- `work` — routes the `resume` command to `project/work.py resume`
+
+**Pairs with:**
+- `work-pause` — saves state to the stack that this skill restores from
