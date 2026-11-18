@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 _lib = Path.home() / ".claude" / "lib"
@@ -174,6 +175,137 @@ def _strip_inherited_lifecycle(ws_dir: Path) -> list[str]:
     return stripped
 
 
+@dataclass
+class RepoPairResult:
+    clone_dest: Path
+    ws_dir: Path | None
+    ws_name: str
+    path_map: dict[str, str]
+
+
+def clone_repo_pair(
+    target_dir: Path,
+    repo_path: Path,
+    branch: str,
+    *,
+    m2_dir: Path | None = None,
+    strip_lifecycle: bool = True,
+    ws_info: tuple[Path, str] | None = None,
+) -> RepoPairResult:
+    """Clone a project repo and its workspace into target_dir.
+
+    Clones repo_path into target_dir/<repo_name> with --shared, checks out
+    branch (if non-empty), configures remotes, installs the post-commit hook,
+    discovers or uses the provided workspace, and sets up wksp/proj symlinks.
+
+    ws_info: None -> auto-discover workspace from repo_path's wksp symlink.
+             (source, name) -> use this workspace; if the directory already
+             exists it is reused without cloning.
+
+    When auto-discovering (ws_info is None) and the workspace directory
+    already exists, raises SlotCreationError (workspace name collision).
+
+    When ws_info is provided, workspace clone failure is not raised -- the
+    function returns with ws_dir=None so the caller can proceed.
+
+    Repointing (repoint_wksp, create_proj_symlink, replicate_claude_md) is
+    only performed in auto-discover mode; callers that pre-resolve workspace
+    info handle repointing themselves.
+    """
+    repo_name = repo_path.name
+    clone_dest = target_dir / repo_name
+    path_map: dict[str, str] = {}
+    auto_discover = ws_info is None
+
+    # --- project clone ---
+    rc, _, stderr = run_cmd([
+        "git", "clone", "--shared", "--branch", "main",
+        str(repo_path), str(clone_dest),
+    ])
+    if rc != 0:
+        raise SlotCreationError(f"clone_failed repo={repo_name} stderr={stderr.strip()}")
+
+    if branch:
+        rc, _, _ = run_cmd(["git", "-C", str(clone_dest), "checkout", "-b", branch])
+        if rc != 0:
+            raise SlotCreationError(f"branch_create_failed repo={repo_name}")
+
+    _cleanup_inherited_symlinks(clone_dest, target_dir)
+    _exclude_symlinks(clone_dest)
+    configure_slot_remotes(clone_dest, repo_path)
+    configure_update_instead(repo_path)
+    install_post_commit_hook(clone_dest)
+    path_map[str(repo_path.resolve())] = str(clone_dest)
+
+    if m2_dir:
+        gi_changed = setup_slot_repo(clone_dest, m2_dir)
+        if gi_changed:
+            run_cmd(["git", "-C", str(clone_dest), "add", ".gitignore"])
+            run_cmd(["git", "-C", str(clone_dest), "commit", "-m",
+                     "chore: add slot infrastructure to .gitignore"])
+
+    # --- workspace ---
+    if auto_discover:
+        ws_info = resolve_workspace_source(repo_path)
+        if not ws_info:
+            ws_info = discover_workspace(repo_path)
+            if ws_info:
+                print(f"DISCOVERED_WORKSPACE={ws_info[1]} repo={repo_name}")
+
+    ws_dir: Path | None = None
+    ws_name = ""
+
+    if ws_info:
+        ws_source, ws_name = ws_info
+        ws_slot_dir = target_dir / ws_name
+
+        if ws_slot_dir.exists():
+            if auto_discover:
+                raise SlotCreationError(
+                    f"workspace_name_collision ws={ws_name} repo={repo_name}: "
+                    f"Workspace clone name '{ws_name}' already exists in slot.")
+            ws_dir = ws_slot_dir
+        else:
+            sync_main(str(ws_source))
+            rc, _, stderr = run_cmd([
+                "git", "clone", "--shared", "--branch", "main",
+                str(ws_source), str(ws_slot_dir),
+            ])
+            if rc != 0:
+                if auto_discover:
+                    raise SlotCreationError(
+                        f"workspace_clone_failed ws={ws_name} stderr={stderr.strip()}")
+            else:
+                if branch:
+                    rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir),
+                                        "checkout", "-b", branch])
+                    if rc != 0 and auto_discover:
+                        raise SlotCreationError(
+                            f"workspace_branch_failed ws={ws_name}")
+
+                _cleanup_inherited_symlinks(ws_slot_dir, target_dir)
+                _exclude_symlinks(ws_slot_dir)
+                configure_slot_remotes(ws_slot_dir, ws_source)
+                configure_update_instead(ws_source)
+                install_post_commit_hook(ws_slot_dir)
+                (ws_slot_dir / ".workspace").touch()
+
+                if strip_lifecycle:
+                    _strip_inherited_lifecycle(ws_slot_dir)
+
+                path_map[str(ws_source.resolve())] = str(ws_slot_dir)
+                ws_dir = ws_slot_dir
+
+        if auto_discover and ws_dir:
+            repoint_wksp(clone_dest, ws_slot_dir)
+            create_proj_symlink(ws_slot_dir, clone_dest)
+            replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
+
+    return RepoPairResult(
+        clone_dest=clone_dest, ws_dir=ws_dir, ws_name=ws_name,
+        path_map=path_map)
+
+
 def allocate_slot_number(family_root: Path) -> int:
     """Reserve next slot number via DB. Reuses pending/failed slots if available."""
     if _wl is None:
@@ -283,65 +415,9 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
 
             sync_main(str(repo_path))
 
-            clone_dest = slot_dir / repo_name
-            rc, _, stderr = run_cmd([
-                "git", "clone", "--shared", "--branch", "main",
-                str(repo_path), str(clone_dest),
-            ])
-            if rc != 0:
-                raise SlotCreationError(f"clone_failed repo={repo_name} stderr={stderr.strip()}")
-            rc, _, _ = run_cmd(["git", "-C", str(clone_dest), "checkout", "-b", branch])
-            if rc != 0:
-                raise SlotCreationError(f"branch_create_failed repo={repo_name}")
-            _cleanup_inherited_symlinks(clone_dest, slot_dir)
-            _exclude_symlinks(clone_dest)
-            configure_slot_remotes(clone_dest, repo_path)
-            configure_update_instead(repo_path)
-            install_post_commit_hook(clone_dest)
-            path_map[str(repo_path.resolve())] = str(clone_dest)
-
-            gi_changed = setup_slot_repo(clone_dest, m2_dir)
-            if gi_changed:
-                run_cmd(["git", "-C", str(clone_dest), "add", ".gitignore"])
-                run_cmd(["git", "-C", str(clone_dest), "commit", "-m",
-                         "chore: add slot infrastructure to .gitignore"])
-
-            ws_info = resolve_workspace_source(repo_path)
-            if not ws_info:
-                ws_info = discover_workspace(repo_path)
-                if ws_info:
-                    print(f"DISCOVERED_WORKSPACE={ws_info[1]} repo={repo_name}")
-            if ws_info:
-                ws_source, ws_name = ws_info
-                ws_slot_dir = slot_dir / ws_name
-
-                if ws_slot_dir.exists():
-                    raise SlotCreationError(
-                        f"workspace_name_collision ws={ws_name} repo={repo_name}: "
-                        f"Workspace clone name '{ws_name}' already exists in slot.")
-
-                sync_main(str(ws_source))
-                rc, _, stderr = run_cmd([
-                    "git", "clone", "--shared", "--branch", "main",
-                    str(ws_source), str(ws_slot_dir),
-                ])
-                if rc != 0:
-                    raise SlotCreationError(f"workspace_clone_failed ws={ws_name} stderr={stderr.strip()}")
-                rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
-                if rc != 0:
-                    raise SlotCreationError(f"workspace_branch_failed ws={ws_name}")
-                _cleanup_inherited_symlinks(ws_slot_dir, slot_dir)
-                _exclude_symlinks(ws_slot_dir)
-                configure_slot_remotes(ws_slot_dir, ws_source)
-                configure_update_instead(ws_source)
-                install_post_commit_hook(ws_slot_dir)
-                (ws_slot_dir / ".workspace").touch()
-                _strip_inherited_lifecycle(ws_slot_dir)
-                path_map[str(ws_source.resolve())] = str(ws_slot_dir)
-
-                repoint_wksp(clone_dest, ws_slot_dir)
-                create_proj_symlink(ws_slot_dir, clone_dest)
-                replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
+            pair_result = clone_repo_pair(slot_dir, repo_path, branch,
+                                          m2_dir=m2_dir)
+            path_map.update(pair_result.path_map)
 
         sanitized = sanitize_slot_claude_md(slot_dir, path_map)
         for s in sanitized:
@@ -459,41 +535,15 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
     m2_dir = slot_dir / ".m2"
     m2_dir.mkdir(exist_ok=True)
 
-    rc, _, stderr = run_cmd([
-        "git", "clone", "--shared", "--branch", "main",
-        str(repo_path), str(clone_dest),
-    ])
-    if rc != 0:
-        print(f"ERROR=clone_failed repo={repo_name} stderr={stderr.strip()}")
-        sys.exit(1)
-
-    rc, _, _ = run_cmd(["git", "-C", str(clone_dest), "checkout", "-b", branch])
-    if rc != 0:
-        print(f"ERROR=branch_create_failed repo={repo_name}")
-        sys.exit(1)
-
-    _cleanup_inherited_symlinks(clone_dest, slot_dir)
-    _exclude_symlinks(clone_dest)
-    install_post_commit_hook(clone_dest)
-    gi_changed = setup_slot_repo(clone_dest, m2_dir)
-    if gi_changed:
-        run_cmd(["git", "-C", str(clone_dest), "add", ".gitignore"])
-        run_cmd(["git", "-C", str(clone_dest), "commit", "-m",
-                 "chore: add slot infrastructure to .gitignore"])
-
-    slot_info = parse_slot(slot_dir)
-    if slot_info and slot_info.isolation_type == "isx":
-        instance = slot_info.isx_instance
-        if instance:
-            _wire_isx_remotes(slot_dir, [repo_name], instance)
-
-    ws_info = resolve_workspace_source(repo_path)
-    if not ws_info:
-        ws_info = discover_workspace(repo_path)
-        if ws_info:
-            print(f"DISCOVERED_WORKSPACE={ws_info[1]} repo={repo_name}")
-    if ws_info:
-        ws_source, ws_name = ws_info
+    # Pre-resolve workspace with collision handling
+    ws_raw = resolve_workspace_source(repo_path)
+    if not ws_raw:
+        ws_raw = discover_workspace(repo_path)
+        if ws_raw:
+            print(f"DISCOVERED_WORKSPACE={ws_raw[1]} repo={repo_name}")
+    ws_resolved = None
+    if ws_raw:
+        ws_source, ws_name = ws_raw
         family_repo_names = _get_family_repo_names(family_root)
         if ws_name in family_repo_names:
             ws_name = f"work-{ws_source.name}"
@@ -502,21 +552,27 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             existing_origin = _get_clone_origin(ws_slot_dir)
             if existing_origin and str(ws_source) not in existing_origin:
                 ws_name = f"work-{ws_source.name}"
-                ws_slot_dir = slot_dir / ws_name
-        if not ws_slot_dir.exists():
-            sync_main(str(ws_source))
-            rc, _, _ = run_cmd([
-                "git", "clone", "--shared", "--branch", "main",
-                str(ws_source), str(ws_slot_dir),
-            ])
-            if rc == 0:
-                run_cmd(["git", "-C", str(ws_slot_dir), "checkout", "-b", branch])
-                _cleanup_inherited_symlinks(ws_slot_dir, slot_dir)
-                _exclude_symlinks(ws_slot_dir)
-                configure_slot_remotes(ws_slot_dir, ws_source)
-                configure_update_instead(ws_source)
-                install_post_commit_hook(ws_slot_dir)
-                (ws_slot_dir / ".workspace").touch()
+        ws_resolved = (ws_source, ws_name)
+
+    try:
+        pair_result = clone_repo_pair(slot_dir, repo_path, branch,
+                                      m2_dir=m2_dir, strip_lifecycle=False,
+                                      ws_info=ws_resolved)
+    except SlotCreationError as e:
+        print(f"ERROR={e}")
+        sys.exit(1)
+
+    slot_info = parse_slot(slot_dir)
+    if slot_info and slot_info.isolation_type == "isx":
+        instance = slot_info.isx_instance
+        if instance:
+            _wire_isx_remotes(slot_dir, [repo_name], instance)
+
+    # Workspace repointing (add_repo-specific: handles subdirectory targets)
+    ws_slot_dir = None
+    if ws_resolved:
+        ws_source, ws_name = ws_resolved
+        ws_slot_dir = slot_dir / ws_name
 
         wksp_target = repo_path / "wksp"
         if wksp_target.is_symlink():
@@ -529,24 +585,24 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
             ws_subdir.mkdir(parents=True, exist_ok=True)
             if rel_subdir != Path("."):
                 _unignore_subdir(ws_slot_dir, str(rel_subdir.parts[0]))
-            repoint_wksp(clone_dest, ws_subdir)
-            create_proj_symlink(ws_subdir, clone_dest)
-            replicate_claude_md(repo_path, ws_subdir, clone_dest)
+            repoint_wksp(pair_result.clone_dest, ws_subdir)
+            create_proj_symlink(ws_subdir, pair_result.clone_dest)
+            replicate_claude_md(repo_path, ws_subdir, pair_result.clone_dest)
 
-    configure_slot_remotes(clone_dest, repo_path)
-    configure_update_instead(repo_path)
-
-    add_path_map: dict[str, str] = {str(repo_path.resolve()): str(clone_dest)}
-    if ws_info:
-        ws_source, ws_name = ws_info
-        ws_slot_dir = slot_dir / ws_name
-        if ws_slot_dir.is_dir():
-            add_path_map[str(ws_source.resolve())] = str(ws_slot_dir)
+    add_path_map = dict(pair_result.path_map)
+    if ws_resolved:
+        ws_source, ws_name = ws_resolved
+        ws_sd = slot_dir / ws_name
+        if ws_sd.is_dir():
+            add_path_map[str(ws_source.resolve())] = str(ws_sd)
     sanitized = sanitize_slot_claude_md(slot_dir, add_path_map)
     for s in sanitized:
         print(f"SANITIZED_CLAUDE_MD={s}")
     if sanitized:
-        for sub in [clone_dest] + ([ws_slot_dir] if ws_info and ws_slot_dir.is_dir() else []):
+        subs_to_check = [pair_result.clone_dest]
+        if ws_slot_dir and ws_slot_dir.is_dir():
+            subs_to_check.append(ws_slot_dir)
+        for sub in subs_to_check:
             if (sub / ".git").is_dir() and (sub / "CLAUDE.md").exists():
                 rc_check, _, _ = run_cmd(["git", "-C", str(sub), "diff", "--quiet", "CLAUDE.md"])
                 if rc_check != 0:
