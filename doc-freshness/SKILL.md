@@ -3,6 +3,7 @@ name: doc-freshness
 description: >
   Documentation freshness detection — structural anchor check for CI
   enforcement. Run by hand or in CI; no skill currently invokes it.
+  Advisory item in work-end pre-close checklist.
 slash-command: false
 ---
 
@@ -22,6 +23,4 @@ Output: JSON with candidate-stale sections. Exit code 1 if candidates found, 0 i
 
 ## Skill Chaining
 
-No skill currently invokes this. The `doc_freshness_gate` step existed in the
-work-end orchestrator deleted in #499; `project/work_progress.py` still lists it
-but nothing calls the gate. See Hortora/soredium#547 for disposition.
+**Invoked by:** `work-end` — advisory item in the pre-close checklist (Step 2)

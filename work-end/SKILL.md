@@ -53,7 +53,8 @@ which is per branch.
 6. **Doc sync** — invoke `implementation-doc-sync` if docs need updating
 7. **ADR** — invoke `adr` if architectural decisions were made
 8. **Write content** — invoke `write-content` (diary) for the session
-9. **Squash review** — invoke `git-squash` on every project repo whose
+9. **Doc freshness** — invoke `doc-freshness` to check for stale structural anchors
+10. **Squash review** — invoke `git-squash` on every project repo whose
    branch has more than one commit, for every branch in the batch. One
    unreviewed branch holds back the whole batch. This is the ONLY path to squashing:
    close.py never squashes. The skill keeps informational commits and
@@ -236,7 +237,7 @@ After `ACTION=complete`:
 
 **Invokes (pre-close):** `code-review`, `branch-audit`, `forage`, `protocol`,
 `update-claude-md`, `implementation-doc-sync`, `adr`, `write-content`,
-`git-squash` (semantic squash; records the reviewed tip that close.py checks)
+`doc-freshness`, `git-squash` (semantic squash; records the reviewed tip that close.py checks)
 
 **Complements:** `work-slot` — slot sessions close through this skill's ceremony
 

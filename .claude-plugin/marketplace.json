@@ -25,6 +25,12 @@
       "version": "1.0.0"
     },
     {
+      "name": "doc-freshness",
+      "source": "./doc-freshness",
+      "description": "Documentation freshness detection — structural anchor check for CI enforcement. Run by hand or in CI. Advisory item in work-end pre-close checklist.",
+      "version": "1.0.0"
+    },
+    {
       "name": "dependency-update",
       "source": "./dependency-update",
       "description": "Use when the user says \"bump a version\", \"upgrade dependencies\", \"check for newer versions\", \"add a dependency\", or \"...",
