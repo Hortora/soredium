@@ -417,3 +417,85 @@ class TestAllPipelinesRegistered:
             for step in steps:
                 assert step.step_type in valid_types, (
                     f"{cmd}/{step.name}: invalid type '{step.step_type}'")
+
+
+class TestContextFromOneCall:
+    """work.py resolves its own context when the caller gives no workspace (#548)."""
+
+    def test_args_come_from_resolved_context(self):
+        from work import fill_from_context
+        context = {"WORKSPACE": "/w", "PROJECT": "/p", "CURRENT_BRANCH": "issue-1-x",
+                   "BASE_BRANCH": "trunk", "ON_MAIN": "no", "IN_SLOT": "yes",
+                   "PLAN_PATH": "/w/.queue", "OWNER_REPO": "o/r", "ISSUE_N": "1"}
+        args = fill_from_context({"command": "continue"}, resolve=lambda: context)
+        assert args["command"] == "continue"
+        assert args["workspace"] == "/w"
+        assert args["project"] == "/p"
+        assert args["branch"] == "issue-1-x"
+        assert args["base_branch"] == "trunk"
+        assert args["in_slot"] == "yes"
+        assert args["plan_path"] == "/w/.queue"
+
+    def test_empty_context_values_are_left_out(self):
+        from work import fill_from_context
+        context = {"WORKSPACE": "/w", "PROJECT": "/p", "PLAN_PATH": "",
+                   "SLOT_PATH": "", "FLYWAY_NEXT_V": ""}
+        args = fill_from_context({"command": "pause"}, resolve=lambda: context)
+        assert "plan_path" not in args
+        assert "slot_path" not in args
+        assert "flyway_next_v" not in args
+
+    def test_given_arguments_win_over_context(self):
+        from work import fill_from_context
+        context = {"WORKSPACE": "/w", "PROJECT": "/p", "ISSUE_N": "1"}
+        args = fill_from_context({"command": "start", "issue_n": "42",
+                                  "issue_title": "T"}, resolve=lambda: context)
+        assert args["issue_n"] == "42"
+        assert args["issue_title"] == "T"
+        assert args["workspace"] == "/w"
+
+    def test_explicit_workspace_never_resolves_context(self):
+        from work import fill_from_context
+
+        def boom():
+            raise AssertionError("context must not be resolved")
+        given = {"command": "pause", "workspace": "/w", "project": "/p"}
+        assert fill_from_context(dict(given), resolve=boom) == given
+
+    def test_parse_error_passes_through(self):
+        from work import fill_from_context
+        assert fill_from_context({"error": "missing_command"},
+                                 resolve=lambda: {}) == {"error": "missing_command"}
+
+    def test_unresolvable_context_is_an_error_not_a_crash(self):
+        from work import fill_from_context
+
+        def no_workspace():
+            raise RuntimeError("no workspace here")
+        args = fill_from_context({"command": "continue"}, resolve=no_workspace)
+        assert args["error"].startswith("context_unresolved:")
+        assert "no workspace here" in args["error"]
+
+    def test_every_mapped_key_is_one_ctx_emits(self):
+        """A renamed ctx.py key must fail here, not silently become a default."""
+        from work import CONTEXT_ARGS
+        source = (Path(__file__).parent.parent / "project" / "ctx.py").read_text()
+        missing = [k for k in CONTEXT_ARGS.values() if f'"{k}":' not in source]
+        assert missing == []
+
+    def test_every_mapped_argument_is_one_build_context_reads(self):
+        from work import CONTEXT_ARGS
+        source = (Path(__file__).parent.parent / "project" / "work.py").read_text()
+        unread = [a for a in CONTEXT_ARGS
+                  if f'args.get("{a}"' not in source and f'args["{a}"]' not in source]
+        assert unread == []
+
+    def test_main_without_arguments_reports_unresolved_context(self, tmp_path, monkeypatch, capsys):
+        """End to end: outside any workspace the script says so in one line."""
+        import work
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["work.py", "continue"])
+        rc = work.main()
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert out.startswith("ERROR=")

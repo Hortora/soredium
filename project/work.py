@@ -65,6 +65,56 @@ def parse_args(argv: list[str]) -> dict[str, str]:
     return result
 
 
+# work.py argument -> the ctx.py key it is read from when the caller gives no
+# workspace. One call is then enough: nothing is copied by hand between scripts.
+CONTEXT_ARGS: dict[str, str] = {
+    "workspace": "WORKSPACE",
+    "project": "PROJECT",
+    "branch": "CURRENT_BRANCH",
+    "base_branch": "BASE_BRANCH",
+    "on_main": "ON_MAIN",
+    "in_slot": "IN_SLOT",
+    "covers": "COVERS",
+    "issue_repo": "ISSUE_REPO",
+    "meta_state": "META_STATE",
+    "owner_repo": "OWNER_REPO",
+    "issue_n": "ISSUE_N",
+    "has_handoff": "HAS_HANDOFF",
+    "handoff_path": "HANDOFF_PATH",
+    "has_platform_doc": "HAS_PLATFORM_DOC",
+    "has_protocols_dir": "HAS_PROTOCOLS_DIR",
+    "flyway_next_v": "FLYWAY_NEXT_V",
+    "design_repo_key": "DESIGN_REPO_KEY",
+    "plan_path": "PLAN_PATH",
+    "slot_path": "SLOT_PATH",
+    "family_root": "FAMILY_ROOT",
+}
+
+
+def args_from_context(context: dict[str, str]) -> dict[str, str]:
+    """The work.py arguments a resolved context supplies. Empty values are left
+    out so each argument keeps its own default."""
+    return {arg: context[key] for arg, key in CONTEXT_ARGS.items() if context.get(key)}
+
+
+def fill_from_context(args: dict[str, str], resolve=None) -> dict[str, str]:
+    """Complete `args` from the resolved context when no workspace was given.
+
+    Arguments the caller did give always win. With an explicit workspace the
+    context is not resolved at all: the caller has stated where it is working.
+    """
+    if "error" in args or "workspace" in args:
+        return args
+    if resolve is None:
+        import ctx as _ctx_module
+        resolve = _ctx_module.resolve
+    try:
+        context = resolve()
+    except RuntimeError as e:
+        return {"error": f"context_unresolved:{e}"}
+    return {**args_from_context(context), **args}
+
+
 def build_context(args: dict[str, str]) -> WorkContext:
     ws = Path(args.get("workspace", "."))
     proj = Path(args.get("project", "."))
@@ -446,7 +496,7 @@ def _complete_summary(command: str, ctx: WorkContext) -> str:
 
 
 def main() -> int:
-    args = parse_args(sys.argv)
+    args = fill_from_context(parse_args(sys.argv))
     if "error" in args:
         print(f"ERROR={args['error']}")
         return 1
