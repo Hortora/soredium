@@ -110,7 +110,7 @@ user typed. To skip: `outcome=skipped`. If blocked:
 **`ACTION=complete`** — The pipeline finished. Report the `SUMMARY=` line.
 
 **`ACTION=stop`** with `NEXT=` — Nothing to run. Tell the user what
-`NEXT=` says and run nothing else.
+`NEXT=` says and run nothing else. With `STOP_REASON=canonical_repo_of_clone_family`, tell the user to open the session at the path in `NEXT=` (or run the create command it gives) and do not start work in the current repo.
 
 **`ACTION=decision`** with `DECISION=`, `DETAIL=`, `OPTIONS=` — Present
 the options with a recommendation and wait. Never run git to resolve

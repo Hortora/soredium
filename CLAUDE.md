@@ -466,6 +466,15 @@ python3 scripts/slot_backup_setup.py detach <family-root>              # existin
 python3 scripts/migrate_slot_state.py <family-root>           # dry-run: shows what needs changing
 python3 scripts/migrate_slot_state.py <family-root> --apply   # apply state field to .slot files
 
+# Permanent clone management (#553)
+python3 project/clone_manager.py create family_root=<path> repo=<name>  # create a permanent clone
+python3 project/clone_manager.py status family_root=<path> repo=<name>  # check if clone exists
+python3 project/clone_manager.py enable family_root=<path>              # enable clones for a family
+python3 project/clone_manager.py enabled family_root=<path>             # check if clones enabled
+
+# Permanent clone tests
+python3 -m pytest tests/test_clone_manager.py tests/test_clone_work_end.py tests/test_work_clone_guard.py -v
+
 # Fix absolute wksp/proj/CLAUDE.md symlinks (one-time migration)
 python3 scripts/fix_absolute_symlinks.py              # dry-run: shows what needs changing
 python3 scripts/fix_absolute_symlinks.py --apply       # apply fixes
@@ -630,6 +639,7 @@ but this checklist ensures the new type is fully wired into all workflows.**
 - `work` -- **unified lifecycle entry point**; `work`, `work start` (without issue), `work continue` and `work next` are all spellings of one operation: `work.py continue`, which reads the queue via `work_route.py:route()` and decides what to run. `work start #N` runs `work.py start issue_n=N`. `work pause`, `work resume`, `work find` each run `work.py <command>`. `work end` and `work sync` use `work-end/close.py`. Routing decisions come from `project/work_route.py`, never from the LLM or `work_chain.py` for these commands
 - `work.py` -- unified pipeline engine (`project/work.py`); Python-driven lifecycle for 6 commands (start, continue, done, pause, resume, find). Each command maps to a step list of `StepDef` objects. Mechanical steps run without LLM involvement; judgment steps yield `ACTION=` for LLM dispatch to handler files in `work/handlers/`. Uses `orchestrator_engine.run_loop`. Three-tier conflict resolution via `conflict_resolution.py`
 - `.queue` -- the issue queue and its state, one file per workspace (or slot root). Read and written by `work-slot/plan_manager.py` and `project/queue_io.py`; never edited by hand. Queue status is one of `active`, `paused`, `drained`, `idle`. An item is unchecked, **done but not closed** (`- [ ] ref — title ← done on <branch>`, written by `plan_manager.py mark-done`), or checked (closed by the close ceremony). Items build on each other by default: `work start` stacks a new branch on the branch of the item just before it while that item is unclosed, in every repo, and records what each branch was cut from in `refs/soredium/base/<branch>` and `refs/soredium/parent/<branch>` (`project/branch_base.py`). An item marked `(from main)` (`plan_manager.py set-base` or `append ... base=main`) starts its code from the base branch; the workspace repo still continues from the previous branch because it holds the queue
+- `clone` -- a permanent per-repo clone at `<family>/clone/<repo>/` holding a project clone (`<repo>/`), its workspace clone, `.slot` and `.permanent` marker. Its only remote is `local`, pointing to its canonical repo. Enabled per family by `<family>/.clone-enabled` (created by `clone_manager.py enable`). `work-end/close.py` lands a permanent clone's branches through canonical and never archives it: when the queue drains the clone stays as-is. `work.py` (`apply_clone_guard`) stops new work in a canonical repo of an enabled family, returning `ACTION=stop` with `STOP_REASON=canonical_repo_of_clone_family` and directing the user to the clone. Managed by `project/clone_manager.py` (create, status, enable, enabled commands)
 - `lifecycle.py` -- older state machine (`project/lifecycle.py`) with a transition table that includes `closing:*` states. The close ceremony no longer uses it, and the pre-push gate that read it is gone
 - `work_chain.py` -- legacy chaining engine (`project/work_chain.py`); no skill runs it as a script any more. `ctx.py` imports `done_fields` from it. Its `evaluate` function is exercised only by tests (`test_work_chain.py`, `test_sync_chain.py`, `test_done_wiring.py`). Retirement tracked separately
 - `work start` -- for `work start #N`, runs `project/work.py start issue_n=N` (the start pipeline): sync main, resolve issue (judgment), branch name (judgment), create branches, scaffold, brainstorm offer (judgment). For `work start` without an issue, runs `work.py continue` which routes through `work_route.py:route()` to either start the next open item or resume paused work. Mechanical steps delegate to `branch_create.py`, `scaffold.py`, `flyway_scan.py`
