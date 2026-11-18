@@ -722,19 +722,22 @@ def get_lifecycle_state(conn: sqlite3.Connection, work_item_id: int,
                         repo_path: str | None = None) -> str | None:
     """Query most recent lifecycle state from events for a work item.
 
-    Returns the to_state from the latest event's metadata, or None if
-    no events exist for the given work_item_id + optional repo_path."""
+    Returns the to_state of the latest event that records a transition, or
+    None if there is none for the given work_item_id + optional repo_path.
+    Events without a to_state (most events) never mask the state."""
     if repo_path:
         row = conn.execute(
-            "SELECT json_extract(metadata, '$.to') FROM events "
+            "SELECT json_extract(metadata, '$.to_state') FROM events "
             "WHERE work_item_id = ? AND repo_path = ? "
+            "AND json_extract(metadata, '$.to_state') IS NOT NULL "
             "ORDER BY id DESC LIMIT 1",
             (work_item_id, repo_path),
         ).fetchone()
     else:
         row = conn.execute(
-            "SELECT json_extract(metadata, '$.to') FROM events "
+            "SELECT json_extract(metadata, '$.to_state') FROM events "
             "WHERE work_item_id = ? "
+            "AND json_extract(metadata, '$.to_state') IS NOT NULL "
             "ORDER BY id DESC LIMIT 1",
             (work_item_id,),
         ).fetchone()

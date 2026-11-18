@@ -93,3 +93,32 @@ def test_event_without_to_state_skipped():
     conn.commit()
     result = worklog.get_lifecycle_state(conn, 1)
     assert result is None
+
+
+def test_later_event_without_to_state_does_not_mask_state():
+    """Most events record no transition; they must not hide the last one."""
+    conn = _make_db()
+    _insert_event(conn, 1, "activate", "active")
+    conn.execute(
+        "INSERT INTO events (timestamp, event_type, work_item_id, metadata) "
+        "VALUES (datetime('now'), 'info', 1, ?)",
+        (json.dumps({"note": "no state"}),),
+    )
+    conn.execute(
+        "INSERT INTO events (timestamp, event_type, work_item_id, metadata) "
+        "VALUES (datetime('now'), 'info', 1, NULL)")
+    conn.commit()
+    assert worklog.get_lifecycle_state(conn, 1) == "active"
+
+
+def test_legacy_to_key_is_not_a_state():
+    """Writers store to_state; a bare 'to' key is not read."""
+    conn = _make_db()
+    _ensure_work_item(conn, 1)
+    conn.execute(
+        "INSERT INTO events (timestamp, event_type, work_item_id, metadata) "
+        "VALUES (datetime('now'), 'x', 1, ?)",
+        (json.dumps({"to": "active"}),),
+    )
+    conn.commit()
+    assert worklog.get_lifecycle_state(conn, 1) is None

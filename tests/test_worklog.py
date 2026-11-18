@@ -1138,11 +1138,11 @@ class TestGetLifecycleState:
         )
         worklog.log_transition(
             conn, "start", work_item_id=wid, repo_path=str(tmp_path / "repo"),
-            metadata={"from": "idle", "to": "active"},
+            metadata={"from_state": "idle", "to_state": "active"},
         )
         worklog.log_transition(
             conn, "review", work_item_id=wid, repo_path=str(tmp_path / "repo"),
-            metadata={"from": "active", "to": "closing:review"},
+            metadata={"from_state": "active", "to_state": "closing:review"},
         )
         state = worklog.get_lifecycle_state(conn, wid, repo_path=str(tmp_path / "repo"))
         assert state == "closing:review"
@@ -1164,11 +1164,11 @@ class TestGetLifecycleState:
         )
         worklog.log_transition(
             conn, "start", work_item_id=wid, repo_path=str(tmp_path / "repo-a"),
-            metadata={"from": "idle", "to": "active"},
+            metadata={"from_state": "idle", "to_state": "active"},
         )
         worklog.log_transition(
             conn, "land", work_item_id=wid, repo_path=str(tmp_path / "repo-b"),
-            metadata={"from": "idle", "to": "closing:pushed"},
+            metadata={"from_state": "idle", "to_state": "closing:pushed"},
         )
         assert worklog.get_lifecycle_state(conn, wid, repo_path=str(tmp_path / "repo-a")) == "active"
         assert worklog.get_lifecycle_state(conn, wid, repo_path=str(tmp_path / "repo-b")) == "closing:pushed"
@@ -1183,11 +1183,11 @@ class TestGetLifecycleState:
         )
         worklog.log_transition(
             conn, "start", work_item_id=wid, repo_path=str(tmp_path / "repo"),
-            metadata={"from": "idle", "to": "active"},
+            metadata={"from_state": "idle", "to_state": "active"},
         )
         worklog.log_transition(
             conn, "push", work_item_id=wid, repo_path=str(tmp_path / "repo"),
-            metadata={"from": "active", "to": "closing:pushed"},
+            metadata={"from_state": "active", "to_state": "closing:pushed"},
         )
         state = worklog.get_lifecycle_state(conn, wid)
         assert state == "closing:pushed"
