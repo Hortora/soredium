@@ -1,7 +1,7 @@
 """Decide what `work continue` (or `work next`) runs, from the queue alone.
 
-To the user there is one command: carry on. `next` is another spelling of
-`continue`. Whether that means continuing the active item, picking up the item
+To the user there is one command: carry on. `work`, `work start` without an
+issue, `work continue` and `work next` are spellings of it. Whether that means continuing the active item, picking up the item
 a branch belongs to, starting the next one or closing what is finished is state
 the queue already holds, so it is decided here and never by the caller.
 
@@ -19,7 +19,7 @@ from typing import Optional
 
 from queue_io import Queue, QueueItem
 
-ROUTED = ("continue", "next", "done")
+ROUTED = ("start", "continue", "next", "done")
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,8 @@ def _open(queue: Queue) -> list[QueueItem]:
             if not i.completed and not i.active and not i.done_branch]
 
 
-def route(command: str, queue: Optional[Queue], branch: str, base_branch: str) -> Route:
+def route(command: str, queue: Optional[Queue], branch: str, base_branch: str,
+          stack_depth: int = 0) -> Route:
     if command not in ROUTED or queue is None:
         return Route(run=command, reason="direct" if command not in ROUTED else "no_queue")
 
@@ -94,6 +95,10 @@ def route(command: str, queue: Optional[Queue], branch: str, base_branch: str) -
                             f"{', '.join(i.ref for i in matches)} all carry that number",
                      offer=offer)
 
+    if on_base and stack_depth > 0:
+        # Paused work comes before new work: the resume pipeline shows the stack.
+        return Route(run="resume", reason="paused_work", offer=offer,
+                     detail=f"{stack_depth} paused branch(es) on the stack")
     if open_items:
         item = open_items[0]
         return Route(run="start", reason="next_open_item", activate=item.ref,
@@ -103,4 +108,4 @@ def route(command: str, queue: Optional[Queue], branch: str, base_branch: str) -
                      detail=f"{len(done)} finished item(s) are waiting to be closed",
                      offer=True)
     return Route(stop="nothing", reason="queue_empty",
-                 detail="the queue has no open item")
+                 detail="the queue has no open item; find work or name an issue")

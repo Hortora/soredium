@@ -143,7 +143,7 @@ class TestNothingActiveOnBase:
 
 
 class TestPassThrough:
-    @pytest.mark.parametrize("command", ["start", "pause", "resume", "find"])
+    @pytest.mark.parametrize("command", ["pause", "resume", "find"])
     def test_other_commands_run_as_given(self, command):
         r = route(command, queue(item(2)), "main", "main")
         assert (r.run, r.stop, r.activate) == (command, "", "")
@@ -160,3 +160,35 @@ class TestPassThrough:
             for command in ("continue", "next"):
                 route(command, q, branch, "main")
         assert repr(q) == before
+
+
+class TestOneCommand:
+    """work, work start, work continue and work next are the same question."""
+
+    STATES = [
+        (lambda: queue(active(1), item(2)), "issue-1-x"),
+        (lambda: queue(closed(1), item(2)), "main"),
+        (lambda: queue(item(2), item(3)), "issue-3-x"),
+        (lambda: queue(item(1, done_branch="issue-1-x"), item(2)), "issue-1-x"),
+        (lambda: queue(item(1, done_branch="issue-1-x")), "main"),
+        (lambda: queue(closed(1)), "main"),
+        (lambda: queue(item(2)), "wip-thing"),
+    ]
+
+    @pytest.mark.parametrize("state", range(len(STATES)))
+    def test_every_spelling_gives_the_same_route(self, state):
+        make, branch = self.STATES[state]
+        routes = {c: route(c, make(), branch, "main") for c in ("start", "continue", "next")}
+        assert routes["start"] == routes["continue"] == routes["next"]
+
+    def test_paused_work_comes_before_new_work(self):
+        r = route("continue", queue(closed(1), item(2)), "main", "main", stack_depth=2)
+        assert (r.run, r.reason, r.activate) == ("resume", "paused_work", "")
+
+    def test_paused_work_does_not_interrupt_an_active_item(self):
+        r = route("continue", queue(active(1)), "issue-1-x", "main", stack_depth=2)
+        assert r.run == "continue"
+
+    def test_paused_work_is_ignored_off_the_base_branch(self):
+        r = route("continue", queue(item(289)), "issue-289-x", "main", stack_depth=1)
+        assert (r.run, r.activate) == ("continue", "o/r#289")

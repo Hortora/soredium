@@ -88,6 +88,7 @@ CONTEXT_ARGS: dict[str, str] = {
     "plan_path": "PLAN_PATH",
     "slot_path": "SLOT_PATH",
     "family_root": "FAMILY_ROOT",
+    "stack_depth": "STACK_DEPTH",
 }
 
 
@@ -132,12 +133,16 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     command = args.get("command", "")
     if command not in ROUTED or args.get("step_done"):
         return args, [], False
+    if command == "start" and args.get("issue_n"):
+        return args, [], False  # a named issue is an instruction, not a question
     from queue_io import read_queue
     queue_dir = _queue_dir(args)
     queue = read_queue(queue_dir)
     branch = args.get("branch", "")
     base = args.get("base_branch", "main")
-    r = route(command, queue, "" if args.get("on_main") == "yes" else branch, base)
+    depth = args.get("stack_depth", "0")
+    r = route(command, queue, "" if args.get("on_main") == "yes" else branch, base,
+              stack_depth=int(depth) if depth.isdigit() else 0)
     if r.reason == "no_queue":
         return args, [], False
 
@@ -158,7 +163,8 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
                       f"OPTIONS={options}"]
         else:
             lines += ["ACTION=stop", f"DETAIL={r.detail}",
-                      "NEXT=work end" if r.stop == "end" else "NEXT=work find"]
+                      "NEXT=work end" if r.stop == "end"
+                      else "NEXT=work find, or work start #N"]
         return args, lines, True
 
     if r.activate:

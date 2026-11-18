@@ -592,7 +592,7 @@ class TestRoutedEntry:
         from work import apply_route
         text = QUEUE_TEXT.replace("- [ ]", "- [x]")
         _, lines, stop = apply_route(self._args(tmp_path, "continue", "main", text))
-        assert stop and "NEXT=work find" in lines
+        assert stop and any(l.startswith("NEXT=work find") for l in lines)
 
     def test_a_step_report_is_never_rerouted(self, tmp_path):
         from work import apply_route
@@ -648,3 +648,36 @@ class TestNextIsContinue:
     def test_done_is_a_valid_command(self):
         from work import parse_args
         assert parse_args(["work.py", "done"]) == {"command": "done"}
+
+
+class TestStartIsTheSameCommand:
+    def _args(self, tmp_path, **extra):
+        (tmp_path / ".queue").write_text(QUEUE_TEXT)
+        return {"command": "start", "workspace": str(tmp_path), "project": str(tmp_path),
+                "branch": "main", "base_branch": "main", "on_main": "yes", **extra}
+
+    def test_start_without_an_issue_takes_the_next_open_item(self, tmp_path):
+        from work import apply_route
+        args, lines, _ = apply_route(self._args(tmp_path))
+        assert (args["command"], args["issue_n"]) == ("start", "289")
+        assert "ACTIVATED=o/r#289" in lines
+
+    def test_start_with_a_named_issue_is_never_rerouted(self, tmp_path):
+        from work import apply_route
+        given = self._args(tmp_path, issue_n="290")
+        assert apply_route(dict(given)) == (given, [], False)
+        assert (tmp_path / ".queue").read_text() == QUEUE_TEXT
+
+    def test_start_on_the_branch_of_an_open_item_continues_it(self, tmp_path):
+        from work import apply_route
+        a = self._args(tmp_path)
+        a.update(branch="issue-290-put", on_main="no")
+        args, lines, _ = apply_route(a)
+        assert args["command"] == "continue"
+        assert "ACTIVATED=o/r#290" in lines
+
+    def test_paused_stack_routes_to_resume(self, tmp_path):
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, stack_depth="1"))
+        assert (args["command"], stop) == ("resume", False)
+        assert (tmp_path / ".queue").read_text() == QUEUE_TEXT
