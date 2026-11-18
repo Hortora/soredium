@@ -107,7 +107,7 @@ def _unignore_subdir(ws_clone: Path, subdir_name: str) -> None:
 
 def repoint_wksp(repo_worktree: Path, ws_subdir: Path) -> None:
     repo_str = str(repo_worktree)
-    if "/slots/" not in repo_str and "/worktrees/" not in repo_str:
+    if "/slots/" not in repo_str and "/worktrees/" not in repo_str and "/clone/" not in repo_str:
         raise SlotCreationError(
             f"repoint_wksp_on_canonical repo={repo_worktree}: "
             f"Refusing to modify wksp symlink in a non-slot directory. "

@@ -312,6 +312,46 @@ class TestWriteSlot:
         assert info.isolation_type == "isx"
         assert info.state == "active"
 
+    def test_write_slot_clone_heading(self, tmp_path):
+        from slot_io import write_slot, parse_slot
+
+        write_slot(
+            tmp_path,
+            slot_number=None,
+            repos=["soredium"],
+            branch="",
+            issue="",
+            issue_repo="",
+            covers="",
+            context="",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert content.startswith("# Clone soredium\n")
+
+        info = parse_slot(tmp_path)
+        assert info is not None
+        assert info.slot_number is None
+        assert info.repos == ["soredium"]
+        assert info.primary == "soredium"
+
+    def test_write_slot_numbered_unchanged(self, tmp_path):
+        from slot_io import write_slot, parse_slot
+
+        write_slot(
+            tmp_path,
+            slot_number=7,
+            repos=["engine"],
+            branch="issue-99-fix",
+            issue="99",
+            issue_repo="Hortora/soredium",
+            covers="99",
+            context="Fix bug",
+        )
+        content = (tmp_path / ".slot").read_text()
+        assert content.startswith("# Slot 7\n")
+        info = parse_slot(tmp_path)
+        assert info.slot_number == 7
+
 
 class TestSetSlotState:
     def test_updates_state_field(self, tmp_path):

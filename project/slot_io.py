@@ -215,12 +215,15 @@ def discover_repos(slot_dir: Path) -> list[str]:
     return repos
 
 
-def write_slot(slot_dir: Path, *, slot_number: int, repos: list[str],
+def write_slot(slot_dir: Path, *, slot_number: int | None, repos: list[str],
                branch: str, issue: str, issue_repo: str, covers: str,
                context: str, title: str = "", description: str = "",
                isolation_type: str = "", isx_instance: str = "",
                isx_template: str = "") -> None:
-    content = f"# Slot {slot_number}\n"
+    if slot_number is not None:
+        content = f"# Slot {slot_number}\n"
+    else:
+        content = f"# Clone {repos[0]}\n"
     content += f"slug: {branch}\n"
     if title:
         content += f"title: {title}\n"
