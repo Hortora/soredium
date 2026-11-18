@@ -647,7 +647,11 @@ def _is_stamp_commit(repo: Path, branch: str) -> bool:
 
 def _issue_trailer(issue: str) -> str:
     """Trailer that satisfies a commit-msg hook requiring an issue reference."""
-    return f"Refs {issue}" if issue else "no-issue: close ceremony bookkeeping"
+    if not issue:
+        return "no-issue: close ceremony bookkeeping"
+    import re as _re
+    m = _re.search(r'#(\d+)', issue)
+    return f"Refs #{m.group(1)}" if m else f"Refs #{issue}" if issue.isdigit() else "no-issue: close ceremony bookkeeping"
 
 
 def stamp(target: CloseTarget, landed_sha: str, issue: str = "") -> None:
