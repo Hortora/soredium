@@ -135,6 +135,38 @@ ALIGNMENT_OPTIONS: dict[str, str] = {
 }
 
 
+def apply_clone_guard(args: dict[str, str]) -> tuple[list[str], bool]:
+    """Stop new work from starting in a canonical repo of a family that uses clones.
+
+    In such a family the canonical repo is only the sync point (#553): work
+    happens in <family>/clone/<repo>/. Work already on a branch in canonical
+    is left to finish; only a start from the base branch is stopped. Inside a
+    clone or a slot the parent directory holds a .slot file and this never fires.
+    """
+    from work_route import ROUTED
+    if args.get("command", "") not in ROUTED or args.get("step_done"):
+        return [], False
+    if args.get("on_main") != "yes" or not args.get("project"):
+        return [], False
+    project = Path(args["project"]).resolve()
+    family = project.parent
+    if (family / ".slot").exists() or not (family / ".clone-enabled").exists():
+        return [], False
+    clone_dir = family / "clone" / project.name
+    lines = ["ACTION=stop", "STOP_REASON=canonical_repo_of_clone_family"]
+    if (clone_dir / ".slot").exists():
+        workspaces = sorted(d for d in clone_dir.iterdir() if (d / ".workspace").exists())
+        where = workspaces[0] if workspaces else clone_dir / project.name
+        lines += [f"DETAIL=work on {project.name} happens in its clone, not in the canonical repo",
+                  f"CLONE={clone_dir}",
+                  f"NEXT=open the session in {where} and run work there"]
+    else:
+        script = Path(__file__).resolve().parent / "clone_manager.py"
+        lines += [f"DETAIL={family.name} uses clones and {project.name} has none yet",
+                  f"NEXT=python3 {script} create family_root={family} repo={project.name}"]
+    return lines, True
+
+
 def apply_alignment(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     """Check that project and workspace agree before anything is routed.
 
@@ -649,6 +681,11 @@ def main() -> int:
     if "error" in args:
         print(f"ERROR={args['error']}")
         return 1
+    guard_lines, stop = apply_clone_guard(args)
+    for line in guard_lines:
+        print(line)
+    if stop:
+        return 0
     args, alignment_lines, stop = apply_alignment(args)
     for line in alignment_lines:
         print(line)
