@@ -33,6 +33,7 @@ Exit codes:
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 _project_dir = str(Path(__file__).resolve().parent.parent / "project")
@@ -73,6 +74,12 @@ def _copromote_images(md_source: Path, md_dest: Path, repo_cwd: str) -> int:
     for raw_ref, resolved_src in extract_image_refs(md_source):
         if not resolved_src.is_file():
             continue
+        if resolved_src.suffix.lower() == ".svg":
+            try:
+                ET.parse(resolved_src)
+            except ET.ParseError as e:
+                raise ImageNotPromoted(
+                    f"{raw_ref} (for {md_source.name}): invalid SVG XML — {e}")
         if raw_ref.startswith("/"):
             img_dest = dest_repo / raw_ref.lstrip("/")
         else:

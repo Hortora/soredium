@@ -16,6 +16,7 @@ Output (KEY=value lines):
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 _script_dir = Path(__file__).resolve().parent
@@ -24,6 +25,18 @@ sys.path.insert(0, str(_script_dir.parent / "project"))
 
 from workspace_artifacts import scan, CATEGORIES
 from artifact_promote import _copromote_images, ImageNotPromoted
+
+
+class InvalidSvg(Exception):
+    """An SVG file is not valid XML."""
+
+
+def validate_svg(path: Path) -> None:
+    """Parse an SVG as XML; raise InvalidSvg with the parse error on failure."""
+    try:
+        ET.parse(path)
+    except ET.ParseError as e:
+        raise InvalidSvg(f"{path.name}: {e}") from e
 
 
 def verify_images(project: Path) -> list[str]:
@@ -186,6 +199,12 @@ def promote_gaps(gaps: list[dict], project: Path,
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
         else:
+            if src.suffix.lower() == ".svg":
+                try:
+                    validate_svg(src)
+                except InvalidSvg as error:
+                    return {"promoted": 0, "by_category": {},
+                            "error": f"invalid SVG: {error}"}
             shutil.copy2(src, dst)
             if src.suffix == ".md":
                 try:
