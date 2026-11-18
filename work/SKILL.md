@@ -15,139 +15,177 @@ description: >
 # work
 
 Unified entry point for the work lifecycle. Routes to Python-driven
-pipelines for mechanical operations. The LLM handles routing decisions
-and judgment steps; `project/work.py` handles mechanical execution.
+pipelines for mechanical operations. The LLM handles judgment steps;
+`project/work.py` handles routing and mechanical execution.
 
 ---
 
-## Step 1 — Parse and route
+## Never switch branches yourself
 
-**Step 1a — Command table**
+Never create, check out or switch a branch with git. The pipeline manages
+branches in every repo — project, workspace and slot clones — atomically.
+If the repos look out of step, run `work.py continue` and relay what it
+says. It detects the alignment state and either repairs it or returns a
+decision for you to present.
 
-| Invocation | Route |
-|------------|-------|
+---
+
+## Command table
+
+| Invocation | Run |
+|------------|-----|
+| `work` | `python3 ~/.claude/skills/project/work.py continue` |
+| `work start` (no issue) | `python3 ~/.claude/skills/project/work.py continue` |
+| `work continue` | `python3 ~/.claude/skills/project/work.py continue` |
+| `work next` | `python3 ~/.claude/skills/project/work.py continue` |
+| `work start #N` | `python3 ~/.claude/skills/project/work.py start issue_n=N` |
+| `work pause` | `python3 ~/.claude/skills/project/work.py pause` |
+| `work resume` | `python3 ~/.claude/skills/project/work.py resume` |
+| `work find` | `python3 ~/.claude/skills/project/work.py find` |
 | `work end` | → **work-end** (close.py) |
-| `work sync` | → **work sync** (close.py) |
-| `work pause` | → pipeline: `pause` |
-| `work resume` / `resume` | → pipeline: `resume` |
-| `work continue` / `continue` | → pipeline: `continue` |
-| `work next` | → pipeline: `next` |
-| `work find` | → pipeline: `find` |
-| `work` / `work start` | → router (Step 1b) → pipeline: `start` |
-| `resume handover` | → handover skill directly |
+| `work sync` | → **work-end** (close.py) |
 
-For `continue`, `next`, `end`, `find`: get the chain directive first
-(Step 1c).
+Run from the workspace directory. No other arguments: the script resolves
+its own context via `ctx.py` internally. Do not run `ctx.py` or
+`work_chain.py` first.
 
-**Step 1b — Run ctx.py**
+**Multiple issue scheduling.** When the user provides multiple issue
+numbers (`work start #42 #43 #44`): run `plan_manager.py append` to add
+them all to the queue. If there is no active work, run `work.py continue`
+— it picks up the first open item. If work is already in progress, the
+new issues are queued after the current work; continue as normal and
+they will be reached in order via `done` → `work.py continue`.
 
-```bash
-python3 ~/.claude/skills/project/ctx.py
+**Before a named start.** `work start #N` on a working branch whose
+active queue item is not #N: do not run it yet. Offer: pause current
+work and start #N (Recommended — preserves current state cleanly), or
+continue current work. If #N is the active item, run `work.py continue`
+instead.
+
+---
+
+## Reading the output
+
+The script prints KEY=VALUE lines in two phases.
+
+### Alignment output
+
+Printed first, and only when the project and workspace repos disagree
+about which branch is checked out:
+
+| Line | Meaning |
+|------|---------|
+| `ALIGNMENT_REPAIRED=<state>` | The repos were out of step and have been brought together. Tell the user in one line, with `ALIGNMENT_ACTIONS=`, then carry on |
+| `ALIGNMENT_ACTIONS=<what was done>` | Each change made, separated by `; ` |
+| `ALIGNMENT=<state>` | The repos are out of step and no repair is safe. An `ACTION=decision` follows with `DECISION=alignment_<reason>` |
+
+### Route output
+
+Printed before the pipeline runs:
+
+| Line | Meaning |
+|------|---------|
+| `ROUTE_REASON=<reason>` | Why this route was chosen (always present) |
+| `ISSUE=<ref>` | The issue the route concerns |
+| `ACTIVATED=<ref>` | An open item was activated in the queue |
+| `COMMAND=<pipeline>` | The pipeline that will run (`start`, `continue`, `done`, `resume`) |
+| `OFFER=wrap_or_continue` | Finished items are waiting — present the wrap-vs-continue decision below, with a recommendation, before doing anything else. Do not skip it and do not offer work-end per issue |
+| `DONE_ITEMS=<ref@branch,...>` | Items finished on their branch, awaiting the close ceremony |
+
+### Pipeline output
+
+After routing, the pipeline runs and prints one of these terminal lines:
+
+**`ACTION=<judgment step>`** with `HANDLER=<path>` — Read the handler
+file and do what it says, then resume the pipeline:
+
+```
+python3 ~/.claude/skills/project/work.py <COMMAND> step_done=<step> outcome=completed
 ```
 
-Read all KEY=VALUE lines. These determine the route AND provide
-context for work.py args.
+Use the `COMMAND=` value printed in the route output, not the word the
+user typed. To skip: `outcome=skipped`. If blocked:
+`outcome=blocked block_reason="..."`.
 
-**Step 1b-pre — Corruption triage (before normal routing)**
+**`ACTION=complete`** — The pipeline finished. Report the `SUMMARY=` line.
 
-If `CORRUPTION_COUNT` > 0, enter triage flow:
+**`ACTION=stop`** with `NEXT=` — Nothing to run. Tell the user what
+`NEXT=` says and run nothing else.
 
-- If `AUTO_RECOVERABLE=yes`: execute each `CORRUPTION_N_AUTO_ACTION`
-  without prompting, re-run ctx.py to verify.
-- If `AUTO_RECOVERABLE=no`: present findings with actions, wait for
-  user to pick. Execute actions, re-run ctx.py.
+**`ACTION=decision`** with `DECISION=`, `DETAIL=`, `OPTIONS=` — Present
+the options with a recommendation and wait. Never run git to resolve
+it yourself.
 
-| Action | Command |
+**`ACTION=error`** — Report `ERROR=` and `DETAIL=`. If `RETRY=` is
+present, re-run the same command.
+
+**`ACTION=user_input`** — A judgment step failed repeatedly. Report
+`STEP=`, `REASON=` and `ATTEMPTS=` to the user and ask what to do.
+
+### ACTION → handler table
+
+| ACTION | Handler |
 |--------|---------|
-| `accept_default` | No-op |
-| `write_active` | `lifecycle.py commit-transition ... new_state=active` |
-| `switch_to_plan_branch` | Checkout both repos to plan branch |
-| `update_plan_branch` | `plan_manager.py set-state ... key=branch value=<branch>` |
-| `remove_plan` | `rm <PLAN_PATH>` and commit |
-| `continue_close` | Route to work-end |
-| `rollback_to_active` | `lifecycle.py commit-transition ... new_state=active event=abort_close` |
-| `sync_plan_with_github` | `work_health.py --scope entry` |
-| `fetch_and_checkout` | `git fetch origin <branch> && git checkout <branch>` |
-| `create_plan` | Extract issue from branch name (`issue-(\d+)`), validate on GitHub, scaffold `.plan` via `plan_manager.py` |
-| `switch_to_main` | `git checkout main` in both project and workspace repos |
-| `ignore` | No-op |
+| `resolve_issue` | Read `handlers/resolve-issue.md` |
+| `branch_name` | Read `handlers/branch-name.md` |
+| `platform_coherence` | Read `handlers/platform-coherence.md` |
+| `check_protocols` | Read `handlers/check-protocols.md` |
+| `brainstorm_offer` | Read `handlers/brainstorm-offer.md` |
+| `load_context` | Read `handlers/load-context.md` |
+| `stack_pick` | Read `handlers/stack-pick.md` |
+| `present_candidates` | Read `handlers/present-candidates.md` |
+| `deferred_check` | Read `handlers/deferred-check.md` |
+| `resolve_conflict` | Read `handlers/resolve-conflict.md` |
+| `recover_plan_offer` | Read `handlers/recover-plan-offer.md` |
 
-**Step 1c — Bidirectional chaining**
+The output includes `HANDLER=<path>` when a handler file exists. Read
+from `HANDLER=` first; fall back to this table for steps without one.
+
+**Cross-repo re-invocation:** When a handler produces `SWITCH_REPO=<name>`,
+the active project has changed. Make the follow-up call from that
+project's workspace directory, with no context arguments: the script
+resolves the new project and workspace itself. Do not carry paths over
+from the earlier call.
+
+---
+
+## Finishing an item
+
+When the active issue's work is complete, run:
 
 ```bash
-python3 ~/.claude/skills/project/work_chain.py <continue|next|end|find> queue=$QUEUE_PATH
+python3 ~/.claude/skills/project/work.py done
 ```
 
-Follow `CHAIN_DIRECTIVE`. Routing is never decided from prose or memory.
+It marks the item done on its branch and prints `OFFER=wrap_or_continue`.
 
-**Done is not closed.** `work next` on a feature branch marks the active
-item *done on its branch* and activates the next one. Nothing is landed and
+**Done is not closed.** `done` on a feature branch marks the active item
+*done on its branch* and activates the next one. Nothing is landed and
 the GitHub issue stays open. Never close an issue, tick a checkbox or run
-work-end to move to the next issue: `work end`, once, lands and closes every
-done item in queue order. `DONE_ITEMS` lists what is waiting.
+work-end to move to the next issue: `work end`, once, lands and closes
+every done item in queue order. `DONE_ITEMS` lists what is waiting.
 
-**`OFFER=wrap_or_continue`** — whenever this line is present, present the
-wrap-vs-continue decision below, with a recommendation, before doing
-anything else. It appears every time an item is finished and whenever done
-items are waiting to be closed. Do not skip it and do not offer work-end
-per issue.
+**After done, "Continue" means** `work.py continue` on the next item.
+Where its branch starts is decided by the queue, not by you:
+`create-branches` stacks it on the branch just finished, in every repo,
+unless the item is marked `(from main)`. Relay `STACKED=`, `STACKED_ON=`,
+`START_REASON=` and `CUT_FROM=` from the output; never pick a start
+point or run `git checkout -b` yourself.
 
-| DIRECTIVE | Action |
-|-----------|--------|
-| `proceed` | Continue with the invoked command |
-| `chain_to_next` | Redirect to `next` pipeline |
-| `chain_to_end` | Redirect to work-end. With `CHAIN_REASON=done_items_await_close`, nothing is active and finished items are waiting: work-end closes them all |
-| `chain_to_find` | Redirect to `find` pipeline |
-| `guard_next` | "Queue has items. Continue or advance?" → present choice |
-| `no_work_found` | "No work found." → stay |
+---
 
-**Step 1d — Wrong-context errors**
+## Fallback: merge conflict in .queue
 
-| Invocation | Condition | Action |
-|------------|-----------|--------|
-| `work resume` | on feature branch | Error: "Use `continue`, not `resume`." |
-| `work resume` | main + empty stack | Error: "Nothing to resume." |
-| `work start` (no issue) | `ROUTE=resume_branch` | Redirect → `continue` |
-| `work start #N` | `ROUTE=resume_branch` AND #N is active in queue | Redirect → `continue` (branch already covers #N) |
-| `work start #N` | `ROUTE=resume_branch` AND #N is NOT active | Offer: pause current branch and start #N, or continue current work |
+If routing returns unexpected results (wrong issue, missing items), check
+whether the `.queue` file contains merge conflict markers (`<<<<<<`). If
+it does, stop and show the user both sides of the conflict. The queue is
+the only record of what is finished and what is waiting: never delete or
+hand-edit it. Once the user has said which side is right, restore that
+version with git and re-run the pipeline.
 
-## Step 2 — Route based on ctx.py output
+---
 
-| `ROUTE` | Action |
-|---------|--------|
-| `start` | What-next recommendation (if no issue specified), then → `start` pipeline |
-| `resume_stack` | → `resume` pipeline (stack_pick handler shows picker) |
-| `resume_branch` | → contextual options menu |
-| `workspace_dirty` | Warn, offer reset, then → `start` pipeline |
-| `drained` | "Queue drained. Run `work find` or `work start #N`." |
-
-**What-next recommendation (start without issue):**
-
-1. `python3 scripts/enrichment.py refresh --repo $OWNER_REPO`
-2. `python3 scripts/enrichment.py what-next --repo $OWNER_REPO --mode general --limit 5`
-3. Present candidates. User picks → `start` pipeline with issue number.
-
-**Contextual options (on feature branch):**
-
-Present: continue / switch / next / sync / end / pause / wrap.
-User picks → route to the matching pipeline or skill.
-
-**Mid-session issue completion (D4):** When an issue completes during
-a session, run `work next`. It marks the item done on its branch, leaves the
-issue open, and prints `OFFER=wrap_or_continue`. Present that decision every
-time. "Continue" means `work start` on the next item. Where its branch starts
-is decided by the queue, not by you: `create-branches` stacks it on the branch
-just finished, in every repo, unless the item is marked `(from main)`, and
-prints `STACKED=`, `STACKED_ON=`, `START_REASON=` and one `CUT_FROM=<repo>:<origin>`
-per repo. Relay those; never pick a start point or run `git checkout -b`
-yourself. An item that must stand alone is marked before it starts:
-`plan_manager.py set-base <queue> ref=<owner/repo#N> base=main` (or
-`append ... base=main`). Its code then starts from the base branch; the
-workspace still continues from the previous branch, because the queue file
-lives there. "Wrap" means one `work end`, which closes every done item.
-Never suggest work-end per issue.
-
-**Wrap-vs-continue decision:**
+## Wrap-vs-continue decision
 
 Present four things, then recommend:
 
@@ -177,68 +215,6 @@ change where compressed context adds noise, not signal.
 
 ---
 
-## Orchestrator Loop
-
-For commands: `start`, `continue`, `pause`, `resume`, `next`, `find`.
-
-Once routing determines the command, call `project/work.py` in a loop:
-
-```bash
-python3 project/work.py <command> \
-    workspace=$WORKSPACE project=$PROJECT \
-    branch=$BRANCH base_branch=$BASE_BRANCH \
-    on_main=$ON_MAIN in_slot=$IN_SLOT \
-    covers=$COVERS issue_repo=$ISSUE_REPO \
-    meta_state=$META_STATE owner_repo=$OWNER_REPO \
-    issue_n=$ISSUE_N issue_title=$ISSUE_TITLE \
-    has_handoff=$HAS_HANDOFF handoff_path=$HANDOFF_PATH \
-    has_platform_doc=$HAS_PLATFORM_DOC \
-    has_protocols_dir=$HAS_PROTOCOLS_DIR \
-    flyway_next_v=$FLYWAY_NEXT_V \
-    design_repo_key=$DESIGN_REPO_KEY \
-    [plan_path=$PLAN_PATH] [slot_path=$SLOT_PATH]
-```
-
-Read `ACTION=` from output. Dispatch:
-
-| ACTION | Handler |
-|--------|---------|
-| `resolve_issue` | Read `handlers/resolve-issue.md` |
-| `branch_name` | Read `handlers/branch-name.md` |
-| `platform_coherence` | Read `handlers/platform-coherence.md` |
-| `check_protocols` | Read `handlers/check-protocols.md` |
-| `brainstorm_offer` | Read `handlers/brainstorm-offer.md` |
-| `load_context` | Read `handlers/load-context.md` |
-| `stack_pick` | Read `handlers/stack-pick.md` |
-| `present_candidates` | Read `handlers/present-candidates.md` |
-| `deferred_check` | Read `handlers/deferred-check.md` |
-| `resolve_conflict` | Read `handlers/resolve-conflict.md` |
-| `complete` | Done. Report summary. |
-| `error` | Read ERROR= and STEP=. Diagnose and retry. |
-| `user_input` | A judgment step failed repeatedly. Ask the user. |
-
-**Note:** The orchestrator output includes `HANDLER=<path>` when a
-handler file exists. Read from `HANDLER=` first; fall back to this
-table for steps without a handler.
-
-After handling a judgment step, call work.py again with the same args
-plus:
-```
-step_done=<step_name> outcome=completed produced=N
-```
-Or to skip: `step_done=<step_name> outcome=skipped`
-Or if blocked: `step_done=<step_name> outcome=blocked block_reason="..."`
-
-Repeat until `ACTION=complete`.
-
-**Cross-repo re-invocation:** When a handler produces `SWITCH_REPO=<name>`,
-the active project has changed. Before calling work.py again:
-1. Re-run `python3 project/ctx.py` to get updated KEY=VALUE context
-2. Rebuild the work.py arguments from the new context
-3. Continue the pipeline with the updated project/workspace paths
-
----
-
 ## Close / Sync
 
 `work end` and `work sync` invoke the `work-end` skill, which runs
@@ -259,8 +235,9 @@ through `project/work.py`.
 **Complements:** `quick-fix` — lands small changes on the base branch without a feature branch
 
 **Uses:**
-- `project/work.py` — Python-driven pipeline for start/continue/pause/resume/next/find
-- `work_chain.py` — bidirectional chaining engine for routing directives
+- `project/work.py` — Python-driven pipeline for start/continue/done/pause/resume/find
+- `project/work_route.py` — decides from the queue what `continue` runs
+- `project/alignment.py`, `project/alignment_repair.py` — check, and where safe repair, that project and workspace are on the same branch
 
 **This skill routes and dispatches.** Mechanical execution lives in
 `work.py`. Judgment step details live in `handlers/*.md`. Close ceremony
