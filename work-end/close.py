@@ -1028,7 +1028,10 @@ def close(workspace: Path) -> CloseResult:
             carried, not_landed = carry_strays(
                 slot_dir, {(t.repo, t.branch) for t in targets})
         # A slot with anything still stranded in it is not ready to archive.
-        if slot_dir is not None and next_item is None and not not_landed:
+        # A permanent clone (#553) is never archived: it is where the repo's
+        # work continues, so a drained queue leaves it exactly as it is.
+        permanent = slot_dir is not None and (slot_dir / ".permanent").exists()
+        if slot_dir is not None and not permanent and next_item is None and not not_landed:
             mark_slot_landed(
                 slot_dir, queue.state.branch if queue else "",
                 {t.repo.name: sha for t, sha in landed.items() if not t.is_workspace})
