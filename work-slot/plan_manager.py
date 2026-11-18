@@ -677,6 +677,48 @@ def _set_done(items: list[QueueItem], ref: IssueRef, branch: str) -> bool:
     return False
 
 
+class ActivateError(Exception):
+    def __init__(self, code: str, detail: str):
+        super().__init__(detail)
+        self.code = code
+
+
+def activate(plan_path: Path, ref: str = "") -> dict:
+    """Make an open item the active one: `ref`, or the first open item.
+
+    Used when the queue has open items but none is active. It never displaces
+    an active item, and never reopens one that is closed or done on a branch.
+    """
+    tree = parse_plan(plan_path)
+    leaves = flatten_leaves(tree)
+    current = next((leaf for leaf in leaves if leaf.active), None)
+    if ref:
+        wanted = IssueRef.parse(ref)
+        target = next((leaf for leaf in leaves if leaf.ref == wanted), None)
+        if target is None:
+            raise ActivateError("not_in_queue", f"{ref} is not in the queue")
+        if target.completed or target.done_branch:
+            raise ActivateError("not_open", f"{ref} is closed or already done on a branch")
+    else:
+        target = next((leaf for leaf in leaves
+                       if not leaf.completed and not leaf.done_branch), None)
+        if target is None:
+            raise ActivateError("no_open_item", "the queue has no open item to activate")
+    if current is not None and current.ref != target.ref:
+        raise ActivateError(
+            "another_item_active",
+            f"{current.ref} is active; finish it with `work next` before activating {target.ref}")
+    already = current is not None
+    if not already:
+        _mark_active(tree.queue, target.ref)
+        tree.current_issue = target.ref
+        tree.state["covers"] = str(target.ref)
+        if tree.state.get("status") in ("drained", "idle", ""):
+            tree.state["status"] = "active"
+        rewrite_plan(plan_path, tree)
+    return {"ref": target.ref, "title": target.title, "already": already}
+
+
 def mark_done(plan_path: Path, branch: str = "") -> dict:
     """Mark the active item done on its branch without closing it, and activate the next.
 
@@ -1589,6 +1631,18 @@ def main() -> int:
         for r in removed:
             print(f"REMOVED={r}")
         print(f"REMOVED_COUNT={len(removed)}")
+        return 0
+
+    elif command == "activate":
+        try:
+            result = activate(plan_path, ref=opts.get("ref", ""))
+        except (ActivateError, ValueError) as e:
+            print(f"ERROR={getattr(e, 'code', 'invalid_ref')}")
+            print(f"ERROR_DETAIL={e}")
+            return 1
+        print(f"ACTIVATED={result['ref']}")
+        print(f"TITLE={result['title']}")
+        print(f"ALREADY_ACTIVE={'yes' if result['already'] else 'no'}")
         return 0
 
     elif command == "mark-done":
