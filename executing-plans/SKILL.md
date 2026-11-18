@@ -271,6 +271,7 @@ Plan execution is complete when:
 **Invokes:**
 - `evidence-before-claims` — after each task, verify before
   marking done
+- `verification-before-completion` — after each task completes, before moving to the next
 - `work-end` — after all tasks complete (handles code-review, squash, push)
 - `code-review` — via `work-end` Step 3c, mandatory review before merge
 

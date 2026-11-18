@@ -421,6 +421,9 @@ Do NOT dispatch a separate final review before invoking work-end.
 - `design-review` — via `work-end` Step 3c, for structural diffs requiring adversarial review
 - `requesting-code-review` — deprecated; use `design-review` `--mode final-review` instead
 
+**Invokes:**
+- `verification-before-completion` — after each task's review passes, before marking done
+
 **Complements:**
 - `test-driven-development` — implementer subagents follow TDD for each
   task. The implementer prompt references TDD as the development

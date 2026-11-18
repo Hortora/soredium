@@ -152,10 +152,12 @@ class TestInvokedBySymmetry(unittest.TestCase):
 
 
 class TestComplementsExist(unittest.TestCase):
-    """Every skill listed in Complements must exist and should mention the referencing skill."""
+    """Every skill listed in Complements must exist. Complements are one-way:
+    a general skill like verification-before-completion legitimately complements
+    many skills that needn't name it back."""
 
-    def test_complements_bidirectional(self):
-        asymmetric = []
+    def test_complements_targets_exist(self):
+        dangling = []
         for skill_name, section in CHAINING_SECTIONS.items():
             if not section:
                 continue
@@ -164,21 +166,11 @@ class TestComplementsExist(unittest.TestCase):
                 if target == skill_name:
                     continue
                 if target not in ALL_SKILLS:
-                    asymmetric.append(
+                    dangling.append(
                         f"`{skill_name}` complements non-existent `{target}`"
                     )
-                    continue
-                target_section = CHAINING_SECTIONS.get(target, "")
-                if not target_section:
-                    continue
-                target_refs = extract_skill_refs(target_section)
-                if skill_name not in target_refs:
-                    asymmetric.append(
-                        f"`{skill_name}` complements `{target}`, but `{target}` "
-                        f"does not reference `{skill_name}` in its Skill Chaining"
-                    )
-        if asymmetric:
-            self.fail("Asymmetric Complements:\n" + "\n".join(asymmetric))
+        if dangling:
+            self.fail("Dangling Complements:\n" + "\n".join(dangling))
 
 
 class TestDebuggingToolkitConsistency(unittest.TestCase):

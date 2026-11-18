@@ -421,6 +421,7 @@ Commit is complete when:
 - [`issue-workflow`] for commit-split detection
 - [`project-health`] when commits affect build/test patterns
 - [`evidence-before-claims`] to verify claims before committing
+- [`verification-before-completion`] — before committing
 - Follows `readme-sync.md` workflow for skill collection sync (automatic if README.md exists and skill changes detected, type: skills only)
 
 **Complements:**
