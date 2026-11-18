@@ -1,10 +1,13 @@
 """Decide what `work continue` (or `work next`) runs, from the queue alone.
 
-To the user there is one command: carry on. Whether that means continuing the
-active item, picking up the item a branch belongs to, starting the next one or
-closing what is finished is state the queue already holds, so it is decided
-here and never by the caller. The one thing the queue cannot know is that the
-active item is finished; `next` is how a session says so.
+To the user there is one command: carry on. `next` is another spelling of
+`continue`. Whether that means continuing the active item, picking up the item
+a branch belongs to, starting the next one or closing what is finished is state
+the queue already holds, so it is decided here and never by the caller.
+
+The one thing the queue cannot know is that the active item is finished. A
+session that has finished it says so with `done`; nothing else marks an item
+done, so typing `next` on unfinished work loses nothing.
 
 Pure: reads its arguments, touches nothing.
 """
@@ -16,7 +19,7 @@ from typing import Optional
 
 from queue_io import Queue, QueueItem
 
-ROUTED = ("continue", "next")
+ROUTED = ("continue", "next", "done")
 
 
 @dataclass(frozen=True)
@@ -52,16 +55,28 @@ def route(command: str, queue: Optional[Queue], branch: str, base_branch: str) -
     done = queue.done_items()
     offer = bool(done)
     active = queue.active_item()
+    on_base = not branch or branch == base_branch
+    on_finished_branch = any(i.done_branch == branch for i in done)
+
     if active is not None:
-        if command == "next":
-            return Route(run="next", reason="mark_done", issue=active.ref,
+        if command == "done":
+            return Route(run="done", reason="mark_done", issue=active.ref,
                          title=active.title, offer=True)
+        if on_base or on_finished_branch:
+            # The active item has no branch checked out. Finishing an item
+            # activates the one after it and clears the recorded branch, so an
+            # empty record means it has not been started.
+            if not queue.state.branch:
+                return Route(run="start", reason="active_item_not_started",
+                             issue=active.ref, title=active.title, offer=offer)
+            return Route(stop="decision", reason="active_branch_not_checked_out",
+                         issue=active.ref,
+                         detail=f"{active.ref} is active on {queue.state.branch}, "
+                                f"which is not the branch checked out", offer=offer)
         return Route(run="continue", reason="active_work", issue=active.ref,
                      title=active.title, offer=offer)
 
     open_items = _open(queue)
-    on_base = not branch or branch == base_branch
-    on_finished_branch = any(i.done_branch == branch for i in done)
 
     if not on_base and not on_finished_branch:
         number = _branch_issue(branch)

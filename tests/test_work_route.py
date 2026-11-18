@@ -33,15 +33,43 @@ class TestActiveItem:
         assert (r.run, r.reason, r.issue) == ("continue", "active_work", "o/r#1")
         assert not r.activate and not r.stop
 
-    def test_next_marks_it_done(self):
-        r = route("next", queue(active(1), item(2)), "issue-1-x", "main")
-        assert (r.run, r.reason, r.issue) == ("next", "mark_done", "o/r#1")
-        assert r.offer
+    def test_next_is_another_spelling_of_continue(self):
+        for q, branch in ((queue(active(1), item(2)), "issue-1-x"),
+                          (queue(closed(1), item(2)), "main"),
+                          (queue(item(2), item(3)), "issue-3-x"),
+                          (queue(item(1, done_branch="issue-1-x"), item(2)), "issue-1-x"),
+                          (queue(closed(1)), "main")):
+            assert route("next", q, branch, "main") == route("continue", q, branch, "main")
 
-    def test_continue_never_marks_done(self):
-        """The only difference between the two commands."""
-        for branch in ("issue-1-x", "main", "issue-9-other"):
-            assert route("continue", queue(active(1), item(2)), branch, "main").run == "continue"
+    def test_only_done_marks_the_active_item_done(self):
+        q = queue(active(1), item(2))
+        r = route("done", q, "issue-1-x", "main")
+        assert (r.run, r.reason, r.issue) == ("done", "mark_done", "o/r#1")
+        assert r.offer
+        for command in ("continue", "next"):
+            assert route(command, q, "issue-1-x", "main").reason != "mark_done"
+
+    def test_done_with_nothing_active_carries_on_like_continue(self):
+        q = queue(closed(1), item(2))
+        assert route("done", q, "main", "main") == route("continue", q, "main", "main")
+
+    def test_active_item_with_no_branch_yet_is_started(self):
+        """After `done`, the following item is active but has no branch."""
+        q = queue(item(1, done_branch="issue-1-x"), active(2))
+        r = route("continue", q, "issue-1-x", "main")
+        assert (r.run, r.reason, r.issue) == ("start", "active_item_not_started", "o/r#2")
+        assert not r.activate
+        assert route("continue", queue(active(2)), "main", "main").run == "start"
+
+    def test_active_item_whose_branch_is_not_checked_out_is_a_decision(self):
+        q = Queue(items=[active(2)], state=QueueState(branch="issue-2-x"))
+        r = route("continue", q, "main", "main")
+        assert (r.stop, r.reason) == ("decision", "active_branch_not_checked_out")
+        assert "issue-2-x" in r.detail
+
+    def test_active_item_on_its_branch_continues_whatever_the_record_says(self):
+        q = Queue(items=[active(2)], state=QueueState(branch=""))
+        assert route("continue", q, "issue-2-x", "main").run == "continue"
 
 
 class TestNothingActiveOnWorkingBranch:
@@ -49,10 +77,6 @@ class TestNothingActiveOnWorkingBranch:
         q = queue(closed(1), item(289), item(290))
         r = route("continue", q, "issue-289-deprecated-url", "main")
         assert (r.run, r.activate, r.reason) == ("continue", "o/r#289", "branch_item_activated")
-
-    def test_next_behaves_the_same_with_nothing_active(self):
-        q = queue(closed(1), item(289), item(290))
-        assert route("next", q, "issue-289-x", "main") == route("continue", q, "issue-289-x", "main")
 
     def test_number_must_match_whole(self):
         q = queue(item(28), item(2890))

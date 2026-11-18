@@ -499,3 +499,152 @@ class TestContextFromOneCall:
         out = capsys.readouterr().out
         assert rc == 1
         assert out.startswith("ERROR=")
+
+
+QUEUE_TEXT = """# Work Plan —
+
+## State
+branch:
+status: drained
+issue-repo: o/r
+
+## Queue
+- [x] o/r#1 — first
+- [ ] o/r#289 — deprecated url
+- [ ] o/r#290 — put bytes
+"""
+
+
+class TestRoutedEntry:
+    """`work continue` runs whatever the queue calls for, in one call (#548)."""
+
+    def _args(self, tmp_path, command, branch, text=QUEUE_TEXT, **extra):
+        (tmp_path / ".queue").write_text(text)
+        return {"command": command, "workspace": str(tmp_path), "project": str(tmp_path),
+                "branch": branch, "base_branch": "main",
+                "on_main": "yes" if branch == "main" else "no", **extra}
+
+    def _active(self, tmp_path):
+        from queue_io import read_queue
+        item = read_queue(tmp_path).active_item()
+        return item.ref if item else None
+
+    def test_continue_on_a_hand_made_branch_activates_its_item(self, tmp_path):
+        """The observed failure: nothing active, on the branch of an open item."""
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, "continue", "issue-289-url"))
+        assert not stop
+        assert args["command"] == "continue"
+        assert "ACTIVATED=o/r#289" in lines and "COMMAND=continue" in lines
+        assert self._active(tmp_path) == "o/r#289"
+        assert args["covers"] == "o/r#289"
+
+    def test_next_does_the_same_when_nothing_is_active(self, tmp_path):
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, "next", "issue-289-url"))
+        assert args["command"] == "continue"
+        assert self._active(tmp_path) == "o/r#289"
+
+    def test_continue_on_base_starts_the_next_open_item(self, tmp_path):
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, "continue", "main"))
+        assert not stop
+        assert args["command"] == "start"
+        assert (args["issue_n"], args["issue_title"], args["issue_repo"]) == (
+            "289", "deprecated url", "o/r")
+        assert "COMMAND=start" in lines
+        assert self._active(tmp_path) == "o/r#289"
+
+    def test_given_issue_arguments_are_kept(self, tmp_path):
+        from work import apply_route
+        args, _, _ = apply_route(self._args(tmp_path, "continue", "main", issue_title="Mine"))
+        assert args["issue_title"] == "Mine"
+
+    def test_active_item_runs_the_command_unchanged(self, tmp_path):
+        from work import apply_route
+        text = QUEUE_TEXT.replace("deprecated url", "deprecated url ← active")
+        before = text
+        args, lines, stop = apply_route(self._args(tmp_path, "continue", "issue-289-url", text))
+        assert (args["command"], stop) == ("continue", False)
+        assert not any(l.startswith("ACTIVATED=") for l in lines)
+        assert (tmp_path / ".queue").read_text() == before
+
+    def test_unknown_branch_stops_with_a_decision_and_changes_nothing(self, tmp_path):
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, "continue", "wip-thing"))
+        assert stop
+        assert "ACTION=decision" in lines
+        assert "DECISION=branch_matches_no_open_item" in lines
+        assert (tmp_path / ".queue").read_text() == QUEUE_TEXT
+
+    def test_only_finished_items_hands_over_to_work_end(self, tmp_path):
+        from work import apply_route
+        text = QUEUE_TEXT.replace("- [ ] o/r#289 — deprecated url",
+                                  "- [ ] o/r#289 — deprecated url ← done on issue-289-url"
+                                  ).replace("- [ ] o/r#290", "- [x] o/r#290")
+        args, lines, stop = apply_route(self._args(tmp_path, "continue", "main", text))
+        assert stop
+        assert "ACTION=stop" in lines and "NEXT=work end" in lines
+        assert "OFFER=wrap_or_continue" in lines
+        assert "DONE_ITEMS=o/r#289@issue-289-url" in lines
+
+    def test_nothing_left_names_work_find(self, tmp_path):
+        from work import apply_route
+        text = QUEUE_TEXT.replace("- [ ]", "- [x]")
+        _, lines, stop = apply_route(self._args(tmp_path, "continue", "main", text))
+        assert stop and "NEXT=work find" in lines
+
+    def test_a_step_report_is_never_rerouted(self, tmp_path):
+        from work import apply_route
+        given = self._args(tmp_path, "continue", "main", step_done="load_context")
+        args, lines, stop = apply_route(dict(given))
+        assert (args, lines, stop) == (given, [], False)
+        assert (tmp_path / ".queue").read_text() == QUEUE_TEXT
+
+    def test_no_queue_file_runs_the_command_as_given(self, tmp_path):
+        from work import apply_route
+        given = {"command": "continue", "workspace": str(tmp_path), "branch": "issue-1-x"}
+        assert apply_route(dict(given)) == (given, [], False)
+
+    def test_other_commands_are_untouched(self, tmp_path):
+        from work import apply_route
+        given = self._args(tmp_path, "pause", "issue-289-url")
+        assert apply_route(dict(given)) == (given, [], False)
+
+    def test_main_prints_the_decision_and_exits_cleanly(self, tmp_path, monkeypatch, capsys):
+        import work
+        a = self._args(tmp_path, "continue", "wip-thing")
+        monkeypatch.setattr(sys, "argv", ["work.py", "continue"] + [
+            f"{k}={v}" for k, v in a.items() if k != "command"])
+        rc = work.main()
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "ACTION=decision" in out
+        assert "ACTION=complete" not in out
+
+
+class TestNextIsContinue:
+    def _args(self, tmp_path, command):
+        (tmp_path / ".queue").write_text(
+            QUEUE_TEXT.replace("status: drained", "status: active")
+            .replace("deprecated url", "deprecated url ← active"))
+        return {"command": command, "workspace": str(tmp_path), "project": str(tmp_path),
+                "branch": "issue-289-url", "base_branch": "main", "on_main": "no"}
+
+    def test_next_on_an_active_item_continues_it(self, tmp_path):
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, "next"))
+        assert (args["command"], stop) == ("continue", False)
+        assert "COMMAND=continue" in lines
+        assert "← done on" not in (tmp_path / ".queue").read_text()
+
+    def test_done_runs_the_mark_done_pipeline(self, tmp_path):
+        from work import apply_route, PIPELINES, NEXT_STEPS
+        args, lines, stop = apply_route(self._args(tmp_path, "done"))
+        assert (args["command"], stop) == ("done", False)
+        assert PIPELINES["done"] is NEXT_STEPS
+        assert "OFFER=wrap_or_continue" in lines
+
+    def test_done_is_a_valid_command(self):
+        from work import parse_args
+        assert parse_args(["work.py", "done"]) == {"command": "done"}

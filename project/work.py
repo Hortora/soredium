@@ -26,7 +26,7 @@ from judgment import StepType
 from work_progress import update_progress, delete_progress
 from conflict_resolution import make_rebase_error_handler
 
-VALID_COMMANDS = {"start", "continue", "pause", "resume", "next", "find"}
+VALID_COMMANDS = {"start", "continue", "pause", "resume", "next", "done", "find"}
 
 _WORK_END_DIR = _project_dir.parent / "work-end"
 _WORK_START_DIR = _project_dir.parent / "work-start"
@@ -113,6 +113,77 @@ def fill_from_context(args: dict[str, str], resolve=None) -> dict[str, str]:
     except RuntimeError as e:
         return {"error": f"context_unresolved:{e}"}
     return {**args_from_context(context), **args}
+
+
+def _queue_dir(args: dict[str, str]) -> Path:
+    if args.get("plan_path"):
+        return Path(args["plan_path"]).parent
+    return Path(args.get("workspace", "."))
+
+
+def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
+    """Turn `continue`/`next` into the pipeline the queue calls for.
+
+    Returns (args, lines to print, stop). On a first call only: a call that
+    reports a finished step (`step_done=`) is already inside a pipeline and
+    names it.
+    """
+    from work_route import ROUTED, route
+    command = args.get("command", "")
+    if command not in ROUTED or args.get("step_done"):
+        return args, [], False
+    from queue_io import read_queue
+    queue_dir = _queue_dir(args)
+    queue = read_queue(queue_dir)
+    branch = args.get("branch", "")
+    base = args.get("base_branch", "main")
+    r = route(command, queue, "" if args.get("on_main") == "yes" else branch, base)
+    if r.reason == "no_queue":
+        return args, [], False
+
+    lines = [f"ROUTE_REASON={r.reason}"]
+    if r.issue:
+        lines.append(f"ISSUE={r.issue}")
+    if r.offer:
+        lines.append("OFFER=wrap_or_continue")
+        lines.append("DONE_ITEMS=" + ",".join(
+            f"{i.ref}@{i.done_branch}" for i in queue.done_items()))
+
+    if r.stop:
+        if r.stop == "decision":
+            options = ("checkout_active_branch,start_over_from_here"
+                       if r.reason == "active_branch_not_checked_out"
+                       else "switch_to_base_branch,add_item_for_this_branch")
+            lines += ["ACTION=decision", f"DECISION={r.reason}", f"DETAIL={r.detail}",
+                      f"OPTIONS={options}"]
+        else:
+            lines += ["ACTION=stop", f"DETAIL={r.detail}",
+                      "NEXT=work end" if r.stop == "end" else "NEXT=work find"]
+        return args, lines, True
+
+    if r.activate:
+        _slot_dir = str(_PLAN_MANAGER.parent)
+        if _slot_dir not in sys.path:
+            sys.path.insert(0, _slot_dir)
+        import plan_manager
+        try:
+            plan_manager.activate(queue_dir / ".queue", ref=r.activate)
+        except (plan_manager.ActivateError, ValueError) as e:
+            lines += ["ACTION=error", "ERROR=activate_failed", f"DETAIL={e}"]
+            return args, lines, True
+        lines.append(f"ACTIVATED={r.activate}")
+
+    routed = dict(args)
+    routed["command"] = r.run
+    if r.run == "start":
+        repo, _, number = r.issue.rpartition("#")
+        routed.setdefault("issue_n", number)
+        routed.setdefault("issue_title", r.title)
+        routed.setdefault("issue_repo", repo)
+    if r.activate:
+        routed["covers"] = r.activate
+    lines.append(f"COMMAND={r.run}")
+    return routed, lines, False
 
 
 def build_context(args: dict[str, str]) -> WorkContext:
@@ -464,7 +535,11 @@ PIPELINES: dict[str, list[StepDef]] = {
     "continue": CONTINUE_STEPS,
     "pause": PAUSE_STEPS,
     "resume": RESUME_STEPS,
+    # `done` marks the active item finished. `next` names the same pipeline for
+    # a call that reports one of its steps; a first call of `next` is routed
+    # like `continue` (work_route).
     "next": NEXT_STEPS,
+    "done": NEXT_STEPS,
     "find": FIND_STEPS,
 }
 
@@ -500,6 +575,11 @@ def main() -> int:
     if "error" in args:
         print(f"ERROR={args['error']}")
         return 1
+    args, route_lines, stop = apply_route(args)
+    for line in route_lines:
+        print(line)
+    if stop:
+        return 1 if "ACTION=error" in route_lines else 0
     ctx = build_context(args)
     command = ctx.command
     if command not in PIPELINES:
