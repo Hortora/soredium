@@ -1,10 +1,13 @@
 #!/bin/bash
 # PreToolUse hook for Write/Edit: block direct writes to lifecycle files.
 # Use the plan_manager.py API instead:
-#   append   — add issues to queue
-#   set-state — update state fields
-#   defer    — add deferred items
+#   append       — add issues to queue
+#   set-state    — update state fields
+#   defer        — add deferred items
 #   inject-tasks — add tasks to batches
+#   reorder      — reorder queue items
+#   remove       — remove items from queue
+#   advance      — mark active as done, activate next
 
 FILE_PATH=$(cat | python3 -c "import json,sys; print(json.load(sys.stdin).get('tool_input',{}).get('file_path',''))" 2>/dev/null)
 
@@ -12,7 +15,7 @@ BASENAME=$(basename "$FILE_PATH" 2>/dev/null)
 
 case "$BASENAME" in
   .meta|.plan|.queue|.slot)
-    echo "BLOCK: Use plan_manager.py API instead of editing $BASENAME directly. Commands: append, set-state, defer, inject-tasks, check-task, detect." >&2
+    echo "BLOCK: Use plan_manager.py API instead of editing $BASENAME directly. Commands: append, set-state, defer, inject-tasks, check-task, detect, reorder, remove, advance." >&2
     exit 2
     ;;
 esac
