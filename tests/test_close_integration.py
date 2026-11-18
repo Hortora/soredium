@@ -1217,3 +1217,125 @@ class TestSlotMarkedLanded:
         assert result.success
         assert result.slot_ready == ""
         assert not (repo / ".landed").exists()
+
+
+OLD_HOOK = """#!/bin/bash
+MSG=$(cat "$1")
+if echo "$MSG" | grep -qE '(Refs|Closes|Fixes|Resolves) #[0-9]+'; then exit 0; fi
+if echo "$MSG" | grep -qi 'no-issue'; then exit 0; fi
+exit 1
+"""
+
+
+def _require_bare_issue_refs(repo: Path) -> None:
+    """The earlier commit-msg hook, still installed in many repos: bare numbers only."""
+    hooks = repo / ".git" / "hooks"
+    hooks.mkdir(exist_ok=True)
+    target = hooks / "commit-msg"
+    target.write_text(OLD_HOOK)
+    target.chmod(0o755)
+
+
+def _publish_as(repo: Path, tmp_path: Path, slug: str) -> None:
+    """Give repo an origin whose URL ends in <owner>/<name>.git."""
+    bare = tmp_path / "remotes" / f"{slug}.git"
+    bare.parent.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    _git(repo, "remote", "add", "origin", str(bare))
+    _git(repo, "push", "-q", "origin", "main")
+
+
+def _stamp_of(repo: Path, branch: str) -> str:
+    return _git(repo, "log", "-1", "--format=%B", branch).stdout
+
+
+class TestStampReferenceNamesTheRightRepository:
+    """#556: a bare number only in the issue's own repository."""
+
+    def _ready(self, tmp_path, issue_repo="Owner/repo"):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(repo, "issue-1-feat", issue_repo=issue_repo)
+        _git(repo, "add", ".queue")
+        _git(repo, "commit", "-m", "chore: queue Refs #1")
+        squash_marker.mark(repo, "issue-1-feat")
+        return repo
+
+    def test_old_hook_fixture_rejects_a_plain_qualified_reference(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _require_bare_issue_refs(repo)
+        r = subprocess.run(["git", "-C", str(repo), "commit", "--allow-empty",
+                            "-m", "chore: x", "-m", "Refs Owner/repo#1"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+
+    def test_own_repository_gets_a_bare_number(self, tmp_path):
+        repo = self._ready(tmp_path)
+        _publish_as(repo, tmp_path, "Owner/repo")
+        _require_bare_issue_refs(repo)
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        stamp = _stamp_of(repo, "issue-1-feat")
+        assert "Refs #1" in stamp
+        assert "Owner/repo#1" not in stamp
+
+    def test_own_repository_is_matched_whatever_the_case(self, tmp_path):
+        repo = self._ready(tmp_path, issue_repo="owner/Repo")
+        _publish_as(repo, tmp_path, "Owner/repo")
+        _require_bare_issue_refs(repo)
+
+        assert _close_single(repo).success
+        assert "Refs #1" in _stamp_of(repo, "issue-1-feat")
+
+    def test_another_repository_keeps_the_qualified_reference(self, tmp_path):
+        repo = self._ready(tmp_path)
+        _publish_as(repo, tmp_path, "Owner/workspace")
+        _require_bare_issue_refs(repo)
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        stamp = _stamp_of(repo, "issue-1-feat")
+        assert "Refs Owner/repo#1" in stamp
+        assert "Refs #1" not in stamp
+
+    def test_a_repository_with_no_remote_keeps_the_qualified_reference(self, tmp_path):
+        repo = self._ready(tmp_path)
+        _require_bare_issue_refs(repo)
+
+        result = _close_single(repo)
+
+        assert result.success, result.errors
+        assert "Refs Owner/repo#1" in _stamp_of(repo, "issue-1-feat")
+
+    def test_the_queue_commit_follows_the_same_rule(self, tmp_path):
+        repo = self._ready(tmp_path)
+        _publish_as(repo, tmp_path, "Owner/workspace")
+        _require_bare_issue_refs(repo)
+
+        assert _close_single(repo).success
+        message = _git(repo, "log", "-1", "--format=%B", "main").stdout
+        assert "advance queue" in message
+        assert "Refs Owner/repo#1" in message
+        assert "Refs #1" not in message
+
+    @pytest.mark.parametrize("url, slug", [
+        ("https://github.com/Owner/repo.git", "Owner/repo"),
+        ("https://github.com/Owner/repo", "Owner/repo"),
+        ("https://user:secret@github.com/Owner/repo.git", "Owner/repo"),
+        ("git@github.com:Owner/repo.git", "Owner/repo"),
+        ("ssh://git@github.com/Owner/my.repo-x.git", "Owner/my.repo-x"),
+    ])
+    def test_remote_urls_are_read_for_the_repository_name(self, tmp_path, url, slug):
+        import close as close_module
+        repo = _init_repo(tmp_path / "repo")
+        _git(repo, "remote", "add", "origin", url)
+        assert close_module._published_as(repo) == slug
+
+    def test_trailer_without_a_usable_reference_is_bookkeeping(self):
+        import close as close_module
+        assert close_module._issue_trailer("") .startswith("no-issue")
+        assert close_module._issue_trailer("not a ref").startswith("no-issue")
+        assert close_module._issue_trailer("42") == "Refs #42"

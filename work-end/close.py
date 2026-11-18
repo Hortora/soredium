@@ -13,6 +13,8 @@ checkout is switched while it runs.
 """
 from __future__ import annotations
 
+import re
+
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -645,13 +647,47 @@ def _is_stamp_commit(repo: Path, branch: str) -> bool:
     return result.stdout.strip().startswith("chore: branch closed")
 
 
-def _issue_trailer(issue: str) -> str:
-    """Trailer that satisfies a commit-msg hook requiring an issue reference."""
+_QUALIFIED_REF = re.compile(r"^(?P<repo>[^#\s]+)#(?P<number>\d+)$")
+_REMOTE_SLUG = re.compile(r"[:/]([^/:\s]+/[^/\s]+?)(?:\.git)?/?$")
+
+
+def _published_as(repo: Path) -> str:
+    """owner/name this repository's commits are published under; "" when unknown.
+
+    Read from the remote its canonical repo publishes to, so a slot clone and a
+    linked worktree answer the same as the canonical checkout.
+    """
+    try:
+        canon = canonical_sync.locate(repo)
+    except SyncError:
+        return ""
+    if not canon.blessed:
+        return ""
+    url = _git(canon.repo, "remote", "get-url", canon.blessed).stdout.strip()
+    m = _REMOTE_SLUG.search(url)
+    return m.group(1) if m else ""
+
+
+def _issue_trailer(issue: str, repo: Optional[Path] = None) -> str:
+    """Issue reference for a commit made in `repo` by the ceremony.
+
+    A bare number means "an issue of the repository this commit is in", so it is
+    used only there. Anywhere else the reference keeps its repository: a bare
+    number would link to an unrelated issue. Installed commit-msg hooks come in
+    two generations, one accepting only a bare number, so the qualified form
+    carries a no-issue note that the older one accepts as well.
+    """
     if not issue:
         return "no-issue: close ceremony bookkeeping"
-    import re as _re
-    m = _re.search(r'#(\d+)', issue)
-    return f"Refs #{m.group(1)}" if m else f"Refs #{issue}" if issue.isdigit() else "no-issue: close ceremony bookkeeping"
+    if issue.isdigit():
+        return f"Refs #{issue}"
+    m = _QUALIFIED_REF.match(issue)
+    if not m:
+        return "no-issue: close ceremony bookkeeping"
+    home = _published_as(repo) if repo is not None else ""
+    if home and home.lower() == m.group("repo").lower():
+        return f"Refs #{m.group('number')}"
+    return f"Refs {issue} (no-issue: the reference is repository-qualified)"
 
 
 def stamp(target: CloseTarget, landed_sha: str, issue: str = "") -> None:
@@ -661,7 +697,7 @@ def stamp(target: CloseTarget, landed_sha: str, issue: str = "") -> None:
     with canonical_sync.checked_out(target.repo, target.branch) as tree:
         result = _git(tree, "commit", "--allow-empty",
                       "-m", f"chore: branch closed — landed as {landed_sha} on {target.base_branch}",
-                      "-m", _issue_trailer(issue))
+                      "-m", _issue_trailer(issue, target.repo))
     if result.returncode != 0:
         raise RuntimeError(
             f"stamp commit failed in {target.repo.name}: {result.stderr.strip()}")
@@ -715,7 +751,7 @@ def commit_and_push_queue(workspace: Path, closing_issue: str, refs_issue: str =
         return
     _git(workspace, "add", ".queue")
     result = _git(workspace, "commit", "-m", f"chore: advance queue — completed {closing_issue}",
-                  "-m", _issue_trailer(refs_issue or closing_issue), "--", ".queue")
+                  "-m", _issue_trailer(refs_issue or closing_issue, workspace), "--", ".queue")
     if result.returncode != 0 and _git(workspace, "status", "--porcelain", "--", ".queue").stdout.strip():
         raise RuntimeError(
             f"queue commit failed in {workspace.name}: {result.stderr.strip()}")
