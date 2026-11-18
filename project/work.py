@@ -122,6 +122,74 @@ def _queue_dir(args: dict[str, str]) -> Path:
     return Path(args.get("workspace", "."))
 
 
+# What the user can choose between when the two repos disagree and no repair
+# is safe. Named so a session presents choices instead of reaching for git.
+ALIGNMENT_OPTIONS: dict[str, str] = {
+    "workspace_dirty": "commit_workspace_changes_then_retry,return_project_to_base_branch",
+    "workspace_other": "checkout_project_branch_in_workspace,checkout_workspace_branch_in_project",
+    "project_behind": "checkout_workspace_branch_in_project,return_workspace_to_base_branch",
+    "queue_mismatch": "set_queue_branch_to_this_branch,checkout_queue_branch",
+    "detached": "finish_or_abort_the_operation_in_progress_then_retry",
+    "unreadable": "correct_the_repository_path_then_retry",
+    "origin_unclear": "land_the_parent_branch_first,record_the_base_by_hand",
+}
+
+
+def apply_alignment(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
+    """Check that project and workspace agree before anything is routed.
+
+    Two states are repaired without asking (see alignment_repair). Any other
+    disagreement stops with ACTION=decision: nothing is switched on a guess.
+    Skipped where there is nothing to compare or the caller is mid-pipeline:
+    a follow-up call (`step_done=`), a named `start`, one repo serving as both,
+    and slots, whose several repos this pairwise check does not model.
+    """
+    from work_route import ROUTED
+    command = args.get("command", "")
+    if command not in ROUTED or args.get("step_done"):
+        return args, [], False
+    if command == "start" and args.get("issue_n"):
+        return args, [], False
+    if args.get("in_slot") == "yes" or not args.get("project") or not args.get("workspace"):
+        return args, [], False
+    project, workspace = Path(args["project"]), Path(args["workspace"])
+    if project.resolve() == workspace.resolve():
+        return args, [], False
+
+    from alignment import detect
+    from alignment_repair import REPAIRABLE, repair
+    base = args.get("base_branch", "main")
+    found = detect(project, workspace, base)
+    if found.state in ("on_base", "aligned"):
+        return args, [], False
+
+    def decision(reason: str, detail: str) -> tuple[dict[str, str], list[str], bool]:
+        return args, [f"ALIGNMENT={found.state}", "ACTION=decision",
+                      f"DECISION=alignment_{reason}", f"DETAIL={detail}",
+                      f"OPTIONS={ALIGNMENT_OPTIONS.get(reason, 'resolve_then_retry')}"], True
+
+    if found.state == "queue_mismatch":
+        from queue_io import read_queue
+        queue = read_queue(_queue_dir(args))
+        if queue is None or queue.active_item() is None:
+            return args, [], False  # a branch name left by finished work; routing decides
+        return decision("queue_mismatch", found.detail)
+
+    if found.state not in REPAIRABLE:
+        return decision(found.state, found.detail)
+
+    result = repair(found, project, workspace, base)
+    if not result.ok:
+        return decision(result.reason, result.detail)
+    aligned = dict(args)
+    aligned["branch"] = found.project_branch
+    aligned["on_main"] = "no"
+    lines = [f"ALIGNMENT_REPAIRED={found.state}"]
+    if result.actions:
+        lines.append("ALIGNMENT_ACTIONS=" + "; ".join(result.actions))
+    return aligned, lines, False
+
+
 def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     """Turn `continue`/`next` into the pipeline the queue calls for.
 
@@ -581,6 +649,11 @@ def main() -> int:
     if "error" in args:
         print(f"ERROR={args['error']}")
         return 1
+    args, alignment_lines, stop = apply_alignment(args)
+    for line in alignment_lines:
+        print(line)
+    if stop:
+        return 0
     args, route_lines, stop = apply_route(args)
     for line in route_lines:
         print(line)
