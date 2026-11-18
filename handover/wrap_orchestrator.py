@@ -33,7 +33,7 @@ try:
     import worklog as _wl
 except ImportError:
     _wl = None
-from queue_io import parse_covers
+from queue_io import parse_covers, read_queue
 from shared_steps import (
     StepDef,
     OrchestratorContextBase,
@@ -148,6 +148,33 @@ def parse_args(argv: list[str]) -> dict[str, str]:
     return result
 
 
+def _build_wrap_summary(workspace: Path, branch: str) -> str:
+    """Build wrap summary including queue-next info."""
+    parts = ["Wrap complete."]
+    try:
+        queue = read_queue(workspace)
+        if queue is None:
+            return parts[0]
+        active = queue.active_item()
+        remaining = [i for i in queue.items if not i.completed and not i.active]
+        done_pending = queue.done_items()
+        if active:
+            parts.append(f"Active: {active.ref} — {active.title}")
+        if done_pending:
+            refs = ", ".join(i.ref for i in done_pending)
+            parts.append(f"Done (awaiting close): {refs}")
+        if remaining:
+            nxt = remaining[0]
+            parts.append(f"Next in queue: {nxt.ref} — {nxt.title}")
+            if len(remaining) > 1:
+                parts.append(f"Queue depth: {len(remaining)} remaining")
+        elif not active and not done_pending:
+            parts.append("Queue: drained")
+    except Exception:
+        pass
+    return " | ".join(parts)
+
+
 def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
     workspace = Path(args["workspace"])
     project = Path(args.get("project", ""))
@@ -221,10 +248,12 @@ def run_orchestrator(args: dict[str, str]) -> dict[str, str]:
         has_arc42=has_arc42, has_plan=has_plan,
     )
 
+    summary = _build_wrap_summary(workspace, branch)
+
     result = run_loop(
         WRAP_STEPS, ctx,
         user_input_steps=WRAP_USER_INPUT_STEPS,
-        complete_summary="Wrap complete.",
+        complete_summary=summary,
     )
     log_call(workspace, "wrap", result, ctx.steps_executed, dry_run=dry_run)
 
