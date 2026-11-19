@@ -1,5 +1,6 @@
 """Tests for scripts/audit_duplicate_commits.py"""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -39,7 +40,14 @@ class TestAuditDuplicateCommits:
         _git(repo, "commit", "-m", "feat: add feature")
         feat_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
         _git(repo, "checkout", "main")
-        _git(repo, "cherry-pick", feat_sha)
+        # Picked onto its own parent within the same second, by the same identity,
+        # the cherry-pick would be the very same commit and nothing would be
+        # duplicated. A later committer date makes it a second commit, as in real use.
+        picked = subprocess.run(
+            ["git", "-C", str(repo), "cherry-pick", feat_sha], capture_output=True, text=True,
+            env={**os.environ, "GIT_COMMITTER_DATE": "2030-01-01T00:00:00 +0000"})
+        assert picked.returncode == 0, picked.stderr
+        assert _git(repo, "rev-parse", "HEAD").stdout.strip() != feat_sha
         _git(repo, "merge", "feature", "--no-edit")
 
         result = subprocess.run(
