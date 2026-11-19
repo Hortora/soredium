@@ -249,3 +249,101 @@ class TestReport:
         answer(world, "end", "item_finished", "finished=yes")
         result = answer(world, "end", "handoff")
         assert result["ACTION"] == "complete" and "ATTENTION" not in result
+
+
+class TestNoLostWork:
+    """Existing layouts and half-finished states are refused or left intact, never guessed at."""
+
+    def test_end_says_up_front_which_repos_it_is_limited_to(self, world):
+        result = run(world, "end")
+        assert str(world["project"].resolve()) in result["SCOPE"]
+        assert str(world["workspace"].resolve()) in result["SCOPE"]
+        assert result["ACTION"] == "review"
+
+    def test_wrap_prints_no_scope_because_it_publishes_nothing(self, world):
+        assert "SCOPE" not in run(world, "wrap")
+
+    def test_workspace_left_on_main_is_brought_onto_the_branch_first(self, world):
+        """The safe repair from the alignment check: a clean workspace joins the project."""
+        g(world["workspace"], "checkout", "-q", "main")
+
+        result = run(world, "end")
+
+        assert result["ALIGNMENT_REPAIRED"] == "workspace_behind"
+        assert g(world["workspace"], "symbolic-ref", "--short", "HEAD") == BRANCH
+        assert result["ACTION"] == "review"
+
+    def test_both_repos_on_main_while_the_work_is_on_a_branch_stops_and_names_the_branch(
+            self, world):
+        """The queue rides on the working branch, so from main it is not even visible."""
+        for key in ("project", "workspace"):
+            g(world[key], "checkout", "-q", "main")
+        before = {k: g(world[k], "rev-parse", "HEAD") for k in ("project", "workspace")}
+
+        result = run(world, "end")
+
+        assert result["ACTION"] == "stop", result["_raw"]
+        assert result["STOP_REASON"] == "nothing_to_end"
+        assert BRANCH in result["DETAIL"]
+        assert {k: g(world[k], "rev-parse", "HEAD") for k in ("project", "workspace")} == before
+        assert g(world["project"], "rev-parse", BRANCH), "the branch and its work are still there"
+
+    def test_queue_naming_another_branch_than_the_one_checked_out_is_refused(self, world):
+        ws = world["workspace"]
+        for key in ("project", "workspace"):
+            g(world[key], "checkout", "-q", "-b", "issue-9-elsewhere")
+            branch_base.record(world[key], "issue-9-elsewhere", g(world[key], "rev-parse", "main"))
+        before = g(world["project"], "rev-parse", "HEAD")
+
+        result = run(world, "end")
+
+        assert result["ACTION"] == "decision", result["_raw"]
+        assert result["DECISION"] in ("active_branch_not_checked_out", "alignment_queue_mismatch")
+        assert g(world["project"], "rev-parse", "HEAD") == before
+        assert next(i for i in read_queue(ws).items if i.ref == "o/r#1").active
+
+    def test_finished_on_the_base_branch_never_closes_the_item_outright(self, tmp_path):
+        """An item with no working branch cannot be marked done by the sequence."""
+        workspace, _ = with_remote(tmp_path, "solo")
+        (workspace / ".git" / "info" / "exclude").write_text(".work-progress\n")
+        write_queue(workspace, Queue(
+            items=[QueueItem(ref="o/r#1", title="First", completed=False, active=True)],
+            state=QueueState(branch="", issue_repo="O/r", status="active", covers="o/r#1")))
+        g(workspace, "add", ".queue")
+        g(workspace, "commit", "-q", "-m", "queue")
+        world = dict(project=workspace, workspace=workspace)
+        drive_to_item_finished(world, "wrap")
+
+        result = answer(world, "wrap", "item_finished", "finished=yes")
+
+        assert result["ACTION"] == "handoff", result["_raw"]
+        first = read_queue(workspace).items[0]
+        assert first.active and not first.completed and not first.done_branch
+
+    def test_an_interrupted_run_says_it_is_resuming(self, world):
+        run(world, "wrap")
+        answer(world, "wrap", "review")
+        result = run(world, "wrap")
+        assert result["RESUMING"] == "wrap steps_already_done=review"
+        assert result["ACTION"] == "diary"
+
+    def test_a_fresh_run_does_not_claim_to_resume(self, world):
+        assert "RESUMING" not in run(world, "wrap")
+
+    def test_uncommitted_work_in_the_project_stops_the_landing_and_is_untouched(self, world):
+        (world["project"] / "unsaved.txt").write_text("in progress")
+        drive_to_item_finished(world, "end")
+
+        result = answer(world, "end", "item_finished", "finished=yes")
+
+        assert result["ACTION"] == "error" and result["STEP"] == "land", result["_raw"]
+        assert (world["project"] / "unsaved.txt").read_text() == "in progress"
+        assert g(world["project_remote"], "rev-parse", "refs/heads/main") != \
+            g(world["project"], "rev-parse", BRANCH)
+
+    def test_old_progress_from_before_runs_were_recorded_is_not_trusted(self, world):
+        (world["workspace"] / ".work-progress").write_text(
+            "review=done\ndiary=done\nfile_issues=done\nitem_finished=done\n"
+            "mark_done=done\nland=done\npublish=done\nhandoff=done\n")
+        result = run(world, "end")
+        assert result["ACTION"] == "review", "a stale progress file must not skip the sequence"

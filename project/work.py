@@ -179,7 +179,9 @@ def apply_alignment(args: dict[str, str]) -> tuple[dict[str, str], list[str], bo
     """
     from work_route import ROUTED
     command = args.get("command", "")
-    if command not in ROUTED or args.get("step_done"):
+    # wrap and end mark, land and publish: they must not start from repos that
+    # disagree about which branch the work is on.
+    if command not in ROUTED + ("wrap", "end") or args.get("step_done"):
         return args, [], False
     if command == "start" and args.get("issue_n"):
         return args, [], False
@@ -832,6 +834,16 @@ def _item_not_finished(ctx) -> bool:
     return ctx.progress.get(ITEM_FINISHED_ANSWER, "") != "yes"
 
 
+def _mark_done_on_branch(ctx) -> list[str] | None:
+    """Mark the active item done on its branch. On the base branch there is no
+    branch to mark it done on, and this sequence never closes an item outright:
+    that would record work as finished that nothing has landed."""
+    if not ctx.plan_path or not ctx.branch or ctx.branch == ctx.base_branch:
+        return None
+    return ["python3", str(_PLAN_MANAGER), "mark-done", str(ctx.plan_path),
+            f"branch={ctx.branch}"]
+
+
 def _scope(command: str, with_covers: bool = False):
     def build(ctx) -> list[str]:
         cmd = ["python3", str(_SCOPE), command, str(ctx.workspace)]
@@ -854,7 +866,7 @@ _WRAP_OPENING: list[StepDef] = [
     # Not skippable: marking and landing both depend on the answer.
     _wrap_step(ITEM_FINISHED, "wrap-item-finished.md", skippable=False),
     StepDef("mark_done", "wrap", StepType.MECHANICAL,
-            skip_fn=_item_not_finished, script_fn=_finish_active_command),
+            skip_fn=_item_not_finished, script_fn=_mark_done_on_branch),
     # The queue change is committed at once: uncommitted it stops the ceremony
     # and is lost when the branch is switched.
     StepDef("commit_queue", "wrap", StepType.MECHANICAL,
@@ -883,6 +895,66 @@ END_STEPS: list[StepDef] = _WRAP_OPENING + _CLOSE_STEPS + _WRAP_CLOSING
 _REPORTED = ("LANDED", "CLOSED_ITEM", "NOT_LANDED", "CARRIED", "PROMOTED_COUNT", "NOT_PROMOTED",
              "PUBLISHED_COUNT", "NOT_PUBLISHED", "BLOG_PUBLISHED_COUNT", "BLOG_HELD",
              "UNPUBLISHED", "UNPROMOTED_BACKLOG", "WARN", "MARKED_DONE")
+
+
+def sequence_preflight(args: dict[str, str]) -> tuple[list[str], bool]:
+    """What a first call of wrap or end checks and says before any step runs.
+
+    Stops, changing nothing, when the active item was started on a branch that
+    is not checked out: the sequence would otherwise judge, mark or land the
+    wrong thing. Otherwise it says whether an earlier, unfinished run is being
+    resumed, and for `end` lists the repos the close will be limited to.
+    """
+    command = args.get("command", "")
+    if command not in ("wrap", "end") or args.get("step_done"):
+        return [], False
+    lines: list[str] = []
+    from queue_io import read_queue
+    queue = read_queue(_queue_dir(args))
+    branch = args.get("branch", "")
+    base = args.get("base_branch", "main")
+    active = queue.active_item() if queue else None
+    if active is not None and queue.state.branch and branch != queue.state.branch:
+        on = "the base branch" if (args.get("on_main") == "yes" or branch == base) else branch
+        return ["ACTION=decision", "DECISION=active_branch_not_checked_out",
+                f"DETAIL={active.ref} is being worked on {queue.state.branch}, but this "
+                f"checkout is on {on}",
+                "OPTIONS=checkout_the_active_branch_then_retry,correct_the_queue_then_retry"], True
+
+    if command == "end" and (queue is None or (active is None and not queue.done_items())):
+        # Nothing here to land. The queue lives on the working branch, so a
+        # checkout left on the base branch sees none of the work in progress:
+        # name the branches that hold unlanded work instead of running on.
+        unlanded = ""
+        if args.get("project") and Path(args["project"]).is_dir():
+            from git_util import git
+            refs = git(Path(args["project"]), "for-each-ref", "--format=%(refname)",
+                       "refs/soredium/base/").stdout.split()
+            unlanded = ", ".join(r.split("refs/soredium/base/", 1)[1] for r in refs)
+        return ["ACTION=stop", "STOP_REASON=nothing_to_end",
+                "DETAIL=no item is active or marked done in the queue this checkout sees"
+                + (f"; branches with unlanded work: {unlanded}" if unlanded else ""),
+                "NEXT=check out the branch the work is on and run work end there"], True
+
+    from progress import Progress
+    workspace = Path(args.get("workspace", "."))
+    progress = Progress.load(workspace) if workspace.is_dir() else None
+    if (progress is not None and progress.get(RUN_KEY) == run_key(args)
+            and progress.get(RUN_COMPLETE) != "yes"):
+        done = [s.name for s in PIPELINES[command] if progress.is_done(s.name)]
+        if done:
+            lines.append(f"RESUMING={command} steps_already_done={','.join(done)}")
+    if command == "end" and workspace.is_dir():
+        work_end = str(_WORK_END_DIR)
+        if work_end not in sys.path:
+            sys.path.insert(0, work_end)
+        try:
+            import scope
+            repos = scope.covered(workspace)
+            lines.append("SCOPE=" + ", ".join(str(r) for r in repos))
+        except Exception as error:       # the scope line is information, never a blocker
+            lines.append(f"SCOPE=unknown ({error})")
+    return lines, False
 
 
 def stop_on_mechanical_error(step, ctx, result: dict) -> dict:
@@ -994,6 +1066,11 @@ def main() -> int:
         print(line)
     if stop:
         return 1 if "ACTION=error" in route_lines else 0
+    sequence_lines, stop = sequence_preflight(args)
+    for line in sequence_lines:
+        print(line)
+    if stop:
+        return 0
     begin_run(args)
     ctx = build_context(args)
     command = ctx.command
