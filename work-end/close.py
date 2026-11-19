@@ -503,6 +503,43 @@ def carry_strays(slot_dir: Path, covered: set) -> tuple[dict, dict]:
     return carried, not_landed
 
 
+def settle_permanent_clone(slot_dir: Path) -> list[str]:
+    """After a ceremony in a permanent clone: every clone returns to its base
+    branch and follows canonical, ready for the next item. Returns warnings.
+
+    A clone with uncommitted changes, or whose branch still holds commits
+    canonical lacks, is left where it is: moving it would hide work.
+    """
+    from slot_core import get_all_slot_repos
+    left: list[str] = []
+    for name in get_all_slot_repos(slot_dir):
+        repo = slot_dir / name
+        base = _get_base_branch(repo)
+        current = _current_branch(repo)
+        if current and current != base:
+            if _git(repo, "status", "--porcelain").stdout.strip():
+                left.append(f"{name}: left on {current} with uncommitted changes")
+                continue
+            try:
+                ahead = canonical_sync.ahead_of_canonical(repo, current)
+            except SyncError:
+                ahead = 0
+            if ahead and not _is_stamp_commit(repo, current):
+                left.append(f"{name}: left on {current}, {ahead} commit(s) not in canonical")
+                continue
+            if _git(repo, "checkout", "-q", base).returncode != 0:
+                left.append(f"{name}: could not return to {base}")
+                continue
+        try:
+            state = canonical_sync.follow(repo)
+        except SyncError as error:
+            left.append(f"{name}: {error.detail}")
+            continue
+        if state == "diverged":
+            left.append(f"{name}: {base} has diverged from canonical")
+    return left
+
+
 def promotion_pairs(workspace: Path) -> list[tuple[Path, Path]]:
     """(workspace repo, project repo) pairs this ceremony covers.
 
@@ -993,30 +1030,21 @@ def close(workspace: Path) -> CloseResult:
 
         if slot_root:
             next_item = finish_queue()
-            elevate_queue(workspace, slot_root)
+            if (slot_root / ".permanent").exists() and (workspace / ".git").exists():
+                # A permanent clone's workspace holds the repo's own queue, which
+                # travels with its base branch: the completion is committed here
+                # and reaches canonical when the workspace's commits are carried.
+                # No second copy is kept at the clone root (#563).
+                commit_and_push_queue(workspace, ", ".join(closed) or closing_issue,
+                                      closed[-1] if closed else covers_issue)
+            else:
+                elevate_queue(workspace, slot_root)
             checkout_all(targets)
         else:
             checkout_all(targets)
             next_item = finish_queue()
             commit_and_push_queue(workspace, ", ".join(closed) or closing_issue,
                                   closed[-1] if closed else covers_issue)
-
-        # Counted again now that the queue commit exists, and for the workspace
-        # even when it had no branch to land: commits made straight onto a base
-        # branch (queue, handoff, diary) are unpublished work too (#559).
-        covered = [t.repo for t in targets]
-        if (workspace / ".git").exists():
-            covered.append(workspace)
-        for repo in covered:
-            try:
-                canon = canonical_sync.locate(repo)
-            except SyncError:
-                continue
-            count = canonical_sync.unpublished(canon)
-            if count:
-                unpublished[str(canon.repo)] = count
-            else:
-                unpublished.pop(str(canon.repo), None)
 
         _remove_close_state(workspace)
 
@@ -1031,6 +1059,29 @@ def close(workspace: Path) -> CloseResult:
         # A permanent clone (#553) is never archived: it is where the repo's
         # work continues, so a drained queue leaves it exactly as it is.
         permanent = slot_dir is not None and (slot_dir / ".permanent").exists()
+        if permanent:
+            warnings.extend(settle_permanent_clone(slot_dir))
+
+        # Counted last: after the queue commit and after strays were carried, and
+        # for the workspace even when it had no branch to land. Commits made
+        # straight onto a base branch (queue, handoff, diary) are unpublished
+        # work too (#559, #563).
+        covered = [t.repo for t in targets]
+        if (workspace / ".git").exists():
+            covered.append(workspace)
+        if slot_dir is not None:
+            from slot_core import get_all_slot_repos
+            covered += [slot_dir / name for name in get_all_slot_repos(slot_dir)]
+        for repo in covered:
+            try:
+                canon = canonical_sync.locate(repo)
+            except SyncError:
+                continue
+            count = canonical_sync.unpublished(canon)
+            if count:
+                unpublished[str(canon.repo)] = count
+            else:
+                unpublished.pop(str(canon.repo), None)
         if slot_dir is not None and not permanent and next_item is None and not not_landed:
             mark_slot_landed(
                 slot_dir, queue.state.branch if queue else "",
