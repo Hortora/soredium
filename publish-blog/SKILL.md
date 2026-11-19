@@ -43,76 +43,49 @@ path escapes the slot, `BLOG_DIR` is returned empty.
 If `BLOG_DIR` is non-empty, use it directly. Otherwise fall back to `blog/`
 relative to `WORKSPACE` (or CWD if `WORKSPACE` is not set).
 
-### Step 1 — Load routing config
+### Steps 1–4 — Run routing plan
 
 Read `HAS_BLOG_ROUTING` from the ctx.py output (already run in Step 0).
 
 If `HAS_BLOG_ROUTING=no`, stop:
 > "No global routing config found at `~/.claude/blog-routing.yaml`."
 
-Read the global config with PyYAML. If a project-level `blog-routing.yaml`
-exists in the workspace, read it too and merge: project `destinations` and
-`rules` extend (not replace) the global ones.
-
-**No external script.** Apply the routing logic directly:
-
-**Matching rules** — for each entry, evaluate every rule in order:
-- `entry_type: X` — exact match against frontmatter `entry_type`
-- `tags: [a, b]` — entry must have at least one of these tags
-- `projects: [x, y]` — entry must belong to at least one of these projects
-- Multiple fields in one rule → AND logic
-- Multiple matching rules → union their `destinations` lists
-- No rule matches → use `defaults.destinations`
-
-Collect `(entry_filename, [destination_names])` pairs. Proceed to Step 4.
-
-### Step 2 — Scan blog entries
-
-Read all entries in `$BLOG_DIR`:
+Run the routing plan script:
 
 ```bash
-ls "$BLOG_DIR"/*.md | grep -v INDEX | sort
+python3 ~/.claude/skills/publish-blog/blog_publish.py plan "$WORKSPACE"
 ```
 
-For each entry, parse the YAML frontmatter to extract:
-- `entry_type` — article | note
-- `subtype` — diary | ... (notes only)
-- `projects` — list of project identifiers
-- `tags` — list of topic tags (may be absent or empty)
+The script loads the global routing config (`~/.claude/blog-routing.yaml`),
+merges any workspace override (`<workspace>/blog-routing.yaml`), scans blog
+entries, resolves destinations per entry, and checks presence at each
+destination. It outputs structured lines:
 
-Parse YAML frontmatter directly with PyYAML (split on `---` delimiters) — no utility script dependency needed.
-
-Skip entries where `entry_type` is missing (warn the user).
-
-### Step 3 — Resolve destinations per entry
-
-For each entry, call:
-
-```python
-destinations = router.resolve_destinations(frontmatter)
+```
+ENTRY=<file> DEST=<name> PATH=<destination path> PRESENT=yes|no
+...
+MISSING=<file:dest pairs with PRESENT=no>
+ENTRIES_MISSING=<entries with at least one missing destination>
 ```
 
-### Step 4 — Show routing plan
-
-Present a table before doing anything:
+Present the results as a table:
 
 ```
 Blog publishing plan
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Entry                               Destinations
-2026-04-14-mdp01-day-zero.md       personal-blog
-2026-04-14-mdp02-closing-gaps.md   personal-blog
-2026-04-14-quarkus-article.md      quarkus-blog, personal-blog
+Entry                               Destinations          Present
+2026-04-14-mdp01-day-zero.md       personal-blog          yes
+2026-04-14-mdp02-closing-gaps.md   personal-blog          no
+2026-04-14-quarkus-article.md      quarkus-blog           no
+                                   personal-blog          yes
 
-  Destination paths:
-  personal-blog  →  ~/blog/_posts/   (git)
-  quarkus-blog   →  ~/quarkus-community-blog/_posts/   (git)
+  MISSING: 2 entries need publishing
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Publish all? (y/n) or enter entry numbers to publish selectively:
+Publish missing? (y/n) or enter entry numbers to publish selectively:
 ```
 
 If user enters numbers (e.g. "1 3"), publish only those entries.
-If user says `y`, publish all.
+If user says `y`, publish all missing entries.
 If user says `n`, stop.
 
 ### Step 5 — Validate destinations
@@ -300,7 +273,12 @@ rules:
 | `project: casehubio/engine` | Org-qualified match — see backward compat rule below |
 | `projects: [soredium]` | Entry must belong to at least one of these projects |
 | Multiple fields | AND logic — all must match |
-| Multiple matching rules | Destinations are unioned |
+| What an entry's project is | The repo it lives in, as `owner/repo`, read from the project's git remote (`SOURCE=` in the plan). Fully qualified names in the frontmatter `projects:` line add further projects; bare or legacy names there are ignored when the source is known |
+| `project: org/repo`, `org/*`, or bare `repo` | That repo; every repo of the organisation; that repo name under any organisation |
+| Rule that names a project | Decides for that project. When several match, the most specific (most fields) wins; equally specific ones are unioned. An empty list means publish nowhere |
+| Rule without a project (a fallback by entry type, subtype or tags) | Applies only when no project rule matched |
+| Workspace override rules | Always add to the result |
+| Nothing matched | The defaults |
 | No matching rules | Entry goes to `defaults.destinations` |
 
 **Org-qualified project matching (backward compat):** When a routing rule
