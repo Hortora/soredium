@@ -42,7 +42,8 @@ decision for you to present.
 | `work pause` | `python3 ~/.claude/skills/project/work.py pause` |
 | `work resume` | `python3 ~/.claude/skills/project/work.py resume` |
 | `work find` | `python3 ~/.claude/skills/project/work.py find` |
-| `work end` | → **work-end** (close.py) |
+| `work wrap` | `python3 ~/.claude/skills/project/work.py wrap` |
+| `work end` | `python3 ~/.claude/skills/project/work.py end` |
 | `work sync` | → **work-end** (close.py) |
 
 Run from the workspace directory. No other arguments: the script resolves
@@ -149,6 +150,48 @@ from the earlier call.
 
 ---
 
+## Wrap and end
+
+`work wrap` and `work end` are the end-of-session sequence. Run the command
+and do each step it hands you, in the order it hands them; never run the steps
+from memory or out of order.
+
+| | `work wrap` | `work end` |
+|---|---|---|
+| Review, diary entry, loose ends filed and queued | yes | yes |
+| Is the active item finished? Mark it done if so | yes | yes |
+| Land what is marked done; promote; publish | no | yes |
+| Handoff | yes | yes |
+
+- **`work wrap`** changes nothing outside the working branches: nothing is
+  landed, promoted or published. Use it at the end of any session.
+- **`work end`** also lands every item marked done, promotes, and publishes.
+  Typing it is the user's go-ahead to publish exactly what the ceremony
+  covered: its own project and workspace (or the repos of its slot or clone)
+  and their landed blog entries. Never publish, promote or post anything the
+  sequence did not, and never look for other repos that are ahead.
+- It can be run part-way through the queue. An unfinished active item is never
+  landed; it stays active on its branch.
+
+The `item_finished` step needs an answer, not just completion:
+
+```
+python3 ~/.claude/skills/project/work.py <wrap|end> step_done=item_finished outcome=completed finished=yes
+python3 ~/.claude/skills/project/work.py <wrap|end> step_done=item_finished outcome=completed finished=no
+```
+
+If a step fails the sequence stops with `ACTION=error` and `STEP=`. Fix what
+it names (`ERROR=promotion_needed` gives the commands in `PROMOTE_COMMANDS=`;
+`ERROR=squash_review_needed` means invoke `git-squash`), then run the same
+command again: it resumes at that step. Do not carry on by hand.
+
+When it completes it prints one `STEP_<NAME>=` line per step. Relay them. If
+there is an `ATTENTION=` line, tell the user what could not be done and why.
+Then run the command on the `THEN=` line: after a finished item it scaffolds
+the next one, and you stop there without beginning the work.
+
+---
+
 ## Finishing an item
 
 When the active issue's work is complete, run:
@@ -217,9 +260,9 @@ change where compressed context adds noise, not signal.
 
 ## Close / Sync
 
-`work end` and `work sync` invoke the `work-end` skill, which runs
-`close.py` — the atomic close ceremony. These commands are NOT routed
-through `project/work.py`.
+`work end` runs `project/work.py end` (see Wrap and end above); the atomic
+ceremony in `work-end/close.py` is one of its steps. `work sync` still
+invokes the `work-end` skill directly.
 
 ---
 

@@ -88,7 +88,7 @@ class TestBeginRun:
 
     def test_a_command_with_no_pipeline_touches_nothing(self, tmp_path):
         (tmp_path / ".work-progress").write_text("x=done\n")
-        assert work.begin_run(args(tmp_path, "end")) is False
+        assert work.begin_run(args(tmp_path, "sync")) is False
         assert (tmp_path / ".work-progress").read_text() == "x=done\n"
 
     def test_a_missing_workspace_is_left_alone(self, tmp_path):

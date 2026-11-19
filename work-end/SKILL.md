@@ -9,6 +9,13 @@ description: >
 
 # work-end
 
+> **`work end` is run through `python3 ~/.claude/skills/project/work.py end`** (see the
+> `work` skill, "Wrap and end"). That sequence does the review, diary entry and issue
+> filing as steps, then runs this ceremony, then promotes and publishes within the
+> ceremony's scope. This skill documents the ceremony itself and `work sync`. Where the
+> advisory pre-close checklist below overlaps the sequence's steps, the sequence wins.
+
+
 Three phases: pre-close (advisory, skills), ceremony (close.py), post-close (issues, report).
 
 <HARD-GATE>
