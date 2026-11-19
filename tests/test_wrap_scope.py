@@ -279,6 +279,17 @@ class TestPublishBlog:
         assert "uncommitted changes under docs/blog" in held["project"]
         assert not (blog["site"] / "_notes").exists()
 
+    def test_a_project_with_no_blog_entries_is_passed_over_quietly(self, blog):
+        g(blog["project"], "remote", "remove", "origin")
+        assert scope.publish_blog(blog["workspace"], blog["routing"]) == ({}, {})
+
+    def test_problems_are_reported_without_failing_the_command(self, blog, capsys):
+        g(blog["project"], "remote", "remove", "origin")
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        assert scope.main(["publish-blog", str(blog["workspace"]),
+                           f"routing={blog['routing']}"]) == 0
+        assert "BLOG_HELD=project reason=" in capsys.readouterr().out
+
     def test_a_project_with_no_remote_is_never_routed_on_a_guess(self, blog):
         g(blog["project"], "remote", "remove", "origin")
         commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)

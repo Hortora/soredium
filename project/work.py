@@ -26,7 +26,8 @@ from judgment import StepType
 from work_progress import update_progress, delete_progress
 from conflict_resolution import make_rebase_error_handler
 
-VALID_COMMANDS = {"start", "continue", "pause", "resume", "next", "done", "find"}
+VALID_COMMANDS = {"start", "continue", "pause", "resume", "next", "done", "find",
+                  "wrap", "end"}
 
 _WORK_END_DIR = _project_dir.parent / "work-end"
 _WORK_START_DIR = _project_dir.parent / "work-start"
@@ -811,6 +812,126 @@ FIND_STEPS: list[StepDef] = [
 # Pipeline registry
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Wrap and end — the end-of-session sequence (#571)
+# ---------------------------------------------------------------------------
+#
+# `wrap` is the session wrap-up: review, diary, loose ends filed and queued,
+# the item marked done if it is finished, handoff. Nothing lands, is promoted
+# or is published. `end` is the same steps plus the close, in between marking
+# the item done and the handoff: land what is done, promote, publish the repos
+# the ceremony covered and post their landed blog entries. The close steps act
+# only on what work-end/scope.py says the ceremony covers.
+
+ITEM_FINISHED = "item_finished"                 # the step
+ITEM_FINISHED_ANSWER = "item_finished_answer"   # yes or no, kept apart from the step's own record
+_SCOPE = _WORK_END_DIR / "scope.py"
+
+
+def _item_not_finished(ctx) -> bool:
+    return ctx.progress.get(ITEM_FINISHED_ANSWER, "") != "yes"
+
+
+def _scope(command: str, with_covers: bool = False):
+    def build(ctx) -> list[str]:
+        cmd = ["python3", str(_SCOPE), command, str(ctx.workspace)]
+        if with_covers and ctx.covers:
+            cmd.append(f"covers={ctx.covers.split(',')[0].strip()}")
+        return cmd
+    return build
+
+
+def _wrap_step(name: str, handler: str, skippable: bool = True) -> StepDef:
+    return StepDef(name, "wrap", StepType.JUDGMENT,
+                   action_context_fn=lambda ctx, _n=name: {"CONTEXT": _n},
+                   handler=f"handlers/{handler}", skippable=skippable)
+
+
+_WRAP_OPENING: list[StepDef] = [
+    _wrap_step("review", "wrap-review.md"),
+    _wrap_step("diary", "wrap-diary.md"),
+    _wrap_step("file_issues", "wrap-issues.md"),
+    # Not skippable: marking and landing both depend on the answer.
+    _wrap_step(ITEM_FINISHED, "wrap-item-finished.md", skippable=False),
+    StepDef("mark_done", "wrap", StepType.MECHANICAL,
+            skip_fn=_item_not_finished, script_fn=_finish_active_command),
+    # The queue change is committed at once: uncommitted it stops the ceremony
+    # and is lost when the branch is switched.
+    StepDef("commit_queue", "wrap", StepType.MECHANICAL,
+            script_fn=_scope("commit-queue", with_covers=True)),
+]
+
+_CLOSE_STEPS: list[StepDef] = [
+    StepDef("land", "close", StepType.MECHANICAL, script_fn=_scope("land"),
+            requires=(ITEM_FINISHED,)),
+    StepDef("promote_backlog", "close", StepType.MECHANICAL,
+            script_fn=_scope("promote-backlog", with_covers=True), requires=("land",)),
+    StepDef("publish", "close", StepType.MECHANICAL, script_fn=_scope("publish"),
+            requires=("land",)),
+    StepDef("publish_blog", "close", StepType.MECHANICAL, script_fn=_scope("publish-blog"),
+            requires=("promote_backlog",)),
+]
+
+_WRAP_CLOSING: list[StepDef] = [
+    _wrap_step("handoff", "wrap-handoff.md"),
+]
+
+WRAP_STEPS: list[StepDef] = _WRAP_OPENING + _WRAP_CLOSING
+END_STEPS: list[StepDef] = _WRAP_OPENING + _CLOSE_STEPS + _WRAP_CLOSING
+
+# What each mechanical step printed that the final report repeats.
+_REPORTED = ("LANDED", "CLOSED_ITEM", "NOT_LANDED", "CARRIED", "PROMOTED_COUNT", "NOT_PROMOTED",
+             "PUBLISHED_COUNT", "NOT_PUBLISHED", "BLOG_PUBLISHED_COUNT", "BLOG_HELD",
+             "UNPUBLISHED", "UNPROMOTED_BACKLOG", "WARN", "MARKED_DONE")
+
+
+def stop_on_mechanical_error(step, ctx, result: dict) -> dict:
+    """In wrap and end a failed mechanical step stops the sequence, every time.
+
+    The engine's default retries a failed step and then marks it skipped and
+    carries on. Carrying on past a failed landing into publishing is exactly
+    what must not happen, so the failure is returned as the result. Running
+    the command again retries the step.
+    """
+    return {"ACTION": "error", "STEP": step.name, **result}
+
+
+def record_step_report(step, ctx, result: dict) -> None:
+    """Keep what a mechanical step reported, for the summary at the end."""
+    from progress import Progress
+    kept = "; ".join(f"{k}={result[k]}" for k in _REPORTED if result.get(k))
+    progress = Progress.load(ctx.workspace)
+    progress.set(f"report_{step.name}", kept or "ok")
+    progress.save(ctx.workspace)
+
+
+def sequence_report(command: str, workspace: Path) -> list[str]:
+    """One line per step of a finished wrap or end, and what to run next."""
+    from progress import Progress
+    progress = Progress.load(workspace)
+    lines = []
+    for step in PIPELINES[command]:
+        if progress.get(f"report_{step.name}"):
+            state = progress.get(f"report_{step.name}")
+        elif progress.is_done(step.name):
+            state = progress.get(step.name)
+        else:
+            state = "not run"
+        lines.append(f"STEP_{step.name.upper()}={state}")
+    troubled = [step.name for step in PIPELINES[command]
+                if any(mark in progress.get(f"report_{step.name}", "")
+                       for mark in ("NOT_PUBLISHED", "NOT_PROMOTED", "BLOG_HELD", "NOT_LANDED"))]
+    if troubled:
+        lines.append("ATTENTION=" + ",".join(troubled)
+                     + " reported something they could not do; tell the user what and why")
+    finished = progress.get(ITEM_FINISHED_ANSWER, "")
+    lines.append(f"ITEM_FINISHED={finished or 'unanswered'}")
+    lines.append("THEN=python3 " + str(Path(__file__).resolve()) + " continue"
+                 + ("   (scaffold the next item; do not begin it)" if finished == "yes"
+                    else "   (next session: continues the current item)"))
+    return lines
+
+
 PIPELINES: dict[str, list[StepDef]] = {
     "start": START_STEPS,
     "continue": CONTINUE_STEPS,
@@ -822,6 +943,8 @@ PIPELINES: dict[str, list[StepDef]] = {
     "next": NEXT_STEPS,
     "done": NEXT_STEPS,
     "find": FIND_STEPS,
+    "wrap": WRAP_STEPS,
+    "end": END_STEPS,
 }
 
 
@@ -911,6 +1034,10 @@ def main() -> int:
             print(f"ACTION=error\nERROR=step_blocked\nSTEP={step_name}\nREASON={response.block_reason or 'no reason'}")
             return 1
         else:
+            if step_name == ITEM_FINISHED and args.get("finished") not in ("yes", "no"):
+                print("ACTION=error\nERROR=answer_required\nSTEP=item_finished\n"
+                      "DETAIL=report this step with finished=yes or finished=no")
+                return 1
             err = apply_step_done(ctx.workspace, step_name,
                                   args.get("produced"),
                                   mechanical_steps=mechanical)
@@ -918,18 +1045,28 @@ def main() -> int:
                 for k, v in err.items():
                     print(f"{k}={v}")
                 return 1
+            if step_name == ITEM_FINISHED:
+                answered = Progress.load(ctx.workspace)
+                answered.set(ITEM_FINISHED_ANSWER, args["finished"])
+                answered.save(ctx.workspace)
         ctx.progress = Progress.load(ctx.workspace)
 
     if ctx.in_slot and ctx.slot_path and command in ("start", "continue"):
         _write_slot_occupant(ctx.slot_path)
 
     steps = PIPELINES[command]
+    sequence = command in ("wrap", "end")
     result = run_loop(
         steps, ctx,
-        on_mechanical_error=make_rebase_error_handler(),
+        on_mechanical_error=(stop_on_mechanical_error if sequence
+                             else make_rebase_error_handler()),
+        on_step_done=record_step_report if sequence else None,
         complete_summary=_complete_summary(command, ctx),
     )
     if result.get("ACTION") == "complete":
+        if sequence:
+            for line in sequence_report(command, ctx.workspace):
+                print(line)
         end_run(ctx.workspace)
         problem = start_made_no_branch(args) if command == "start" else ""
         if problem:

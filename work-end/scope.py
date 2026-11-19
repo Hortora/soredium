@@ -2,6 +2,9 @@
 """What one ceremony covers, and the follow-up actions limited to exactly that (#571).
 
     scope.py covered <workspace>            the canonical repos this ceremony covers
+    scope.py commit-queue <workspace> [covers=<ref>]
+                                            commit the queue file alone, if it changed
+    scope.py land <workspace>               land every item marked done; never the active item
     scope.py publish <workspace>            publish each of those that is ahead of its remote
     scope.py promote-backlog <workspace> [covers=<ref>]
                                             promote documents on a covered workspace's base
@@ -16,6 +19,12 @@ is the point of this module: left to wording, "all" has been read as every
 repo on the machine.
 
 Nothing is pushed except through canonical_sync.publish_base, which never forces.
+
+`land` fails loudly, because everything after it depends on it. The follow-up
+actions (publish, promote-backlog, publish-blog) do what they can and name what
+they could not (NOT_PUBLISHED=, NOT_PROMOTED=, BLOG_HELD=) with exit 0: one repo
+with expired credentials should not stop the handoff being written, and the
+sequence's final report repeats every such line under ATTENTION.
 """
 from __future__ import annotations
 
@@ -110,6 +119,58 @@ def promote_backlog(workspace: Path, covers: str = "") -> tuple[dict[str, int], 
     return promoted, failed
 
 
+def commit_queue(workspace: Path, covers: str = "") -> tuple[int, list[str]]:
+    """Commit the workspace's queue file, that path only, when it has changed.
+
+    Marking an item done rewrites the queue. Left uncommitted it stops the
+    ceremony, which will not land from a workspace with changes outside the
+    lifecycle files, and it is lost if the branch is switched.
+    """
+    import subprocess
+    workspace = Path(workspace)
+    changed = subprocess.run(["git", "-C", str(workspace), "status", "--porcelain", "--", ".queue"],
+                             capture_output=True, text=True).stdout.strip()
+    if not changed:
+        return 0, ["QUEUE_COMMITTED=unchanged"]
+    subprocess.run(["git", "-C", str(workspace), "add", "--", ".queue"],
+                   capture_output=True, text=True)
+    done = subprocess.run(
+        ["git", "-C", str(workspace), "commit", "-q",
+         "-m", "chore: queue records the item marked done",
+         "-m", ceremony._issue_trailer(covers, workspace), "--", ".queue"],
+        capture_output=True, text=True)
+    if done.returncode != 0:
+        return 1, ["ERROR=queue_commit_failed",
+                   "DETAIL=" + " ".join((done.stderr or done.stdout).split())[:300]]
+    return 0, ["QUEUE_COMMITTED=yes"]
+
+
+def land(workspace: Path) -> tuple[int, list[str]]:
+    """Land every item marked done, for the work end pipeline. Returns (exit code, lines).
+
+    The active item is never landed here: by the time the pipeline lands, a
+    finished item has been marked done, and an unfinished one must stay as it
+    is. Having nothing to land is not a failure. A stop that needs a person
+    (documents to promote, a squash review) is one ERROR line with everything
+    needed to act on it, so the pipeline halts instead of carrying on.
+    """
+    result = ceremony.close(Path(workspace), land_active=False)
+    if result.success:
+        lines = [l for l in ceremony.render(result) if not l.startswith(("ACTION=", "OFFER="))]
+        closed = ",".join(result.closed_items)
+        return 0, lines + [f"LANDED={closed or 'nothing'}"]
+    if result.unpromoted:
+        return 2, ["ERROR=promotion_needed",
+                   "UNPROMOTED=" + " ;; ".join(result.unpromoted),
+                   "PROMOTE_COMMANDS=" + " ;; ".join(result.promote_commands)]
+    if result.squash_review:
+        return 2, ["ERROR=squash_review_needed",
+                   "SQUASH_REVIEW=" + " ;; ".join(result.squash_review)]
+    if result.errors and result.errors[0].startswith("nothing to land"):
+        return 0, ["LANDED=nothing"]
+    return 1, ["ERROR=land_failed", "DETAIL=" + " ;; ".join(result.errors)]
+
+
 def _blog_modules():
     publish_dir = str(_here.parent / "publish-blog")
     if publish_dir not in sys.path:
@@ -151,6 +212,11 @@ def publish_blog(workspace: Path, routing_path: Path | None = None
         except SyncError as error:
             held[label] = error.detail
             continue
+        has_entries = subprocess.run(
+            ["git", "-C", str(canonical_project), "ls-tree", "--name-only", base, "docs/blog/"],
+            capture_output=True, text=True).stdout.strip()
+        if not has_entries:
+            continue        # nothing has landed there to publish
         if not blog_routing.source_identity(canonical_project):
             held[label] = "project has no remote to identify it by; nothing is routed on a guess"
             continue
@@ -228,8 +294,9 @@ def publish_blog(workspace: Path, routing_path: Path | None = None
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) < 2 or args[0] not in ("covered", "publish", "promote-backlog", "publish-blog"):
-        print("usage: scope.py <covered|publish|promote-backlog|publish-blog> <workspace> "
+    if len(args) < 2 or args[0] not in ("covered", "commit-queue", "land", "publish",
+                                        "promote-backlog", "publish-blog"):
+        print("usage: scope.py <covered|land|publish|promote-backlog|publish-blog> <workspace> "
               "[covers=<ref>] [routing=<path>]", file=sys.stderr)
         return 2
     command, workspace = args[0], Path(args[1])
@@ -237,6 +304,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR=workspace_not_found:{workspace}")
         return 1
     options = dict(a.split("=", 1) for a in args[2:] if "=" in a)
+    if command == "commit-queue":
+        code, lines = commit_queue(workspace, options.get("covers", ""))
+        for line in lines:
+            print(line)
+        return code
+    if command == "land":
+        code, lines = land(workspace)
+        for line in lines:
+            print(line)
+        return code
     if command == "covered":
         for repo in covered(workspace):
             print(f"COVERED={repo}")
@@ -248,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         for repo, why in failed.items():
             print(f"NOT_PUBLISHED={repo} reason={canonical_sync.redact(why)}")
         print(f"PUBLISHED_COUNT={len(pushed)}")
-        return 1 if failed else 0
+        return 0
     if command == "publish-blog":
         routing = Path(options["routing"]).expanduser() if options.get("routing") else None
         posted, held = publish_blog(workspace, routing)
@@ -257,14 +334,14 @@ def main(argv: list[str] | None = None) -> int:
         for what, why in held.items():
             print(f"BLOG_HELD={what} reason={why}")
         print(f"BLOG_PUBLISHED_COUNT={sum(posted.values())}")
-        return 1 if held else 0
+        return 0
     promoted, failed = promote_backlog(workspace, options.get("covers", ""))
     for pair, count in promoted.items():
         print(f"PROMOTED={pair} documents={count}")
     for pair, why in failed.items():
         print(f"NOT_PROMOTED={pair} reason={why}")
     print(f"PROMOTED_COUNT={sum(promoted.values())}")
-    return 1 if failed else 0
+    return 0
 
 
 if __name__ == "__main__":
