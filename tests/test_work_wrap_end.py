@@ -503,6 +503,33 @@ class TestEndInASlotUsingItsRootQueue(TestEndInANumberedSlot):
         queue_home.mark(built["slot"])
         return built
 
+    def _run(self, slot, *extra):
+        """As the parent, but told the queue is the workspace clone's inherited
+        file, which is what an unswitched slot's context reports. A slot using
+        its root queue must not be led there."""
+        ws, proj = slot["clones"]["wsp"], slot["clones"]["agency"]
+        branch = g(ws, "symbolic-ref", "--short", "HEAD")
+        done = subprocess.run(
+            ["python3", WORK, "end", f"workspace={ws}", f"project={proj}", f"branch={branch}",
+             "base_branch=main", f"on_main={'yes' if branch == 'main' else 'no'}", "in_slot=yes",
+             f"slot_path={slot['slot']}", f"plan_path={ws / '.queue'}",
+             "covers=o/r#1", "issue_repo=O/r", *extra],
+            capture_output=True, text=True, cwd=str(ws))
+        out = {"_raw": done.stdout + done.stderr}
+        for line in done.stdout.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                out[key] = value
+        return out
+
+    def test_the_context_resolved_inside_the_workspace_clone_names_the_root_queue(self, slot):
+        done = subprocess.run(["python3", str(ROOT / "project" / "ctx.py")],
+                              capture_output=True, text=True, cwd=str(slot["clones"]["wsp"]))
+        found = dict(l.split("=", 1) for l in done.stdout.splitlines() if "=" in l)
+        assert Path(found["PLAN_PATH"]).resolve() == (slot["slot"] / ".queue").resolve(), \
+            done.stdout + done.stderr
+        assert "o/r#1" in done.stdout and "issue-77-elsewhere" not in done.stdout
+
     def test_the_queue_stays_at_the_slot_root(self, slot):
         self._drive(slot)
         assert read_queue(slot["slot"], exact=True).items[0].ref == "o/r#1"

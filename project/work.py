@@ -134,6 +134,18 @@ def _queue_dir(args: dict[str, str]) -> Path:
     return workspace
 
 
+def _decided_queue_file(args: dict[str, str]):
+    """The queue file every step of the pipeline writes to. Where queue_io
+    decides the location (#577) that wins over whatever path was handed in,
+    so no step can be led to a workspace clone's inherited file."""
+    from queue_io import queue_dir
+    workspace = Path(args.get("workspace", "."))
+    decided = queue_dir(workspace)
+    if decided != workspace:
+        return decided / ".queue"
+    return Path(args["plan_path"]) if args.get("plan_path") else None
+
+
 # What the user can choose between when the two repos disagree and no repair
 # is safe. Named so a session presents choices instead of reaching for git.
 ALIGNMENT_OPTIONS: dict[str, str] = {
@@ -508,7 +520,7 @@ def build_context(args: dict[str, str]) -> WorkContext:
         covers=args.get("covers", ""),
         issue_repo=args.get("issue_repo", ""),
         progress=progress,
-        plan_path=Path(args["plan_path"]) if args.get("plan_path") else None,
+        plan_path=_decided_queue_file(args),
         slot_path=Path(args["slot_path"]) if args.get("slot_path") else None,
         family_root=Path(args["family_root"]) if args.get("family_root") else None,
         command=args.get("command", ""),
