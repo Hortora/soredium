@@ -222,6 +222,84 @@ def apply_alignment(args: dict[str, str]) -> tuple[dict[str, str], list[str], bo
     return aligned, lines, False
 
 
+def _plan_manager():
+    slot_dir = str(_PLAN_MANAGER.parent)
+    if slot_dir not in sys.path:
+        sys.path.insert(0, slot_dir)
+    import plan_manager
+    return plan_manager
+
+
+def _named_start(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
+    """`start issue_n=N`: the user named the issue, so nothing is chosen here, but
+    the queue must say what is being worked on before anything is branched (#561).
+
+    The item is added when the queue lacks it, made active, and becomes what the
+    work covers. Anything that would displace other work, or reopen finished
+    work, stops with a decision and changes nothing.
+    """
+    from queue_io import read_queue
+    queue_dir = _queue_dir(args)
+    queue = read_queue(queue_dir)
+    number = args["issue_n"].lstrip("#")
+    repo = args.get("issue_repo") or (queue.state.issue_repo if queue else "") \
+        or args.get("owner_repo", "")
+    if queue is None or not repo or not number.isdigit():
+        return args, [], False  # nothing to register against; the pipeline scaffolds it
+    pm = _plan_manager()
+    wanted = pm.IssueRef.parse(f"{repo}#{number}")
+    same = lambda item: pm.IssueRef.parse(item.ref) == wanted  # noqa: E731
+    item = next((i for i in queue.items if same(i)), None)
+    active = queue.active_item()
+    lines = ["ROUTE_REASON=named_start", f"ISSUE={wanted}"]
+
+    def decision(reason: str, detail: str, options: str):
+        return args, lines[1:] + ["ACTION=decision", f"DECISION={reason}",
+                                  f"DETAIL={detail}", f"OPTIONS={options}"], True
+
+    if item is not None and item.completed:
+        return decision("named_issue_already_closed",
+                        f"{wanted} is closed in the queue",
+                        "add_it_again_as_new_work,pick_another_issue")
+    if item is not None and item.done_branch:
+        return decision("named_issue_done_awaiting_close",
+                        f"{wanted} is finished on {item.done_branch} and waiting for work end",
+                        "work_end,keep_working_on_its_branch")
+    if active is not None and not same(active):
+        return decision("another_item_active",
+                        f"{active.ref} is active; starting {wanted} would displace it",
+                        "pause_current_then_start,continue_current")
+
+    routed = dict(args)
+    if item is not None and item.active and queue.state.branch:
+        routed["command"] = "continue"
+        routed.pop("issue_n", None)
+        return routed, ["ROUTE_REASON=named_issue_already_started", f"ISSUE={wanted}",
+                        "COMMAND=continue"], False
+
+    queue_path = queue_dir / ".queue"
+    try:
+        if item is None:
+            # The user named the issue: no lookup, no network. An item needs a
+            # title to be written and read back as itself.
+            pm.append_to_queue(queue_path, [pm.QueueItem(
+                ref=wanted, title=args.get("issue_title") or f"issue {number}")],
+                skip_state_check=True)
+            lines.append(f"QUEUED={wanted}")
+        activated = pm.activate(queue_path, ref=str(wanted))
+    except (pm.ActivateError, ValueError) as e:
+        return args, lines + ["ACTION=error", "ERROR=named_start_failed", f"DETAIL={e}"], True
+    if not activated["already"]:
+        lines.append(f"ACTIVATED={wanted}")
+    routed["issue_n"] = number
+    routed["issue_repo"] = repo
+    routed["covers"] = str(wanted)
+    if activated.get("title"):
+        routed.setdefault("issue_title", activated["title"])
+    lines.append("COMMAND=start")
+    return routed, lines, False
+
+
 def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     """Turn `continue`/`next` into the pipeline the queue calls for.
 
@@ -234,7 +312,7 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     if command not in ROUTED or args.get("step_done"):
         return args, [], False
     if command == "start" and args.get("issue_n"):
-        return args, [], False  # a named issue is an instruction, not a question
+        return _named_start(args)
     from queue_io import read_queue
     queue_dir = _queue_dir(args)
     queue = read_queue(queue_dir)

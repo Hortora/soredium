@@ -662,11 +662,16 @@ class TestStartIsTheSameCommand:
         assert (args["command"], args["issue_n"]) == ("start", "289")
         assert "ACTIVATED=o/r#289" in lines
 
-    def test_start_with_a_named_issue_is_never_rerouted(self, tmp_path):
+    def test_start_with_a_named_issue_starts_that_issue_and_no_other(self, tmp_path):
+        """A named issue is never rerouted to another item; since #561 it is
+        made the active item so the queue says what is being worked on."""
         from work import apply_route
-        given = self._args(tmp_path, issue_n="290")
-        assert apply_route(dict(given)) == (given, [], False)
-        assert (tmp_path / ".queue").read_text() == QUEUE_TEXT
+        from queue_io import read_queue
+        args, lines, stop = apply_route(self._args(tmp_path, issue_n="290"))
+        assert not stop
+        assert args["command"] == "start" and args["issue_n"] == "290"
+        assert read_queue(tmp_path).active_item().ref == "o/r#290"
+        assert "ACTIVATED=o/r#290" in lines and "ACTIVATED=o/r#289" not in lines
 
     def test_start_on_the_branch_of_an_open_item_continues_it(self, tmp_path):
         from work import apply_route
@@ -681,3 +686,127 @@ class TestStartIsTheSameCommand:
         args, lines, stop = apply_route(self._args(tmp_path, stack_depth="1"))
         assert (args["command"], stop) == ("resume", False)
         assert (tmp_path / ".queue").read_text() == QUEUE_TEXT
+
+
+class TestNamedStartRegistersTheIssue:
+    """`work start #N` puts N in the queue, active, and covered, before branching (#561)."""
+
+    DRAINED = ("- [x] o/r#553 — Earlier work\n\n## State\nbranch: issue-553-x\n"
+               "issue-repo: O/r\nstatus: drained\ncovers: o/r#553\n")
+
+    def _args(self, tmp_path, text, branch="main", **extra):
+        (tmp_path / ".queue").write_text(text)
+        return {"command": "start", "workspace": str(tmp_path), "project": str(tmp_path),
+                "branch": branch, "base_branch": "main",
+                "on_main": "yes" if branch == "main" else "no", **extra}
+
+    def _queue(self, tmp_path):
+        from queue_io import read_queue
+        return read_queue(tmp_path)
+
+    def test_the_observed_failure_issue_absent_and_covers_stale(self, tmp_path):
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, self.DRAINED, issue_n="551"))
+
+        assert not stop
+        queue = self._queue(tmp_path)
+        assert queue.active_item().ref == "o/r#551"
+        assert queue.state.covers == "o/r#551"
+        assert queue.state.status == "active"
+        assert args["command"] == "start"
+        assert args["covers"] == "o/r#551"
+        assert args["issue_n"] == "551" and args["issue_repo"] == "O/r"
+        assert "QUEUED=o/r#551" in lines and "ACTIVATED=o/r#551" in lines
+        assert lines[-1] == "COMMAND=start"
+        assert [i.ref for i in queue.items if i.completed] == ["o/r#553"]
+
+    def test_title_given_by_the_caller_is_kept(self, tmp_path):
+        from work import apply_route
+        apply_route(self._args(tmp_path, self.DRAINED, issue_n="551", issue_title="Fix hooks"))
+        assert self._queue(tmp_path).active_item().title == "Fix hooks"
+
+    def test_hash_prefix_on_the_number_is_accepted(self, tmp_path):
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, self.DRAINED, issue_n="#551"))
+        assert not stop and self._queue(tmp_path).active_item().ref == "o/r#551"
+
+    def test_an_item_added_without_a_title_reads_back_as_itself(self, tmp_path):
+        from work import apply_route
+        apply_route(self._args(tmp_path, self.DRAINED, issue_n="551"))
+        item = self._queue(tmp_path).active_item()
+        assert (item.ref, item.title) == ("o/r#551", "issue 551")
+
+    def test_no_network_is_used(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        from work import apply_route
+        real = sp.run
+        def guarded(cmd, *a, **k):
+            assert "gh" not in (cmd[0] if isinstance(cmd, (list, tuple)) else cmd), cmd
+            return real(cmd, *a, **k)
+        monkeypatch.setattr(sp, "run", guarded)
+        args, lines, stop = apply_route(self._args(tmp_path, self.DRAINED, issue_n="551"))
+        assert not stop
+
+    def test_an_open_item_already_queued_is_activated_not_duplicated(self, tmp_path):
+        from work import apply_route
+        text = "- [ ] o/r#551 — Queued earlier\n" + self.DRAINED
+        args, lines, stop = apply_route(self._args(tmp_path, text, issue_n="551"))
+        queue = self._queue(tmp_path)
+        assert not stop
+        assert [i.ref for i in queue.items].count("o/r#551") == 1
+        assert queue.active_item().ref == "o/r#551"
+        assert "QUEUED=o/r#551" not in lines
+        assert args.get("issue_title") == "Queued earlier"
+
+    def test_the_issue_repo_is_matched_whatever_its_case(self, tmp_path):
+        from work import apply_route
+        text = "- [ ] o/r#551 — Queued earlier\n" + self.DRAINED
+        apply_route(self._args(tmp_path, text, issue_n="551", issue_repo="O/R"))
+        assert [i.ref for i in self._queue(tmp_path).items].count("o/r#551") == 1
+
+    @pytest.mark.parametrize("text, reason", [
+        ("- [ ] o/r#7 — Other ← active\n\n## State\nbranch: issue-7-x\nissue-repo: O/r\n"
+         "status: active\ncovers: o/r#7\n", "another_item_active"),
+        ("- [x] o/r#551 — Done long ago\n\n## State\nbranch: \nissue-repo: O/r\n"
+         "status: drained\n", "named_issue_already_closed"),
+        ("- [ ] o/r#551 — Finished ← done on issue-551-x\n\n## State\nbranch: \n"
+         "issue-repo: O/r\nstatus: active\n", "named_issue_done_awaiting_close"),
+    ])
+    def test_decisions_change_nothing(self, tmp_path, text, reason):
+        from work import apply_route
+        args, lines, stop = apply_route(self._args(tmp_path, text, issue_n="551"))
+        assert stop
+        assert "ACTION=decision" in lines and f"DECISION={reason}" in lines
+        assert any(l.startswith("OPTIONS=") and "," in l for l in lines)
+        assert (tmp_path / ".queue").read_text() == text
+
+    def test_naming_the_item_already_in_progress_continues_it(self, tmp_path):
+        from work import apply_route
+        text = ("- [ ] o/r#551 — In progress ← active\n\n## State\nbranch: issue-551-x\n"
+                "issue-repo: O/r\nstatus: active\ncovers: o/r#551\n")
+        args, lines, stop = apply_route(self._args(tmp_path, text, branch="issue-551-x",
+                                                   issue_n="551"))
+        assert not stop
+        assert args["command"] == "continue" and "issue_n" not in args
+        assert "COMMAND=continue" in lines
+        assert (tmp_path / ".queue").read_text() == text
+
+    def test_active_but_never_started_item_is_started(self, tmp_path):
+        from work import apply_route
+        text = ("- [ ] o/r#551 — Not begun ← active\n\n## State\nbranch: \n"
+                "issue-repo: O/r\nstatus: active\ncovers: o/r#551\n")
+        args, lines, stop = apply_route(self._args(tmp_path, text, issue_n="551"))
+        assert not stop and args["command"] == "start"
+        assert "QUEUED=o/r#551" not in lines and "ACTIVATED=o/r#551" not in lines
+
+    def test_without_a_queue_the_start_runs_as_given(self, tmp_path):
+        from work import apply_route
+        given = {"command": "start", "workspace": str(tmp_path), "project": str(tmp_path),
+                 "branch": "main", "base_branch": "main", "on_main": "yes", "issue_n": "551"}
+        assert apply_route(dict(given)) == (given, [], False)
+
+    def test_a_follow_up_call_registers_nothing(self, tmp_path):
+        from work import apply_route
+        args = self._args(tmp_path, self.DRAINED, issue_n="551", step_done="branch_name")
+        assert apply_route(args)[1:] == ([], False)
+        assert (tmp_path / ".queue").read_text() == self.DRAINED
