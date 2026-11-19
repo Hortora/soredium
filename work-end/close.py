@@ -494,13 +494,42 @@ def slot_strays(slot_dir: Path, covered: set) -> list[tuple[Path, str, int]]:
     return strays
 
 
-def carry_strays(slot_dir: Path, covered: set) -> tuple[dict, dict]:
+def diverged_bases(slot_dir: Optional[Path]) -> set:
+    """Slot repos whose own base branch has diverged from canonical, as it stands now.
+
+    Taken before the ceremony lands anything: afterwards every clone base that
+    was merely ahead looks diverged too, because canonical has just moved.
+    """
+    if slot_dir is None:
+        return set()
+    from slot_core import get_all_slot_repos
+    found = set()
+    for name in get_all_slot_repos(slot_dir):
+        repo = slot_dir / name
+        try:
+            if canonical_sync.follow(repo) == "diverged":
+                found.add(repo.resolve())
+        except SyncError:
+            continue
+    return found
+
+
+def carry_strays(slot_dir: Path, covered: set, diverged: Optional[set] = None) -> tuple[dict, dict]:
     """Land every stray in canonical. Returns (carried, not_landed), keyed "repo:branch"."""
     carried: dict[str, int] = {}
     not_landed: dict[str, str] = {}
     for repo, branch, count in slot_strays(slot_dir, covered):
         key = f"{repo.name}:{branch}"
         try:
+            # A clone's own base branch is carried only when it simply holds extra
+            # commits. One that has diverged from canonical (commits on both sides:
+            # an old clone, or history rewritten since it was made) is not replayed
+            # onto canonical; that would re-apply its whole divergent history.
+            if branch == _get_base_branch(repo) and repo.resolve() in (diverged or set()):
+                not_landed[key] = (f"{branch} has diverged from canonical ({count} commits "
+                                   f"canonical lacks, and canonical has commits it lacks); "
+                                   f"not carried. Compare the two by hand")
+                continue
             canonical_sync.land(repo, branch)
             carried[key] = count
         except SyncError as error:
@@ -965,6 +994,8 @@ def close(workspace: Path, land_active: bool = True) -> CloseResult:
     if misaligned:
         return CloseResult(success=False, errors=misaligned)
 
+    already_diverged = diverged_bases(_slot_dir_of(workspace))
+
     queue = read_queue(workspace)
     entries = batch_entries(workspace, queue) if queue else []
     repos = [repo for repo, *_ in discover_repo_topology(workspace)]
@@ -1121,7 +1152,7 @@ def close(workspace: Path, land_active: bool = True) -> CloseResult:
         not_landed: dict = {}
         if slot_dir is not None:
             carried, not_landed = carry_strays(
-                slot_dir, {(t.repo, t.branch) for t in targets})
+                slot_dir, {(t.repo, t.branch) for t in targets}, diverged=already_diverged)
         # A slot with anything still stranded in it is not ready to archive.
         # A permanent clone (#553) is never archived: it is where the repo's
         # work continues, so a drained queue leaves it exactly as it is.

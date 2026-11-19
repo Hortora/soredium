@@ -918,12 +918,23 @@ def sequence_preflight(args: dict[str, str]) -> tuple[list[str], bool]:
     branch = args.get("branch", "")
     base = args.get("base_branch", "main")
     active = queue.active_item() if queue else None
-    if active is not None and queue.state.branch and branch != queue.state.branch:
-        on = "the base branch" if (args.get("on_main") == "yes" or branch == base) else branch
-        return ["ACTION=decision", "DECISION=active_branch_not_checked_out",
-                f"DETAIL={active.ref} is being worked on {queue.state.branch}, but this "
-                f"checkout is on {on}",
-                "OPTIONS=checkout_the_active_branch_then_retry,correct_the_queue_then_retry"], True
+    if active is not None and queue.state.branch:
+        # Judged from both repos, and before any alignment repair: when neither
+        # is on the branch the queue names, nothing is switched to make them agree.
+        from git_util import git
+        here = {branch}
+        for key in ("project", "workspace"):
+            if args.get(key) and Path(args[key]).is_dir():
+                head = git(Path(args[key]), "symbolic-ref", "--short", "-q", "HEAD")
+                if head.returncode == 0:
+                    here.add(head.stdout.strip())
+        here.discard("")
+        if queue.state.branch not in here:
+            return ["ACTION=decision", "DECISION=active_branch_not_checked_out",
+                    f"DETAIL={active.ref} is being worked on {queue.state.branch}, but the "
+                    f"checkouts here are on {', '.join(sorted(here)) or 'no branch'}",
+                    "OPTIONS=checkout_the_active_branch_then_retry,"
+                    "correct_the_queue_then_retry"], True
 
     if command == "end" and (queue is None or (active is None and not queue.done_items())):
         # Nothing here to land. The queue lives on the working branch, so a
@@ -959,6 +970,14 @@ def sequence_preflight(args: dict[str, str]) -> tuple[list[str], bool]:
         except Exception as error:       # the scope line is information, never a blocker
             lines.append(f"SCOPE=unknown ({error})")
     return lines, False
+
+
+def sequence_branch_check(args: dict[str, str]) -> tuple[list[str], bool]:
+    """The part of the preflight that must come before anything is repaired:
+    is the branch the queue names checked out anywhere here?"""
+    lines, stop = sequence_preflight(args)
+    return (lines, True) if stop and "DECISION=active_branch_not_checked_out" in lines \
+        else ([], False)
 
 
 def stop_on_mechanical_error(step, ctx, result: dict) -> dict:
@@ -1057,6 +1076,11 @@ def main() -> int:
         return 1
     guard_lines, stop = apply_clone_guard(args)
     for line in guard_lines:
+        print(line)
+    if stop:
+        return 0
+    refused, stop = sequence_branch_check(args)
+    for line in refused:
         print(line)
     if stop:
         return 0

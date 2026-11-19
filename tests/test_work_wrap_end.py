@@ -347,3 +347,30 @@ class TestNoLostWork:
             "mark_done=done\nland=done\npublish=done\nhandoff=done\n")
         result = run(world, "end")
         assert result["ACTION"] == "review", "a stale progress file must not skip the sequence"
+
+
+class TestNothingIsRepairedWhenTheQueueDisagrees:
+
+    def test_project_on_a_hand_made_branch_and_workspace_on_main_changes_nothing(self, world):
+        """The alignment repair would move the workspace onto the project's branch.
+        It must not, when the queue says the work is on a third branch."""
+        g(world["workspace"], "checkout", "-q", "main")
+        write_queue(world["workspace"], Queue(
+            items=[QueueItem(ref="o/r#1", title="First", completed=False, active=True)],
+            state=QueueState(branch="issue-7-somewhere-else", issue_repo="O/r", status="active")))
+        g(world["workspace"], "add", ".queue")
+        g(world["workspace"], "commit", "-q", "-m", "queue on main")
+        g(world["project"], "checkout", "-q", "-b", "wip/hand-made")
+        before = {k: (g(world[k], "symbolic-ref", "--short", "HEAD"), g(world[k], "rev-parse", "HEAD"),
+                      g(world[k], "for-each-ref", "refs/heads"))
+                  for k in ("project", "workspace")}
+
+        result = run(world, "end")
+
+        assert result["ACTION"] == "decision", result["_raw"]
+        assert result["DECISION"] == "active_branch_not_checked_out"
+        assert "ALIGNMENT_REPAIRED" not in result
+        after = {k: (g(world[k], "symbolic-ref", "--short", "HEAD"), g(world[k], "rev-parse", "HEAD"),
+                     g(world[k], "for-each-ref", "refs/heads"))
+                 for k in ("project", "workspace")}
+        assert after == before
