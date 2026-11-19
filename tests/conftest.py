@@ -34,6 +34,13 @@ for _name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME",
               "GIT_COMMITTER_EMAIL", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
     os.environ.pop(_name, None)
 
+# The worklog too (Hortora/soredium#576). The per-test fixture below gives each
+# test its own database, but it is set per test: an environment copied at module
+# import (`GIT_ENV = {**os.environ, ...}`) or used by a wider-scoped fixture never
+# saw it, and wrote to the real ~/.hortora/worklog.db. This default covers those.
+SESSION_WORKLOG_DB = str(Path(tempfile.mkdtemp(prefix="soredium-test-worklog-")) / "worklog.db")
+os.environ["HORTORA_WORKLOG_DB"] = SESSION_WORKLOG_DB
+
 # Pin the repo's own directories at the front of sys.path so that
 # imports always resolve to the code under test, not to the installed
 # copies under ~/.claude/skills/.

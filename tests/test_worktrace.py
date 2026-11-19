@@ -185,3 +185,33 @@ class TestWorkEndIsTraced:
         [ceremony] = events("close-ceremony")
         assert ceremony["success"] is False and ceremony["errors"]
         assert not events("publish") and not events("land")
+
+
+class TestTestsNeverReachTheRealWorklog:
+    """Hortora/soredium#576."""
+
+    def test_the_session_default_is_a_temp_database(self):
+        from tests.conftest import SESSION_WORKLOG_DB
+        assert SESSION_WORKLOG_DB != worklog.DEFAULT_DB
+        assert "soredium-test-worklog-" in SESSION_WORKLOG_DB
+
+    def test_an_environment_copied_at_import_is_already_isolated(self):
+        """test_safe_promotion.py builds its subprocess environment at module import."""
+        from tests import test_safe_promotion
+        copied = test_safe_promotion.GIT_ENV.get("HORTORA_WORKLOG_DB", "")
+        assert copied and copied != worklog.DEFAULT_DB
+
+    def test_without_the_per_test_variable_a_record_still_misses_the_real_database(
+            self, tmp_path, monkeypatch):
+        from tests.conftest import SESSION_WORKLOG_DB
+        monkeypatch.setenv("HORTORA_WORKLOG_DB", SESSION_WORKLOG_DB)
+        marker = f"isolation-probe-{tmp_path.name}"
+        assert worktrace.record(marker, repo=tmp_path)
+        real = Path(worklog.DEFAULT_DB)
+        if real.exists():
+            conn = sqlite3.connect(f"file:{real}?mode=ro", uri=True)
+            try:
+                assert conn.execute("SELECT count(*) FROM events WHERE event_type=?",
+                                    (marker,)).fetchone()[0] == 0
+            finally:
+                conn.close()
