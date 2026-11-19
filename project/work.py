@@ -1262,7 +1262,7 @@ def main() -> int:
             for repo in dict.fromkeys((str(ctx.project), str(ctx.workspace))):
                 branch = _branch_of(repo)
                 if branch:
-                    worktrace.work_started(repo, branch, issue=args.get("covers", ""),
+                    worktrace.work_started(repo, branch, covers=args.get("covers", ""),
                                            location="slot" if ctx.in_slot else "primary")
         if sequence:
             for line in sequence_report(command, ctx.workspace):

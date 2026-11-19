@@ -315,3 +315,42 @@ class TestAWorkspaceKeepsItsQueueUntilItIsMovedOnPurpose:
         write_queue(workspace, queue("o/r#1", active="o/r#1"))
         (workspace / ".queue").write_text("- [ ] O/z#99: Stray\n\n## State\nstatus: active\n")
         assert read_queue(workspace).active_item().ref == "o/r#1"
+
+
+class TestInheritedFilesAreNotThisAreasWork:
+    """A marked area with an empty root queue: nothing falls back to what a
+    workspace clone inherited, and nothing judges or rewrites it (#577 review)."""
+
+    @pytest.fixture
+    def area(self, tmp_path):
+        area = tmp_path / "slots" / "9"
+        ws = area / "wsp"
+        ws.mkdir(parents=True)
+        (area / ".slot").write_text("# Slot 9\n")
+        (ws / ".workspace").write_text("project: x\n")
+        _git(ws, "init", "-q", "-b", "main")
+        (ws / ".plan").write_text("- [ ] O/r#7: Old\n\n## State\nbranch: issue-7-old\nstate: active\n")
+        write_queue(ws, queue("o/r#1", active="o/r#1", branch="issue-1-a"))
+        (ws / ".plan.bak").unlink(missing_ok=True)
+        (ws / ".plan").write_text("- [ ] O/r#7: Old\n\n## State\nbranch: issue-7-old\nstate: active\n")
+        _git(ws, "add", "-A")
+        _git(ws, "commit", "-q", "-m", "inherited files")
+        queue_home.mark(area)
+        return area
+
+    def test_plan_manager_detect_finds_nothing(self, area):
+        sys.path.insert(0, str(ROOT / "work-slot"))
+        import plan_manager
+        assert plan_manager.detect(area / "wsp") is None
+
+    def test_the_health_check_never_rewrites_the_inherited_plan(self, area):
+        import work_health
+        before = tree(area)
+        assert work_health.check_plan_state(str(area / "wsp"), str(area / "wsp"),
+                                            owner_repo="O/r") == "CHECK=plan_state STATUS=ok"
+        assert tree(area) == before
+
+    def test_inherited_files_are_not_called_stale_scaffold(self, area):
+        import work_health
+        line = work_health.check_stale_scaffold_on_main(str(area / "wsp"), str(area / "wsp"))
+        assert ".queue" not in line and ".plan" not in line

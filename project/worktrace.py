@@ -94,7 +94,7 @@ def work_started(repo, branch: str, issue: str = "", covers: str = "",
     """Make sure the work item for this branch exists, whichever path started it."""
     try:
         worklog = _worklog()
-        issue_repo, number = _issue_parts(issue)
+        issue_repo, number = _issue_parts((issue or covers).split(",")[0].strip())
         conn = worklog.connect()
         try:
             open_item = conn.execute(
@@ -107,6 +107,8 @@ def work_started(repo, branch: str, issue: str = "", covers: str = "",
                                           work_path=work_path or None)
         finally:
             conn.close()
+        if covers and "," in covers:
+            record("work-covers", repo=repo, branch=branch, covers=covers)
         return True
     except Exception as error:
         _warn("work-start", error)

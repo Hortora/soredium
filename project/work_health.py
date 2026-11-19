@@ -181,7 +181,10 @@ def check_stale_scaffold_on_main(project, workspace, base_branch="main"):
                         f"DETAIL=workspace main has stale scaffold: {', '.join(stale)} — run cleanup-scaffold")
             return "CHECK=stale_scaffold_on_main STATUS=ok"
     stale = []
+    inherited = (".queue", ".plan") if _queue_is_elsewhere(ws) else ()
     for name in (".queue", ".plan", ".meta", ".epic", "JOURNAL.md", ".execute-progress"):
+        if name in inherited:
+            continue
         if (ws / name).exists():
             stale.append(name)
     if stale:
@@ -260,7 +263,17 @@ def check_branch_closure(project, workspace):
     return "CHECK=branch_closure STATUS=ok"
 
 
+def _queue_is_elsewhere(workspace) -> bool:
+    """The area keeps its queue at its root or in a notes store (#577): any
+    .queue or .plan in this workspace was inherited from the repo and is not
+    this area's work. It is never judged, rewritten or called stale."""
+    from queue_io import queue_dir
+    return queue_dir(Path(workspace)) != Path(workspace)
+
+
 def check_plan_state(project, workspace, owner_repo=None):
+    if _queue_is_elsewhere(workspace):
+        return "CHECK=plan_state STATUS=ok"
     plan_path = Path(workspace) / ".plan"
     if not plan_path.exists():
         return "CHECK=plan_state STATUS=ok"

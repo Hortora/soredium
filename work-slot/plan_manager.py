@@ -1194,9 +1194,12 @@ def detect(workspace_path: Path) -> dict | None:
     if _project_dir not in _sys.path:
         _sys.path.insert(0, _project_dir)
     from queue_io import queue_dir
-    queue_path = queue_dir(workspace_path) / ".queue"
+    decided = queue_dir(workspace_path)
+    queue_path = decided / ".queue"
     if queue_path.exists():
         return _detect_from_queue(queue_path, workspace_path)
+    if decided != Path(workspace_path) and not (decided / ".plan").exists():
+        return None      # the area's queue is elsewhere and empty: an inherited .plan is not it
 
     plan_path = workspace_path / ".plan"
     if not plan_path.exists():

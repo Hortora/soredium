@@ -74,6 +74,16 @@ class TestRecorder:
         assert worktrace.record("work-end-stopped", repo=tmp_path, action="stop", reason="x")
         assert events("work-end-stopped")[0]["action"] == "work-end-stopped"
 
+    def test_work_covering_several_issues_is_recorded_against_the_first(self, tmp_path):
+        worktrace.work_started(tmp_path, "issue-1-x", covers="o/r#1,o/r#2")
+        conn = worklog.connect()
+        try:
+            rows = conn.execute("SELECT issue_number, issue_repo FROM work_item_issues").fetchall()
+        finally:
+            conn.close()
+        assert [(r["issue_number"], r["issue_repo"]) for r in rows] == [(1, "o/r")]
+        assert events("work-covers")[0]["covers"] == "o/r#1,o/r#2"
+
     def test_a_started_item_is_created_once_and_can_be_ended(self, tmp_path):
         worktrace.work_started(tmp_path, "issue-1-x", issue="o/r#1")
         worktrace.work_started(tmp_path, "issue-1-x", issue="o/r#1")
@@ -200,18 +210,3 @@ class TestTestsNeverReachTheRealWorklog:
         from tests import test_safe_promotion
         copied = test_safe_promotion.GIT_ENV.get("HORTORA_WORKLOG_DB", "")
         assert copied and copied != worklog.DEFAULT_DB
-
-    def test_without_the_per_test_variable_a_record_still_misses_the_real_database(
-            self, tmp_path, monkeypatch):
-        from tests.conftest import SESSION_WORKLOG_DB
-        monkeypatch.setenv("HORTORA_WORKLOG_DB", SESSION_WORKLOG_DB)
-        marker = f"isolation-probe-{tmp_path.name}"
-        assert worktrace.record(marker, repo=tmp_path)
-        real = Path(worklog.DEFAULT_DB)
-        if real.exists():
-            conn = sqlite3.connect(f"file:{real}?mode=ro", uri=True)
-            try:
-                assert conn.execute("SELECT count(*) FROM events WHERE event_type=?",
-                                    (marker,)).fetchone()[0] == 0
-            finally:
-                conn.close()

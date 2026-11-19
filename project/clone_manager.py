@@ -57,8 +57,9 @@ def create_clone(family_root: Path, repo: str) -> dict[str, str]:
       .slot          slot file (slot_number=None)
       .permanent     marker file
 
-    The workspace clone keeps its lifecycle files (.queue, HANDOFF.md)
-    so the queue and handoff travel with the base branch.
+    The clone's one queue is at its root, copied from the repo's backlog (#577).
+    The workspace clone keeps the files it inherited (.queue, HANDOFF.md);
+    the handoff travels with its base branch, the inherited .queue is not read.
     """
     canonical = family_root / repo
     if not canonical.is_dir() or not (canonical / ".git").exists():
@@ -92,12 +93,12 @@ def create_clone(family_root: Path, repo: str) -> dict[str, str]:
     # with the repo's own queue; that backlog becomes the clone's queue by copy,
     # and the inherited file is left as it is. If the choice is not clear the
     # clone is left unswitched and says so; `queue_home.py adopt` settles it.
-    import queue_home
     try:
+        import queue_home
         queue_home.adopt(target, apply=True)
         queue = "root"
-    except queue_home.AdoptError as error:
-        queue = f"not_switched: {error.detail}"
+    except Exception as error:      # the clone exists either way; say what happened
+        queue = f"not_switched: {getattr(error, 'detail', error)}"
 
     return {"CREATED": "yes",
             "CLONE_PATH": str(result.clone_dest),

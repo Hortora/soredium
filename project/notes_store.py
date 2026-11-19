@@ -12,6 +12,7 @@ and committed with a pathspec so only the named file lands in the commit.
 from __future__ import annotations
 
 import fcntl
+import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -107,6 +108,7 @@ class NotesStore:
             fd, tmp_name = tempfile.mkstemp(
                 dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp"
             )
+            os.close(fd)
             tmp_path = Path(tmp_name)
             try:
                 tmp_path.write_text(content)
@@ -131,8 +133,10 @@ class NotesStore:
                 stderr = commit_result.stderr.strip()
                 stdout = commit_result.stdout.strip()
                 combined = f"{stdout}\n{stderr}".strip()
-                if "nothing to commit" in combined:
-                    return
+                unchanged = _git(self.path, "status", "--porcelain", "--", filename)
+                if unchanged.returncode == 0 and not unchanged.stdout.strip():
+                    return      # the file is committed as written: nothing changed
+
                 raise NotesError(
                     f"git commit failed: {combined}"
                 )

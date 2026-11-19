@@ -100,7 +100,7 @@ def detect(topo: Topology, base_branch: str = "main") -> WorkState:
         total = len(queue.items)
         plan_position = f"{completed}/{total}" if total else ""
     else:
-        plan_file = find_design_file(".plan", topo)
+        plan_file = None if decided_elsewhere else find_design_file(".plan", topo)
         if plan_file:
             from plan_manager import detect as _plan_detect
             detect_base = plan_file.parent.parent if plan_file.parent.name == "design" else plan_file.parent

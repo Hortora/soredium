@@ -328,3 +328,28 @@ class TestSourceAudit:
             assert not lines_with, (
                 f"Found '{forbidden}' in notes_store.py source: {lines_with}"
             )
+
+
+class TestReviewFindings:
+    """Found by review of the first version (Hortora/soredium#577)."""
+
+    def test_an_unchanged_write_succeeds_when_another_file_is_untracked(self, workspace):
+        from notes_store import NotesStore
+        store = NotesStore(workspace)
+        store.ensure()
+        store.write(".queue", "one\n", "first")
+        (store.path / ".pause-stack").write_text("untracked\n")
+        store.write(".queue", "one\n", "same content again")
+        assert store.read(".queue") == "one\n"
+        assert (store.path / ".pause-stack").read_text() == "untracked\n"
+
+    def test_writing_does_not_leak_file_descriptors(self, workspace):
+        import os
+        from notes_store import NotesStore
+        store = NotesStore(workspace)
+        store.ensure()
+        store.write(".queue", "0\n", "warm up")
+        before = len(os.listdir("/dev/fd"))
+        for n in range(1, 12):
+            store.write(".queue", f"{n}\n", "again")
+        assert len(os.listdir("/dev/fd")) <= before + 1
