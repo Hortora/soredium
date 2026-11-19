@@ -11,6 +11,29 @@ import pytest
 
 SOREDIUM_ROOT = Path(__file__).parent.parent
 
+# Git in tests never sees this machine's configuration (#565). A developer's
+# global config can route every commit through hooks that have nothing to do
+# with the code under test: on a machine with a managed secret scanner that
+# more than doubled the time of every test that commits. It also made results
+# depend on the machine (default branch name, identity, signing).
+# Each pytest process, and each xdist worker, gets its own generated config.
+# A test that needs a different one sets GIT_CONFIG_GLOBAL itself.
+import tempfile  # noqa: E402
+
+_GIT_CONFIG = Path(tempfile.mkdtemp(prefix="soredium-test-git-")) / "gitconfig"
+_GIT_CONFIG.write_text(
+    "[init]\n\tdefaultBranch = main\n"
+    "[user]\n\tname = Soredium Tests\n\temail = tests@soredium.invalid\n"
+    "[commit]\n\tgpgsign = false\n"
+    "[tag]\n\tgpgsign = false\n"
+    "[advice]\n\tdetachedHead = false\n"
+)
+os.environ["GIT_CONFIG_GLOBAL"] = str(_GIT_CONFIG)
+os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+for _name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME",
+              "GIT_COMMITTER_EMAIL", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+    os.environ.pop(_name, None)
+
 # Pin the repo's own directories at the front of sys.path so that
 # imports always resolve to the code under test, not to the installed
 # copies under ~/.claude/skills/.
