@@ -370,6 +370,64 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     return routed, lines, False
 
 
+RUN_KEY = "_run"
+RUN_COMPLETE = "_run_complete"
+
+
+def run_key(args: dict[str, str]) -> str:
+    """What one run of a pipeline is about: the command and the issue or branch."""
+    subject = args.get("issue_n") or args.get("covers") or args.get("branch", "")
+    return f"{args.get('command', '')}:{subject}"
+
+
+def begin_run(args: dict[str, str]) -> bool:
+    """Step progress belongs to one run of one pipeline for one issue (#562).
+
+    A first call (no `step_done`) starts clean unless it repeats a run that has
+    not finished, which is resumed. Without this a second `start` found every
+    step of the first already done and created no branch. Returns True when
+    the progress was started afresh.
+    """
+    if args.get("step_done") or args.get("command", "") not in PIPELINES:
+        return False
+    from progress import Progress
+    workspace = Path(args.get("workspace", "."))
+    if not workspace.is_dir():
+        return False
+    progress = Progress.load(workspace)
+    key = run_key(args)
+    if progress.get(RUN_KEY) == key and progress.get(RUN_COMPLETE) != "yes":
+        return False
+    fresh = Progress()
+    fresh.set(RUN_KEY, key)
+    fresh.save(workspace)
+    return True
+
+
+def end_run(workspace: Path) -> None:
+    """Record that the run finished, so the next first call starts clean."""
+    from progress import Progress
+    progress = Progress.load(workspace)
+    progress.set(RUN_COMPLETE, "yes")
+    progress.save(workspace)
+
+
+def start_made_no_branch(args: dict[str, str]) -> str:
+    """After `start` reports complete: "" when the project is on a working
+    branch, otherwise why not. A start that leaves the project on its base
+    branch did nothing, whatever its steps recorded."""
+    project = args.get("project", "")
+    if not project or not Path(project).is_dir():
+        return ""
+    from git_util import git
+    head = git(Path(project), "symbolic-ref", "--short", "-q", "HEAD")
+    branch = head.stdout.strip() if head.returncode == 0 else ""
+    base = args.get("base_branch", "main")
+    if branch == base:
+        return f"{Path(project).name} is still on {base}: no working branch was created"
+    return ""
+
+
 def build_context(args: dict[str, str]) -> WorkContext:
     ws = Path(args.get("workspace", "."))
     proj = Path(args.get("project", "."))
@@ -774,6 +832,7 @@ def main() -> int:
         print(line)
     if stop:
         return 1 if "ACTION=error" in route_lines else 0
+    begin_run(args)
     ctx = build_context(args)
     command = ctx.command
     if command not in PIPELINES:
@@ -831,6 +890,12 @@ def main() -> int:
         on_mechanical_error=make_rebase_error_handler(),
         complete_summary=_complete_summary(command, ctx),
     )
+    if result.get("ACTION") == "complete":
+        end_run(ctx.workspace)
+        problem = start_made_no_branch(args) if command == "start" else ""
+        if problem:
+            print(f"ACTION=error\nERROR=start_made_no_branch\nDETAIL={problem}")
+            return 1
     for k, v in result.items():
         print(f"{k}={v}")
     return 0
