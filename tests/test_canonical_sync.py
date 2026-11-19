@@ -923,7 +923,7 @@ class TestPushHook:
 
         assert refused.value.code == "retired_push_hook"
         assert str(hook.resolve()) in refused.value.detail or str(hook) in refused.value.detail
-        assert "push_hook_setup.py" in refused.value.detail
+        assert "install_linear_pre_push.py" in refused.value.detail
         assert "--no-verify" not in refused.value.detail
         assert (fam.remote_main(fam.blessed), fam.remote_main(fam.mirror)) == before
         assert not g(fam.blessed, "for-each-ref", "refs/heads/publish", must=False)
@@ -986,3 +986,76 @@ class TestPushHook:
             cs.publish_base(fam.canon)
         assert "ghp_secret" not in failed.value.detail
         assert "ghp_secret" not in str(failed.value)
+
+
+class TestPublishRunsTheBaseBranchsHooks:
+    """#568: with hooks tracked in the repo, a feature branch's copy does not
+    decide whether the base branch can be published."""
+
+    def _tracked_hooks(self, fam, text: str) -> None:
+        _hook(fam.canon / ".githooks", text)
+        g(fam.canon, "config", "core.hooksPath", ".githooks")
+        g(fam.canon, "add", ".githooks")
+        g(fam.canon, "commit", "-q", "-m", "hooks")
+
+    def _feature_branch_with(self, fam, text: str) -> None:
+        g(fam.canon, "checkout", "-q", "-b", "feature")
+        _hook(fam.canon / ".githooks", text)
+        g(fam.canon, "commit", "-q", "-am", "feature keeps another hook")
+
+    def test_stale_hook_on_the_checked_out_feature_branch_does_not_block_main(self, fam):
+        self._tracked_hooks(fam, LINEAR_HOOK.read_text())
+        self._feature_branch_with(fam, RETIRED_HOOK)
+        tree_before = g(fam.canon, "status", "--porcelain"), sha(fam.canon, "HEAD")
+
+        result = cs.publish_base(fam.canon)
+
+        assert result.published == "upstream"
+        assert fam.remote_main(fam.blessed) == sha(fam.canon, "refs/heads/main")
+        assert (g(fam.canon, "status", "--porcelain"), sha(fam.canon, "HEAD")) == tree_before
+        assert (fam.canon / ".githooks" / "pre-push").read_text() == RETIRED_HOOK
+        assert g(fam.canon, "config", "--local", "core.hooksPath") == ".githooks"
+
+    def test_retired_hook_on_main_still_refuses_and_names_main(self, fam):
+        self._tracked_hooks(fam, RETIRED_HOOK)
+        self._feature_branch_with(fam, LINEAR_HOOK.read_text())
+        before = fam.remote_main(fam.blessed)
+
+        with pytest.raises(cs.SyncError) as refused:
+            cs.publish_base(fam.canon)
+
+        assert refused.value.code == "retired_push_hook"
+        assert ".githooks/pre-push on main" in refused.value.detail
+        assert fam.remote_main(fam.blessed) == before
+
+    def test_a_refusing_hook_on_main_refuses_even_when_the_feature_branch_has_none(self, fam):
+        self._tracked_hooks(fam, REFUSING_HOOK)
+        g(fam.canon, "checkout", "-q", "-b", "feature")
+        g(fam.canon, "rm", "-q", "-r", ".githooks")
+        g(fam.canon, "commit", "-q", "-m", "feature drops hooks")
+        before = fam.remote_main(fam.blessed)
+
+        with pytest.raises(cs.SyncError) as refused:
+            cs.publish_base(fam.canon)
+
+        assert refused.value.code == "publish_failed"
+        assert "policy: not today" in refused.value.detail
+        assert fam.remote_main(fam.blessed) == before
+
+    def test_base_branch_checked_out_uses_git_as_configured(self, fam):
+        self._tracked_hooks(fam, LINEAR_HOOK.read_text())
+        with cs.base_hooks(cs.locate(fam.canon)) as options:
+            assert options == []
+
+    def test_no_local_hooks_path_means_no_override(self, fam):
+        g(fam.canon, "checkout", "-q", "-b", "feature")
+        with cs.base_hooks(cs.locate(fam.canon)) as options:
+            assert options == []
+
+    def test_temporary_hooks_are_removed_afterwards(self, fam):
+        self._tracked_hooks(fam, LINEAR_HOOK.read_text())
+        g(fam.canon, "checkout", "-q", "-b", "feature")
+        with cs.base_hooks(cs.locate(fam.canon)) as options:
+            where = Path(options[1].split("=", 1)[1])
+            assert (where / "pre-push").read_text() == LINEAR_HOOK.read_text()
+        assert not where.exists()

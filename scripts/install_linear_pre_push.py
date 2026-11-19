@@ -13,13 +13,21 @@ when it is a repo). Two old hooks are replaced:
 Both stop `canonical_sync.py publish`, which pushes without --no-verify. History
 is reviewed before landing now (work-end/close.py), not at push time.
 
-Any other pre-push hook is left alone, and so is a repo without one. Without
---apply nothing is changed. When the hook file is tracked by the repo (a
-.githooks directory), replacing it leaves a modification for that repo's owner
-to commit; this script never commits.
+A third kind, any other hook that refuses and advises `--no-verify` alongside
+/git-squash, is replaced too. Any other pre-push hook is left alone, and so is
+a repo without one. Without --apply nothing is changed.
+
+When the hook file is tracked by the repo (a .githooks directory), the
+replacement is committed on the repo's base branch, that file only, in a
+checkout of that branch: a working tree on another branch is not touched, and
+its copy of the hook changes when that branch next includes the base branch.
+A tracked hook with uncommitted changes on the checked-out base branch is
+skipped. Nothing is pushed.
 
 Output: one line per repo, then SUMMARY.
-    REPLACE=<repo> hook=<path> kind=<old kind> tracked=<yes|no>     (REPLACED with --apply)
+    REPLACE=<repo> hook=<path> kind=<old kind> tracked=<yes|no>     (REPLACED with --apply,
+                         plus committed=<sha> on=<base branch> for a tracked hook)
+    SKIPPED=<repo> reason=<why>   a tracked hook that could not be committed safely
     OK=<repo>            already the current hook
     OTHER_LEFT=<repo>    some other hook; not touched
 """
@@ -35,6 +43,15 @@ OLD_KINDS = (
     ("squash-candidates", "SQUASH_PATTERNS"),
     ("always-prompt", "always prompt for /git-squash"),
 )
+
+
+_project = str(Path(__file__).resolve().parent.parent / "project")
+if _project not in sys.path:
+    sys.path.insert(0, _project)
+
+COMMIT_MESSAGE = ("chore: pre-push hook checks linear history only\n\n"
+                  "Replaces the retired hook that refused pushes and advised bypassing it.\n\n"
+                  "no-issue: tooling")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -62,7 +79,47 @@ def classify(hook: Path) -> str:
     for kind, mark in OLD_KINDS:
         if mark in text:
             return kind
+    if "--no-verify" in text and "/git-squash" in text:
+        return "bypass-advice"
     return "other"
+
+
+def commit_on_base(repo: Path, hook: Path) -> tuple[str, str]:
+    """Commit the replacement of a tracked hook on the repo's base branch.
+
+    Returns (sha, base branch), or ("", reason) when it was not done. Works in
+    canonical_sync.checked_out, so a working tree on another branch is never
+    touched, and commits that one path only.
+    """
+    import canonical_sync
+    rel = hook.resolve().relative_to(repo.resolve()).as_posix()
+    try:
+        base = canonical_sync.locate(repo).base
+        with canonical_sync.checked_out(repo, base) as tree:
+            tree = Path(tree)
+            target = tree / rel
+            if not target.is_file():
+                return "", f"{rel} is not on {base}"
+            if classify(target) in ("current",):
+                return "", f"{rel} on {base} is already the current hook"
+            if _git(tree, "status", "--porcelain", "--", rel):
+                return "", f"{rel} has uncommitted changes on {base}"
+            target.write_bytes(SOURCE.read_bytes())
+            target.chmod(0o755)
+            subprocess.run(["git", "-C", str(tree), "add", "--", rel],
+                           capture_output=True, text=True)
+            done = subprocess.run(
+                ["git", "-C", str(tree), "commit", "-q", "-m", COMMIT_MESSAGE, "--", rel],
+                capture_output=True, text=True)
+            if done.returncode != 0:
+                subprocess.run(["git", "-C", str(tree), "reset", "-q", "--", rel],
+                               capture_output=True, text=True)
+                subprocess.run(["git", "-C", str(tree), "checkout", "-q", "--", rel],
+                               capture_output=True, text=True)
+                return "", "commit refused: " + " ".join((done.stderr or done.stdout).split())[:200]
+            return _git(tree, "rev-parse", "--short", "HEAD"), base
+    except canonical_sync.SyncError as error:
+        return "", error.detail
 
 
 def repos_in(directory: Path) -> list[Path]:
@@ -109,7 +166,14 @@ def main(argv: list[str] | None = None) -> int:
                 tracked = "yes" if is_tracked(repo, hook) else "no"
                 action = "REPLACE"
                 detail = f" hook={hook} kind={kind} tracked={tracked}"
-                if apply:
+                if apply and tracked == "yes":
+                    sha, where = commit_on_base(repo, hook)
+                    if sha:
+                        action = "REPLACED"
+                        detail += f" committed={sha} on={where}"
+                    else:
+                        action, detail = "SKIPPED", f" reason={where}"
+                elif apply:
                     hook.write_bytes(SOURCE.read_bytes())
                     hook.chmod(0o755)
                     action = "REPLACED"

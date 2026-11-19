@@ -74,8 +74,10 @@ def test_apply_replaces_both_old_kinds_and_leaves_the_rest(tmp_path, capsys):
     assert any(l.startswith(f"REPLACED={prompt} ") and "tracked=yes" in l for l in out)
     assert f"OTHER_LEFT={custom}" in out
     assert out[-1] == "SUMMARY=NONE:1, OTHER_LEFT:1, REPLACED:2"
-    assert g(prompt, "status", "--porcelain").strip() == "M .githooks/pre-push"   # left to commit
-    assert g(prompt, "log", "--oneline").count("\n") == 1                          # never commits
+    # Since #568 a tracked hook is committed on the base branch, not left modified.
+    assert g(prompt, "status", "--porcelain").strip() == ""
+    assert g(prompt, "show", "--name-only", "--format=", "main") == ".githooks/pre-push"
+    assert g(prompt, "log", "--oneline").count("\n") == 2      # exactly one commit added
 
 
 def test_running_again_finds_nothing_to_do(tmp_path, capsys):
@@ -107,3 +109,93 @@ def test_replaced_hook_is_executable_and_lets_a_plain_push_through(tmp_path):
 
 def test_usage_error():
     assert installer.main([]) == 2
+
+
+BYPASS = "#!/bin/bash\necho 'Run /git-squash, or use --no-verify to skip.'\nexit 1\n"
+
+
+def commit_all(repo: Path, message: str) -> None:
+    g(repo, "add", "-A")
+    g(repo, "-c", "user.name=T", "-c", "user.email=t@t", "commit", "-q", "-m", message)
+
+
+class TestTrackedHookIsCommittedOnTheBaseBranch:
+    """#568"""
+
+    def test_on_main_the_replacement_is_one_commit_of_one_file(self, tmp_path, capsys):
+        repo = repo_with_hook(tmp_path, "a", OLD_SQUASH, hooks_path=True)
+        before = g(repo, "rev-parse", "HEAD")
+
+        assert installer.main([str(tmp_path), "--apply"]) == 0
+
+        out = lines(capsys)
+        assert any(l.startswith(f"REPLACED={repo} ") and "committed=" in l and "on=main" in l
+                   for l in out)
+        assert g(repo, "rev-list", "--count", f"{before}..main") == "1"
+        assert g(repo, "show", "--name-only", "--format=", "main") == ".githooks/pre-push"
+        assert g(repo, "status", "--porcelain") == ""
+        assert installer.classify(repo / ".githooks" / "pre-push") == "current"
+        assert "no-issue" in g(repo, "log", "-1", "--format=%B", "main")
+
+    def test_a_repo_on_a_feature_branch_keeps_its_tree_and_branch(self, tmp_path, capsys):
+        repo = repo_with_hook(tmp_path, "a", OLD_PROMPT, hooks_path=True)
+        g(repo, "checkout", "-q", "-b", "feature")
+        (repo / "work.txt").write_text("in progress")
+        feature_tip = g(repo, "rev-parse", "HEAD")
+        status = g(repo, "status", "--porcelain")
+
+        assert installer.main([str(tmp_path), "--apply"]) == 0
+
+        assert g(repo, "rev-parse", "HEAD") == feature_tip
+        assert g(repo, "symbolic-ref", "--short", "HEAD") == "feature"
+        assert g(repo, "status", "--porcelain") == status
+        assert (repo / ".githooks" / "pre-push").read_text() == OLD_PROMPT
+        assert "linear" in g(repo, "show", "main:.githooks/pre-push")
+
+    def test_unrelated_staged_and_modified_files_stay_out_of_the_commit(self, tmp_path, capsys):
+        repo = repo_with_hook(tmp_path, "a", OLD_SQUASH, hooks_path=True)
+        (repo / "tracked.txt").write_text("v1")
+        commit_all(repo, "tracked")
+        (repo / "tracked.txt").write_text("v2")
+        (repo / "staged.txt").write_text("staged")
+        g(repo, "add", "staged.txt")
+        status = g(repo, "status", "--porcelain")
+
+        assert installer.main([str(tmp_path), "--apply"]) == 0
+
+        assert g(repo, "show", "--name-only", "--format=", "main") == ".githooks/pre-push"
+        assert g(repo, "status", "--porcelain") == status
+
+    def test_a_hook_with_uncommitted_changes_on_main_is_skipped(self, tmp_path, capsys):
+        repo = repo_with_hook(tmp_path, "a", OLD_SQUASH, hooks_path=True)
+        edited = OLD_SQUASH + "# local edit\n"
+        (repo / ".githooks" / "pre-push").write_text(edited)
+        before = g(repo, "rev-parse", "HEAD")
+
+        assert installer.main([str(tmp_path), "--apply"]) == 0
+
+        assert any(l.startswith(f"SKIPPED={repo} ") and "uncommitted" in l for l in lines(capsys))
+        assert g(repo, "rev-parse", "HEAD") == before
+        assert (repo / ".githooks" / "pre-push").read_text() == edited
+
+    def test_running_again_commits_nothing_more(self, tmp_path, capsys):
+        repo = repo_with_hook(tmp_path, "a", OLD_SQUASH, hooks_path=True)
+        installer.main([str(tmp_path), "--apply"])
+        tip = g(repo, "rev-parse", "main")
+        capsys.readouterr()
+        assert installer.main([str(tmp_path), "--apply"]) == 0
+        assert g(repo, "rev-parse", "main") == tip
+        assert any(l == f"OK={repo}" for l in lines(capsys))
+
+    def test_the_bypass_advice_hook_is_replaced_too(self, tmp_path, capsys):
+        repo = repo_with_hook(tmp_path, "a", BYPASS, hooks_path=True)
+        assert installer.classify(repo / ".githooks" / "pre-push") == "bypass-advice"
+        assert installer.main([str(tmp_path), "--apply"]) == 0
+        assert installer.classify(repo / ".githooks" / "pre-push") == "current"
+
+    def test_an_untracked_hook_is_replaced_in_place_without_a_commit(self, tmp_path, capsys):
+        repo = repo_with_hook(tmp_path, "a", OLD_SQUASH)
+        before = g(repo, "rev-parse", "HEAD")
+        assert installer.main([str(tmp_path), "--apply"]) == 0
+        assert g(repo, "rev-parse", "HEAD") == before
+        assert installer.classify(repo / ".git" / "hooks" / "pre-push") == "current"

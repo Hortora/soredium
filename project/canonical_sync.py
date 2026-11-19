@@ -36,6 +36,7 @@ from __future__ import annotations
 import fcntl
 import os
 import re
+import subprocess
 import sys
 import shutil
 import tempfile
@@ -575,6 +576,10 @@ def push_hook(repo: Path | str) -> Optional[Path]:
     return hook if hook.is_file() else None
 
 
+def _is_retired(text: str) -> bool:
+    return all(mark in text for mark in _RETIRED_PUSH_HOOK_MARKS)
+
+
 def retired_push_hook(repo: Path | str) -> Optional[Path]:
     """That hook, when it is one of the retired ones; None otherwise."""
     hook = push_hook(repo)
@@ -584,13 +589,76 @@ def retired_push_hook(repo: Path | str) -> Optional[Path]:
         text = hook.read_text(errors="replace")
     except OSError:
         return None
-    return hook if all(mark in text for mark in _RETIRED_PUSH_HOOK_MARKS) else None
+    return hook if _is_retired(text) else None
+
+
+def retired_hook_for_publish(canon: Canonical) -> Optional[str]:
+    """The retired hook that would run when the base branch is pushed, as text
+    naming it; None when the push is clear.
+
+    With hooks tracked in the repo and another branch checked out, the push
+    runs the base branch's copy (see base_hooks), so that copy is the one judged.
+    """
+    with base_hooks(canon) as options:
+        if not options:
+            hook = retired_push_hook(canon.repo)
+            return str(hook) if hook else None
+        hook = Path(options[1].split("=", 1)[1]) / "pre-push"
+        if hook.is_file() and _is_retired(hook.read_text(errors="replace")):
+            configured = _out(canon.repo, "config", "--local", "--get", "core.hooksPath")
+            return f"{configured.rstrip('/')}/pre-push on {canon.base}"
+    return None
+
+
+@contextmanager
+def base_hooks(canon: Canonical) -> Iterator[list[str]]:
+    """Git options that make a push of the base branch run that branch's own hooks.
+
+    A repo that tracks its hooks (a local, relative core.hooksPath) runs whatever
+    copy its working tree holds. With another branch checked out, that branch's
+    copy would decide whether the base branch may be published: a stale hook on
+    a feature branch blocked publishing main (#568). Then the base branch's copy
+    of the directory is written out and used for the push. In every other case
+    this yields no options and git behaves as configured.
+    """
+    configured = _out(canon.repo, "config", "--local", "--get", "core.hooksPath")
+    current = _out(canon.repo, "symbolic-ref", "-q", "--short", "HEAD")
+    if (not configured or Path(configured).expanduser().is_absolute()
+            or current == canon.base):
+        yield []
+        return
+    rel = Path(configured).as_posix().rstrip("/")
+    listed = _out(canon.repo, "ls-tree", "-r", "--name-only", canon.base, "--", f"{rel}/")
+    if not listed:
+        yield []        # the base branch carries no hooks there: nothing to prefer
+        return
+    temporary = Path(tempfile.mkdtemp(prefix="soredium-hooks-"))
+    try:
+        for name in listed.splitlines():
+            blob = subprocess.run(["git", "-C", str(canon.repo), "show", f"{canon.base}:{name}"],
+                                  capture_output=True)
+            if blob.returncode != 0:
+                continue
+            target = temporary / Path(name).relative_to(rel)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(blob.stdout)
+            target.chmod(0o755)
+        yield ["-c", f"core.hooksPath={temporary}"]
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
+def _git_with(repo: Path, options: list[str], *args: str, timeout: Optional[int] = None):
+    return subprocess.run(["git", *options, "-C", str(repo), *args],
+                          capture_output=True, text=True, timeout=timeout)
 
 
 def _push_base(canon: Canonical) -> None:
     """Plain push of canonical's base branch to the blessed remote. Never forced."""
-    result = git(canon.repo, "push", "-q", canon.blessed,
-                 f"refs/heads/{canon.base}:refs/heads/{canon.base}", timeout=_NETWORK_TIMEOUT)
+    with base_hooks(canon) as options:
+        result = _git_with(canon.repo, options, "push", "-q", canon.blessed,
+                           f"refs/heads/{canon.base}:refs/heads/{canon.base}",
+                           timeout=_NETWORK_TIMEOUT)
     if result.returncode == 0:
         return
     text = result.stderr.lower()
@@ -631,9 +699,10 @@ def publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> Publis
             result.sha = _sha(canon.repo, f"refs/heads/{canon.base}")
             result.warnings.append(f"{canon.repo.name}: no remote to publish to")
             return result
-        retired = retired_push_hook(canon.repo)
+        retired = retired_hook_for_publish(canon)
         if retired is not None:
-            setup = Path(__file__).resolve().parent.parent / "scripts" / "push_hook_setup.py"
+            setup = (Path(__file__).resolve().parent.parent / "scripts"
+                     / "install_linear_pre_push.py")
             raise SyncError(
                 "retired_push_hook",
                 f"{canon.repo.name}: {retired} is a retired hook that refuses pushes; "
