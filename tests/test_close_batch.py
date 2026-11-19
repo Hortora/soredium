@@ -1011,3 +1011,87 @@ class TestPromotionBacklogIsReported:
         result = _close(proj, ws)
         assert result.success, (result.errors, result.squash_review, result.unpromoted)
         assert result.backlog == {}
+
+
+def _close_done_only(proj: Path, ws: Path):
+    with patch("close.discover_repo_topology") as m, \
+         patch("close._detect_slot_root", return_value=None):
+        m.return_value = [(proj, "main", "direct", None, "origin", ""),
+                          (ws, "main", "direct", None, "origin", "")]
+        return close(ws, land_active=False)
+
+
+class TestWorkEndAtIntervals:
+    """#571: run part-way through the queue, the ceremony lands what is done and
+    leaves an unfinished active item alone."""
+
+    def _two_done_and_one_in_progress(self, proj, ws):
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _stack(proj, "b2", "b1", {"two.txt": "2"})
+        _stack(proj, "b3", "b2", {"three.txt": "3"})
+        _git(proj, "checkout", "-q", "b3")
+        _queue(ws, [("R#1", "b1"), ("R#2", "b2"), ("R#3", "")], active="R#3", branch="b3")
+
+    def test_done_items_land_and_the_active_item_does_not(self, repos):
+        proj, ws = repos
+        pre = _main(proj)
+        self._two_done_and_one_in_progress(proj, ws)
+        active_tip = _git(proj, "rev-parse", "b3").stdout.strip()
+
+        result = _close_done_only(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, pre) == ["feat: b1 adds one.txt Refs #1",
+                                        "feat: b2 adds two.txt Refs #1"]
+        assert result.closed_items == ["R#1", "R#2"]
+        assert _git(proj, "show", "main:three.txt", check=False).returncode != 0
+        assert _git(proj, "rev-parse", "b3").stdout.strip() == active_tip
+        assert not _tip_message(proj, "b3").startswith("chore: branch closed")
+
+    def test_the_active_item_stays_active_on_its_branch(self, repos):
+        proj, ws = repos
+        self._two_done_and_one_in_progress(proj, ws)
+
+        _close_done_only(proj, ws)
+
+        state = _state(ws)
+        assert state["R#1"][0] and state["R#2"][0]
+        assert state["R#3"] == (False, True, "")
+        queue = read_queue(ws)
+        assert queue.state.status == "active" and queue.state.branch == "b3"
+        assert _git(proj, "branch", "--show-current").stdout.strip() == "b3"
+
+    def test_the_active_item_lands_later_with_only_its_own_commit(self, repos):
+        proj, ws = repos
+        pre = _main(proj)
+        self._two_done_and_one_in_progress(proj, ws)
+        _close_done_only(proj, ws)
+        after_interval = _main(proj)
+
+        result = _close(proj, ws)
+
+        assert result.success, result.errors
+        assert _subjects(proj, after_interval) == ["feat: b3 adds three.txt Refs #1"]
+        assert _subjects(proj, pre).count("feat: b1 adds one.txt Refs #1") == 1
+        assert _merge_commits(proj, pre) == 0
+        assert result.closed_items == ["R#3"]
+
+    def test_nothing_done_and_active_left_out_lands_nothing(self, repos):
+        proj, ws = repos
+        pre = _main(proj)
+        _stack(proj, "b1", "main", {"one.txt": "1"})
+        _git(proj, "checkout", "-q", "b1")
+        _queue(ws, [("R#1", "")], active="R#1", branch="b1")
+
+        result = _close_done_only(proj, ws)
+
+        assert not result.success
+        assert "nothing to land" in result.errors[0]
+        assert _main(proj) == pre
+        assert _state(ws)["R#1"] == (False, True, "")
+
+    def test_default_still_lands_the_active_item(self, repos):
+        proj, ws = repos
+        self._two_done_and_one_in_progress(proj, ws)
+        result = _close(proj, ws)
+        assert result.success and result.closed_items == ["R#1", "R#2", "R#3"]

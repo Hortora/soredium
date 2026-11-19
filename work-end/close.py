@@ -508,9 +508,12 @@ def carry_strays(slot_dir: Path, covered: set) -> tuple[dict, dict]:
     return carried, not_landed
 
 
-def settle_permanent_clone(slot_dir: Path) -> list[str]:
+def settle_permanent_clone(slot_dir: Path, keep_branches: Optional[set] = None) -> list[str]:
     """After a ceremony in a permanent clone: every clone returns to its base
     branch and follows canonical, ready for the next item. Returns warnings.
+
+    A clone on one of `keep_branches` stays there: that is an active item the
+    ceremony deliberately did not land, and its work continues on that branch.
 
     A clone with uncommitted changes, or whose branch still holds commits
     canonical lacks, is left where it is: moving it would hide work.
@@ -521,6 +524,12 @@ def settle_permanent_clone(slot_dir: Path) -> list[str]:
         repo = slot_dir / name
         base = _get_base_branch(repo)
         current = _current_branch(repo)
+        if current and current != base and current in (keep_branches or set()):
+            try:
+                canonical_sync.follow(repo)      # the base ref still catches up
+            except SyncError:
+                pass
+            continue
         if current and current != base:
             if _git(repo, "status", "--porcelain").stdout.strip():
                 left.append(f"{name}: left on {current} with uncommitted changes")
@@ -943,7 +952,11 @@ def mark_slot_landed(slot_dir: Path, branch: str, project_shas: dict[str, str]) 
 
 # --- close orchestration ---
 
-def close(workspace: Path) -> CloseResult:
+def close(workspace: Path, land_active: bool = True) -> CloseResult:
+    """Run the ceremony. `land_active=False` lands only the items marked done and
+    leaves the active item exactly as it is: still active, its branch unlanded
+    and still checked out (#571). That is `work end` run part-way through the
+    queue while the current item is unfinished."""
     busy = check_repos_idle(workspace)
     if busy:
         return CloseResult(success=False, errors=busy)
@@ -958,6 +971,9 @@ def close(workspace: Path) -> CloseResult:
 
     missing = []
     for entry in entries:
+        if not entry.done and not land_active:
+            entry.targets = []      # handled below like an active item that was never started
+            continue
         entry.targets = resolve(workspace, entry.branches)
         if entry.done and not entry.targets and not any(
                 _branch_exists(repo, b) for repo in repos for b in entry.branches):
@@ -983,6 +999,11 @@ def close(workspace: Path) -> CloseResult:
                         f"nothing was landed. The queue names a branch that has "
                         f"already been closed."],
             )
+        if not land_active:
+            return CloseResult(
+                success=False,
+                errors=["nothing to land: no item is marked done, and the active item "
+                        "was left out because it is not finished"])
         return CloseResult(
             success=False,
             errors=["no targets found — branch may not exist or has no commits"],
@@ -1106,7 +1127,9 @@ def close(workspace: Path) -> CloseResult:
         # work continues, so a drained queue leaves it exactly as it is.
         permanent = slot_dir is not None and (slot_dir / ".permanent").exists()
         if permanent:
-            warnings.extend(settle_permanent_clone(slot_dir))
+            kept = set() if active_landed or not queue else {
+                b for b in discover_active_branches(workspace, queue)}
+            warnings.extend(settle_permanent_clone(slot_dir, keep_branches=kept))
 
         # Counted last: after the queue commit and after strays were carried, and
         # for the workspace even when it had no branch to land. Commits made
@@ -1217,8 +1240,9 @@ def main() -> int:
     if not workspace.is_dir():
         print(f"ERROR=workspace_not_found:{workspace}")
         return 1
+    land_active = "land_active=no" not in sys.argv[2:]
     try:
-        result = close(workspace)
+        result = close(workspace, land_active=land_active)
     except Exception as e:
         print(f"ACTION=error\nERROR={e}")
         return 1

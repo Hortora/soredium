@@ -315,3 +315,74 @@ class TestCloneWorkspaceIsSettled:
         assert "- [x] R#2" in queue_text
         assert _merge_count(canonical_p) == 0 and _merge_count(canonical_w) == 0
         assert _main_head(ws_clone) == _main_head(canonical_w)
+
+
+class TestCloneWorkEndAtIntervals:
+    """#571: in a clone, landing only the done items leaves the active item's
+    branches checked out in both clones."""
+
+    def _one_done_one_in_progress(self, clone_world):
+        family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
+        second = "issue-2-y"
+        for repo, name in ((project_clone, "second.txt"), (ws_clone, "notes2.md")):
+            parent_tip = _git(repo, "rev-parse", branch).stdout.strip()
+            _git(repo, "checkout", "-b", second, branch)
+            branch_base.record(repo, second, parent_tip, branch)
+            (repo / name).write_text("in progress\n")
+            _git(repo, "add", name)
+            _git(repo, "commit", "-m", f"feat: {name} Refs #2")
+        write_queue(ws_clone, Queue(
+            items=[QueueItem(ref="R#1", title="Task", completed=False, active=False,
+                             done_branch=branch),
+                   QueueItem(ref="R#2", title="Next", completed=False, active=True)],
+            state=QueueState(branch=second, issue_repo="R", status="active"),
+        ))
+        _git(ws_clone, "add", ".queue")
+        _git(ws_clone, "commit", "-m", "chore: first item done, second active")
+        return second
+
+    def test_done_item_lands_and_both_clones_stay_on_the_active_branch(self, clone_world):
+        family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
+        second = self._one_done_one_in_progress(clone_world)
+
+        result = close(ws_clone, land_active=False)
+
+        assert result.success, f"close failed: {result.errors}"
+        assert result.closed_items == ["R#1"]
+        assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:feature.txt"],
+                              capture_output=True).returncode == 0
+        assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:second.txt"],
+                              capture_output=True).returncode != 0
+        assert _git(project_clone, "branch", "--show-current").stdout.strip() == second
+        assert _git(ws_clone, "branch", "--show-current").stdout.strip() == second
+        assert (project_clone / "second.txt").read_text() == "in progress\n"
+        assert not (clone_target / ".landed").exists()
+
+    def test_the_queue_shows_one_closed_and_one_still_active(self, clone_world):
+        ws_clone = clone_world[5]
+        self._one_done_one_in_progress(clone_world)
+
+        close(ws_clone, land_active=False)
+
+        from queue_io import read_queue
+        queue = read_queue(ws_clone)
+        states = {i.ref: (i.completed, i.active) for i in queue.items}
+        assert states == {"R#1": (True, False), "R#2": (False, True)}
+        assert queue.state.branch == "issue-2-y"
+
+    def test_the_active_item_then_lands_on_its_own(self, clone_world):
+        family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
+        second = self._one_done_one_in_progress(clone_world)
+        close(ws_clone, land_active=False)
+        squash_marker.mark(project_clone, second)
+        squash_marker.mark(ws_clone, second)
+
+        result = close(ws_clone)
+
+        assert result.success, f"second close failed: {result.errors}"
+        assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:second.txt"],
+                              capture_output=True).returncode == 0
+        assert _merge_count(canonical_p) == 0 and _merge_count(canonical_w) == 0
+        assert _git(project_clone, "branch", "--show-current").stdout.strip() == "main"
+        assert _git(ws_clone, "branch", "--show-current").stdout.strip() == "main"
+        assert _main_head(ws_clone) == _main_head(canonical_w)
