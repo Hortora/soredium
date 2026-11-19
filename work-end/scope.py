@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""What one ceremony covers, and the follow-up actions limited to exactly that (#571).
+
+    scope.py covered <workspace>            the canonical repos this ceremony covers
+    scope.py publish <workspace>            publish each of those that is ahead of its remote
+    scope.py promote-backlog <workspace> [covers=<ref>]
+                                            promote documents on a covered workspace's base
+                                            branch that its project lacks
+
+"Publish all" and "promote all" mean all of what `covered` prints: the project
+and workspace the ceremony ran in, or every repo of the slot or clone it ran in.
+Nothing here ever looks for other repos that happen to be ahead. That boundary
+is the point of this module: left to wording, "all" has been read as every
+repo on the machine.
+
+Nothing is pushed except through canonical_sync.publish_base, which never forces.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_here = Path(__file__).resolve().parent
+for _entry in (str(_here), str(_here.parent / "project"), str(_here.parent / "work-slot")):
+    if _entry not in sys.path:
+        sys.path.insert(0, _entry)
+
+import canonical_sync  # noqa: E402
+from canonical_sync import SyncError  # noqa: E402
+import close as ceremony  # noqa: E402
+
+
+def covered(workspace: Path) -> list[Path]:
+    """Canonical repos the ceremony run from `workspace` covers, each once, in order.
+
+    The same repos the ceremony itself resolves (its topology), plus the
+    workspace and, in a slot or clone, every repo in it. A clone answers as its
+    canonical repo, because that is what gets published.
+    """
+    workspace = Path(workspace)
+    repos: list[Path] = [entry[0] for entry in ceremony.discover_repo_topology(workspace)]
+    if (workspace / ".git").exists():
+        repos.append(workspace)
+    slot_dir = ceremony._slot_dir_of(workspace)
+    if slot_dir is not None:
+        from slot_core import get_all_slot_repos
+        repos += [slot_dir / name for name in get_all_slot_repos(slot_dir)]
+    seen: list[Path] = []
+    for repo in repos:
+        try:
+            canonical = canonical_sync.locate(repo).repo.resolve()
+        except SyncError:
+            continue
+        if canonical not in seen:
+            seen.append(canonical)
+    return seen
+
+
+def publish(workspace: Path) -> tuple[dict[str, int], dict[str, str]]:
+    """Publish every covered repo that is ahead of its remote.
+
+    Returns ({repo: commits pushed}, {repo: why it was not published}). One
+    repo failing does not stop the others. A repo with no remote, or with
+    nothing to publish, appears in neither.
+    """
+    pushed: dict[str, int] = {}
+    failed: dict[str, str] = {}
+    for repo in covered(workspace):
+        try:
+            canon = canonical_sync.locate(repo)
+            if not canon.blessed or not canonical_sync.unpublished(canon):
+                continue
+            result = canonical_sync.publish_base(repo)
+            pushed[str(repo)] = result.pushed
+        except SyncError as error:
+            failed[str(repo)] = f"{error.code}: {error.detail}"
+    return pushed, failed
+
+
+def promote_backlog(workspace: Path, covers: str = "") -> tuple[dict[str, int], dict[str, str]]:
+    """Promote documents on each covered workspace's base branch that its project lacks.
+
+    Returns ({"workspace -> project": documents promoted}, {pair: why not}).
+    Only the ceremony's own workspace/project pairs are considered.
+    """
+    import contextlib
+    import io
+    import artifact_promote
+
+    promoted: dict[str, int] = {}
+    failed: dict[str, str] = {}
+    backlog, _ = ceremony.promotion_backlog(Path(workspace), covers)
+    for ws_repo, project in ceremony.promotion_pairs(Path(workspace)):
+        pair = f"{ws_repo.name} -> {project.name}"
+        if pair not in backlog:
+            continue
+        params = {"covers": covers} if covers else {}
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            code = artifact_promote.sweep_promotion_gaps(str(project), str(ws_repo), params)
+        lines = captured.getvalue().splitlines()
+        swept = next((l.split("=", 1)[1] for l in lines if l.startswith("SWEPT=")), "0")
+        problems = [l for l in lines if l.startswith(("ERROR", "CONFLICT", "LAND_ERROR"))]
+        if code != 0 or problems:
+            failed[pair] = "; ".join(problems) or f"exit {code}"
+        if swept.isdigit() and int(swept):
+            promoted[pair] = int(swept)
+    return promoted, failed
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) < 2 or args[0] not in ("covered", "publish", "promote-backlog"):
+        print("usage: scope.py <covered|publish|promote-backlog> <workspace> [covers=<ref>]",
+              file=sys.stderr)
+        return 2
+    command, workspace = args[0], Path(args[1])
+    if not workspace.is_dir():
+        print(f"ERROR=workspace_not_found:{workspace}")
+        return 1
+    options = dict(a.split("=", 1) for a in args[2:] if "=" in a)
+    if command == "covered":
+        for repo in covered(workspace):
+            print(f"COVERED={repo}")
+        return 0
+    if command == "publish":
+        pushed, failed = publish(workspace)
+        for repo, count in pushed.items():
+            print(f"PUBLISHED={repo} commits={count}")
+        for repo, why in failed.items():
+            print(f"NOT_PUBLISHED={repo} reason={canonical_sync.redact(why)}")
+        print(f"PUBLISHED_COUNT={len(pushed)}")
+        return 1 if failed else 0
+    promoted, failed = promote_backlog(workspace, options.get("covers", ""))
+    for pair, count in promoted.items():
+        print(f"PROMOTED={pair} documents={count}")
+    for pair, why in failed.items():
+        print(f"NOT_PROMOTED={pair} reason={why}")
+    print(f"PROMOTED_COUNT={sum(promoted.values())}")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
