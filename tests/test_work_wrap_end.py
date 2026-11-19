@@ -374,3 +374,108 @@ class TestNothingIsRepairedWhenTheQueueDisagrees:
                      g(world[k], "for-each-ref", "refs/heads"))
                  for k in ("project", "workspace")}
         assert after == before
+
+
+class TestEndInANumberedSlot:
+    """The whole sequence in a slot with two project repos and a workspace clone,
+    the queue at the slot root (#571)."""
+
+    @pytest.fixture
+    def slot(self, tmp_path):
+        canonical, remotes = {}, {}
+        for name in ("agency", "connectors", "wsp", "unrelated"):
+            repo, bare = with_remote(tmp_path / "canonical", name)
+            canonical[name], remotes[name] = repo, bare
+        commit(canonical["unrelated"], "elsewhere.txt")      # ahead of its remote, not ours
+        slot_dir = tmp_path / "family" / "slots" / "42"
+        slot_dir.mkdir(parents=True)
+        (slot_dir / ".slot").write_text(
+            "# Slot 42 — test\n\n## Issue\no/r#1\n\n## Repos\n- agency (primary)\n- connectors\n")
+        clones = {}
+        for name in ("agency", "connectors", "wsp"):
+            clone = slot_dir / name
+            subprocess.run(["git", "clone", "-q", str(canonical[name]), str(clone)], check=True)
+            g(clone, "remote", "rename", "origin", "local")
+            base = g(clone, "rev-parse", "main")
+            g(clone, "checkout", "-q", "-b", BRANCH)
+            branch_base.record(clone, BRANCH, base)
+            commit(clone, f"{name}-work.txt")
+            squash_marker.mark(clone, BRANCH)
+            clones[name] = clone
+        (clones["wsp"] / ".workspace").write_text(f"project: {clones['agency']}\n")
+        (clones["wsp"] / ".git" / "info" / "exclude").write_text(".workspace\n.work-progress\n")
+        write_queue(slot_dir, Queue(
+            items=[QueueItem(ref="o/r#1", title="First", completed=False, active=True)],
+            state=QueueState(branch=BRANCH, issue_repo="O/r", status="active", covers="o/r#1")))
+        return dict(slot=slot_dir, clones=clones, canonical=canonical, remotes=remotes)
+
+    def _run(self, slot, *extra):
+        ws, proj = slot["clones"]["wsp"], slot["clones"]["agency"]
+        branch = g(ws, "symbolic-ref", "--short", "HEAD")
+        done = subprocess.run(
+            ["python3", WORK, "end", f"workspace={ws}", f"project={proj}", f"branch={branch}",
+             "base_branch=main", f"on_main={'yes' if branch == 'main' else 'no'}", "in_slot=yes",
+             f"slot_path={slot['slot']}", f"plan_path={slot['slot'] / '.queue'}",
+             "covers=o/r#1", "issue_repo=O/r", *extra],
+            capture_output=True, text=True, cwd=str(ws))
+        out = {"_raw": done.stdout + done.stderr}
+        for line in done.stdout.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                out[key] = value
+        return out
+
+    def _answer(self, slot, step, *extra):
+        return self._run(slot, f"step_done={step}", "outcome=completed", *extra)
+
+    def _drive(self, slot, finished="yes"):
+        first = self._run(slot)
+        assert first["ACTION"] == "review", first["_raw"]
+        assert self._answer(slot, "review")["ACTION"] == "diary"
+        assert self._answer(slot, "diary")["ACTION"] == "file_issues"
+        assert self._answer(slot, "file_issues")["ACTION"] == "item_finished"
+        result = self._answer(slot, "item_finished", f"finished={finished}")
+        return first, result
+
+    def test_scope_is_the_slots_repos_as_their_canonicals(self, slot):
+        first = self._run(slot)
+        for name in ("agency", "connectors", "wsp"):
+            assert str(slot["canonical"][name].resolve()) in first["SCOPE"]
+        assert "unrelated" not in first["SCOPE"]
+
+    def test_every_repo_of_the_slot_lands_and_is_published(self, slot):
+        _, result = self._drive(slot)
+        assert result["ACTION"] == "handoff", result["_raw"]
+        result = self._answer(slot, "handoff")
+        assert result["ACTION"] == "complete", result["_raw"]
+
+        for name in ("agency", "connectors"):
+            canonical = slot["canonical"][name]
+            assert g(canonical, "show", f"main:{name}-work.txt") == "x"
+            assert g(slot["remotes"][name], "rev-parse", "refs/heads/main") == \
+                g(canonical, "rev-parse", "main")
+            assert g(slot["clones"][name], "symbolic-ref", "--short", "HEAD") == "main"
+            assert g(canonical, "rev-list", "--merges", "--count", "main") == "0"
+        assert g(slot["canonical"]["wsp"], "show", "main:wsp-work.txt") == "x"
+        assert read_queue(slot["slot"]).items[0].completed
+
+    def test_a_canonical_repo_outside_the_slot_is_never_published(self, slot):
+        before = g(slot["remotes"]["unrelated"], "rev-parse", "refs/heads/main")
+        self._drive(slot)
+        self._answer(slot, "handoff")
+        assert g(slot["remotes"]["unrelated"], "rev-parse", "refs/heads/main") == before
+
+    def test_unfinished_item_in_a_slot_lands_nothing(self, slot):
+        before = {n: g(slot["canonical"][n], "rev-parse", "main") for n in ("agency", "connectors")}
+        _, result = self._drive(slot, finished="no")
+        assert result["ACTION"] == "handoff", result["_raw"]
+        assert {n: g(slot["canonical"][n], "rev-parse", "main")
+                for n in ("agency", "connectors")} == before
+        assert g(slot["clones"]["agency"], "symbolic-ref", "--short", "HEAD") == BRANCH
+        assert read_queue(slot["slot"]).items[0].active
+        assert not (slot["slot"] / ".landed").exists()
+
+    def test_the_queue_stays_at_the_slot_root(self, slot):
+        self._drive(slot)
+        assert (slot["slot"] / ".queue").exists()
+        assert not (slot["clones"]["wsp"] / ".queue").exists()

@@ -848,9 +848,16 @@ def _mark_done_on_branch(ctx) -> list[str] | None:
             f"branch={ctx.branch}"]
 
 
+def _ceremony_root(ctx) -> Path:
+    """The directory the ceremony runs from: where the queue is. In a numbered
+    slot that is the slot root, above the workspace clone; everywhere else it
+    is the workspace."""
+    return Path(ctx.plan_path).parent if ctx.plan_path else Path(ctx.workspace)
+
+
 def _scope(command: str, with_covers: bool = False):
     def build(ctx) -> list[str]:
-        cmd = ["python3", str(_SCOPE), command, str(ctx.workspace)]
+        cmd = ["python3", str(_SCOPE), command, str(_ceremony_root(ctx))]
         if with_covers and ctx.covers:
             cmd.append(f"covers={ctx.covers.split(',')[0].strip()}")
         return cmd
@@ -965,7 +972,7 @@ def sequence_preflight(args: dict[str, str]) -> tuple[list[str], bool]:
             sys.path.insert(0, work_end)
         try:
             import scope
-            repos = scope.covered(workspace)
+            repos = scope.covered(_queue_dir(args))
             lines.append("SCOPE=" + ", ".join(str(r) for r in repos))
         except Exception as error:       # the scope line is information, never a blocker
             lines.append(f"SCOPE=unknown ({error})")
