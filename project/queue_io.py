@@ -2,6 +2,11 @@
 
 Owns all CRUD operations for the issue queue. The queue is never deleted
 during normal operation — only read, written, and migrated from .plan.
+
+When a workspace has a notes worktree (``.notes/`` on an orphan ``notes``
+branch), the queue is read from and written to ``.notes/.queue`` instead of
+``workspace/.queue``.  Each write through the notes store is one commit on
+the ``notes`` branch.  When no notes worktree exists, behaviour is unchanged.
 """
 from __future__ import annotations
 
@@ -122,8 +127,22 @@ def _parse_item(line: str) -> Optional[QueueItem]:
 _KNOWN_STATE_FIELDS = {"branch", "issue-repo", "status", "covers"}
 
 
+def _has_notes_store(workspace: Path) -> bool:
+    """True if workspace has a .notes/ worktree on the notes branch."""
+    from notes_store import NotesStore
+    return NotesStore(workspace).available
+
+
+def queue_dir(workspace: Path) -> Path:
+    """The directory holding .queue: .notes/ if available, else workspace."""
+    if _has_notes_store(workspace):
+        return workspace / ".notes"
+    return workspace
+
+
 def read_queue(workspace: Path) -> Optional[Queue]:
-    queue_path = workspace / ".queue"
+    qdir = queue_dir(workspace)
+    queue_path = qdir / ".queue"
     plan_path = workspace / ".plan"
 
     # Reading never changes a file. A workspace still on the older `.plan` name
@@ -228,15 +247,18 @@ def write_queue(workspace: Path, queue: Queue) -> None:
             lines.append("## Deferred")
         lines.extend(queue.deferred_lines)
     lines.append("")
-    converting = not (workspace / ".queue").exists()
-    tmp = workspace / ".queue.tmp"
-    tmp.write_text("\n".join(lines))
-    tmp.replace(workspace / ".queue")
-    if converting:
-        # Only the write that creates .queue retires the older file. Where both
-        # already exist, .plan is some earlier leftover (it may be tracked in
-        # git) and renaming it on every write would leave a deletion behind.
-        _retire_plan_file(workspace)
+    content = "\n".join(lines)
+    if _has_notes_store(workspace):
+        from notes_store import NotesStore
+        store = NotesStore(workspace)
+        store.write(".queue", content, "update queue")
+    else:
+        converting = not (workspace / ".queue").exists()
+        tmp = workspace / ".queue.tmp"
+        tmp.write_text(content)
+        tmp.replace(workspace / ".queue")
+        if converting:
+            _retire_plan_file(workspace)
 
 
 def _retire_plan_file(workspace: Path) -> None:

@@ -156,6 +156,23 @@ def write_field(plan_path: Path, field_name: str, value: str) -> None:
     write_fields(plan_path, {field_name: value})
 
 
+def _write_and_commit(path: Path, content: str, what: str = "update queue") -> None:
+    """Write content, committing through NotesStore when the path is inside .notes/."""
+    parts = path.resolve().parts
+    if ".notes" in parts:
+        idx = parts.index(".notes")
+        workspace = Path("/").joinpath(*parts[:idx])
+        filename = str(Path(*parts[idx + 1:]))
+        from notes_store import NotesStore
+        store = NotesStore(workspace)
+        if store.available:
+            store.write(filename, content, what)
+            return
+    tmp = path.parent / ".plan.tmp"
+    tmp.write_text(content)
+    tmp.replace(path)
+
+
 def write_fields(plan_path: Path, updates: dict[str, str]) -> None:
     content = plan_path.read_text()
     lines = content.splitlines()
@@ -190,9 +207,7 @@ def write_fields(plan_path: Path, updates: dict[str, str]) -> None:
             lines.insert(state_end, f"{k}: {v}")
             state_end += 1
 
-    tmp = plan_path.parent / ".plan.tmp"
-    tmp.write_text("\n".join(lines) + "\n")
-    tmp.replace(plan_path)
+    _write_and_commit(plan_path, "\n".join(lines) + "\n")
 
 
 def copy_plan(src: Path, dst: Path) -> None:
@@ -204,12 +219,14 @@ def copy_plan(src: Path, dst: Path) -> None:
 
 
 def write_plan(plan_path: Path, content: str) -> None:
-    """Write complete .plan content atomically. Validates ## State section exists."""
+    """Write complete .plan content atomically. Validates ## State section exists.
+
+    When the target path is inside a ``.notes/`` worktree, the write is
+    committed on the ``notes`` branch through NotesStore.
+    """
     if "## State" not in content:
         raise ValueError("Invalid .plan content: missing ## State section")
-    tmp = plan_path.with_suffix(".plan.tmp")
-    tmp.write_text(content)
-    tmp.replace(plan_path)
+    _write_and_commit(plan_path, content)
 
 
 def update_lifecycle_fields(plan_path: Path, state: str,
