@@ -122,6 +122,7 @@ Local work lifecycle tracking and enriched backlog for what-next recommendations
 | Script | Purpose |
 |--------|---------|
 | `scripts/worklog.py` | Cross-repo work lifecycle tracking (SQLite) |
+| `project/worktrace.py` | Records every lifecycle action in the worklog (start, step, wrap, end, land, stamp, close, publish, promote, blog publish); `show` lists recent actions |
 | `scripts/enrichment.py` | Issue enrichment, GitHub cache, what-next queries (CLI) |
 | `scripts/worklog_mcp_server.py` | MCP server exposing worklog queries |
 | `scripts/query_worklog.py` | Audit tool for inspecting worklog state |

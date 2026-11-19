@@ -28,6 +28,16 @@ import canonical_sync  # noqa: E402
 from canonical_sync import SyncError  # noqa: E402
 
 
+def _trace(action: str, **details) -> None:
+    """Record in the worklog; never fails the publish."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
+        import worktrace
+        worktrace.record(action, **details)
+    except Exception as error:
+        print(f"WARN=worklog_not_recorded action={action} detail={error}", file=sys.stderr)
+
+
 def _image_dest(md_dest_dir: Path, raw_ref: str) -> Path:
     return md_dest_dir / raw_ref.lstrip("/")
 
@@ -148,6 +158,8 @@ def commit_destination(dest_repo: str, files_csv: str, message: str) -> None:
         print(f"ERROR=publish_failed: {error.detail}", flush=True)
         sys.exit(1)
     print(f"PUBLISHED={published.published}", flush=True)
+    _trace("blog-publish", repo=dest_repo, files=files, remote=published.published,
+           sha=published.sha)
     for warning in published.warnings:
         print(f"WARN={warning}", flush=True)
 

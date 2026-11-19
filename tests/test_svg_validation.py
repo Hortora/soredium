@@ -172,7 +172,7 @@ class TestCopromoteImagesUnit:
         md_dst.write_text("![fig](images/fig.svg)\n")
 
         copied = _copromote_images(md_src, md_dst, str(repo))
-        assert copied >= 1
+        assert len(copied) >= 1      # the copied paths, since Hortora/soredium#558
         assert (repo / "docs" / "blog" / "images" / "fig.svg").exists()
 
     def test_invalid_svg_ref_raises_image_not_promoted(self, tmp_path):

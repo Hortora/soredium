@@ -57,6 +57,16 @@ class ImageNotPromoted(Exception):
     """An image the source has did not arrive with the document that refers to it."""
 
 
+def _trace(action: str, **details) -> None:
+    """Record in the worklog; never fails the promotion."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
+        import worktrace
+        worktrace.record(action, **details)
+    except Exception as error:
+        print(f"WARN=worklog_not_recorded action={action} detail={error}", file=sys.stderr)
+
+
 def _copromote_images(md_source: Path, md_dest: Path, repo_cwd: str) -> list[str]:
     """Copy images referenced by a .md file from source to destination, and prove it.
 
@@ -210,6 +220,8 @@ def to_workspace_main(workspace: str, params: dict[str, str]) -> int:
         print(f"ERROR_DETAIL={error.detail}")
         return 1
 
+    if promoted:
+        _trace("promote", repo=workspace, branch=branch, files=promoted, to="workspace base branch")
     print(f"PROMOTED={promoted}")
     if skipped:
         print(f"SKIPPED={len(skipped)}")
@@ -343,6 +355,9 @@ def _promote_to_target(ws: Path, target: Path, target_cwd: str,
                 print("PROMOTED=0")
                 return 1, []
 
+    if promoted and not dry_run:
+        _trace("promote", repo=target, files=promoted, promoted_from=str(ws), covers=covers,
+               paths=committed_paths[:50])
     if dry_run:
         print("DRY_RUN=yes")
     print(f"PROMOTED={promoted}")

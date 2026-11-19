@@ -74,6 +74,9 @@ class Canonical:
     mirror: str     # second remote kept in step with base; "" when there is none
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worktrace  # noqa: E402
+
 @dataclass
 class LandResult:
     repo: Path
@@ -686,6 +689,21 @@ def _stage_on_fork(canon: Canonical) -> str:
 
 
 def publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> PublishResult:
+    """Publish canonical's base branch, and record the outcome either way."""
+    try:
+        result = _publish_base(repo, lock_timeout)
+    except SyncError as error:
+        worktrace.record("publish-failed", repo=repo, code=error.code,
+                         detail=redact(error.detail)[:300])
+        raise
+    if result.published != "none":
+        worktrace.record("publish", repo=result.repo, sha=result.sha, pushed=result.pushed,
+                         rebased=result.rebased, remote=result.published,
+                         mirrored=result.mirrored)
+    return result
+
+
+def _publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> PublishResult:
     """Publish canonical's base branch: fetch, settle, stage on the fork, push, mirror.
 
     The standalone step after one or more landings. The blessed remote is never
@@ -831,6 +849,10 @@ def land_all(work: list[tuple],
             result.sha = _sha(canon.repo, f"refs/heads/{canon.base}")
             result.unpublished = unpublished(canon)
             results.append(result)
+            if not result.already_landed:
+                worktrace.record("land", repo=canon.repo, branch=branch, sha=result.sha,
+                                 base=canon.base, landed_from=str(repo),
+                                 unpublished=result.unpublished)
         return results
 
 

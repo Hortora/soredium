@@ -39,6 +39,7 @@ for _entry in (str(_here), str(_here.parent / "project"), str(_here.parent / "wo
 import canonical_sync  # noqa: E402
 from canonical_sync import SyncError  # noqa: E402
 import close as ceremony  # noqa: E402
+import worktrace  # noqa: E402
 
 
 def covered(workspace: Path) -> list[Path]:
@@ -289,6 +290,10 @@ def publish_blog(workspace: Path, routing_path: Path | None = None
             canonical_sync.publish_base(repo)
         except SyncError as error:
             held[label] = f"committed, not pushed: {canonical_sync.redact(error.detail)}"
+            continue
+        worktrace.record("blog-publish", repo=repo, files=rel, published_from=str(workspace))
+    for label, reason in held.items():
+        worktrace.record("blog-held", repo=workspace, entries=label, reason=reason[:300])
     return posted, held
 
 

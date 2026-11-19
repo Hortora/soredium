@@ -43,6 +43,8 @@ LIFECYCLE_FILES = [
 ]
 
 
+import worktrace  # noqa: E402
+
 @dataclass(frozen=True)
 class CloseTarget:
     repo: Path
@@ -982,6 +984,21 @@ def mark_slot_landed(slot_dir: Path, branch: str, project_shas: dict[str, str]) 
 # --- close orchestration ---
 
 def close(workspace: Path, land_active: bool = True) -> CloseResult:
+    """Run the ceremony and record what it did, whether or not it succeeded."""
+    result = _close(workspace, land_active)
+    for ref in result.closed_items:
+        worktrace.record("issue-close", repo=workspace,
+                         branch=result.closed_branches.get(ref, ""), issue=ref)
+    worktrace.record(
+        "close-ceremony", repo=workspace, success=result.success,
+        land_active=land_active, closed=result.closed_items,
+        landed={**result.landed, **result.workspace_landed}, carried=result.carried,
+        not_landed=result.not_landed, squash_review=result.squash_review,
+        slot_ready=result.slot_ready, errors=[str(e)[:200] for e in result.errors])
+    return result
+
+
+def _close(workspace: Path, land_active: bool = True) -> CloseResult:
     """Run the ceremony. `land_active=False` lands only the items marked done and
     leaves the active item exactly as it is: still active, its branch unlanded
     and still checked out (#571). That is `work end` run part-way through the
@@ -1105,6 +1122,9 @@ def close(workspace: Path, land_active: bool = True) -> CloseResult:
                     unpublished[canonical] = outcome.unpublished
             for target in entry.targets:
                 stamp(target, landed[target], issue)
+                worktrace.record("stamp", repo=target.repo, branch=target.branch,
+                                 sha=landed[target], issue=issue)
+                worktrace.work_ended(target.repo, target.branch, landed[target])
                 squash_marker.clear(target.repo, target.branch)
                 # The branch now sits on the base branch: the record has done its job.
                 branch_base.clear(target.repo, target.branch)

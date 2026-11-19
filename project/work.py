@@ -24,6 +24,9 @@ from orchestrator_engine import run_loop, run_script
 from shared_steps import StepDef, OrchestratorContextBase
 from judgment import StepType
 from work_progress import update_progress, delete_progress
+import subprocess
+
+import worktrace
 from conflict_resolution import make_rebase_error_handler
 
 VALID_COMMANDS = {"start", "continue", "pause", "resume", "next", "done", "find",
@@ -998,6 +1001,27 @@ def stop_on_mechanical_error(step, ctx, result: dict) -> dict:
     return {"ACTION": "error", "STEP": step.name, **result}
 
 
+def trace_step(sequence: bool):
+    """Record each mechanical step as it finishes; keep its report for wrap and end."""
+    def on_step_done(step, ctx, result: dict) -> None:
+        worktrace.record("step", repo=ctx.workspace, branch=ctx.branch, command=ctx.command,
+                         step=step.name, outcome="error" if result.get("ERROR") else "completed",
+                         error=result.get("ERROR", ""))
+        if sequence:
+            record_step_report(step, ctx, result)
+    return on_step_done
+
+
+def trace_stop(args: dict[str, str], lines: list[str]) -> None:
+    """A command that stopped before or instead of running: record why."""
+    found = dict(l.split("=", 1) for l in lines if "=" in l)
+    worktrace.record(
+        f"work-{args.get('command', '')}-stopped", repo=args.get("workspace") or None,
+        branch=args.get("branch", ""), result=found.get("ACTION", ""),
+        reason=found.get("STOP_REASON") or found.get("DECISION") or found.get("ERROR", ""),
+        detail=found.get("DETAIL", "")[:300])
+
+
 def record_step_report(step, ctx, result: dict) -> None:
     """Keep what a mechanical step reported, for the summary at the end."""
     from progress import Progress
@@ -1076,6 +1100,12 @@ def _complete_summary(command: str, ctx: WorkContext) -> str:
     return " ".join(parts)
 
 
+def _branch_of(repo: str) -> str:
+    done = subprocess.run(["git", "-C", repo, "symbolic-ref", "-q", "--short", "HEAD"],
+                          capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
 def main() -> int:
     args = fill_from_context(parse_args(sys.argv))
     if "error" in args:
@@ -1085,26 +1115,31 @@ def main() -> int:
     for line in guard_lines:
         print(line)
     if stop:
+        trace_stop(args, guard_lines)
         return 0
     refused, stop = sequence_branch_check(args)
     for line in refused:
         print(line)
     if stop:
+        trace_stop(args, refused)
         return 0
     args, alignment_lines, stop = apply_alignment(args)
     for line in alignment_lines:
         print(line)
     if stop:
+        trace_stop(args, alignment_lines)
         return 0
     args, route_lines, stop = apply_route(args)
     for line in route_lines:
         print(line)
     if stop:
+        trace_stop(args, route_lines)
         return 1 if "ACTION=error" in route_lines else 0
     sequence_lines, stop = sequence_preflight(args)
     for line in sequence_lines:
         print(line)
     if stop:
+        trace_stop(args, sequence_lines)
         return 0
     begin_run(args)
     ctx = build_context(args)
@@ -1162,6 +1197,12 @@ def main() -> int:
                 answered.set(ITEM_FINISHED_ANSWER, args["finished"])
                 answered.save(ctx.workspace)
         ctx.progress = Progress.load(ctx.workspace)
+        worktrace.record("step", repo=ctx.workspace, branch=ctx.branch, command=command,
+                         step=step_name, outcome=response.outcome.value,
+                         finished=args.get("finished", "") if step_name == ITEM_FINISHED else "")
+    else:
+        worktrace.record(f"work-{command}-begin", repo=ctx.workspace, branch=ctx.branch,
+                         project=str(ctx.project), issue=args.get("covers", ""))
 
     if ctx.in_slot and ctx.slot_path and command in ("start", "continue"):
         _write_slot_occupant(ctx.slot_path)
@@ -1172,10 +1213,23 @@ def main() -> int:
         steps, ctx,
         on_mechanical_error=(stop_on_mechanical_error if sequence
                              else make_rebase_error_handler()),
-        on_step_done=record_step_report if sequence else None,
+        on_step_done=trace_step(sequence),
         complete_summary=_complete_summary(command, ctx),
     )
+    if result.get("ACTION") == "error":
+        worktrace.record(f"work-{command}-stopped", repo=ctx.workspace, branch=ctx.branch,
+                         result="error", reason=result.get("ERROR", ""), step=result.get("STEP", ""),
+                         detail=str(result.get("DETAIL", ""))[:300])
     if result.get("ACTION") == "complete":
+        worktrace.record(f"work-{command}-complete", repo=ctx.workspace, branch=ctx.branch,
+                         project=str(ctx.project), issue=args.get("covers", ""),
+                         summary=str(result.get("SUMMARY", ""))[:300])
+        if command == "start":
+            for repo in dict.fromkeys((str(ctx.project), str(ctx.workspace))):
+                branch = _branch_of(repo)
+                if branch:
+                    worktrace.work_started(repo, branch, issue=args.get("covers", ""),
+                                           location="slot" if ctx.in_slot else "primary")
         if sequence:
             for line in sequence_report(command, ctx.workspace):
                 print(line)
