@@ -11,12 +11,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
 
 def _init_git(path: Path) -> None:
-    subprocess.run(["git", "-C", str(path), "init"], capture_output=True)
+    subprocess.run(["git", "-C", str(path), "init", "-b", "main"], capture_output=True)
     subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"], capture_output=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "test"], capture_output=True)
     (path / ".gitkeep").touch()
     subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
     subprocess.run(["git", "-C", str(path), "commit", "-m", "init"], capture_output=True)
+
+
+def _git_show(repo: Path, branch: str, path: str):
+    r = subprocess.run(["git", "-C", str(repo), "show", f"{branch}:{path}"],
+                       capture_output=True)
+    return r.stdout if r.returncode == 0 else None
 
 
 class TestToProjectImageCopromotion:
@@ -46,8 +52,8 @@ class TestToProjectImageCopromotion:
             })
 
         assert rc == 0
-        assert (proj / "docs/blog/entry.md").exists()
-        assert (proj / "docs/blog/images/fig1.png").exists()
+        assert _git_show(proj, "main", "docs/blog/entry.md") is not None
+        assert _git_show(proj, "main", "docs/blog/images/fig1.png") is not None
 
     def test_md_with_missing_image_promotes_md_only(self, tmp_path):
         ws = tmp_path / "workspace"
@@ -71,8 +77,8 @@ class TestToProjectImageCopromotion:
             })
 
         assert rc == 0
-        assert (proj / "docs/blog/entry.md").exists()
-        assert not (proj / "docs/blog/images/missing.png").exists()
+        assert _git_show(proj, "main", "docs/blog/entry.md") is not None
+        assert _git_show(proj, "main", "docs/blog/images/missing.png") is None
 
     def test_nested_image_dir_preserved(self, tmp_path):
         ws = tmp_path / "workspace"
@@ -100,7 +106,7 @@ class TestToProjectImageCopromotion:
             })
 
         assert rc == 0
-        assert (proj / "specs/feature/images/screenshots/screen1.png").exists()
+        assert _git_show(proj, "main", "specs/feature/images/screenshots/screen1.png") is not None
 
     def test_non_md_artifact_no_image_scan(self, tmp_path):
         ws = tmp_path / "workspace"
@@ -122,4 +128,4 @@ class TestToProjectImageCopromotion:
             })
 
         assert rc == 0
-        assert (proj / "data.json").exists()
+        assert _git_show(proj, "main", "data.json") is not None

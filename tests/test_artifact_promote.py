@@ -195,7 +195,7 @@ class TestToProject:
         g(proj, "checkout", "-q", "-b", "issue-1")
 
         rc, out, text = run("to-project", str(proj), str(ws),
-                            "artifacts=specs/design.md", "dest-prefix=docs/")
+                            "artifacts=specs/design.md", "dest-prefix=docs/", "scope=branch")
 
         assert rc == 0, text
         assert out["LANDED"] == "branch"
