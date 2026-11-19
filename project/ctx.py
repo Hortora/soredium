@@ -319,7 +319,10 @@ def resolve(cwd=None) -> dict[str, str]:
     unfinished_branch = ""
     unfinished_issue = ""
     unfinished_warn = ""
-    _has_local_queue = (Path(workspace) / ".queue").exists() or (Path(workspace) / ".plan").exists()
+    from queue_io import queue_dir as _queue_dir
+    _qdir = _queue_dir(Path(workspace))
+    _has_local_queue = ((_qdir / ".queue").exists() or (Path(workspace) / ".plan").exists()
+                        or (_qdir / ".plan").exists())
     if not _has_local_queue:
         try:
             _lib = Path.home() / ".claude" / "lib"

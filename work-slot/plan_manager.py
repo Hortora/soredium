@@ -1190,7 +1190,11 @@ def _detect_from_queue(queue_path: Path, workspace_path: Path) -> dict | None:
 
 
 def detect(workspace_path: Path) -> dict | None:
-    queue_path = workspace_path / ".queue"
+    _project_dir = str(Path(__file__).resolve().parent.parent / "project")
+    if _project_dir not in _sys.path:
+        _sys.path.insert(0, _project_dir)
+    from queue_io import queue_dir
+    queue_path = queue_dir(workspace_path) / ".queue"
     if queue_path.exists():
         return _detect_from_queue(queue_path, workspace_path)
 

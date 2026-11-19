@@ -170,7 +170,7 @@ def queue_dir(workspace: Path) -> Path:
     4. a workspace with a `.notes` worktree and no queue anywhere yet: `.notes`.
     5. otherwise the workspace.
     """
-    workspace = Path(workspace)
+    workspace = _workspace_of(Path(workspace))
     area = root_queue_area(workspace)
     if area is not None:
         return area
@@ -184,6 +184,11 @@ def queue_dir(workspace: Path) -> Path:
     return workspace
 
 
+def _workspace_of(path: Path) -> Path:
+    """A caller handed the `.notes` directory itself means the workspace it belongs to."""
+    return path.parent if path.name == ".notes" else path
+
+
 def _plan_dir(workspace: Path, qdir: Path) -> Path:
     """Where an older `.plan` is looked for: beside the queue, except that a
     workspace using `.notes` keeps any old `.plan` in the workspace itself."""
@@ -193,7 +198,7 @@ def _plan_dir(workspace: Path, qdir: Path) -> Path:
 def read_queue(workspace: Path, exact: bool = False) -> Optional[Queue]:
     """The queue for work at `workspace`. `exact=True` reads the file in that very
     directory, whatever area it belongs to (for listing every queue in a slot)."""
-    workspace = Path(workspace)
+    workspace = Path(workspace) if exact else _workspace_of(Path(workspace))
     qdir = workspace if exact else queue_dir(workspace)
     queue_path = qdir / ".queue"
     plan_path = _plan_dir(workspace, qdir) / ".plan"
@@ -301,7 +306,7 @@ def write_queue(workspace: Path, queue: Queue) -> None:
         lines.extend(queue.deferred_lines)
     lines.append("")
     content = "\n".join(lines)
-    workspace = Path(workspace)
+    workspace = _workspace_of(Path(workspace))
     qdir = queue_dir(workspace)
     if qdir.name == ".notes" and qdir.parent == workspace:
         from notes_store import NotesStore

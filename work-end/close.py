@@ -29,6 +29,7 @@ if _slot_dir not in sys.path:
     sys.path.insert(0, _slot_dir)
 
 from queue_io import read_queue, write_queue, Queue, QueueItem
+from queue_io import queue_dir  # noqa: E402
 import squash_marker
 import canonical_sync
 from canonical_sync import SyncError
@@ -870,6 +871,8 @@ def settle_queue(workspace: Path) -> Optional[QueueItem]:
 
 
 def commit_and_push_queue(workspace: Path, closing_issue: str, refs_issue: str = "") -> None:
+    if queue_dir(workspace) != workspace:
+        return      # the queue is at the area root or in the notes store: not a file tracked here
     if not (workspace / ".queue").exists():
         return
     _git(workspace, "add", ".queue")
@@ -885,6 +888,8 @@ def commit_and_push_queue(workspace: Path, closing_issue: str, refs_issue: str =
 def elevate_queue(workspace: Path, slot_root: Optional[Path]) -> None:
     if not slot_root:
         return
+    if queue_dir(workspace) != workspace:
+        return      # the slot already uses its root queue (#577): nothing is copied up
     ws_queue = workspace / ".queue"
     slot_queue = slot_root / ".queue"
     if not ws_queue.exists():

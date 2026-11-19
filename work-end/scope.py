@@ -128,7 +128,12 @@ def commit_queue(workspace: Path, covers: str = "") -> tuple[int, list[str]]:
     lifecycle files, and it is lost if the branch is switched.
     """
     import subprocess
+    from queue_io import queue_dir
     workspace = Path(workspace)
+    if queue_dir(workspace) != workspace or not (workspace / ".git").exists():
+        # At the area root, or in the notes store (which commits its own writes):
+        # there is no queue file tracked in this workspace to commit.
+        return 0, ["QUEUE_COMMITTED=not_tracked_here"]
     changed = subprocess.run(["git", "-C", str(workspace), "status", "--porcelain", "--", ".queue"],
                              capture_output=True, text=True).stdout.strip()
     if not changed:

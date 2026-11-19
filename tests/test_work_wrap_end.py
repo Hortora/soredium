@@ -382,6 +382,9 @@ class TestEndInANumberedSlot:
 
     @pytest.fixture
     def slot(self, tmp_path):
+        return self._build(tmp_path)
+
+    def _build(self, tmp_path):
         canonical, remotes = {}, {}
         for name in ("agency", "connectors", "wsp", "unrelated"):
             repo, bare = with_remote(tmp_path / "canonical", name)
@@ -479,3 +482,42 @@ class TestEndInANumberedSlot:
         self._drive(slot)
         assert (slot["slot"] / ".queue").exists()
         assert not (slot["clones"]["wsp"] / ".queue").exists()
+
+
+class TestEndInASlotUsingItsRootQueue(TestEndInANumberedSlot):
+    """The same sequence in a slot switched to its root queue, whose workspace
+    clone also carries a different queue inherited from its repo (#577)."""
+
+    INHERITED = ("- [ ] o/other#77 — Someone else's work        ← active\n\n"
+                 "## State\nbranch: issue-77-elsewhere\nissue-repo: O/other\nstatus: active\n")
+
+    @pytest.fixture
+    def slot(self, tmp_path):
+        import queue_home
+        built = self._build(tmp_path)
+        wsp = built["clones"]["wsp"]
+        (wsp / ".queue").write_text(self.INHERITED)
+        g(wsp, "add", ".queue")
+        g(wsp, "commit", "-q", "-m", "chore: the repo's own queue Refs O/r#1")
+        squash_marker.mark(wsp, BRANCH)
+        queue_home.mark(built["slot"])
+        return built
+
+    def test_the_queue_stays_at_the_slot_root(self, slot):
+        self._drive(slot)
+        assert read_queue(slot["slot"], exact=True).items[0].ref == "o/r#1"
+
+    def test_the_inherited_queue_is_never_read_or_changed(self, slot):
+        _, result = self._drive(slot)
+        assert result["ACTION"] == "handoff", result["_raw"]
+        assert self._answer(slot, "handoff")["ACTION"] == "complete"
+        wsp = slot["clones"]["wsp"]
+        assert g(wsp, "show", "HEAD:.queue") + "\n" == self.INHERITED
+        assert (wsp / ".queue").read_text() == self.INHERITED
+        assert g(wsp, "status", "--porcelain", "--", ".queue") == ""
+        assert read_queue(slot["slot"], exact=True).items[0].completed
+
+    def test_the_scope_and_item_come_from_the_root_queue(self, slot):
+        first = self._run(slot)
+        assert first["ACTION"] == "review", first["_raw"]
+        assert "issue-77-elsewhere" not in first["_raw"]

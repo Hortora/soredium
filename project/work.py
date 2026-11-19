@@ -121,9 +121,17 @@ def fill_from_context(args: dict[str, str], resolve=None) -> dict[str, str]:
 
 
 def _queue_dir(args: dict[str, str]) -> Path:
+    """Where this work's queue is. A slot or clone using its root queue, or a
+    workspace using its notes store, is decided by queue_io (#577); everything
+    else is where the context found the queue, as before."""
+    from queue_io import queue_dir
+    workspace = Path(args.get("workspace", "."))
+    decided = queue_dir(workspace)
+    if decided != workspace:
+        return decided
     if args.get("plan_path"):
         return Path(args["plan_path"]).parent
-    return Path(args.get("workspace", "."))
+    return workspace
 
 
 # What the user can choose between when the two repos disagree and no repair
@@ -548,7 +556,7 @@ def _sync_queue_branch_script(ctx):
     if not ctx.branch:
         return None
     return ["python3", str(_PLAN_MANAGER),
-            "set-state", str(ctx.plan_path) if ctx.plan_path else str(ctx.workspace / ".queue"),
+            "set-state", _queue_file(ctx),
             f"key=branch", f"value={ctx.branch}"]
 
 
@@ -851,11 +859,25 @@ def _mark_done_on_branch(ctx) -> list[str] | None:
             f"branch={ctx.branch}"]
 
 
+def _queue_file(ctx) -> str:
+    from queue_io import queue_dir
+    decided = queue_dir(Path(ctx.workspace))
+    if decided != Path(ctx.workspace):
+        return str(decided / ".queue")
+    return str(ctx.plan_path) if ctx.plan_path else str(Path(ctx.workspace) / ".queue")
+
+
 def _ceremony_root(ctx) -> Path:
     """The directory the ceremony runs from: where the queue is. In a numbered
     slot that is the slot root, above the workspace clone; everywhere else it
     is the workspace."""
-    return Path(ctx.plan_path).parent if ctx.plan_path else Path(ctx.workspace)
+    from queue_io import root_queue_area
+    area = root_queue_area(Path(ctx.workspace))
+    if area is not None:
+        return area
+    if ctx.plan_path and Path(ctx.plan_path).parent.name != ".notes":
+        return Path(ctx.plan_path).parent
+    return Path(ctx.workspace)
 
 
 def _scope(command: str, with_covers: bool = False):

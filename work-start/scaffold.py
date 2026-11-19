@@ -81,9 +81,25 @@ def scaffold(workspace: Path, branch: str, project_sha: str,
             f"workspace path looks like a project repo (has wksp/ symlink, "
             f"no proj/ symlink, no .workspace marker): {workspace}")
 
-    queue_path = workspace / ".queue"
+    from queue_io import queue_dir
+    qdir = queue_dir(workspace)
+    queue_path = qdir / ".queue"
     plan_path = workspace / ".plan"
     journal_path = workspace / "JOURNAL.md"
+    if qdir != workspace and not queue_path.exists() and not force:
+        # A slot or clone using its root queue, or a workspace using its notes
+        # store, with no queue yet (#577): the queue starts there, as a queue.
+        from queue_io import Queue, QueueItem, QueueState
+        first = covers or (f"{issue_repo}#{issue}" if issue and issue_repo else "")
+        write_queue(workspace, Queue(
+            items=([QueueItem(ref=first.split(",")[0].strip().lower(), title=f"Issue #{issue}",
+                              completed=False, active=True)] if first else []),
+            state=QueueState(branch=branch, issue_repo=issue_repo, status="active",
+                             covers=covers or first)))
+        if not journal_path.exists():
+            journal_path.write_text(f"# Design Journal — {branch}\n")
+        return ScaffoldResult(plan_path=str(queue_path), journal_path=str(journal_path),
+                              created=True)
 
     if not force and queue_path.exists():
         queue = read_queue(workspace)

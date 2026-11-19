@@ -68,7 +68,15 @@ def detect(topo: Topology, base_branch: str = "main") -> WorkState:
     # Queue/plan detection — read_queue is primary (handles .plan migration)
     # Search workspace, workspace_root, slot_dir (same as find_design_file)
     queue = None
-    for search_base in [topo.workspace, topo.workspace_root, topo.slot_dir]:
+    from queue_io import queue_dir as _queue_dir
+    decided = _queue_dir(topo.workspace) if topo.workspace and topo.workspace.is_dir() else None
+    decided_elsewhere = decided is not None and decided != topo.workspace
+    if decided_elsewhere:
+        # A slot or clone using its root queue, or a workspace using its notes
+        # store (#577): that is the only queue; nothing else is searched.
+        queue = read_queue(topo.workspace)
+    for search_base in ([] if decided_elsewhere
+                        else [topo.workspace, topo.workspace_root, topo.slot_dir]):
         if search_base and search_base.is_dir():
             queue = read_queue(search_base)
             if queue:
@@ -81,8 +89,9 @@ def detect(topo: Topology, base_branch: str = "main") -> WorkState:
 
     if queue:
         has_plan = True
-        for qb in [topo.workspace, topo.workspace_root, topo.slot_dir]:
-            if qb and (qb / ".queue").exists():
+        for qb in ([decided] if decided_elsewhere
+                   else [topo.workspace, topo.workspace_root, topo.slot_dir]):
+            if qb and ((qb / ".queue").exists() or decided_elsewhere):
                 plan_path = str(qb / ".queue")
                 break
         active = queue.active_item()

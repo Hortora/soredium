@@ -58,7 +58,9 @@ def branch_exists(repo: Path | str, branch: str) -> bool:
 
 
 def _read_queue(workspace: Path):
-    from queue_io import read_queue
+    from queue_io import queue_dir, read_queue
+    if queue_dir(workspace) != workspace:      # root queue or notes store (#577)
+        return read_queue(workspace)
     for candidate in (workspace, workspace.parent):
         if (candidate / ".queue").exists() or (candidate / ".plan").exists():
             queue = read_queue(candidate)
