@@ -304,7 +304,8 @@ class TestPlan:
         assert missing[0]["file"] == "absent.md"
         assert len(entries_missing) == 1
 
-    def test_entry_with_no_frontmatter_skipped(self, tmp_path):
+    def test_entry_with_no_frontmatter_is_routed_as_a_note(self, tmp_path):
+        """Was test_entry_with_no_frontmatter_skipped; since #572 it is a note."""
         global_cfg = {
             "destinations": {"blog": {"path": str(tmp_path / "dest")}},
             "defaults": {"destinations": ["blog"]},
@@ -317,7 +318,7 @@ class TestPlan:
 
         entries, _, _ = plan(ws, gpath)
         files = [e["file"] for e in entries]
-        assert "nofm.md" not in files
+        assert "nofm.md" in files
         assert "hasfm.md" in files
 
     def test_destination_dir_does_not_exist(self, tmp_path):
@@ -668,30 +669,45 @@ class TestEntriesAreIdentifiedByTheirRepo:
         assert _identity_matches(rule, identity) is expected
 
 
-class TestUnroutableEntriesAreReported:
-    """Entries with missing metadata are named, never guessed at and never silent."""
+class TestUntypedEntriesAreNotes:
+    """#572: an entry that does not say what it is is a note, routed by its repo."""
 
-    def _ws(self, tmp_path):
-        ws = tmp_path / "ws"
-        (ws / "blog").mkdir(parents=True)
-        _write_entry(ws / "blog", "2026-01-01-good.md", {"entry_type": "note"})
+    def _ws(self, tmp_path, slug="casehubio/engine"):
+        project = _project_repo(tmp_path, "p", slug)
+        ws = _workspace_for(tmp_path, project)
+        _write_entry(ws / "blog", "2026-01-01-good.md", {"entry_type": "article"})
         _write_entry(ws / "blog", "2026-01-02-untyped.md", {"title": "no type"})
         (ws / "blog" / "2026-01-03-bare.md").write_text("# No frontmatter at all\n")
+        _write_entry(ws / "blog", "2026-01-04-diary.md", {"entry_type": "diary"})
         (ws / "blog" / "INDEX.md").write_text("# index\n")
         return ws
 
-    def test_each_is_named_with_its_reason(self, tmp_path):
-        from blog_routing import unroutable
-        assert unroutable(self._ws(tmp_path)) == [
-            {"file": "2026-01-02-untyped.md", "reason": "no_entry_type"},
-            {"file": "2026-01-03-bare.md", "reason": "no_frontmatter"},
-        ]
-
-    def test_they_are_not_routed_anywhere(self, tmp_path):
-        ws = self._ws(tmp_path)
+    def _routes(self, ws, tmp_path):
         gpath = _write_routing(tmp_path / "blog-routing.yaml", PROPOSED_GLOBAL)
         entries, _, _ = plan(ws, gpath, check_present_fn=lambda *_: False)
-        assert {e["file"] for e in entries} == {"2026-01-01-good.md"}
+        out: dict[str, set[str]] = {}
+        for e in entries:
+            out.setdefault(e["file"], set()).add(e["dest"])
+        return out
+
+    def test_in_a_casehub_repo_they_go_to_both_notes_sites(self, tmp_path):
+        routes = self._routes(self._ws(tmp_path), tmp_path)
+        for name in ("2026-01-02-untyped.md", "2026-01-03-bare.md", "2026-01-04-diary.md"):
+            assert routes[name] == {"personal-notes", "casehub-notes"}, name
+        assert routes["2026-01-01-good.md"] == {"personal-articles", "casehub-articles"}
+
+    def test_in_a_hortora_repo_they_go_to_personal_notes_only(self, tmp_path):
+        routes = self._routes(self._ws(tmp_path, "Hortora/engine"), tmp_path)
+        for name in ("2026-01-02-untyped.md", "2026-01-03-bare.md", "2026-01-04-diary.md"):
+            assert routes[name] == {"personal-notes"}, name
+
+    def test_each_is_named_with_its_reason(self, tmp_path):
+        from blog_routing import defaulted
+        assert defaulted(self._ws(tmp_path)) == [
+            {"file": "2026-01-02-untyped.md", "reason": "no_entry_type"},
+            {"file": "2026-01-03-bare.md", "reason": "no_frontmatter"},
+            {"file": "2026-01-04-diary.md", "reason": "unknown_entry_type:diary"},
+        ]
 
     def test_the_command_line_prints_them_and_a_count(self, tmp_path, capsys):
         from blog_routing import plan_cli
@@ -699,15 +715,15 @@ class TestUnroutableEntriesAreReported:
         gpath = _write_routing(tmp_path / "blog-routing.yaml", PROPOSED_GLOBAL)
         plan_cli(str(ws), str(gpath))
         out = capsys.readouterr().out
-        assert "UNROUTABLE=2026-01-02-untyped.md REASON=no_entry_type" in out
-        assert "UNROUTABLE=2026-01-03-bare.md REASON=no_frontmatter" in out
-        assert "UNROUTABLE_COUNT=2" in out
+        assert "DEFAULTED=2026-01-03-bare.md AS=note REASON=no_frontmatter" in out
+        assert "DEFAULTED_COUNT=3" in out
+        assert "UNROUTABLE" not in out
 
-    def test_a_clean_workspace_reports_zero(self, tmp_path, capsys):
+    def test_a_fully_typed_workspace_reports_zero(self, tmp_path, capsys):
         from blog_routing import plan_cli
-        ws = tmp_path / "ws"
-        (ws / "blog").mkdir(parents=True)
+        project = _project_repo(tmp_path, "p", "casehubio/ops")
+        ws = _workspace_for(tmp_path, project)
         _write_entry(ws / "blog", "2026-01-01-good.md", {"entry_type": "note"})
         gpath = _write_routing(tmp_path / "blog-routing.yaml", PROPOSED_GLOBAL)
         plan_cli(str(ws), str(gpath))
-        assert "UNROUTABLE_COUNT=0" in capsys.readouterr().out
+        assert "DEFAULTED_COUNT=0" in capsys.readouterr().out

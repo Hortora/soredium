@@ -321,11 +321,7 @@ def plan(
     for md in sorted(blog_dir.glob("*.md")):
         if md.name == "INDEX.md":
             continue
-        fm = parse_frontmatter(md)
-        if fm is None:
-            continue
-        if not fm.get("entry_type"):
-            continue
+        fm, _ = typed_frontmatter(md)
 
         if source:
             fm = {**fm, SOURCE_KEY: source}
@@ -348,11 +344,34 @@ def plan(
     return entries, missing_pairs, entries_with_missing
 
 
-def unroutable(workspace_or_project: Path) -> list[dict[str, str]]:
-    """Entries the plan cannot route, and why: no frontmatter, or no entry_type.
+KNOWN_ENTRY_TYPES = ("note", "article")
+DEFAULT_ENTRY_TYPE = "note"
 
-    They are never guessed at. Reported so they can be fixed: left unreported,
-    an entry with bad metadata is simply never published and nobody is told.
+
+def typed_frontmatter(path: Path) -> tuple[dict[str, Any], str]:
+    """An entry's frontmatter with a usable entry_type, and why it was defaulted.
+
+    An entry with no frontmatter, no entry_type, or an entry_type that is not a
+    known type (`diary` is a subtype) is a note (#572). Where it goes is decided
+    by the repo it lives in, so nothing else needs guessing. The second value
+    is "" when the entry already had a known type.
+    """
+    fm = parse_frontmatter(path)
+    if fm is None:
+        return {"entry_type": DEFAULT_ENTRY_TYPE}, "no_frontmatter"
+    kind = str(fm.get("entry_type") or "").strip().lower()
+    if not kind:
+        return {**fm, "entry_type": DEFAULT_ENTRY_TYPE}, "no_entry_type"
+    if kind not in KNOWN_ENTRY_TYPES:
+        return {**fm, "entry_type": DEFAULT_ENTRY_TYPE}, f"unknown_entry_type:{kind}"
+    return fm, ""
+
+
+def defaulted(workspace_or_project: Path) -> list[dict[str, str]]:
+    """Entries routed as notes because their metadata did not say what they are.
+
+    They are published like any other note. They are named so the metadata can
+    be completed, not because anything is withheld.
     """
     blog_dir = _find_blog_dir(workspace_or_project.resolve())
     if blog_dir is None:
@@ -361,11 +380,9 @@ def unroutable(workspace_or_project: Path) -> list[dict[str, str]]:
     for md in sorted(blog_dir.glob("*.md")):
         if md.name == "INDEX.md":
             continue
-        fm = parse_frontmatter(md)
-        if fm is None:
-            found.append({"file": md.name, "reason": "no_frontmatter"})
-        elif not fm.get("entry_type"):
-            found.append({"file": md.name, "reason": "no_entry_type"})
+        _, reason = typed_frontmatter(md)
+        if reason:
+            found.append({"file": md.name, "reason": reason})
     return found
 
 
@@ -385,7 +402,7 @@ def plan_cli(workspace_or_project: str, routing: str | None = None) -> None:
     em_str = " ".join(e["file"] for e in entries_with_missing)
     print(f"ENTRIES_MISSING={em_str}" if em_str else "ENTRIES_MISSING=")
 
-    skipped = unroutable(root)
-    for entry in skipped:
-        print(f"UNROUTABLE={entry['file']} REASON={entry['reason']}")
-    print(f"UNROUTABLE_COUNT={len(skipped)}")
+    assumed = defaulted(root)
+    for entry in assumed:
+        print(f"DEFAULTED={entry['file']} AS={DEFAULT_ENTRY_TYPE} REASON={entry['reason']}")
+    print(f"DEFAULTED_COUNT={len(assumed)}")

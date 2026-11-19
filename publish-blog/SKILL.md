@@ -294,7 +294,7 @@ written before the convention change without requiring bulk frontmatter updates.
 
 | Situation | Behaviour |
 |-----------|-----------|
-| Entry missing `entry_type` | Skip with warning |
+| Entry with no frontmatter, no `entry_type`, or an unknown one | Routed as a note; the plan names it (`DEFAULTED=`) so the metadata can be completed |
 | Entry with no matching rules | Routes to `defaults.destinations` |
 | `defaults.destinations` not configured | Entry gets no destinations (warn user) |
 | Destination path missing | Prompt: create / skip / abort |
