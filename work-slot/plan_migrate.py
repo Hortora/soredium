@@ -173,3 +173,18 @@ def migrate_if_needed(design_dir: Path) -> bool:
 
     meta_path.unlink()
     return True
+
+
+if __name__ == "__main__":
+    # plan_migrate.py to-root <workspace>: the explicit form of what resolving
+    # context used to do on every read.
+    if len(sys.argv) != 3 or sys.argv[1] != "to-root":
+        print("usage: plan_migrate.py to-root <workspace>", file=sys.stderr)
+        sys.exit(2)
+    _target = Path(sys.argv[2])
+    if not _target.is_dir():
+        print(f"ERROR=workspace_not_found:{_target}")
+        sys.exit(1)
+    _moved = migrate_to_root(_target)
+    _merged = migrate_if_needed(_target)      # an old .meta at the root, merged into .plan
+    print(f"MIGRATED={'yes' if (_moved or _merged) else 'no'}")

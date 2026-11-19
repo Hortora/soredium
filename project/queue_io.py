@@ -126,14 +126,14 @@ def read_queue(workspace: Path) -> Optional[Queue]:
     queue_path = workspace / ".queue"
     plan_path = workspace / ".plan"
 
+    # Reading never changes a file. A workspace still on the older `.plan` name
+    # is read in place: the parser below understands both. It is renamed to
+    # `.queue` only when something writes the queue (write_queue, or
+    # ensure_queue_file before a writer that needs the path).
     if queue_path.exists():
         path = queue_path
     elif plan_path.exists():
-        migrate_plan_to_queue(workspace)
-        if queue_path.exists():
-            path = queue_path
-        else:
-            return None
+        path = plan_path
     else:
         return None
 
@@ -231,6 +231,35 @@ def write_queue(workspace: Path, queue: Queue) -> None:
     tmp = workspace / ".queue.tmp"
     tmp.write_text("\n".join(lines))
     tmp.replace(workspace / ".queue")
+    _retire_plan_file(workspace)
+
+
+def _retire_plan_file(workspace: Path) -> None:
+    """Once `.queue` holds the queue, the older `.plan` is kept aside as `.plan.bak`.
+
+    Said out loud on stderr: a file being renamed is never done silently.
+    """
+    plan_path = workspace / ".plan"
+    if plan_path.exists() and (workspace / ".queue").exists():
+        plan_path.rename(workspace / ".plan.bak")
+        import sys
+        print(f"MIGRATED_PLAN={workspace} (.plan kept as .plan.bak; the queue is now .queue)",
+              file=sys.stderr)
+
+
+def ensure_queue_file(workspace: Path) -> bool:
+    """Make sure `.queue` exists before a writer that needs its path.
+
+    Returns True when an older `.plan` was converted just now. Called only by
+    code that is about to write the queue, never on a read.
+    """
+    if (workspace / ".queue").exists() or not (workspace / ".plan").exists():
+        return False
+    migrate_plan_to_queue(workspace)
+    import sys
+    print(f"MIGRATED_PLAN={workspace} (.plan kept as .plan.bak; the queue is now .queue)",
+          file=sys.stderr)
+    return True
 
 
 def _migrate_lifecycle_state(state_val: str) -> str:

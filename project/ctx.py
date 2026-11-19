@@ -75,9 +75,17 @@ def resolve(cwd=None) -> dict[str, str]:
     """Resolve all workspace context. Returns a dict of KEY -> value strings."""
     topo = topo_resolve(cwd)
 
-    from plan_migrate import migrate_to_root
+    # Resolving context is a read: it moves and deletes nothing. A workspace
+    # still using the old design/ layout is reported (LEGACY_LAYOUT below) and
+    # converted only by `plan_migrate.py to-root <workspace>`.
+    legacy_layout = ""
     if topo.workspace and topo.workspace.is_dir():
-        migrate_to_root(topo.workspace)
+        _design = topo.workspace / "design"
+        if any((_design / name).exists() for name in
+               (".plan", ".meta", ".epic", "JOURNAL.md", ".pause-stack", ".execute-progress")):
+            legacy_layout = str(_design)
+        elif (topo.workspace / ".meta").exists():
+            legacy_layout = str(topo.workspace / ".meta")
 
     workspace_valid = "yes"
     workspace_error = ""
@@ -367,6 +375,7 @@ def resolve(cwd=None) -> dict[str, str]:
         "HANDOFF_PATH": state.handoff_path,
         "HAS_PLAN": "yes" if state.has_plan else "no",
         "HAS_QUEUE": "yes" if queue else ("yes" if state.has_plan else "no"),
+        "LEGACY_LAYOUT": legacy_layout,
         "PLAN_PATH": state.plan_path,
         "QUEUE_PATH": state.plan_path,
         "ACTIVE_ISSUE": state.active_issue,

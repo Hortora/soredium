@@ -61,11 +61,9 @@ def detect(topo: Topology, base_branch: str = "main") -> WorkState:
             if line.strip().startswith("- branch:")
         )
 
-    # Migration — convert old .meta to unified .plan if needed
-    meta_file = find_design_file(".meta", topo)
-    if meta_file and meta_file.exists():
-        from plan_migrate import migrate_if_needed
-        migrate_if_needed(meta_file.parent)
+    # Detecting state is a read (Hortora/soredium#574): an old .meta is not merged
+    # into .plan and deleted here any more. ctx reports it as LEGACY_LAYOUT and
+    # `plan_migrate.py to-root <workspace>` converts it on request.
 
     # Queue/plan detection — read_queue is primary (handles .plan migration)
     # Search workspace, workspace_root, slot_dir (same as find_design_file)

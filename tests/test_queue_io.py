@@ -119,8 +119,10 @@ def test_migrate_plan_to_queue(tmp_path):
     assert q is not None
     assert q.state.status == "active"
     assert q.state.branch == "issue-1-task"
-    assert (tmp_path / ".queue").exists()
-    assert (tmp_path / ".plan.bak").exists()
+    # Since Hortora/soredium#574 a read changes nothing: the older file is read in place.
+    assert not (tmp_path / ".queue").exists()
+    assert not (tmp_path / ".plan.bak").exists()
+    assert (tmp_path / ".plan").exists()
 
 
 def test_migrate_closing_state(tmp_path):
@@ -272,3 +274,67 @@ def test_queue_with_covers_field(tmp_path):
     write_queue(tmp_path, q)
     q2 = read_queue(tmp_path)
     assert q2.state.covers == "R#1"
+
+
+PLAN_TEXT = ("- [ ] R#1 — Task        ← active\n- [x] R#0 — Earlier\n"
+             "\n## State\nbranch: issue-1-task\nstate: active\nissue-repo: R\ncovers: R#1\n")
+
+
+def _snapshot(directory: Path) -> dict[str, bytes]:
+    return {p.name: p.read_bytes() for p in sorted(directory.iterdir()) if p.is_file()}
+
+
+class TestReadingNeverWrites:
+    """Hortora/soredium#574"""
+
+    def test_reading_a_plan_file_leaves_the_directory_byte_identical(self, tmp_path):
+        (tmp_path / ".plan").write_text(PLAN_TEXT)
+        (tmp_path / "other.md").write_text("untouched")
+        before = _snapshot(tmp_path)
+
+        queue = read_queue(tmp_path)
+        read_queue(tmp_path)
+
+        assert _snapshot(tmp_path) == before
+        assert [i.ref for i in queue.items] == ["R#1", "R#0"]
+        assert queue.active_item().ref == "R#1" and queue.state.covers == "R#1"
+
+    def test_reading_a_queue_file_leaves_it_alone_too(self, tmp_path):
+        (tmp_path / ".queue").write_text(PLAN_TEXT.replace("state: active", "status: active"))
+        before = _snapshot(tmp_path)
+        read_queue(tmp_path)
+        assert _snapshot(tmp_path) == before
+
+    def test_the_queue_file_wins_when_both_exist(self, tmp_path):
+        (tmp_path / ".plan").write_text(PLAN_TEXT)
+        (tmp_path / ".queue").write_text("- [ ] R#9 — Newer        ← active\n\n## State\n"
+                                         "branch: b\nissue-repo: R\nstatus: active\n")
+        assert read_queue(tmp_path).active_item().ref == "R#9"
+
+    def test_writing_converts_and_keeps_the_old_file_aside(self, tmp_path, capsys):
+        from project.queue_io import write_queue
+        (tmp_path / ".plan").write_text(PLAN_TEXT)
+        queue = read_queue(tmp_path)
+
+        write_queue(tmp_path, queue)
+
+        assert (tmp_path / ".queue").exists()
+        assert not (tmp_path / ".plan").exists()
+        assert (tmp_path / ".plan.bak").read_text() == PLAN_TEXT
+        assert "MIGRATED_PLAN=" in capsys.readouterr().err
+        assert [i.ref for i in read_queue(tmp_path).items] == ["R#1", "R#0"]
+
+    def test_ensure_queue_file_converts_once_and_says_so(self, tmp_path, capsys):
+        from project.queue_io import ensure_queue_file
+        (tmp_path / ".plan").write_text(PLAN_TEXT)
+
+        assert ensure_queue_file(tmp_path) is True
+        assert "MIGRATED_PLAN=" in capsys.readouterr().err
+        assert (tmp_path / ".queue").exists() and (tmp_path / ".plan.bak").exists()
+        assert ensure_queue_file(tmp_path) is False
+        assert capsys.readouterr().err == ""
+
+    def test_ensure_queue_file_with_nothing_to_convert(self, tmp_path):
+        from project.queue_io import ensure_queue_file
+        assert ensure_queue_file(tmp_path) is False
+        assert list(tmp_path.iterdir()) == []

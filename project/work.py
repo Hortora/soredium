@@ -310,6 +310,8 @@ def _named_start(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]
         return routed, ["ROUTE_REASON=named_issue_already_started", f"ISSUE={wanted}",
                         "COMMAND=continue"], False
 
+    from queue_io import ensure_queue_file
+    ensure_queue_file(queue_dir)        # about to write: an older .plan becomes .queue now
     queue_path = queue_dir / ".queue"
     try:
         if item is None:
@@ -392,6 +394,8 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
         if _slot_dir not in sys.path:
             sys.path.insert(0, _slot_dir)
         import plan_manager
+        from queue_io import ensure_queue_file
+        ensure_queue_file(queue_dir)    # about to write: an older .plan becomes .queue now
         try:
             plan_manager.activate(queue_dir / ".queue", ref=r.activate)
         except (plan_manager.ActivateError, ValueError) as e:
