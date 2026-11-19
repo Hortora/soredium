@@ -209,3 +209,109 @@ class TestCommandLine:
         done = subprocess.run(["python3", SCRIPT, "adopt", str(slot), "--apply"],
                               capture_output=True, text=True)
         assert done.returncode == 1 and "ERROR=choose_one" in done.stdout
+
+
+class TestTheToolsFollowTheMarker:
+    """read_queue and write_queue are what every tool calls (#577)."""
+
+    def test_an_unmarked_slot_reads_each_workspace_clones_own_queue(self, slot):
+        assert read_queue(slot / "wsp-a").active_item().ref == "o/r#3"
+        assert read_queue(slot / "wsp-b").active_item().ref == "o/x#9"
+
+    def test_a_marked_slot_reads_the_root_queue_from_anywhere_in_it(self, slot):
+        queue_home.adopt(slot, source=slot / "wsp-a", apply=True)
+        for where in (slot, slot / "wsp-a", slot / "wsp-b"):
+            assert read_queue(where).active_item().ref == "o/r#3", where
+
+    def test_a_write_from_a_workspace_clone_changes_only_the_root_queue(self, slot):
+        queue_home.adopt(slot, source=slot / "wsp-a", apply=True)
+        inherited = {n: (slot / n / ".queue").read_bytes() for n in ("wsp-a", "wsp-b")}
+        current = read_queue(slot / "wsp-b")
+        current.items.append(QueueItem(ref="o/r#50", title="New", completed=False, active=False))
+
+        write_queue(slot / "wsp-b", current)
+
+        assert [i.ref for i in read_queue(slot, exact=True).items][-1] == "o/r#50"
+        assert {n: (slot / n / ".queue").read_bytes() for n in ("wsp-a", "wsp-b")} == inherited
+        assert not list((slot / "wsp-b").glob(".queue.tmp"))
+
+    def test_a_marked_slot_with_no_root_queue_has_no_queue(self, tmp_path):
+        """The queue a workspace clone inherited from its repo is not this slot's work."""
+        area = tmp_path / "slots" / "9"
+        (area / "wsp").mkdir(parents=True)
+        (area / ".slot").write_text("# Slot 9\n")
+        (area / "wsp" / ".workspace").write_text("project: x\n")
+        write_queue(area / "wsp", queue("o/r#1", active="o/r#1"))
+        (area / "wsp" / ".plan").write_text("- [ ] O/r#7: Old\n\n## State\nstate: active\n")
+        queue_home.mark(area)
+        assert read_queue(area / "wsp") is None and read_queue(area) is None
+
+    def test_the_first_write_in_a_marked_slot_creates_the_root_queue(self, tmp_path):
+        area = tmp_path / "slots" / "9"
+        (area / "wsp").mkdir(parents=True)
+        (area / ".slot").write_text("# Slot 9\n")
+        (area / "wsp" / ".workspace").write_text("project: x\n")
+        queue_home.mark(area)
+        write_queue(area / "wsp", queue("o/r#4", active="o/r#4"))
+        assert (area / ".queue").is_file() and not (area / "wsp" / ".queue").exists()
+
+    def test_show_after_the_switch_still_lists_each_clones_own_file(self, slot):
+        queue_home.adopt(slot, source=slot / "wsp-a", apply=True)
+        by_name = {c.directory.name: c for c in queue_home.candidates(slot)}
+        assert by_name["wsp-b"].active == "o/x#9" and by_name["wsp-b"].items == 1
+        assert by_name["7"].items == 3
+
+
+def _git(repo: Path, *args: str) -> str:
+    done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+class TestAWorkspaceKeepsItsQueueUntilItIsMovedOnPurpose:
+
+    @pytest.fixture
+    def workspace(self, tmp_path):
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        _git(ws, "init", "-q", "-b", "main")
+        (ws / "seed.txt").write_text("x")
+        _git(ws, "add", ".")
+        _git(ws, "commit", "-q", "-m", "init")
+        return ws
+
+    def test_a_notes_worktree_appearing_does_not_hide_an_existing_queue(self, workspace):
+        from notes_store import NotesStore
+        write_queue(workspace, queue("o/r#1", active="o/r#1"))
+        _git(workspace, "add", ".queue")
+        _git(workspace, "commit", "-q", "-m", "queue")
+        NotesStore(workspace).ensure()
+
+        assert read_queue(workspace).active_item().ref == "o/r#1"
+        current = read_queue(workspace)
+        current.items.append(QueueItem(ref="o/r#2", title="Two", completed=False, active=False))
+        write_queue(workspace, current)
+
+        assert not (workspace / ".notes" / ".queue").exists()
+        assert len(read_queue(workspace, exact=True).items) == 2
+
+    def test_an_older_plan_file_is_not_hidden_either(self, workspace):
+        from notes_store import NotesStore
+        (workspace / ".plan").write_text("- [ ] O/r#7: Old\n\n## State\nstate: active\n")
+        NotesStore(workspace).ensure()
+        assert read_queue(workspace) is not None
+
+    def test_a_workspace_with_notes_and_no_queue_yet_starts_its_queue_in_notes(self, workspace):
+        from notes_store import NotesStore
+        NotesStore(workspace).ensure()
+        write_queue(workspace, queue("o/r#1", active="o/r#1"))
+        assert (workspace / ".notes" / ".queue").is_file()
+        assert not (workspace / ".queue").exists()
+        assert read_queue(workspace).active_item().ref == "o/r#1"
+
+    def test_once_notes_holds_the_queue_a_stray_file_in_the_workspace_is_ignored(self, workspace):
+        from notes_store import NotesStore
+        NotesStore(workspace).ensure()
+        write_queue(workspace, queue("o/r#1", active="o/r#1"))
+        (workspace / ".queue").write_text("- [ ] O/z#99: Stray\n\n## State\nstatus: active\n")
+        assert read_queue(workspace).active_item().ref == "o/r#1"

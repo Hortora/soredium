@@ -24,9 +24,10 @@ from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from queue_io import read_queue, write_queue  # noqa: E402
+from queue_io import (ROOT_QUEUE_MARKER, area_root, read_queue,  # noqa: E402,F401
+                      root_queue_area, write_queue)
 
-MARKER = ".queue-root"
+MARKER = ROOT_QUEUE_MARKER
 
 
 class AdoptError(Exception):
@@ -35,27 +36,14 @@ class AdoptError(Exception):
         self.code, self.detail = code, detail
 
 
-def area_root(path: Path | str) -> Optional[Path]:
-    """The slot or clone directory `path` is, or sits directly inside."""
-    path = Path(path).resolve()
-    for candidate in (path, path.parent):
-        if (candidate / ".slot").is_file():
-            return candidate
-    return None
-
-
 def uses_root(area: Path | str) -> bool:
     return (Path(area) / MARKER).is_file()
 
 
 def home(path: Path | str) -> Optional[Path]:
-    """The directory holding the queue for work at `path`, when this module decides it.
-
-    The area root for a slot or clone marked as using its root queue; None
-    everywhere else, meaning the caller keeps its existing behaviour.
-    """
-    area = area_root(path)
-    return area if area is not None and uses_root(area) else None
+    """The area root when `path` is in a slot or clone marked as using its root
+    queue; None everywhere else. `queue_io.queue_dir` is what the tools call."""
+    return root_queue_area(Path(path))
 
 
 def mark(area: Path | str, adopted_from: str = "") -> None:
@@ -88,7 +76,7 @@ def _candidate(directory: Path) -> Optional[Candidate]:
         return None
     found = Candidate(directory=directory, name=name)
     try:
-        queue = read_queue(directory)
+        queue = read_queue(directory, exact=True)
     except Exception:
         queue = None
     if queue is None:
@@ -135,7 +123,7 @@ def _queue_text(candidate: Candidate) -> str:
     if candidate.name == ".queue":
         return candidate.path.read_text()
     import tempfile
-    queue = read_queue(candidate.directory)
+    queue = read_queue(candidate.directory, exact=True)
     with tempfile.TemporaryDirectory() as scratch:
         write_queue(Path(scratch), queue)
         return (Path(scratch) / ".queue").read_text()
@@ -188,7 +176,7 @@ def adopt(area: Path | str, source: Optional[Path | str] = None, apply: bool = F
         if plan["backup"]:
             _write_atomically(Path(plan["backup"]), root_queue.read_text())
         _write_atomically(root_queue, text)
-        if read_queue(area) is None:
+        if read_queue(area, exact=True) is None:
             raise AdoptError("unreadable", f"{root_queue} did not read back as a queue; "
                                            f"the marker was not written")
     mark(area, adopted_from=str(chosen.path) if chosen else "")
