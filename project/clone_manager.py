@@ -3,8 +3,8 @@
 
 A permanent clone mirrors the slot structure (project + workspace under one
 directory, .slot file, local remote to canonical) but has no slot number and
-no worklog row. The queue and handoff live in the clone's workspace and
-travel with its base branch. It is invisible to slot_query.list_slots.
+no worklog row. The clone has one queue, at its root (#577); the handoff lives
+in the clone's workspace and travels with its base branch. It is invisible to slot_query.list_slots.
 
 Commands:
   create   family_root=<path> repo=<name>
@@ -88,8 +88,20 @@ def create_clone(family_root: Path, repo: str) -> dict[str, str]:
                issue="", issue_repo="", covers="", context="")
     (target / ".permanent").touch()
 
+    # One queue for the clone, at its root (#577). The workspace clone arrived
+    # with the repo's own queue; that backlog becomes the clone's queue by copy,
+    # and the inherited file is left as it is. If the choice is not clear the
+    # clone is left unswitched and says so; `queue_home.py adopt` settles it.
+    import queue_home
+    try:
+        queue_home.adopt(target, apply=True)
+        queue = "root"
+    except queue_home.AdoptError as error:
+        queue = f"not_switched: {error.detail}"
+
     return {"CREATED": "yes",
-            "CLONE_PATH": str(result.clone_dest)}
+            "CLONE_PATH": str(result.clone_dest),
+            "QUEUE": queue}
 
 
 def cmd_create(opts: dict[str, str]) -> int:
