@@ -222,6 +222,36 @@ def apply_alignment(args: dict[str, str]) -> tuple[dict[str, str], list[str], bo
     return aligned, lines, False
 
 
+def level_before_queue_write(args: dict[str, str]) -> tuple[list[str], bool]:
+    """Bring a clone's workspace level with canonical before the queue is written (#567).
+
+    A start writes the queue (item added, made active) and only then runs the
+    pipeline's sync step. With the workspace clone behind canonical, that
+    uncommitted write stopped the catch-up, the branch was cut from a stale
+    base, and the queue collided at landing. So the catch-up comes first, on
+    disk, no network; a clone that cannot be made level stops the start.
+    """
+    workspace = args.get("workspace", "")
+    if not workspace or not (Path(workspace) / ".git").exists():
+        return [], False
+    import canonical_sync
+    try:
+        state = canonical_sync.follow(Path(workspace))
+    except canonical_sync.SyncError as error:
+        return ["ACTION=decision", "DECISION=workspace_not_level",
+                f"DETAIL={error.detail}",
+                "OPTIONS=fix_the_clone_then_retry"], True
+    if state in ("diverged", "blocked"):
+        why = ("holds commits canonical lacks and lacks commits canonical has"
+               if state == "diverged" else
+               "is behind canonical and has uncommitted changes in the way")
+        return ["ACTION=decision", "DECISION=workspace_not_level",
+                f"DETAIL={Path(workspace).name}: its base branch {why}",
+                "OPTIONS=commit_or_land_the_workspace_changes_then_retry,"
+                "start_anyway_from_the_stale_base"], True
+    return ([f"WORKSPACE_FOLLOWED={state}"] if state == "fast-forward" else []), False
+
+
 def _plan_manager():
     slot_dir = str(_PLAN_MANAGER.parent)
     if slot_dir not in sys.path:
@@ -311,8 +341,17 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     command = args.get("command", "")
     if command not in ROUTED or args.get("step_done"):
         return args, [], False
+    # Before the queue is read or written: a clone's workspace catches up with
+    # canonical. Only a start from the base branch is stopped by a clone that
+    # cannot catch up; work already on a branch carries on.
+    level_lines, level_stop = level_before_queue_write(args)
+    if level_stop:
+        if args.get("on_main") == "yes":
+            return args, level_lines, True
+        level_lines = []
     if command == "start" and args.get("issue_n"):
-        return _named_start(args)
+        named_args, named_lines, named_stop = _named_start(args)
+        return named_args, level_lines + named_lines, named_stop
     from queue_io import read_queue
     queue_dir = _queue_dir(args)
     queue = read_queue(queue_dir)
@@ -324,7 +363,7 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     if r.reason == "no_queue":
         return args, [], False
 
-    lines = [f"ROUTE_REASON={r.reason}"]
+    lines = level_lines + [f"ROUTE_REASON={r.reason}"]
     if r.issue:
         lines.append(f"ISSUE={r.issue}")
     if r.offer:

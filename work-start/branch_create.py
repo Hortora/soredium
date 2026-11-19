@@ -364,6 +364,10 @@ def _sync_repo(repo: str, warnings: list[str], label: str) -> str:
             strategy = "ahead"
 
     state = cs.follow(repo, canon)
+    if state == "blocked":
+        warnings.append(f"follow_{label}_blocked")
+        print(f"SYNC_DETAIL={name} is behind canonical and could not be moved: "
+              f"uncommitted changes in its checkout")
     if state in ("ahead", "diverged"):
         print(f"STRAY={name} state={state} detail=the clone's own {canon.base} holds commits "
               f"canonical lacks; the next landing carries them")

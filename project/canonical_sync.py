@@ -690,8 +690,10 @@ def follow(repo: Path | str, canon: Optional[Canonical] = None) -> str:
 
     Returns "current", "fast-forward", "ahead" when the clone's base branch holds
     commits canonical lacks (strays the next landing carries), "diverged" when
-    each has commits the other lacks (left as it is), or "canonical" when `repo`
-    is not a clone. The clone's local/* tracking refs are refreshed either way.
+    each has commits the other lacks (left as it is), "blocked" when the clone
+    is behind and could not be moved (uncommitted changes in its checkout that
+    the incoming commits also touch), or "canonical" when `repo` is not a
+    clone. The clone's local/* tracking refs are refreshed either way.
     """
     repo = Path(repo)
     canon = canon or locate(repo)
@@ -705,7 +707,7 @@ def follow(repo: Path | str, canon: Optional[Canonical] = None) -> str:
     if mine and not _is_ancestor(repo, mine, target):
         return "ahead" if _is_ancestor(repo, target, mine) else "diverged"
     _follow_in_clone(repo, canon)
-    return "fast-forward" if _sha(repo, f"refs/heads/{canon.base}") == target else "current"
+    return "fast-forward" if _sha(repo, f"refs/heads/{canon.base}") == target else "blocked"
 
 
 # --- landing ---

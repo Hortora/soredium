@@ -542,6 +542,8 @@ def settle_permanent_clone(slot_dir: Path) -> list[str]:
             continue
         if state == "diverged":
             left.append(f"{name}: {base} has diverged from canonical")
+        elif state == "blocked":
+            left.append(f"{name}: {base} is behind canonical and could not be moved")
     return left
 
 
