@@ -321,6 +321,7 @@ def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: blog_publish.py <subcommand> [args...]", file=sys.stderr)
         print("Subcommands:", file=sys.stderr)
+        print("  plan <project-or-workspace> [routing=<path>]", file=sys.stderr)
         print("  copy-entry <source-path> <dest-dir>", file=sys.stderr)
         print("  commit-destination <dest-repo> files=<csv> message=<msg>",
               file=sys.stderr)
@@ -330,7 +331,19 @@ def main() -> None:
 
     subcommand = sys.argv[1]
 
-    if subcommand == "copy-entry":
+    if subcommand == "plan":
+        if len(sys.argv) < 3:
+            print("Usage: plan <project-or-workspace> [routing=<path>]",
+                  file=sys.stderr)
+            sys.exit(1)
+        from blog_routing import plan_cli
+        routing = None
+        for arg in sys.argv[3:]:
+            if arg.startswith("routing="):
+                routing = arg[8:]
+        plan_cli(sys.argv[2], routing)
+
+    elif subcommand == "copy-entry":
         if len(sys.argv) != 4:
             print("Usage: copy-entry <source-path> <dest-dir>", file=sys.stderr)
             sys.exit(1)
