@@ -338,3 +338,42 @@ class TestReadingNeverWrites:
         from project.queue_io import ensure_queue_file
         assert ensure_queue_file(tmp_path) is False
         assert list(tmp_path.iterdir()) == []
+
+
+class TestPlanFileIsRetiredOnlyOnce:
+    """Hortora/soredium#574 regression: a workspace that has both files keeps both."""
+
+    def test_writing_when_both_exist_leaves_the_plan_file_alone(self, tmp_path, capsys):
+        from project.queue_io import write_queue
+        (tmp_path / ".plan").write_text("an older, tracked plan file\n")
+        (tmp_path / ".queue").write_text(PLAN_TEXT.replace("state: active", "status: active"))
+        queue = read_queue(tmp_path)
+
+        write_queue(tmp_path, queue)
+        write_queue(tmp_path, queue)
+
+        assert (tmp_path / ".plan").read_text() == "an older, tracked plan file\n"
+        assert not (tmp_path / ".plan.bak").exists()
+        assert "MIGRATED_PLAN" not in capsys.readouterr().err
+
+    def test_a_tracked_plan_file_does_not_become_an_uncommitted_deletion(self, tmp_path):
+        import subprocess
+        from project.queue_io import write_queue
+        def g(*a):
+            return subprocess.run(["git", "-C", str(tmp_path), *a], capture_output=True, text=True)
+        g("init", "-q", "-b", "main")
+        (tmp_path / ".plan").write_text("tracked\n")
+        (tmp_path / ".queue").write_text(PLAN_TEXT.replace("state: active", "status: active"))
+        g("add", "-A")
+        g("commit", "-q", "-m", "both files tracked")
+
+        write_queue(tmp_path, read_queue(tmp_path))
+
+        assert " D .plan" not in g("status", "--porcelain").stdout
+        assert (tmp_path / ".plan").exists()
+
+    def test_the_first_conversion_still_retires_it(self, tmp_path):
+        from project.queue_io import write_queue
+        (tmp_path / ".plan").write_text(PLAN_TEXT)
+        write_queue(tmp_path, read_queue(tmp_path))
+        assert not (tmp_path / ".plan").exists() and (tmp_path / ".plan.bak").exists()

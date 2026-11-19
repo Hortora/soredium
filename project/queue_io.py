@@ -228,10 +228,15 @@ def write_queue(workspace: Path, queue: Queue) -> None:
             lines.append("## Deferred")
         lines.extend(queue.deferred_lines)
     lines.append("")
+    converting = not (workspace / ".queue").exists()
     tmp = workspace / ".queue.tmp"
     tmp.write_text("\n".join(lines))
     tmp.replace(workspace / ".queue")
-    _retire_plan_file(workspace)
+    if converting:
+        # Only the write that creates .queue retires the older file. Where both
+        # already exist, .plan is some earlier leftover (it may be tracked in
+        # git) and renaming it on every write would leave a deletion behind.
+        _retire_plan_file(workspace)
 
 
 def _retire_plan_file(workspace: Path) -> None:
