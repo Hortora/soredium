@@ -919,3 +919,95 @@ class TestStackedBranches:
         assert _close(proj, ws).success
 
         assert _git(proj, "for-each-ref", "refs/soredium").stdout == ""
+
+
+class TestPromotionBacklogIsReported:
+    """#566: documents on a workspace's base branch that the project lacks are
+    counted and offered after every ceremony. They never refuse it (#537)."""
+
+    def _old_entries(self, ws: Path, names: list[str], directory: str = "blog") -> None:
+        (ws / directory).mkdir(exist_ok=True)
+        for name in names:
+            (ws / directory / name).write_text("never promoted\n")
+        _git(ws, "add", ".")
+        _git(ws, "commit", "-q", "-m", "docs: old entries Refs #1")
+
+    def _closed(self, proj: Path, ws: Path):
+        _branch(proj, "issue-1-a", {"a.txt": "a"})
+        _queue(ws, [("R#1", "")], active="R#1", branch="issue-1-a")
+        result = _close(proj, ws)
+        assert result.success, (result.errors, result.unpromoted)
+        return result
+
+    def test_backlog_is_counted_and_the_sweep_command_named(self, repos):
+        import close as close_module
+        proj, ws = repos
+        self._old_entries(ws, ["2020-a.md", "2020-b.md"])
+        self._old_entries(ws, ["design.md"], directory="specs")
+
+        result = self._closed(proj, ws)
+
+        assert result.backlog == {"workspace -> project": 3}
+        assert len(result.backlog_commands) == 1
+        command = result.backlog_commands[0]
+        assert "artifact_promote.py sweep-gaps" in command
+        assert f"{proj} {ws}" in command
+        lines = close_module.render(result)
+        assert "UNPROMOTED_BACKLOG=workspace -> project documents=3" in lines
+        assert f"PROMOTE_BACKLOG={command}" in lines
+        assert lines[-1] == "OFFER=promote_backlog" or "OFFER=promote_backlog" in lines
+
+    def test_running_the_named_command_clears_the_backlog(self, repos):
+        import close as close_module
+        proj, ws = repos
+        self._old_entries(ws, ["2020-a.md"])
+        result = self._closed(proj, ws)
+
+        done = subprocess.run(result.backlog_commands[0].split(), capture_output=True, text=True)
+
+        assert "SWEPT=1" in done.stdout, done.stdout + done.stderr
+        assert close_module.promotion_backlog(ws) == ({}, [])
+        assert _git(proj, "show", "main:docs/blog/2020-a.md").returncode == 0
+
+    def test_nothing_missing_means_no_offer(self, repos):
+        import close as close_module
+        proj, ws = repos
+        result = self._closed(proj, ws)
+        assert result.backlog == {} and result.backlog_commands == []
+        assert not any("BACKLOG" in line for line in close_module.render(result))
+
+    def test_index_and_non_markdown_files_are_not_documents(self, repos):
+        proj, ws = repos
+        self._old_entries(ws, ["INDEX.md", "notes.txt", "decisions.md"])
+        assert self._closed(proj, ws).backlog == {}
+
+    def test_a_document_already_in_the_project_is_not_counted(self, repos):
+        proj, ws = repos
+        self._old_entries(ws, ["2020-a.md", "2020-b.md"])
+        (proj / "docs" / "blog").mkdir(parents=True)
+        (proj / "docs" / "blog" / "2020-a.md").write_text("promoted earlier\n")
+        _git(proj, "add", ".")
+        _git(proj, "commit", "-q", "-m", "docs: promoted Refs #1")
+        assert self._closed(proj, ws).backlog == {"workspace -> project": 1}
+
+    def test_only_committed_base_branch_content_counts(self, repos):
+        proj, ws = repos
+        (ws / "blog").mkdir()
+        (ws / "blog" / "draft.md").write_text("not committed\n")
+        import close as close_module
+        assert close_module.promotion_backlog(ws) == ({}, [])
+        assert (ws / "blog" / "draft.md").read_text() == "not committed\n"
+
+    def test_a_document_the_closing_branch_promoted_is_not_backlog(self, repos):
+        proj, ws = repos
+        gate = TestPromotionGate()
+        gate._on_branches(proj, ws, "issue-1-a", "blog/2026-new.md")
+        first = _close(proj, ws)
+        assert first.unpromoted
+        for command in first.promote_commands:
+            subprocess.run(command.split(), check=True, capture_output=True)
+        import squash_marker
+        squash_marker.mark(proj, "issue-1-a")
+        result = _close(proj, ws)
+        assert result.success, (result.errors, result.squash_review, result.unpromoted)
+        assert result.backlog == {}

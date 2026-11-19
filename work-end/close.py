@@ -79,6 +79,11 @@ class CloseResult:
     # Canonical repos holding commits their remote lacks: {canonical path: count}.
     unpublished: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    # Documents on a workspace's base branch that its project's base branch lacks,
+    # whoever wrote them and whenever: {"workspace -> project": count}, and the
+    # command that promotes each. Reported, never a reason to refuse (#566).
+    backlog: dict = field(default_factory=dict)
+    backlog_commands: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -589,6 +594,45 @@ def unpromoted_artifacts(workspace: Path, covers: str = "") -> tuple[list[str], 
     return findings, commands
 
 
+# Where the sweep (artifact_promote.py sweep-gaps) promotes from and to.
+_PROMOTED_DIRS = (("blog", "docs/blog"), ("specs", "docs/specs"))
+_NOT_DOCUMENTS = {"INDEX.md", "index.html", ".gitkeep", "decisions.md", "pipeline.state"}
+
+
+def _documents_on(repo: Path, branch: str, directory: str) -> set[str]:
+    """Names of the markdown files directly in `directory` on `branch`."""
+    listed = _git(repo, "ls-tree", "--name-only", branch, f"{directory}/")
+    if listed.returncode != 0:
+        return set()
+    names = {Path(line).name for line in listed.stdout.splitlines() if line.strip()}
+    return {n for n in names if n.endswith(".md") and n not in _NOT_DOCUMENTS}
+
+
+def promotion_backlog(workspace: Path, covers: str = "") -> tuple[dict, list[str]]:
+    """Documents committed on a workspace's base branch that its project lacks.
+
+    The promotion gate sees only what the closing branch added. A document
+    committed straight onto the base branch (workspace left on it, an entry
+    written outside a work branch, a recovery) is never the closing branch's,
+    so it is counted here, after the ceremony, from the base branches as they
+    now stand. Returns ({"workspace -> project": count}, commands).
+    """
+    backlog: dict[str, int] = {}
+    commands: list[str] = []
+    sweep = Path(__file__).resolve().parent / "artifact_promote.py"
+    for ws_repo, project in promotion_pairs(workspace):
+        ws_base, project_base = _get_base_branch(ws_repo), _get_base_branch(project)
+        missing = 0
+        for source, destination in _PROMOTED_DIRS:
+            missing += len(_documents_on(ws_repo, ws_base, source)
+                           - _documents_on(project, project_base, destination))
+        if missing:
+            backlog[f"{ws_repo.name} -> {project.name}"] = missing
+            commands.append(f"python3 {sweep} sweep-gaps {project} {ws_repo}"
+                            + (f" covers={covers}" if covers else ""))
+    return backlog, commands
+
+
 def _branch_landed(repo: Path, branch: str, base: str) -> bool:
     """A branch that is gone, stamped closed, or wholly on the base branch has landed."""
     if not _branch_exists(repo, branch):
@@ -1089,8 +1133,16 @@ def close(workspace: Path) -> CloseResult:
             if (slot_dir / ".landed").exists():
                 slot_ready = str(slot_dir)
 
+        try:
+            backlog, backlog_commands = promotion_backlog(workspace, covers_issue)
+        except Exception as error:      # a report must never fail a ceremony that landed
+            backlog, backlog_commands = {}, []
+            warnings.append(f"promotion backlog could not be counted: {error}")
+
         return CloseResult(
             success=True,
+            backlog=backlog,
+            backlog_commands=backlog_commands,
             slot_ready=slot_ready,
             landed={t.repo.name: sha for t, sha in landed.items()
                     if not (split_workspace and t.is_workspace)},
@@ -1138,6 +1190,11 @@ def render(result: CloseResult) -> list[str]:
                   for repo, count in result.unpublished.items()]
         if result.unpublished:
             lines.append("OFFER=publish")
+        lines += [f"UNPROMOTED_BACKLOG={pair} documents={count}"
+                  for pair, count in result.backlog.items()]
+        lines += [f"PROMOTE_BACKLOG={command}" for command in result.backlog_commands]
+        if result.backlog:
+            lines.append("OFFER=promote_backlog")
         if result.slot_ready:
             lines.append(f"SLOT_READY_FOR_ARCHIVE={result.slot_ready}")
         return lines
