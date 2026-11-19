@@ -6,6 +6,8 @@
     scope.py promote-backlog <workspace> [covers=<ref>]
                                             promote documents on a covered workspace's base
                                             branch that its project lacks
+    scope.py publish-blog <workspace>       post the covered projects' landed blog entries to
+                                            the destinations the routing names
 
 "Publish all" and "promote all" mean all of what `covered` prints: the project
 and workspace the ceremony ran in, or every repo of the slot or clone it ran in.
@@ -108,11 +110,127 @@ def promote_backlog(workspace: Path, covers: str = "") -> tuple[dict[str, int], 
     return promoted, failed
 
 
+def _blog_modules():
+    publish_dir = str(_here.parent / "publish-blog")
+    if publish_dir not in sys.path:
+        sys.path.insert(0, publish_dir)
+    import blog_publish
+    import blog_routing
+    return blog_routing, blog_publish
+
+
+def publish_blog(workspace: Path, routing_path: Path | None = None
+                 ) -> tuple[dict[str, int], dict[str, str]]:
+    """Post this ceremony's blog entries to the destinations the routing names.
+
+    Only what has landed is published: entries are read from each covered
+    project's base branch, never from a working branch, and a project whose
+    base-branch checkout has uncommitted changes under docs/blog waits. An
+    entry goes out when its destination lacks it or holds an older version.
+
+    Returns ({destination name: entries posted}, {what was held back: why}).
+    Each destination repo gets one commit holding only the files written, and
+    is then published through canonical_sync. A destination that is not on its
+    base branch is left alone.
+    """
+    import contextlib
+    import io
+    import subprocess
+    blog_routing, blog_publish = _blog_modules()
+
+    posted: dict[str, int] = {}
+    held: dict[str, str] = {}
+    written: dict[Path, list[Path]] = {}      # destination repo -> files written
+    names: dict[Path, set[str]] = {}
+
+    for ws_repo, project in ceremony.promotion_pairs(Path(workspace)):
+        label = project.name
+        try:
+            base = canonical_sync.locate(project).base
+            canonical_project = canonical_sync.locate(project).repo
+        except SyncError as error:
+            held[label] = error.detail
+            continue
+        if not blog_routing.source_identity(canonical_project):
+            held[label] = "project has no remote to identify it by; nothing is routed on a guess"
+            continue
+        override = ws_repo / "blog-routing.yaml"
+        try:
+            with canonical_sync.checked_out(canonical_project, base) as tree:
+                tree = Path(tree)
+                dirty = subprocess.run(
+                    ["git", "-C", str(tree), "status", "--porcelain", "--", "docs/blog"],
+                    capture_output=True, text=True).stdout.strip()
+                if dirty:
+                    held[label] = f"uncommitted changes under docs/blog on {base}"
+                    continue
+                entries, missing, _ = blog_routing.plan(
+                    tree, routing_path,
+                    workspace_routing=override if override.is_file() else None)
+                for record in missing:
+                    dest_dir = Path(record["path"])
+                    captured = io.StringIO()
+                    try:
+                        with contextlib.redirect_stdout(captured):
+                            blog_publish.copy_entry(record["source"], str(dest_dir))
+                    except SystemExit:
+                        problem = [l for l in captured.getvalue().splitlines()
+                                   if l.startswith("ERROR")]
+                        held[f"{label}:{record['file']} -> {record['dest']}"] = \
+                            "; ".join(problem) or "copy failed"
+                        continue
+                    top = subprocess.run(
+                        ["git", "-C", str(dest_dir), "rev-parse", "--show-toplevel"],
+                        capture_output=True, text=True).stdout.strip()
+                    if not top:
+                        held[f"{label}:{record['file']} -> {record['dest']}"] = \
+                            f"{dest_dir} is not in a git repository"
+                        continue
+                    repo = Path(top)
+                    written.setdefault(repo, []).append(dest_dir / record["file"])
+                    for raw_ref, resolved in blog_publish.extract_image_refs(Path(record["source"])):
+                        if resolved.is_file():
+                            written[repo].append(blog_publish._image_dest(dest_dir, raw_ref))
+                    names.setdefault(repo, set()).add(record["dest"])
+                    posted[record["dest"]] = posted.get(record["dest"], 0) + 1
+        except SyncError as error:
+            held[label] = error.detail
+
+    for repo, files in written.items():
+        label = ", ".join(sorted(names[repo]))
+        try:
+            canon = canonical_sync.locate(repo)
+        except SyncError as error:
+            held[label] = error.detail
+            continue
+        current = subprocess.run(["git", "-C", str(repo), "symbolic-ref", "-q", "--short", "HEAD"],
+                                 capture_output=True, text=True).stdout.strip()
+        rel = sorted({str(f.resolve().relative_to(repo.resolve())) for f in files})
+        if current != canon.base:
+            held[label] = (f"{repo.name} is on {current or 'no branch'}, not {canon.base}; "
+                           f"the files were written but not committed")
+            continue
+        subprocess.run(["git", "-C", str(repo), "add", "--", *rel], capture_output=True, text=True)
+        done = subprocess.run(
+            ["git", "-C", str(repo), "commit", "-q", "-m",
+             f"chore: publish {len([r for r in rel if r.endswith('.md')])} blog entries\n\n"
+             f"no-issue: published by work end", "--", *rel],
+            capture_output=True, text=True)
+        if done.returncode != 0 and "nothing to commit" not in (done.stdout + done.stderr):
+            held[label] = "commit refused: " + " ".join((done.stderr or done.stdout).split())[:200]
+            continue
+        try:
+            canonical_sync.publish_base(repo)
+        except SyncError as error:
+            held[label] = f"committed, not pushed: {canonical_sync.redact(error.detail)}"
+    return posted, held
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) < 2 or args[0] not in ("covered", "publish", "promote-backlog"):
-        print("usage: scope.py <covered|publish|promote-backlog> <workspace> [covers=<ref>]",
-              file=sys.stderr)
+    if len(args) < 2 or args[0] not in ("covered", "publish", "promote-backlog", "publish-blog"):
+        print("usage: scope.py <covered|publish|promote-backlog|publish-blog> <workspace> "
+              "[covers=<ref>] [routing=<path>]", file=sys.stderr)
         return 2
     command, workspace = args[0], Path(args[1])
     if not workspace.is_dir():
@@ -131,6 +249,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"NOT_PUBLISHED={repo} reason={canonical_sync.redact(why)}")
         print(f"PUBLISHED_COUNT={len(pushed)}")
         return 1 if failed else 0
+    if command == "publish-blog":
+        routing = Path(options["routing"]).expanduser() if options.get("routing") else None
+        posted, held = publish_blog(workspace, routing)
+        for destination, count in posted.items():
+            print(f"BLOG_PUBLISHED={destination} entries={count}")
+        for what, why in held.items():
+            print(f"BLOG_HELD={what} reason={why}")
+        print(f"BLOG_PUBLISHED_COUNT={sum(posted.values())}")
+        return 1 if held else 0
     promoted, failed = promote_backlog(workspace, options.get("covers", ""))
     for pair, count in promoted.items():
         print(f"PROMOTED={pair} documents={count}")

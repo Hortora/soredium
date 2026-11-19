@@ -281,14 +281,23 @@ def plan(
     workspace_or_project: Path,
     routing_path: Path | None = None,
     check_present_fn=None,
+    workspace_routing: Path | None = None,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
     """Resolve every entry's routing and check presence at destinations.
 
     Returns (entries, missing_pairs, entries_with_missing) where:
-      - entries: list of dicts with keys file, dest, path, present
-      - missing_pairs: subset of entries where present == "no"
+      - entries: list of dicts with keys file, source, dest, path, present
+      - missing_pairs: subset of entries where present is "no" or "stale"
       - entries_with_missing: deduplicated list of entries that have at
-        least one missing destination
+        least one such destination
+
+    present is "yes" when the destination holds the same bytes, "stale" when it
+    holds a different version of the entry (the entry was revised after it was
+    published), and "no" when it is absent.
+
+    `workspace_routing` names the workspace's override file when the entries
+    are read from somewhere other than the workspace itself, such as a
+    project's base branch.
     """
     root = workspace_or_project.resolve()
     blog_dir = _find_blog_dir(root)
@@ -296,7 +305,7 @@ def plan(
         print(f"WARN=no_blog_dir: {root}", file=sys.stderr)
         return [], [], []
 
-    ws_routing = root / "blog-routing.yaml"
+    ws_routing = workspace_routing if workspace_routing is not None else root / "blog-routing.yaml"
     config = load_routing(
         global_path=routing_path if routing_path and routing_path.name != "blog-routing.yaml"
         else None,
@@ -329,14 +338,19 @@ def plan(
         for dest_name in sorted(dests):
             dest_dir = config.dest_path(dest_name)
             present = check_present_fn(str(md), str(dest_dir))
+            state = "yes" if present else "no"
+            published = dest_dir / md.name
+            if present and published.is_file() and published.read_bytes() != md.read_bytes():
+                state = "stale"
             rec = {
                 "file": md.name,
+                "source": str(md),
                 "dest": dest_name,
                 "path": str(dest_dir),
-                "present": "yes" if present else "no",
+                "present": state,
             }
             entries.append(rec)
-            if not present:
+            if state != "yes":
                 missing_pairs.append(rec)
                 missing_entries.add(md.name)
 

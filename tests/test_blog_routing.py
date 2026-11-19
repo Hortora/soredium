@@ -293,6 +293,9 @@ class TestPlan:
             "absent.md": {"entry_type": "note"},
         })
 
+        # "Present" means the destination holds this entry as it now is.
+        (dest_dir / "present.md").write_bytes((ws / "blog" / "present.md").read_bytes())
+
         entries, missing, entries_missing = plan(ws, gpath)
         assert len(entries) == 2
         present_rec = [e for e in entries if e["file"] == "present.md"][0]
@@ -303,6 +306,26 @@ class TestPlan:
         assert len(missing) == 1
         assert missing[0]["file"] == "absent.md"
         assert len(entries_missing) == 1
+
+    def test_an_older_version_at_the_destination_is_stale_and_counts_as_missing(self, tmp_path):
+        dest_dir = tmp_path / "dest" / "_posts"
+        dest_dir.mkdir(parents=True)
+        (dest_dir / "revised.md").write_text("the version published before the entry was revised")
+        global_cfg = {
+            "destinations": {"blog": {"path": str(tmp_path / "dest"), "subdir": "_posts"}},
+            "defaults": {"destinations": ["blog"]},
+            "rules": [],
+        }
+        ws, gpath = self._setup_workspace(tmp_path, global_cfg, entries={
+            "revised.md": {"entry_type": "note"},
+        })
+
+        entries, missing, entries_missing = plan(ws, gpath)
+
+        assert [e["present"] for e in entries] == ["stale"]
+        assert [m["file"] for m in missing] == ["revised.md"]
+        assert entries[0]["source"] == str(ws.resolve() / "blog" / "revised.md")
+        assert [e["file"] for e in entries_missing] == ["revised.md"]
 
     def test_entry_with_no_frontmatter_is_routed_as_a_note(self, tmp_path):
         """Was test_entry_with_no_frontmatter_skipped; since #572 it is a note."""
@@ -355,6 +378,8 @@ class TestPlan:
         ws, gpath = self._setup_workspace(tmp_path, global_cfg, entries={
             "entry.md": {"entry_type": "note"},
         })
+
+        (dest1 / "entry.md").write_bytes((ws / "blog" / "entry.md").read_bytes())
 
         entries, missing, entries_missing = plan(ws, gpath)
         assert len(entries) == 2

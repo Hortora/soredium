@@ -191,3 +191,132 @@ class TestCommandLine:
         out = capsys.readouterr().out.splitlines()
         assert out == [f"COVERED={world['project'].resolve()}",
                        f"COVERED={world['workspace'].resolve()}"]
+
+
+def routing_for(tmp_path: Path, site: Path) -> Path:
+    import yaml
+    path = tmp_path / "routing" / "blog-routing.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump({
+        "version": 1,
+        "destinations": {"site-notes": {"type": "git", "path": str(site), "subdir": "_notes/"}},
+        "defaults": {"destinations": ["site-notes"]},
+        "rules": [],
+    }))
+    return path
+
+
+ENTRY = "---\ntitle: T\nentry_type: note\n---\n\nBody.\n"
+
+
+class TestPublishBlog:
+    """Only landed entries of the covered projects go out, one commit per site."""
+
+    @pytest.fixture
+    def blog(self, world, tmp_path):
+        site, site_remote = repo_with_remote(tmp_path, "site")
+        g(world["project"], "remote", "set-url", "origin", "https://github.com/acme/project.git")
+        world.update(site=site, site_remote=site_remote, routing=routing_for(tmp_path, site))
+        return world
+
+    def test_a_landed_entry_is_posted_committed_and_published(self, blog):
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+
+        posted, held = scope.publish_blog(blog["workspace"], blog["routing"])
+
+        assert held == {}
+        assert posted == {"site-notes": 1}
+        assert g(blog["site"], "show", "main:_notes/2026-01-01-a.md").startswith("---")
+        assert g(blog["site"], "show", "--name-only", "--format=", "main") == "_notes/2026-01-01-a.md"
+        assert remote_main(blog["site_remote"]) == g(blog["site"], "rev-parse", "main")
+        assert g(blog["site"], "status", "--porcelain") == ""
+
+    def test_running_again_posts_nothing(self, blog):
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        scope.publish_blog(blog["workspace"], blog["routing"])
+        tip = g(blog["site"], "rev-parse", "main")
+        assert scope.publish_blog(blog["workspace"], blog["routing"]) == ({}, {})
+        assert g(blog["site"], "rev-parse", "main") == tip
+
+    def test_a_revised_entry_replaces_the_published_one(self, blog):
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        scope.publish_blog(blog["workspace"], blog["routing"])
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY + "Revised.\n")
+
+        posted, held = scope.publish_blog(blog["workspace"], blog["routing"])
+
+        assert posted == {"site-notes": 1} and held == {}
+        assert "Revised." in g(blog["site"], "show", "main:_notes/2026-01-01-a.md")
+
+    def test_an_entry_only_on_a_working_branch_is_not_published(self, blog):
+        g(blog["project"], "checkout", "-q", "-b", "issue-1-x")
+        commit(blog["project"], "docs/blog/2026-01-02-unlanded.md", ENTRY)
+
+        posted, held = scope.publish_blog(blog["workspace"], blog["routing"])
+
+        assert posted == {}
+        assert not (blog["site"] / "_notes" / "2026-01-02-unlanded.md").exists()
+        assert g(blog["project"], "symbolic-ref", "--short", "HEAD") == "issue-1-x"
+
+    def test_landed_entries_are_published_while_another_branch_is_checked_out(self, blog):
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        g(blog["project"], "checkout", "-q", "-b", "issue-1-x")
+        commit(blog["project"], "docs/blog/2026-01-02-unlanded.md", ENTRY)
+
+        posted, held = scope.publish_blog(blog["workspace"], blog["routing"])
+
+        assert posted == {"site-notes": 1}
+        assert (blog["site"] / "_notes" / "2026-01-01-a.md").exists()
+        assert not (blog["site"] / "_notes" / "2026-01-02-unlanded.md").exists()
+
+    def test_uncommitted_blog_changes_on_the_base_branch_hold_the_project_back(self, blog):
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        (blog["project"] / "docs" / "blog" / "2026-01-01-a.md").write_text(ENTRY + "unsaved\n")
+
+        posted, held = scope.publish_blog(blog["workspace"], blog["routing"])
+
+        assert posted == {}
+        assert "uncommitted changes under docs/blog" in held["project"]
+        assert not (blog["site"] / "_notes").exists()
+
+    def test_a_project_with_no_remote_is_never_routed_on_a_guess(self, blog):
+        g(blog["project"], "remote", "remove", "origin")
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        posted, held = scope.publish_blog(blog["workspace"], blog["routing"])
+        assert posted == {} and "no remote to identify it" in held["project"]
+
+    def test_other_staged_work_in_the_site_repo_stays_out_of_the_commit(self, blog):
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        (blog["site"] / "draft.md").write_text("someone else's")
+        g(blog["site"], "add", "draft.md")
+
+        scope.publish_blog(blog["workspace"], blog["routing"])
+
+        assert g(blog["site"], "show", "--name-only", "--format=", "main") == "_notes/2026-01-01-a.md"
+        assert g(blog["site"], "status", "--porcelain") == "A  draft.md"
+
+    def test_a_site_repo_on_another_branch_is_not_committed_to(self, blog):
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        g(blog["site"], "checkout", "-q", "-b", "redesign")
+        tip = g(blog["site"], "rev-parse", "main")
+
+        posted, held = scope.publish_blog(blog["workspace"], blog["routing"])
+
+        assert g(blog["site"], "rev-parse", "main") == tip
+        assert any("not main" in why for why in held.values())
+
+    def test_another_projects_entries_are_not_published(self, blog, tmp_path):
+        other_project, _ = repo_with_remote(tmp_path, "other-project")
+        g(other_project, "remote", "set-url", "origin", "https://github.com/acme/other.git")
+        commit(other_project, "docs/blog/2026-03-03-theirs.md", ENTRY)
+
+        scope.publish_blog(blog["workspace"], blog["routing"])
+
+        assert not (blog["site"] / "_notes" / "2026-03-03-theirs.md").exists()
+
+    def test_command_line(self, blog, capsys):
+        commit(blog["project"], "docs/blog/2026-01-01-a.md", ENTRY)
+        assert scope.main(["publish-blog", str(blog["workspace"]), f"routing={blog['routing']}"]) == 0
+        out = capsys.readouterr().out
+        assert "BLOG_PUBLISHED=site-notes entries=1" in out
+        assert "BLOG_PUBLISHED_COUNT=1" in out
