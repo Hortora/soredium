@@ -445,8 +445,15 @@ RUN_COMPLETE = "_run_complete"
 
 def run_key(args: dict[str, str]) -> str:
     """What one run of a pipeline is about: the command and the issue or branch."""
+    command = args.get("command", "")
+    if command in ("wrap", "end"):
+        # One wrap or end at a time per workspace, whatever it is about. Marking
+        # the item done makes the next item the active one and landing moves the
+        # checkout to the base branch: keyed on either, a retry after a failed
+        # step looked like a new run and started again from the review.
+        return command
     subject = args.get("issue_n") or args.get("covers") or args.get("branch", "")
-    return f"{args.get('command', '')}:{subject}"
+    return f"{command}:{subject}"
 
 
 def begin_run(args: dict[str, str]) -> bool:

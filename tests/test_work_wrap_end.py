@@ -230,6 +230,27 @@ class TestEnd:
             g(project, "rev-parse", "main")
 
 
+class TestARetryResumesWhateverTheQueueNowSays:
+    """Found on the first live run: marking the item done made the next item
+    active, the context then reported a different `covers`, and the retry
+    after a failed landing started again from the review."""
+
+    def test_a_retry_with_the_next_items_covers_resumes_at_the_failed_step(self, world):
+        commit(world["project"], "second.txt")            # two commits, no review of the tip
+        drive_to_item_finished(world, "end")
+        failed = answer(world, "end", "item_finished", "finished=yes")
+        assert failed["ACTION"] == "error" and failed["STEP"] == "land", failed["_raw"]
+
+        ws, proj = world["workspace"], world["project"]
+        retry = subprocess.run(
+            ["python3", WORK, "end", f"workspace={ws}", f"project={proj}", f"branch={BRANCH}",
+             "base_branch=main", "on_main=no", "covers=o/r#2", "issue_repo=O/r",
+             f"plan_path={ws / '.queue'}"], capture_output=True, text=True, cwd=str(ws))
+        assert "ACTION=error" in retry.stdout and "STEP=land" in retry.stdout, retry.stdout
+        assert "ACTION=review" not in retry.stdout
+        assert "RESUMING=" in retry.stdout
+
+
 class TestReport:
 
     def test_a_step_that_could_not_do_something_is_called_out(self, world):
