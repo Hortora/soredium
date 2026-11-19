@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 330" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="760" height="330" fill="#ffffff"/>
+  <text x="190" y="26" text-anchor="middle" font-size="15" font-weight="600" fill="#1f2933">Before: a queue rides in with every clone</text>
+  <text x="570" y="26" text-anchor="middle" font-size="15" font-weight="600" fill="#1f2933">After: one queue at the slot root</text>
+  <line x1="380" y1="12" x2="380" y2="318" stroke="#cbd2d9" stroke-dasharray="4 4"/>
+
+  <!-- before -->
+  <rect x="20" y="44" width="340" height="270" rx="8" fill="#f5f7fa" stroke="#9aa5b1"/>
+  <text x="34" y="66" font-weight="600" fill="#1f2933">slots/196/</text>
+  <rect x="34" y="78" width="312" height="34" rx="5" fill="#fff4e5" stroke="#d9822b"/>
+  <text x="46" y="100" fill="#1f2933">.queue</text>
+  <text x="334" y="100" text-anchor="end" fill="#8a5a1c">18 items, copied once, never updated</text>
+  <g fill="#ffffff" stroke="#9aa5b1">
+    <rect x="34" y="124" width="312" height="38" rx="5"/>
+    <rect x="34" y="170" width="312" height="38" rx="5"/>
+    <rect x="34" y="216" width="312" height="38" rx="5"/>
+    <rect x="34" y="262" width="312" height="38" rx="5"/>
+  </g>
+  <g fill="#1f2933">
+    <text x="46" y="148">workspace clone A / .queue</text>
+    <text x="46" y="194">workspace clone B / .queue</text>
+    <text x="46" y="240">workspace clone C / .queue</text>
+    <text x="46" y="286">workspace clone D / .queue</text>
+  </g>
+  <g fill="#b42318" text-anchor="end">
+    <text x="334" y="148">89 items</text>
+    <text x="334" y="194">16 items</text>
+    <text x="334" y="240">4 items</text>
+    <text x="334" y="286">90 items</text>
+  </g>
+
+  <!-- after -->
+  <rect x="400" y="44" width="340" height="270" rx="8" fill="#f5f7fa" stroke="#9aa5b1"/>
+  <text x="414" y="66" font-weight="600" fill="#1f2933">slots/196/</text>
+  <rect x="414" y="78" width="312" height="34" rx="5" fill="#e6f4ea" stroke="#2f855a"/>
+  <text x="426" y="100" fill="#1f2933">.queue  +  .queue-root</text>
+  <text x="714" y="100" text-anchor="end" fill="#22663f">the slot's queue</text>
+  <g fill="#ffffff" stroke="#cbd2d9" stroke-dasharray="5 4">
+    <rect x="414" y="124" width="312" height="38" rx="5"/>
+    <rect x="414" y="170" width="312" height="38" rx="5"/>
+    <rect x="414" y="216" width="312" height="38" rx="5"/>
+    <rect x="414" y="262" width="312" height="38" rx="5"/>
+  </g>
+  <g fill="#7b8794">
+    <text x="426" y="148">workspace clone A / .queue</text>
+    <text x="426" y="194">workspace clone B / .queue</text>
+    <text x="426" y="240">workspace clone C / .queue</text>
+    <text x="426" y="286">workspace clone D / .queue</text>
+  </g>
+  <g fill="#7b8794" text-anchor="end">
+    <text x="714" y="148">kept, not read</text>
+    <text x="714" y="194">kept, not read</text>
+    <text x="714" y="240">kept, not read</text>
+    <text x="714" y="286">kept, not read</text>
+  </g>
+</svg>
