@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 import sys
 import shutil
 import tempfile
@@ -553,6 +554,39 @@ def mirror(canon: Canonical) -> str:
     return canon.mirror if result.returncode == 0 else "failed"
 
 
+# Text every retired soredium pre-push hook carries: they refused pushes, or asked
+# for a squash review at push time, and told the user to bypass them.
+_RETIRED_PUSH_HOOK_MARKS = ("--no-verify", "/git-squash")
+_CREDENTIALS = re.compile(r"(?P<scheme>[a-z][a-z0-9+.-]*://)[^/@\s]+@")
+
+
+def redact(text: str) -> str:
+    """Git output with any credentials embedded in a remote URL removed."""
+    return _CREDENTIALS.sub(r"\g<scheme>***@", text)
+
+
+def push_hook(repo: Path | str) -> Optional[Path]:
+    """The pre-push hook git will run for `repo`, whichever hooks path is in effect."""
+    repo = Path(repo)
+    where = _out(repo, "rev-parse", "--git-path", "hooks/pre-push")
+    if not where:
+        return None
+    hook = Path(where) if Path(where).is_absolute() else repo / where
+    return hook if hook.is_file() else None
+
+
+def retired_push_hook(repo: Path | str) -> Optional[Path]:
+    """That hook, when it is one of the retired ones; None otherwise."""
+    hook = push_hook(repo)
+    if hook is None:
+        return None
+    try:
+        text = hook.read_text(errors="replace")
+    except OSError:
+        return None
+    return hook if all(mark in text for mark in _RETIRED_PUSH_HOOK_MARKS) else None
+
+
 def _push_base(canon: Canonical) -> None:
     """Plain push of canonical's base branch to the blessed remote. Never forced."""
     result = git(canon.repo, "push", "-q", canon.blessed,
@@ -564,9 +598,12 @@ def _push_base(canon: Canonical) -> None:
         raise SyncError(
             "remote_moved",
             f"{canon.repo.name}: {canon.blessed}/{canon.base} moved during publishing")
+    hook = push_hook(canon.repo)
     raise SyncError(
         "publish_failed",
-        f"{canon.repo.name}: push to {canon.blessed} failed: {result.stderr.strip()}")
+        f"{canon.repo.name}: push to {canon.blessed} failed: "
+        f"{redact(' '.join(result.stderr.split()))}"
+        + (f" (pre-push hook in effect: {hook})" if hook else ""))
 
 
 def _stage_on_fork(canon: Canonical) -> str:
@@ -594,6 +631,14 @@ def publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> Publis
             result.sha = _sha(canon.repo, f"refs/heads/{canon.base}")
             result.warnings.append(f"{canon.repo.name}: no remote to publish to")
             return result
+        retired = retired_push_hook(canon.repo)
+        if retired is not None:
+            setup = Path(__file__).resolve().parent.parent / "scripts" / "push_hook_setup.py"
+            raise SyncError(
+                "retired_push_hook",
+                f"{canon.repo.name}: {retired} is a retired hook that refuses pushes; "
+                f"nothing was pushed. Replace it with the linear-history hook: "
+                f"python3 {setup} {canon.repo} --apply")
         for attempt in range(1, PUBLISH_ATTEMPTS + 1):
             result.rebased += settle_base(canon)
             result.pushed = unpublished(canon)
@@ -845,6 +890,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         if command == "status":
             print(f"UNPUBLISHED={unpublished(canon)}")
             print(f"BACKUP_REMOTE={backup_remote(canon) or 'none'}")
+            hook = push_hook(canon.repo)
+            print(f"PUSH_HOOK={hook or 'none'}")
+            if retired_push_hook(canon.repo) is not None:
+                print("PUSH_HOOK_RETIRED=yes")
             marker = _backup_marker(repo)
             if marker.exists():
                 print(f"BACKUP_FAILED={marker.read_text().strip()}")

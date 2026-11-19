@@ -862,3 +862,127 @@ class TestPostCommitHook:
         assert result.returncode == 0                      # the commit itself stands
         assert "backup" in result.stderr.lower()
         assert (fam.slot / ".git" / "soredium-backup-failed").exists()
+
+
+RETIRED_HOOK = """#!/bin/bash
+echo "Run /git-squash to review history before pushing, or use --no-verify to skip."
+exit 1
+"""
+REFUSING_HOOK = "#!/bin/sh\necho 'policy: not today' >&2\nexit 1\n"
+LINEAR_HOOK = (Path(__file__).resolve().parent.parent / "git-squash" / "hooks" / "pre-push")
+
+
+def _hook(directory: Path, text: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    hook = directory / "pre-push"
+    hook.write_text(text)
+    hook.chmod(0o755)
+    return hook
+
+
+class TestPushHook:
+    """#551: publish names the hook that stands in its way and never hides its output."""
+
+    def test_no_hook(self, fam):
+        assert cs.push_hook(fam.canon) is None
+        assert cs.retired_push_hook(fam.canon) is None
+
+    def test_hook_in_git_hooks_is_found(self, fam):
+        hook = _hook(fam.canon / ".git" / "hooks", REFUSING_HOOK)
+        assert cs.push_hook(fam.canon).resolve() == hook.resolve()
+
+    def test_local_hooks_path_wins_over_git_hooks(self, fam):
+        _hook(fam.canon / ".git" / "hooks", REFUSING_HOOK)
+        tracked = _hook(fam.canon / ".githooks", RETIRED_HOOK)
+        g(fam.canon, "config", "core.hooksPath", ".githooks")
+        assert cs.push_hook(fam.canon).resolve() == tracked.resolve()
+        assert cs.retired_push_hook(fam.canon).resolve() == tracked.resolve()
+
+    def test_global_hooks_path_is_followed(self, fam, tmp_path, monkeypatch):
+        shared = _hook(tmp_path / "shared-hooks", REFUSING_HOOK)
+        config = tmp_path / "global.gitconfig"
+        config.write_text(f"[core]\n\thooksPath = {shared.parent}\n"
+                          "[user]\n\tname = T\n\temail = t@t\n")
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+        _hook(fam.canon / ".git" / "hooks", RETIRED_HOOK)
+        assert cs.push_hook(fam.canon).resolve() == shared.resolve()
+        assert cs.retired_push_hook(fam.canon) is None
+
+    def test_the_linear_hook_is_not_retired(self, fam):
+        _hook(fam.canon / ".git" / "hooks", LINEAR_HOOK.read_text())
+        assert cs.retired_push_hook(fam.canon) is None
+
+    def test_publish_refuses_before_pushing_when_the_hook_is_retired(self, fam):
+        cs.land(fam.slot, "feat")
+        hook = _hook(fam.canon / ".githooks", RETIRED_HOOK)
+        g(fam.canon, "config", "core.hooksPath", ".githooks")
+        before = fam.remote_main(fam.blessed), fam.remote_main(fam.mirror)
+
+        with pytest.raises(cs.SyncError) as refused:
+            cs.publish_base(fam.canon)
+
+        assert refused.value.code == "retired_push_hook"
+        assert str(hook.resolve()) in refused.value.detail or str(hook) in refused.value.detail
+        assert "push_hook_setup.py" in refused.value.detail
+        assert "--no-verify" not in refused.value.detail
+        assert (fam.remote_main(fam.blessed), fam.remote_main(fam.mirror)) == before
+        assert not g(fam.blessed, "for-each-ref", "refs/heads/publish", must=False)
+        assert not g(fam.mirror, "for-each-ref", "refs/heads/publish", must=False)
+
+    def test_any_other_refusing_hook_is_named_with_its_output(self, fam):
+        cs.land(fam.slot, "feat")
+        hook = _hook(fam.canon / ".git" / "hooks", REFUSING_HOOK)
+        before = fam.remote_main(fam.blessed)
+
+        with pytest.raises(cs.SyncError) as refused:
+            cs.publish_base(fam.canon)
+
+        assert refused.value.code == "publish_failed"
+        assert "policy: not today" in refused.value.detail
+        assert str(hook) in refused.value.detail or str(hook.resolve()) in refused.value.detail
+        assert fam.remote_main(fam.blessed) == before
+
+    def test_publish_works_with_the_linear_hook(self, fam):
+        cs.land(fam.slot, "feat")
+        _hook(fam.canon / ".git" / "hooks", LINEAR_HOOK.read_text())
+        result = cs.publish_base(fam.canon)
+        assert result.published == "upstream"
+        assert fam.remote_main(fam.blessed) == sha(fam.canon, "refs/heads/main")
+
+    def test_status_reports_the_hook(self, fam, capsys):
+        _hook(fam.canon / ".githooks", RETIRED_HOOK)
+        g(fam.canon, "config", "core.hooksPath", ".githooks")
+        assert cs.main(["status", str(fam.canon)]) == 0
+        out = capsys.readouterr().out
+        assert "PUSH_HOOK=" in out and "PUSH_HOOK=none" not in out
+        assert "PUSH_HOOK_RETIRED=yes" in out
+
+    def test_command_line_reports_the_refusal(self, fam, capsys):
+        cs.land(fam.slot, "feat")
+        _hook(fam.canon / ".githooks", RETIRED_HOOK)
+        g(fam.canon, "config", "core.hooksPath", ".githooks")
+        assert cs.main(["publish", str(fam.canon)]) == 1
+        out = capsys.readouterr().out
+        assert "ERROR=retired_push_hook" in out
+        assert "PUBLISHED=" not in out
+
+    @pytest.mark.parametrize("text, expected", [
+        ("fatal: unable to access 'https://user:ghp_secret@github.com/o/r.git/'",
+         "fatal: unable to access 'https://***@github.com/o/r.git/'"),
+        ("error: failed to push some refs to 'https://ghp_secret@github.com/o/r'",
+         "error: failed to push some refs to 'https://***@github.com/o/r'"),
+        ("to git@github.com:o/r.git", "to git@github.com:o/r.git"),
+        ("https://github.com/o/r.git", "https://github.com/o/r.git"),
+    ])
+    def test_credentials_in_urls_are_never_repeated(self, text, expected):
+        assert cs.redact(text) == expected
+        assert "ghp_secret" not in cs.redact(text)
+
+    def test_a_failed_push_does_not_leak_the_remote_s_credentials(self, fam):
+        cs.land(fam.slot, "feat")
+        g(fam.canon, "remote", "set-url", "upstream",
+          "https://user:ghp_secret@invalid.invalid/o/r.git")
+        with pytest.raises(cs.SyncError) as failed:
+            cs.publish_base(fam.canon)
+        assert "ghp_secret" not in failed.value.detail
+        assert "ghp_secret" not in str(failed.value)
