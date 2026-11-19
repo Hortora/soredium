@@ -1,3 +1,12 @@
+---
+layout: post
+title: "cc-praxis — The Writing Rules Get Teeth"
+date: 2026-04-06
+entry_type: note
+subtype: diary
+projects: [Hortora/soredium]
+---
+
 # cc-praxis — The Writing Rules Get Teeth
 
 **Date:** 2026-04-06

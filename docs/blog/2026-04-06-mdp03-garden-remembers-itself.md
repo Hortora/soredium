@@ -1,3 +1,12 @@
+---
+layout: post
+title: "cc-praxis — Teaching the Garden to Remember Itself"
+date: 2026-04-06
+entry_type: note
+subtype: diary
+projects: [Hortora/soredium]
+---
+
 # cc-praxis — Teaching the Garden to Remember Itself
 
 **Date:** 2026-04-06

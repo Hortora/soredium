@@ -1,3 +1,12 @@
+---
+layout: post
+title: "Hortora — The Garden Grows Up"
+date: 2026-04-07
+entry_type: note
+subtype: diary
+projects: [Hortora/soredium]
+---
+
 # Hortora — The Garden Grows Up
 
 **Date:** 2026-04-07

@@ -1,3 +1,12 @@
+---
+layout: post
+title: "cc-praxis — Building the Infrastructure"
+date: 2026-03-31
+entry_type: note
+subtype: diary
+projects: [Hortora/soredium]
+---
+
 # cc-praxis — Building the Infrastructure
 
 **Date:** 2026-03-31

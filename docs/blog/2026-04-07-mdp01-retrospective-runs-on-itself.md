@@ -1,3 +1,12 @@
+---
+layout: post
+title: "cc-praxis — The Retrospective Runs on Itself"
+date: 2026-04-07
+entry_type: note
+subtype: diary
+projects: [Hortora/soredium]
+---
+
 # cc-praxis — The Retrospective Runs on Itself
 
 **Date:** 2026-04-07

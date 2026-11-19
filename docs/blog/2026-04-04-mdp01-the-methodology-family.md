@@ -1,3 +1,12 @@
+---
+layout: post
+title: "cc-praxis — The Methodology Family"
+date: 2026-04-04
+entry_type: note
+subtype: diary
+projects: [Hortora/soredium]
+---
+
 # cc-praxis — The Methodology Family
 
 **Date:** 2026-04-04

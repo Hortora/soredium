@@ -1,3 +1,12 @@
+---
+layout: post
+title: "cc-praxis — The Web Installer"
+date: 2026-04-03
+entry_type: note
+subtype: diary
+projects: [Hortora/soredium]
+---
+
 # cc-praxis — The Web Installer
 
 **Date:** 2026-04-03
