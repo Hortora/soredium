@@ -1,5 +1,7 @@
 # Work Lifecycle: Maintainer Guide
 
+**Update this file in the same change that makes any part of it untrue, and add what you learn** (a new rule, a failure and its lesson, an area to watch). You are expected to edit it; a lifecycle change without the matching update here is not finished.
+
 For a session that has to maintain or improve soredium's work lifecycle (start, wrap, end, landing, publishing, queues, slots, clones, the worklog) and was not there when it was built.
 
 Written 2026-11-20 against `main` at `14aa10d`; revised after an independent review the same day. Step lists, decision names and file roles were printed from the code, not recalled. Where something is believed but was not checked, it says so. `CLAUDE.md` states the conventions; this guide adds how they work and why. Where the two overlap, `CLAUDE.md` is the reference and this file points to it.

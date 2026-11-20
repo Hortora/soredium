@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+**FIRST, EVERY SESSION:** if your work touches the work lifecycle (start, continue, done, wrap, end, landing, publishing, queues, slots, clones, the worklog), read [docs/development/lifecycle-maintainer-guide.md](docs/development/lifecycle-maintainer-guide.md) before changing anything, and **update that file in the same change** whenever you make any part of it untrue or learn something a future session would need (a new rule, a new failure and its lesson, a new area to watch). A change to lifecycle code without the matching guide update is not finished.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Identity
