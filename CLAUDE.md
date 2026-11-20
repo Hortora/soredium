@@ -624,6 +624,12 @@ but this checklist ensures the new type is fully wired into all workflows.**
 
 ---
 
+## Maintaining the Work Lifecycle
+
+Before changing anything in start, wrap, end, landing, publishing, queues, slots, clones or the worklog, read [docs/development/lifecycle-maintainer-guide.md](docs/development/lifecycle-maintainer-guide.md): the rules that are not negotiable, how each command and the ceremony work, how to change things safely, what has gone wrong before, areas to watch and the open improvements. Keep it current in the same change that makes a section untrue.
+
+---
+
 ## Protocols
 
 `docs/protocols/` holds standing rules for the codebase -- constraints and conventions that apply when working on scripts, validation, or skills. Read the index before filing issues that touch validation scripts.
