@@ -39,3 +39,18 @@ Standing rules and principles for the soredium skill collection and garden tooli
 |------|---------|------------|
 | [externalised-scripts-require-tests.md](externalised-scripts-require-tests.md) | Scripts and their pytest tests must be committed together — no script merges without tests | Any .py script added to a skill directory |
 | [skill-md-minimal-orchestrator-loop.md](skill-md-minimal-orchestrator-loop.md) | SKILL.md for orchestrated skills: loop + dispatch table only, handlers in lazy-loaded files | work-end, handover, future orchestrated skills |
+
+## Lifecycle, Queues and Records
+
+| File | Summary | Applies to |
+|------|---------|------------|
+| [a-read-never-writes.md](a-read-never-writes.md) | Reading the queue, detecting state and resolving context change no file; migrations are explicit and say what they did | read_queue, work_state, ctx, any show/status/detect command |
+| [one-queue-per-area-never-synced.md](one-queue-per-area-never-synced.md) | One queue per slot, clone or canonical workspace, never synced; only queue_io.queue_dir decides where it is | Every script that reads, writes, commits or names a queue file |
+| [the-script-that-acts-records-it.md](the-script-that-acts-records-it.md) | Lifecycle actions are recorded through worktrace by the script that performs them; recording never fails the action | Any script that lands, publishes, promotes, closes, pauses, resumes or archives |
+| [issue-references-are-always-qualified.md](issue-references-are-always-qualified.md) | Issue references are owner/repo#N everywhere, never a bare number | Stored fields, markers, records, script arguments, commit trailers |
+
+## Testing
+
+| File | Summary | Applies to |
+|------|---------|------------|
+| [a-test-must-fail-with-the-rule-removed.md](a-test-must-fail-with-the-rule-removed.md) | Break the rule on purpose and see the test fail; hand the code what a real caller would | New tests for routing, location and guard rules |
