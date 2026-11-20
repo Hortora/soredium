@@ -490,6 +490,11 @@ python3 -m pytest tests/test_clone_manager.py tests/test_clone_work_end.py tests
 python3 scripts/fix_absolute_symlinks.py              # dry-run: shows what needs changing
 python3 scripts/fix_absolute_symlinks.py --apply       # apply fixes
 
+# Workspace rename (safely renames across all slots, clones, attic, worklog, Claude projects)
+python3 scripts/rename_workspace.py <family_root> old=<name> new=<name>          # audit
+python3 scripts/rename_workspace.py <family_root> old=<name> new=<name> plan     # plan
+python3 scripts/rename_workspace.py <family_root> old=<name> new=<name> --apply  # apply
+
 # Ecosystem mining pipeline
 python3 scripts/run_pipeline.py          # orchestrate: registry -> extract -> cluster -> delta -> report
 python3 scripts/validate_candidates.py   # human validation gate (accept/reject/skip candidates)
