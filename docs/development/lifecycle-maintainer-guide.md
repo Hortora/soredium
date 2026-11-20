@@ -36,7 +36,7 @@ If a change you are about to make conflicts with one of these, stop and ask the 
 | Family | A directory of related repos: `~/claude/hortora/`, `~/claude/casehub/` |
 | Canonical repo | `~/claude/<family>/<repo>`. The one copy that talks to GitHub |
 | Project repo | The code repo (for example `soredium`) |
-| Workspace repo | A companion repo holding methodology artifacts: handoff, blog drafts, specs, plans. For soredium it is `cc-praxis` (`~/claude/public/cc-praxis`) |
+| Workspace repo | A companion repo holding methodology artifacts: handoff, blog drafts, specs, plans. For soredium it is `soredium` (`~/claude/public/soredium`) |
 | Base branch | `main` (occasionally `master`) |
 | Slot | `~/claude/<family>/slots/<N>/`: clones of several project and workspace repos cut for one piece of work, with a `.slot` file at the root. Archived to `slots/attic/<N>/` when done |
 | Permanent clone | `~/claude/<family>/clone/<repo>/`: one project clone and its workspace clone, with `.slot` and `.permanent`. Never archived |
@@ -62,15 +62,15 @@ Work on soredium happens in the permanent clone, not in canonical:
 ~/claude/hortora/clone/soredium/
     .slot  .permanent  .queue  .queue-root
     soredium/          project clone   (remote: local)
-    wsp-cc-praxis/     workspace clone (remote: local)
+    wsp-soredium/      workspace clone (remote: local)
 ```
 
-Open the session in `wsp-cc-praxis/`. Running `work` in canonical soredium stops with `STOP_REASON=canonical_repo_of_clone_family` and tells you where to go.
+Open the session in `wsp-soredium/`. Running `work` in canonical soredium stops with `STOP_REASON=canonical_repo_of_clone_family` and tells you where to go.
 
 ### 3.2 The loop for one item
 
 ```
-cd ~/claude/hortora/clone/soredium/wsp-cc-praxis
+cd ~/claude/hortora/clone/soredium/wsp-soredium
 python3 ~/.claude/skills/project/work.py start issue_n=<N> "issue_title=<title>"
 python3 ~/.claude/skills/project/work.py start step_done=<step> outcome=completed|skipped [key=value]
 # ... edit in ../soredium, test, commit there ...
@@ -315,7 +315,7 @@ It never squashes, never pushes, never archives.
 
 - `canonical_sync.publish_base(repo)`: fetch, settle canonical's base onto the remote if it moved, push (never forced), mirror. Refuses a repo whose pre-push hook is the retired one and names `scripts/install_linear_pre_push.py`.
 - `scope.covered(workspace)` is the list of canonical repos one `work end` may publish. "Publish all" means that list and nothing else.
-- Blog routing: `~/.claude/blog-routing.yaml`, plus a workspace override (`cc-praxis/blog-routing.yaml`). One resolution detail is not what a reader would assume and was the fix for a real mis-publish: a fallback rule applies only when no project rule matched at all, never in addition to one. An untyped entry is a note. Nothing reaches an organisation's site without a rule naming its project. Run the plan and read the destinations before publishing anything by hand.
+- Blog routing: `~/.claude/blog-routing.yaml`, plus a workspace override (`soredium/blog-routing.yaml`). One resolution detail is not what a reader would assume and was the fix for a real mis-publish: a fallback rule applies only when no project rule matched at all, never in addition to one. An untyped entry is a note. Nothing reaches an organisation's site without a rule naming its project. Run the plan and read the destinations before publishing anything by hand.
 - The `publish_blog` step also refreshes already-published entries whose source changed. On 2026-11-20 that was 21 entries with repaired frontmatter.
 
 ### 6.6 The worklog

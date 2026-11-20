@@ -859,7 +859,7 @@ Claims about git or script behaviour must be observed, not assumed.
 
 Skills write methodology artifacts to a companion workspace, not the project repo.
 
-- **soredium workspace:** `~/claude/public/cc-praxis/` (repurposed from cc-praxis)
+- **soredium workspace:** `~/claude/public/soredium/`
 - Claude opens in the workspace; project loaded via `add-dir` in workspace CLAUDE.md
 - Navigation: `proj/` in workspace -> project; `wksp/` in project -> workspace
 
