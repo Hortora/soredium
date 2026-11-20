@@ -2,7 +2,7 @@
 
 For a session that has to maintain or improve soredium's work lifecycle (start, wrap, end, landing, publishing, queues, slots, clones, the worklog) and was not there when it was built.
 
-Written 2026-11-20. Everything here was true of `main` at `14aa10d`. Line counts and step lists were printed from the code, not recalled. Where something is believed but was not checked, it says so.
+Written 2026-11-20 against `main` at `14aa10d`; revised after an independent review the same day. Step lists, decision names and file roles were printed from the code, not recalled. Where something is believed but was not checked, it says so. `CLAUDE.md` states the conventions; this guide adds how they work and why. Where the two overlap, `CLAUDE.md` is the reference and this file points to it.
 
 Read sections 1 to 4 before changing anything. Use the rest as reference.
 
@@ -70,9 +70,7 @@ Open the session in `wsp-cc-praxis/`. Running `work` in canonical soredium stops
 ```
 cd ~/claude/hortora/clone/soredium/wsp-cc-praxis
 python3 ~/.claude/skills/project/work.py start issue_n=<N> "issue_title=<title>"
-python3 ~/.claude/skills/project/work.py start step_done=branch_name outcome=completed branch=issue-<N>-<slug>
-python3 ~/.claude/skills/project/work.py start step_done=check_protocols outcome=completed produced=0
-python3 ~/.claude/skills/project/work.py start step_done=brainstorm_offer outcome=skipped
+python3 ~/.claude/skills/project/work.py start step_done=<step> outcome=completed|skipped [key=value]
 # ... edit in ../soredium, test, commit there ...
 python3 ~/.claude/skills/project/work.py end          # or: wrap
 ```
@@ -204,12 +202,13 @@ Every tool goes through `read_queue(workspace)` and `write_queue(workspace, queu
 
 ### 5.2 Why
 
-`.queue` is a tracked file in each workspace repo, so `git clone` puts a copy of that repo's whole backlog into every workspace clone. A slot of several repos therefore had several queues, all different, plus a stale copy at the root that the ceremony made once. Which one a tool used depended on the current directory. casehub slot 196 had five (18, 89, 16, 4 and 90 items).
+`.queue` is a tracked file in each workspace repo, so `git clone` copies that repo's whole backlog into every workspace clone. Without the rule, a slot of several repos has several differing queues plus a stale root copy, and which one a tool uses depends on the current directory (casehub slot 196 had five).
 
-### 5.3 State today
+### 5.3 Switching an area
 
-- Switched to a root queue: the hortora clone only.
-- Not switched: every casehub slot. Each is switched by its owner, one at a time:
+Which areas are switched is operational state: it is kept in the workspace `HANDOFF.md`, not here. As of 2026-11-20 only the hortora clone was switched.
+
+An existing slot is switched by its owner, one at a time:
 
 ```
 python3 ~/.claude/skills/project/queue_home.py show  <slot-dir>
@@ -218,8 +217,7 @@ python3 ~/.claude/skills/project/queue_home.py adopt <slot-dir> from=<dir> [--ap
 
 `adopt` is a dry run without `--apply`. It copies the chosen queue to the root, keeps the old root copy as `.queue.before-adopt-<date>`, writes `.queue-root` last, and removes nothing.
 
-- New permanent clones are switched at creation (`clone_manager.create_clone`). New numbered slots are not yet (Hortora/soredium#580).
-- The notes store (`project/notes_store.py`) is landed but dormant: nothing creates the worktree outside tests, so rules 2 and 4 do not fire yet (Hortora/soredium#581).
+New permanent clones are switched at creation (`clone_manager.create_clone`). New numbered slots are not yet (Hortora/soredium#580). The notes store (`project/notes_store.py`) is dormant: nothing creates the worktree outside tests, so rules 2 and 4 do not fire yet (Hortora/soredium#581).
 
 ### 5.4 Things that must stay true
 
@@ -243,28 +241,30 @@ python3 ~/.claude/skills/project/queue_home.py adopt <slot-dir> from=<dir> [--ap
 
 ### 6.1 Files that matter
 
-| File | Lines | Role |
+| File | Size | Role |
 |---|---|---|
-| `project/work.py` | 1288 | Pipelines, gates, routing glue. The entry point for every command |
-| `project/orchestrator_engine.py` | 440 | `run_loop`: runs mechanical steps, yields judgment steps |
-| `project/work_route.py` | 111 | `route()`: what `continue` should do |
-| `project/queue_io.py` | 499 | Queue parse and write, `queue_dir`, `.plan` migration |
-| `project/queue_home.py` | 227 | `show`, `adopt`, `mark` for root queues |
-| `project/notes_store.py` | 200 | `.notes` worktree store; no remotes |
-| `work-slot/plan_manager.py` | 1758 | Queue edits by path: append, activate, mark-done, advance, detect. Older code; writes whatever path it is given |
-| `project/canonical_sync.py` | 1011 | `locate`, `land`, `land_all`, `publish_base`, `follow`, `checked_out`, backup. The only code that moves base branches |
-| `work-end/close.py` | 1313 | The ceremony |
-| `work-end/scope.py` | 358 | What one `work end` may touch: `covered`, `land`, `publish`, `promote_backlog`, `publish_blog`, `commit_queue` |
-| `work-end/artifact_promote.py`, `artifact_sweep.py` | 695, 353 | Promotion |
-| `publish-blog/blog_routing.py`, `blog_publish.py` | 422, 423 | Which site an entry goes to; copying and committing |
-| `project/branch_base.py`, `squash_marker.py` | 175, 146 | The refs that record branch origin and squash review |
-| `project/topology.py`, `ctx.py`, `work_state.py` | 321, 454, 178 | Where am I: layout, context, state. Read-only |
-| `project/alignment.py` | 112 | Project and workspace branch agreement |
-| `project/clone_manager.py` | 182 | Permanent clones |
-| `work-slot/slot_lifecycle.py` | 1146 | Slot create, archive, restore |
-| `project/worktrace.py` | 170 | The one worklog recorder |
-| `scripts/worklog.py` | 838 | The SQLite worklog (`~/.hortora/worklog.db`) |
-| `hooks/push-guard.py` | 184 | Blocks `git push` from a slot or working branch |
+| `project/work.py` | large | Pipelines, gates, routing glue. The entry point for every command |
+| `project/orchestrator_engine.py` | medium | `run_loop`: runs mechanical steps, yields judgment steps |
+| `project/work_route.py` | small | `route()`: what `continue` should do |
+| `project/queue_io.py` | medium | Queue parse and write, `queue_dir`, `.plan` migration |
+| `project/queue_home.py` | small | `show`, `adopt`, `mark` for root queues |
+| `project/notes_store.py` | small | `.notes` worktree store; no remotes |
+| `work-slot/plan_manager.py` | large | Queue edits by path: append, activate, mark-done, advance, detect. Older code; writes whatever path it is given |
+| `project/canonical_sync.py` | large | `locate`, `land`, `land_all`, `publish_base`, `follow`, `checked_out`, backup. The only code that moves base branches |
+| `work-end/close.py` | large | The ceremony |
+| `work-end/scope.py` | medium | What one `work end` may touch: `covered`, `land`, `publish`, `promote_backlog`, `publish_blog`, `commit_queue` |
+| `work-end/artifact_promote.py`, `artifact_sweep.py` | medium | Promotion |
+| `publish-blog/blog_routing.py`, `blog_publish.py` | medium | Which site an entry goes to; copying and committing |
+| `project/branch_base.py`, `squash_marker.py` | small | The refs that record branch origin and squash review |
+| `project/topology.py`, `ctx.py`, `work_state.py` | medium | Where am I: layout, context, state. Read-only |
+| `project/alignment.py` | small | Project and workspace branch agreement |
+| `project/clone_manager.py` | small | Permanent clones |
+| `work-slot/slot_lifecycle.py` | large | Slot create, archive, restore |
+| `project/worktrace.py` | small | The one worklog recorder |
+| `scripts/worklog.py` | medium | The SQLite worklog (`~/.hortora/worklog.db`) |
+| `hooks/push-guard.py` | small | Blocks `git push` from a slot or working branch |
+
+Size: large is over 1,000 lines, medium 300 to 1,000, small under 300. Small files are the focused deciders; start there.
 
 Legacy, do not extend: `project/lifecycle.py`, `project/work_chain.py`.
 
@@ -313,21 +313,12 @@ It never squashes, never pushes, never archives.
 
 - `canonical_sync.publish_base(repo)`: fetch, settle canonical's base onto the remote if it moved, push (never forced), mirror. Refuses a repo whose pre-push hook is the retired one and names `scripts/install_linear_pre_push.py`.
 - `scope.covered(workspace)` is the list of canonical repos one `work end` may publish. "Publish all" means that list and nothing else.
-- Blog routing: `~/.claude/blog-routing.yaml`, plus a workspace override (`cc-praxis/blog-routing.yaml`). Resolution: project rules, most specific first; fallbacks only when no project rule matched; then defaults. An untyped entry is a note. Nothing reaches an organisation's site without a rule naming its project. Run the plan and read the destinations before publishing anything by hand.
+- Blog routing: `~/.claude/blog-routing.yaml`, plus a workspace override (`cc-praxis/blog-routing.yaml`). One resolution detail is not what a reader would assume and was the fix for a real mis-publish: a fallback rule applies only when no project rule matched at all, never in addition to one. An untyped entry is a note. Nothing reaches an organisation's site without a rule naming its project. Run the plan and read the destinations before publishing anything by hand.
 - The `publish_blog` step also refreshes already-published entries whose source changed. On 2026-11-20 that was 21 entries with repaired frontmatter.
 
 ### 6.6 The worklog
 
-`project/worktrace.py record(action, /, repo=, branch=, **details)` writes one row to `events`. The script that performs an action calls it:
-
-| Script | Records |
-|---|---|
-| `work.py` | `work-<cmd>-begin`, `step` (command, step, outcome), `work-<cmd>-complete`, `work-<cmd>-stopped` (reason) |
-| `canonical_sync.py` | `land`, `publish`, `publish-failed` |
-| `close.py` | `stamp`, `issue-close`, `close-ceremony`, and ends the work item |
-| `artifact_promote.py` | `promote` |
-| `blog_publish.py`, `scope.py` | `blog-publish`, `blog-held` |
-| `work-slot/slot_state.py` | slot create, merge, archive |
+`project/worktrace.py record(action, /, repo=, branch=, **details)` writes one row to `events`. The script that performs an action calls it. Which script records which action is listed in `CLAUDE.md` under Key Skills, `worktrace.py`.
 
 Read it with `python3 ~/.claude/skills/project/worktrace.py show limit=40 [action=<name>]`.
 
@@ -343,7 +334,7 @@ A procedure that works for a model without the full history in its head.
 2. **Write the failing test first, on real repos in `tmp_path`.** No mocks for git. Copy a fixture from the nearest existing test file.
 3. **Make the harness supply what a real caller supplies.** For "must not be led to X", hand the code X and assert X's bytes and `git status` are unchanged afterwards.
 4. **Break the rule on purpose and watch the test fail.** Commit your work first, replace the deciding function's body with the old behaviour, run the tests, confirm they fail, then `git checkout -- <file>`. A test that passes with the rule removed proves nothing.
-5. **For anything that reads:** snapshot every file under the directory before and after, compare bytes.
+5. **For anything that reads:** enforce rule 5 with a before and after snapshot test (`tests/test_ctx_reads_only.py` is the pattern).
 6. **Run the suites for every file you touched**, then the full suite in the background before landing.
 7. **Check the real machine, read-only.** List files, read them, use plain `git -C ... status/log/rev-parse`. Use `queue_home.py show` for queues.
 8. **Land and install, then use it for real once** and read the worklog trace. Tests did not find the two defects the first live `work end` found.
@@ -372,7 +363,7 @@ Ordered by how much damage a mistake does.
 5. **`covers` after `mark_done`.** It names the next item. Anything that uses `queue.state.covers` after an item is marked done is talking about the wrong issue. The promote command printed by the ceremony does this today.
 6. **Run keys and progress.** `.work-progress` decides what is skipped. A wrong key either restarts a sequence or treats old steps as done. If a command behaves as if it "already did that", print `.work-progress`.
 7. **Blog routing.** One wrong rule publishes to an organisation's public site. Removing published entries meant rewriting that site's history. Always run the plan first.
-8. **Module shadowing.** Scripts add `~/.claude/lib` and `~/.claude/skills/project` to `sys.path`. In a subprocess the installed copy of a module can be imported instead of the sibling file. New code must not assume a just-added function exists in an imported shared module; `tests/conftest.py` pins the repo's copies for in-process tests only.
+8. **Module shadowing.** In a subprocess the installed copy of a shared module (`~/.claude/lib`, `~/.claude/skills/project`) can be imported instead of the sibling file. New code must not assume a just-added function exists in an imported shared module. `tests/conftest.py` pins the repo's copies for in-process tests only.
 9. **Tests that touch real resources.** An environment dict built at module import bypasses per-test isolation. 797 test rows had reached the real worklog before this was found.
 10. **Silent `except Exception: pass`.** `work-start/scaffold.py` still swallows worklog errors this way. Prefer one warning line.
 11. **Message matching on git output.** Git has several wordings for the same condition. Ask git a question (`status --porcelain -- <file>`) instead of matching text.
@@ -403,33 +394,16 @@ Read this as a list of mistakes not to repeat.
 
 ## 10. Areas to improve
 
-Open issues, in the order they are queued in the clone:
+The backlog is not kept here. It is the epic Hortora/soredium#595 and the queue (`queue_home.py show ~/claude/hortora/clone/soredium`).
 
-| Issue | What | Why it matters |
-|---|---|---|
-| Hortora/soredium#584 | Verify the root-queue rule in the paths the review did not reach; fix `covers` on the promote command; find what put a commit on the clone workspace's own `main` | Unverified code near a critical rule |
-| Hortora/soredium#579 | One lock for every writer of a queue | Lost updates in a shared slot |
-| Hortora/soredium#582 | `adopt` should set a sensible state and validate what it copies | A new clone can start with a queue naming a branch it does not have |
-| Hortora/soredium#580 | New numbered slots get one root queue | Otherwise the multi-queue problem keeps being created |
-| Hortora/soredium#583 | Worklog gaps: a raise in the ceremony is not recorded; recording happens inside the landing lock; work items matched by branch across repos | Trace completeness |
-| Hortora/soredium#581 | Finish the notes store; migration command for one workspace at a time; a `.notes` off its branch must be an error | Removes queue-on-branch problems for canonical workspaces |
-| Hortora/soredium#585 | Checklists shown with the multi-select picker | Consistency for the user |
+What a session needs to know because it changes how things behave today:
 
-Open and not queued: Hortora/soredium#570 (bare issue numbers in stored fields and in older commit-msg hooks), Hortora/soredium#573 (slots, clones and long-lived agent directories as one structure with a generated root `CLAUDE.md`; see `~/claude/agents/`), Hortora/soredium#529, Hortora/soredium#560.
-
-Not yet filed, worth doing:
-
-- **Untrack `.work-progress`** (and consider `.wrap-log.jsonl`). The pipeline modifies a tracked file, which leaves the workspace dirty and stopped the ceremony from moving the workspace clone back to `main`.
-- **`work start` in a canonical repo of a clone-enabled family** could offer to create the clone instead of only printing the command.
-- **`ARC42STORIES.MD`** does not describe the queue rule, the worklog trace, or wrap and end.
-- **Five skills have frontmatter or CSO findings** from `scripts/validate_all.py --tier commit`: `doc-freshness`, `ide-tooling`, `executing-plans`, `writing-plans`, `forage`.
-- **`handover/garden_feedback_table.py`** is named by the handover skill and is not in the installed skill.
-- **`work-end/SKILL.md`** still carries an advisory checklist that overlaps the `end` pipeline.
-- **The pause stack** should be recorded with the queue (same area, same store) and carry qualified references.
-- **Retire `project/work_chain.py` and `project/lifecycle.py`** once their remaining importers and tests are moved.
-- **`tests/test_work_wrap_end.py` drives `end` with explicit arguments.** Add at least one test that lets the context resolve itself, the way a real session does; both live-run defects came from values the context changed mid-run.
-- **Old layouts on this machine** (found 2026-11-19): eight workspaces and one slot still use only `.plan`; five workspaces keep lifecycle files under `design/` (`quarkus-langchain4j`, `ledger`, `openclaw`, `life`, `neocortex`). They are read in place and reported as `LEGACY_LAYOUT=`. Conversion is `python3 work-slot/plan_migrate.py to-root <workspace>`, one at a time, with the owner's agreement.
-- **`casehub-ops` has a plain `.notes` directory** holding `NOTES.md`. The notes store refuses it. A migration must handle that case without replacing the directory.
+- **`.work-progress` and `.wrap-log.jsonl` are tracked and modified by the pipeline.** A workspace is therefore dirty after any command, and the ceremony leaves the workspace clone on the closed branch. Commit those two files or move the checkout by hand until they are untracked.
+- **`queue.state.covers` names the next item once an item is marked done.** The promote command the ceremony prints carries it; correct the `covers=` value by hand.
+- **Old layouts exist on this machine** (found 2026-11-19): eight workspaces and one slot use only `.plan`; five workspaces keep lifecycle files under `design/`. They are read in place and reported as `LEGACY_LAYOUT=`. Conversion is `python3 work-slot/plan_migrate.py to-root <workspace>`, one at a time, with the owner's agreement.
+- **`casehub-ops` has a plain `.notes` directory** holding `NOTES.md`. The notes store refuses it; nothing may replace it.
+- **The handover skill names `garden_feedback_table.py`, which is not installed.** Skip that step with a reason when no garden entries were retrieved.
+- **Context budget.** A session watches its remaining context: it suggests `work wrap` when a task runs long, and after each finished item recommends continue, `work end` then continue, or stop. Until Hortora/soredium#586 lands this is done by judgement.
 
 ---
 
