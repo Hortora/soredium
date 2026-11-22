@@ -754,6 +754,71 @@ def mark_done(plan_path: Path, branch: str = "") -> dict:
             "pending": pending}
 
 
+def _remove_ref(items: list[QueueItem], ref: IssueRef) -> bool:
+    for i, item in enumerate(items):
+        if item.ref == ref and not item.is_epic:
+            items.pop(i)
+            return True
+        if item.is_epic and item.children and _remove_ref(item.children, ref):
+            return True
+    return False
+
+
+def defer_active(plan_path: Path, reason: str = "") -> dict:
+    """Defer the active item: remove from queue, add to deferred, activate next."""
+    tree = parse_plan(plan_path)
+    active = _find_active_leaf(tree.queue)
+    if not active:
+        raise MarkDoneError("no_active_issue", "no active item to defer")
+    ref = active.ref
+    title = active.title
+    scale = getattr(active, "scale", "") or "M"
+    complexity = getattr(active, "complexity", "") or "Med"
+    _remove_ref(tree.queue, ref)
+    tree.deferred.append(DeferredItem(title, scale, complexity, [], reason=reason))
+    leaves = flatten_leaves(tree)
+    next_leaf = next((l for l in leaves if not l.completed and not l.done_branch), None)
+    if next_leaf:
+        _mark_active(tree.queue, next_leaf.ref)
+    tree.current_issue = next_leaf.ref if next_leaf else None
+    tree.state["branch"] = ""
+    tree.state["covers"] = str(next_leaf.ref) if next_leaf else ""
+    rewrite_plan(plan_path, tree)
+    return {"deferred": str(ref), "next": str(next_leaf.ref) if next_leaf else ""}
+
+
+def move_down(plan_path: Path, position: str = "end") -> dict:
+    """Move the active item down in the queue: deactivate, reposition, activate next."""
+    tree = parse_plan(plan_path)
+    active = _find_active_leaf(tree.queue)
+    if not active:
+        raise MarkDoneError("no_active_issue", "no active item to move")
+    ref = active.ref
+    # Find and remove from current position
+    idx = next((i for i, item in enumerate(tree.queue) if item.ref == ref), None)
+    if idx is None:
+        raise MarkDoneError("not_found", f"{ref} not found in queue")
+    moved = tree.queue.pop(idx)
+    moved.active = False
+    if position == "end":
+        tree.queue.append(moved)
+    else:
+        target = next((i for i, item in enumerate(tree.queue) if str(item.ref) == position), None)
+        if target is not None:
+            tree.queue.insert(target + 1, moved)
+        else:
+            tree.queue.append(moved)
+    leaves = flatten_leaves(tree)
+    next_leaf = next((l for l in leaves if not l.completed and not l.done_branch and not l.active), None)
+    if next_leaf:
+        _mark_active(tree.queue, next_leaf.ref)
+    tree.current_issue = next_leaf.ref if next_leaf else None
+    tree.state["branch"] = ""
+    tree.state["covers"] = str(next_leaf.ref) if next_leaf else ""
+    rewrite_plan(plan_path, tree)
+    return {"moved": str(ref), "next": str(next_leaf.ref) if next_leaf else ""}
+
+
 def advance_issue(plan_path: Path | None,
                   repo_path: str | None = None) -> AdvanceResult:
     if plan_path and plan_path.exists():
@@ -1431,6 +1496,30 @@ def main() -> int:
         repos = [r.strip() for r in repos_str.split(",") if r.strip()] if repos_str else []
         append_deferred(plan_path, title, scale, complexity, repos, reason)
         print(f"DEFERRED={title}")
+        return 0
+
+    elif command == "defer-active":
+        reason = opts.get("reason", "")
+        try:
+            result = defer_active(plan_path, reason=reason)
+        except MarkDoneError as e:
+            print(f"ERROR={e.code}", file=_sys.stderr)
+            print(f"ERROR_DETAIL={e}", file=_sys.stderr)
+            return 1
+        print(f"DEFERRED={result['deferred']}")
+        print(f"NEXT={result['next']}")
+        return 0
+
+    elif command == "move-down":
+        position = opts.get("position", "end")
+        try:
+            result = move_down(plan_path, position=position)
+        except MarkDoneError as e:
+            print(f"ERROR={e.code}", file=_sys.stderr)
+            print(f"ERROR_DETAIL={e}", file=_sys.stderr)
+            return 1
+        print(f"MOVED={result['moved']}")
+        print(f"NEXT={result['next']}")
         return 0
 
     elif command == "list-deferred":
