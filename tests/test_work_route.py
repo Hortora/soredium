@@ -33,21 +33,12 @@ class TestActiveItem:
         assert (r.run, r.reason, r.issue) == ("continue", "active_work", "o/r#1")
         assert not r.activate and not r.stop
 
-    def test_next_is_another_spelling_of_continue(self):
-        for q, branch in ((queue(active(1), item(2)), "issue-1-x"),
-                          (queue(closed(1), item(2)), "main"),
-                          (queue(item(2), item(3)), "issue-3-x"),
-                          (queue(item(1, done_branch="issue-1-x"), item(2)), "issue-1-x"),
-                          (queue(closed(1)), "main")):
-            assert route("next", q, branch, "main") == route("continue", q, branch, "main")
-
     def test_only_done_marks_the_active_item_done(self):
         q = queue(active(1), item(2))
         r = route("done", q, "issue-1-x", "main")
         assert (r.run, r.reason, r.issue) == ("done", "mark_done", "o/r#1")
         assert r.offer
-        for command in ("continue", "next"):
-            assert route(command, q, "issue-1-x", "main").reason != "mark_done"
+        assert route("continue", q, "issue-1-x", "main").reason != "mark_done"
 
     def test_done_with_nothing_active_carries_on_like_continue(self):
         q = queue(closed(1), item(2))
@@ -148,7 +139,7 @@ class TestPassThrough:
         r = route(command, queue(item(2)), "main", "main")
         assert (r.run, r.stop, r.activate) == (command, "", "")
 
-    @pytest.mark.parametrize("command", ["continue", "next"])
+    @pytest.mark.parametrize("command", ["start", "continue", "next"])
     def test_no_queue_runs_the_command_as_given(self, command):
         r = route(command, None, "issue-1-x", "main")
         assert (r.run, r.reason) == (command, "no_queue")
@@ -157,30 +148,72 @@ class TestPassThrough:
         q = queue(closed(1), item(2), item(3, done_branch="issue-3-x"))
         before = repr(q)
         for branch in ("main", "issue-2-x", "issue-3-x", "other"):
-            for command in ("continue", "next"):
+            for command in ("start", "continue", "next"):
                 route(command, q, branch, "main")
         assert repr(q) == before
 
 
-class TestOneCommand:
-    """work, work start, work continue and work next are the same question."""
+class TestMoveOnGate:
+    """start and next mean 'move on' — they gate on active work (#596)."""
 
-    STATES = [
-        (lambda: queue(active(1), item(2)), "issue-1-x"),
-        (lambda: queue(closed(1), item(2)), "main"),
-        (lambda: queue(item(2), item(3)), "issue-3-x"),
-        (lambda: queue(item(1, done_branch="issue-1-x"), item(2)), "issue-1-x"),
-        (lambda: queue(item(1, done_branch="issue-1-x")), "main"),
-        (lambda: queue(closed(1)), "main"),
-        (lambda: queue(item(2)), "wip-thing"),
-    ]
+    def test_start_with_active_item_returns_decision(self):
+        q = queue(active(1), item(2))
+        r = route("start", q, "issue-1-x", "main")
+        assert (r.stop, r.reason) == ("decision", "current_item_not_released")
+        assert r.issue == "o/r#1"
 
-    @pytest.mark.parametrize("state", range(len(STATES)))
-    def test_every_spelling_gives_the_same_route(self, state):
-        make, branch = self.STATES[state]
-        routes = {c: route(c, make(), branch, "main") for c in ("start", "continue", "next")}
-        assert routes["start"] == routes["continue"] == routes["next"]
+    def test_next_with_active_item_returns_decision(self):
+        q = queue(active(1), item(2))
+        r = route("next", q, "issue-1-x", "main")
+        assert (r.stop, r.reason) == ("decision", "current_item_not_released")
 
+    def test_continue_with_active_item_still_carries_on(self):
+        q = queue(active(1), item(2))
+        r = route("continue", q, "issue-1-x", "main")
+        assert (r.run, r.reason) == ("continue", "active_work")
+
+    def test_start_no_active_item_starts_next(self):
+        q = queue(closed(1), item(2))
+        r = route("start", q, "main", "main")
+        assert r.run == "start" and r.activate == "o/r#2"
+
+    def test_next_no_active_item_starts_next(self):
+        q = queue(closed(1), item(2))
+        r = route("next", q, "main", "main")
+        assert r.run == "start" and r.activate == "o/r#2"
+
+    def test_start_active_item_on_base_branch_still_gates(self):
+        """On main with an active item that has no branch yet — still a gate."""
+        q = queue(active(1), item(2))
+        r = route("start", q, "main", "main")
+        assert r.stop == "decision"
+        assert r.reason == "current_item_not_released"
+
+    def test_start_active_done_on_branch_no_gate(self):
+        """Active item is done on its branch — treated as no-active, starts next."""
+        q = queue(item(1, done_branch="issue-1-x"), item(2))
+        r = route("start", q, "issue-1-x", "main")
+        assert r.run == "start" and r.activate == "o/r#2"
+
+    def test_start_and_next_produce_identical_gate(self):
+        q = queue(active(1), item(2))
+        assert route("start", q, "issue-1-x", "main") == route("next", q, "issue-1-x", "main")
+
+    def test_start_and_next_match_when_no_active(self):
+        """Without active work, start and next still behave identically."""
+        for q, branch in ((queue(closed(1), item(2)), "main"),
+                          (queue(item(2), item(3)), "issue-3-x"),
+                          (queue(item(1, done_branch="issue-1-x"), item(2)), "issue-1-x"),
+                          (queue(closed(1)), "main")):
+            assert route("start", q, branch, "main") == route("next", q, branch, "main")
+
+    def test_gate_has_detail_text(self):
+        q = queue(active(1), item(2))
+        r = route("start", q, "issue-1-x", "main")
+        assert "o/r#1" in r.detail
+
+
+class TestPausedWork:
     def test_paused_work_comes_before_new_work(self):
         r = route("continue", queue(closed(1), item(2)), "main", "main", stack_depth=2)
         assert (r.run, r.reason, r.activate) == ("resume", "paused_work", "")

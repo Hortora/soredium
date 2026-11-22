@@ -86,6 +86,10 @@ def route(command: str, queue: Optional[Queue], branch: str, base_branch: str,
         if command == "done":
             result = Route(run="done", reason="mark_done", issue=active.ref,
                            title=active.title, offer=True)
+        elif command in ("start", "next"):
+            result = Route(stop="decision", reason="current_item_not_released",
+                           issue=active.ref, title=active.title, offer=offer,
+                           detail=f"{active.ref} is active; release it before moving on")
         elif on_base or on_finished_branch:
             if not queue.state.branch:
                 result = Route(run="start", reason="active_item_not_started",

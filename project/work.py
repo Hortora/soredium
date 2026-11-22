@@ -411,9 +411,12 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
 
     if r.stop:
         if r.stop == "decision":
-            options = ("checkout_active_branch,start_over_from_here"
-                       if r.reason == "active_branch_not_checked_out"
-                       else "switch_to_base_branch,add_item_for_this_branch")
+            if r.reason == "active_branch_not_checked_out":
+                options = "checkout_active_branch,start_over_from_here"
+            elif r.reason == "current_item_not_released":
+                options = "done,deferred,move_down,continue_current"
+            else:
+                options = "switch_to_base_branch,add_item_for_this_branch"
             lines += ["ACTION=decision", f"DECISION={r.reason}", f"DETAIL={r.detail}",
                       f"OPTIONS={options}"]
         else:
