@@ -260,6 +260,25 @@ class TestLandFromSlot:
         assert again.unpublished == 2
         assert merges(fam.canon) == 0
 
+    def test_before_sha_records_canonical_main_before_landing(self, fam):
+        main_before = sha(fam.canon, "refs/heads/main")
+        result = cs.land(fam.slot, "feat")
+        assert result.before_sha == main_before
+        assert result.sha != main_before, "landing must move canonical main"
+
+    def test_already_landed_has_before_sha_equal_to_sha(self, fam):
+        cs.land(fam.slot, "feat")
+        again = cs.land(fam.slot, "feat")
+        assert again.already_landed is True
+        assert again.before_sha == again.sha
+
+    def test_landing_with_commits_always_moves_canonical_main(self, fam):
+        main_before = sha(fam.canon, "refs/heads/main")
+        result = cs.land(fam.slot, "feat")
+        main_after = sha(fam.canon, "refs/heads/main")
+        assert main_after != main_before
+        assert result.sha == main_after
+
 
 class TestLandingIgnoresTheRemote:
     """Landing is an on-disk operation. Bringing canonical up to a remote is publishing's job."""
@@ -690,6 +709,18 @@ class TestLandAll:
         assert [r.repo for r in results] == [slot2, fam.slot]
         assert sha(canon2, "refs/heads/main") == sha(slot2, "feat")
         assert sha(fam.canon, "refs/heads/main") == sha(fam.slot, "feat")
+
+    def test_before_sha_is_captured_per_canonical(self, fam):
+        canon2, slot2 = self._second_repo(fam)
+        before1 = sha(fam.canon, "refs/heads/main")
+        before2 = sha(canon2, "refs/heads/main")
+
+        results = cs.land_all([(fam.slot, "feat"), (slot2, "feat")])
+
+        assert results[0].before_sha == before1
+        assert results[1].before_sha == before2
+        assert results[0].sha != before1
+        assert results[1].sha != before2
 
     def test_a_conflict_in_one_repo_lands_none(self, fam):
         canon2, slot2 = self._second_repo(fam)

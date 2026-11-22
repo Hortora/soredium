@@ -504,6 +504,12 @@ def land_targets(targets: list[CloseTarget]) -> dict:
     landed = dict(zip(targets, results))
     for target, result in landed.items():
         verify_content_landed(target, result.sha)
+        if result.already_landed and result.before_sha == result.sha:
+            tip = _rev_parse(target.repo, target.branch)
+            if tip and tip != result.sha and not _is_ancestor(target.repo, tip, result.sha):
+                raise RuntimeError(
+                    f"{target.repo.name}: branch {target.branch} reported already_landed "
+                    f"but its tip ({tip[:12]}) is not on {target.base_branch} ({result.sha[:12]})")
     return landed
 
 

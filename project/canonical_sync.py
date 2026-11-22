@@ -82,6 +82,7 @@ class LandResult:
     repo: Path
     branch: str
     sha: str = ""               # canonical base after landing
+    before_sha: str = ""        # canonical base before landing
     already_landed: bool = False
     unpublished: int = 0        # commits on canonical base the blessed remote lacks
     warnings: list[str] = field(default_factory=list)
@@ -835,8 +836,13 @@ def land_all(work: list[tuple],
             stack.enter_context(landing_lock(canonicals[key], lock_timeout))
         results: list[LandResult] = []
         ready = []
+        before: dict[str, str] = {}
         for repo, branch, canon in items:
             result = LandResult(repo=repo, branch=branch)
+            canon_key = str(canon.repo.resolve())
+            if canon_key not in before:
+                before[canon_key] = _sha(canon.repo, f"refs/heads/{canon.base}")
+            result.before_sha = before[canon_key]
             if _prepare(repo, branch, canon, own_bases[(str(repo), branch)]) is None:
                 result.already_landed = True
             ready.append((repo, branch, canon, result))
