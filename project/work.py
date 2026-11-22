@@ -362,6 +362,69 @@ def _named_start(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]
     return routed, lines, False
 
 
+def apply_move_on_gate(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
+    """Handle the user's response to the current_item_not_released gate.
+
+    When step_done=move_on_gate arrives, execute the chosen option (mark-done,
+    defer-active, or move-down) and re-route as continue so the next item
+    starts.  If the choice is continue_current, re-route as continue on the
+    current item.  Any other step_done is left untouched.
+    """
+    if args.get("step_done") != "move_on_gate":
+        return args, [], False
+    choice = args.get("choice", "")
+    if not choice:
+        return args, ["ACTION=error", "ERROR=missing_choice",
+                      "DETAIL=step_done=move_on_gate requires choice=done|deferred|move_down|continue_current"], True
+
+    queue_file = _decided_queue_file(args)
+    result = dict(args)
+    lines: list[str] = []
+
+    if choice == "continue_current":
+        result["command"] = "continue"
+        for key in ("step_done", "choice", "reason", "position"):
+            result.pop(key, None)
+        lines.append("GATE_CHOICE=continue_current")
+        return result, lines, False
+
+    if choice == "done":
+        branch = args.get("branch", "")
+        if queue_file:
+            done = run_script(["python3", str(_PLAN_MANAGER), "mark-done",
+                               str(queue_file), f"branch={branch}"])
+            lines.append(f"GATE_CHOICE=done")
+            if done.get("ERROR"):
+                lines.append(f"ACTION=error\nERROR=mark_done_failed\nDETAIL={done.get('ERROR')}")
+                return args, lines, True
+    elif choice == "deferred":
+        reason = args.get("reason", "deferred via move-on gate")
+        if queue_file:
+            done = run_script(["python3", str(_PLAN_MANAGER), "defer-active",
+                               str(queue_file), f"reason={reason}"])
+            lines.append(f"GATE_CHOICE=deferred")
+            if done.get("ERROR"):
+                lines.append(f"ACTION=error\nERROR=defer_failed\nDETAIL={done.get('ERROR')}")
+                return args, lines, True
+    elif choice == "move_down":
+        position = args.get("position", "end")
+        if queue_file:
+            done = run_script(["python3", str(_PLAN_MANAGER), "move-down",
+                               str(queue_file), f"position={position}"])
+            lines.append(f"GATE_CHOICE=move_down")
+            if done.get("ERROR"):
+                lines.append(f"ACTION=error\nERROR=move_down_failed\nDETAIL={done.get('ERROR')}")
+                return args, lines, True
+    else:
+        return args, ["ACTION=error", "ERROR=invalid_choice",
+                      f"DETAIL=unknown choice '{choice}'; expected done|deferred|move_down|continue_current"], True
+
+    result["command"] = "continue"
+    for key in ("step_done", "choice", "reason", "position"):
+        result.pop(key, None)
+    return result, lines, False
+
+
 def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     """Turn `continue`/`next` into the pipeline the queue calls for.
 
@@ -414,6 +477,17 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
             if r.reason == "active_branch_not_checked_out":
                 options = "checkout_active_branch,start_over_from_here"
             elif r.reason == "current_item_not_released":
+                project_path = args.get("project", "")
+                if project_path and Path(project_path).is_dir():
+                    from git_util import git
+                    status = git(Path(project_path), "status", "--porcelain")
+                    if status.stdout.strip():
+                        dirty_files = status.stdout.strip()
+                        lines = [f"ROUTE_REASON={r.reason}", f"ISSUE={r.issue}",
+                                 "ACTION=stop",
+                                 f"DETAIL={r.issue} has uncommitted changes:\n{dirty_files}",
+                                 "NEXT=commit or stash the changes, then try again"]
+                        return args, lines, True
                 options = "done,deferred,move_down,continue_current"
             else:
                 options = "switch_to_base_branch,add_item_for_this_branch"
@@ -1194,6 +1268,12 @@ def main() -> int:
     if stop:
         trace_stop(args, alignment_lines)
         return 0
+    args, gate_lines, gate_stop = apply_move_on_gate(args)
+    for line in gate_lines:
+        print(line)
+    if gate_stop:
+        trace_stop(args, gate_lines)
+        return 1 if "ACTION=error" in gate_lines else 0
     args, route_lines, stop = apply_route(args)
     for line in route_lines:
         print(line)
