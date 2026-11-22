@@ -354,6 +354,49 @@ def _is_dirty(repo: Path) -> bool:
     return False
 
 
+def commit_pipeline_files(repo: Path, issue: str) -> list[str]:
+    """Commit tracked lifecycle-ignored files that are modified, so rebase can proceed.
+
+    Only tracked and modified files from _LIFECYCLE_IGNORE are touched. Untracked
+    files and non-lifecycle files are never committed. In a slot using its root
+    queue, inherited .queue and .plan are skipped (they belong to the repo that
+    owns the queue, not to this clone).
+    """
+    candidates = []
+    for name in sorted(_LIFECYCLE_IGNORE):
+        result = _git(repo, "status", "--porcelain", "--", name)
+        if result.returncode != 0 or not result.stdout.strip():
+            continue
+        status_code = result.stdout[:2]
+        if status_code.strip() == "??":
+            continue
+        candidates.append(name)
+
+    if not candidates:
+        return []
+
+    from queue_io import queue_dir
+    parent = repo.parent
+    is_slot = (parent / ".slot").exists() or (parent / ".queue-root").exists()
+    if is_slot and (parent / ".queue-root").exists():
+        qdir = queue_dir(repo)
+        if qdir != repo:
+            candidates = [c for c in candidates if c not in (".queue", ".plan")]
+
+    if not candidates:
+        return []
+
+    add = _git(repo, "add", "--", *candidates)
+    if add.returncode != 0:
+        raise RuntimeError(f"git add failed in {repo}: {add.stderr}")
+    trailer = _issue_trailer(issue, repo)
+    commit = _git(repo, "commit", "-m", "chore: pipeline state files", "-m", trailer,
+                  "--", *candidates)
+    if commit.returncode != 0:
+        raise RuntimeError(f"git commit failed in {repo}: {commit.stderr}")
+    return candidates
+
+
 def _remote_reachable(repo: Path, remote: str) -> bool:
     result = _git(repo, "remote", "get-url", remote)
     if result.returncode != 0:
@@ -533,6 +576,9 @@ def carry_strays(slot_dir: Path, covered: set, diverged: Optional[set] = None) -
                                    f"canonical lacks, and canonical has commits it lacks); "
                                    f"not carried. Compare the two by hand")
                 continue
+            current = _current_branch(repo)
+            if current and current == branch:
+                commit_pipeline_files(repo, "")
             canonical_sync.land(repo, branch)
             carried[key] = count
         except SyncError as error:
@@ -563,6 +609,7 @@ def settle_permanent_clone(slot_dir: Path, keep_branches: Optional[set] = None) 
                 pass
             continue
         if current and current != base:
+            commit_pipeline_files(repo, "")
             if _git(repo, "status", "--porcelain").stdout.strip():
                 left.append(f"{name}: left on {current} with uncommitted changes")
                 continue
@@ -1114,6 +1161,14 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
             if not entry.done and not entry.targets:
                 continue  # the active item was never started: it stays active
             issue = entry.issue or covers_issue
+            for target in entry.targets:
+                current = _current_branch(target.repo)
+                if current and current == target.branch:
+                    committed = commit_pipeline_files(target.repo, issue)
+                    if committed:
+                        warnings.append(
+                            f"{target.repo.name}: committed pipeline files "
+                            f"before landing: {', '.join(committed)}")
             try:
                 results = land_targets(entry.targets)
             except SyncError as error:
@@ -1266,6 +1321,8 @@ def render(result: CloseResult) -> list[str]:
             lines.append(f"NEXT_ITEM={result.next_item.ref}")
         lines += [f"CARRIED={key} commits={count}" for key, count in result.carried.items()]
         lines += [f"NOT_LANDED={key} reason={why}" for key, why in result.not_landed.items()]
+        if result.not_landed:
+            lines.append(f"ATTENTION={len(result.not_landed)} not landed")
         lines += [f"WARN={warning}" for warning in result.warnings]
         lines += [f"UNPUBLISHED={repo} commits={count}"
                   for repo, count in result.unpublished.items()]

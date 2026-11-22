@@ -231,11 +231,11 @@ New permanent clones are switched at creation (`clone_manager.create_clone`). Ne
 
 | File | Where | Notes |
 |---|---|---|
-| `.work-progress` | workspace | Step progress for the current pipeline run (`project/progress.py`). It is tracked in git and modified by the pipeline, which leaves the workspace dirty; this should be untracked |
+| `.work-progress` | workspace | Step progress for the current pipeline run (`project/progress.py`). Tracked in git and modified by the pipeline. `close.py:commit_pipeline_files` commits it before rebase; still tracked until the second half of Hortora/soredium#587 untracks it |
 | `.pause-stack` | workspace `main` | Paused branches (`project/stack.py`). Entries still store bare issue numbers |
 | `.close-state` | workspace | Written while the ceremony lands. A stale one is ignored |
 | `.landed` | slot root | Slot is ready for archive. Never written for a permanent clone |
-| `.wrap-log.jsonl`, `.land-ledger.jsonl` | workspace | Logs written by the orchestrators |
+| `.wrap-log.jsonl`, `.land-ledger.jsonl` | workspace | Logs written by the orchestrators. Same lifecycle as `.work-progress`: committed by `commit_pipeline_files` before rebase |
 
 ---
 
@@ -400,7 +400,7 @@ The backlog is not kept here. It is the epic Hortora/soredium#595 and the queue 
 
 What a session needs to know because it changes how things behave today:
 
-- **`.work-progress` and `.wrap-log.jsonl` are tracked and modified by the pipeline.** A workspace is therefore dirty after any command, and the ceremony leaves the workspace clone on the closed branch. Commit those two files or move the checkout by hand until they are untracked.
+- **`.work-progress` and `.wrap-log.jsonl` are tracked and modified by the pipeline.** `close.py:commit_pipeline_files` now commits them before rebase, so the ceremony no longer leaves workspace clones on closed branches (Hortora/soredium#587 first half). They are still tracked; untracking is the second half. A ceremony with anything in `not_landed` stops before publish (`scope.py land()` exits 1).
 - **`queue.state.covers` names the next item once an item is marked done.** The promote command the ceremony prints carries it; correct the `covers=` value by hand.
 - **Old layouts exist on this machine** (found 2026-11-19): eight workspaces and one slot use only `.plan`; five workspaces keep lifecycle files under `design/`. They are read in place and reported as `LEGACY_LAYOUT=`. Conversion is `python3 work-slot/plan_migrate.py to-root <workspace>`, one at a time, with the owner's agreement.
 - **`casehub-ops` has a plain `.notes` directory** holding `NOTES.md`. The notes store refuses it; nothing may replace it.

@@ -164,6 +164,9 @@ def land(workspace: Path) -> tuple[int, list[str]]:
     if result.success:
         lines = [l for l in ceremony.render(result) if not l.startswith(("ACTION=", "OFFER="))]
         closed = ",".join(result.closed_items)
+        if result.not_landed:
+            details = "; ".join(f"{k}: {v}" for k, v in result.not_landed.items())
+            return 1, lines + [f"ERROR=not_landed", f"DETAIL={details}"]
         return 0, lines + [f"LANDED={closed or 'nothing'}"]
     if result.unpromoted:
         return 2, ["ERROR=promotion_needed",
