@@ -26,6 +26,8 @@ class QueueItem:
     done_branch: str = ""
     # Its branch starts from the base branch, not stacked on the item before it.
     from_main: bool = False
+    scale: str = ""
+    complexity: str = ""
 
 
 @dataclass
@@ -96,6 +98,7 @@ _ITEM_RE = re.compile(
 )
 _DONE_RE = re.compile(r"\s*(?:←|<-)\s*done on (\S+)")
 _FROM_MAIN_RE = re.compile(r"\s*\(from main\)")
+_SCALE_RE = re.compile(r"\s*\(([A-Z]+)/([A-Za-z]+)\)")
 _REF_TITLE_RE = re.compile(r"^(.+?) — (.+)$")
 _SUB_TASK_RE = re.compile(r"^\s+- \[[ x]\] ")
 
@@ -115,13 +118,20 @@ def _parse_item(line: str) -> Optional[QueueItem]:
     rest = re.sub(r"\s*\(epic\)\s*", "", rest).strip()
     from_main = bool(_FROM_MAIN_RE.search(rest))
     rest = _FROM_MAIN_RE.sub("", rest).strip()
+    sc_m = _SCALE_RE.search(rest)
+    scale = sc_m.group(1) if sc_m else ""
+    complexity = sc_m.group(2) if sc_m else ""
+    if sc_m:
+        rest = rest[:sc_m.start()] + rest[sc_m.end():]
+        rest = rest.strip()
     tm = _REF_TITLE_RE.match(rest)
     if tm:
         return QueueItem(ref=tm.group(1), title=tm.group(2),
                          completed=completed, active=active, done_branch=done_branch,
-                         from_main=from_main)
+                         from_main=from_main, scale=scale, complexity=complexity)
     return QueueItem(ref=rest, title="", completed=completed, active=active,
-                     done_branch=done_branch, from_main=from_main)
+                     done_branch=done_branch, from_main=from_main,
+                     scale=scale, complexity=complexity)
 
 
 _KNOWN_STATE_FIELDS = {"branch", "issue-repo", "status", "covers"}
@@ -280,11 +290,12 @@ def write_queue(workspace: Path, queue: Queue) -> None:
         marker = "        ← active" if item.active else ""
         if item.done_branch and not item.completed and not item.active:
             marker = f" ← done on {item.done_branch}"
+        scale_str = f" ({item.scale}/{item.complexity})" if item.scale else ""
         base = " (from main)" if item.from_main else ""
         if item.title:
-            lines.append(f"- [{check}] {item.ref} — {item.title}{base}{marker}")
+            lines.append(f"- [{check}] {item.ref} — {item.title}{scale_str}{base}{marker}")
         else:
-            lines.append(f"- [{check}] {item.ref}{base}{marker}")
+            lines.append(f"- [{check}] {item.ref}{scale_str}{base}{marker}")
         if i in queue.sub_task_lines:
             lines.extend(queue.sub_task_lines[i])
     lines.append("")

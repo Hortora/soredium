@@ -1652,6 +1652,35 @@ def main() -> int:
         print(f"ALREADY_ACTIVE={'yes' if result['already'] else 'no'}")
         return 0
 
+    elif command == "set-scale":
+        ref = opts.get("ref", "")
+        scale = opts.get("scale", "")
+        complexity = opts.get("complexity", "")
+        if not ref:
+            print("ERROR=ref is required", file=_sys.stderr)
+            return 1
+        _proj_dir = str(Path(__file__).resolve().parent.parent / "project")
+        if _proj_dir not in _sys.path:
+            _sys.path.insert(0, _proj_dir)
+        from queue_io import read_queue as _read_q, write_queue as _write_q
+        queue = _read_q(plan_path.parent, exact=True)
+        if queue is None:
+            print("ERROR=no_queue")
+            print(f"ERROR_DETAIL=no queue at {plan_path.parent}")
+            return 1
+        found = next((item for item in queue.items if item.ref == ref), None)
+        if found is None:
+            print("ERROR=not_found")
+            print(f"ERROR_DETAIL={ref} not in queue")
+            return 1
+        found.scale = scale
+        found.complexity = complexity
+        _write_q(plan_path.parent, queue)
+        print(f"UPDATED={found.ref}")
+        print(f"SCALE={scale}")
+        print(f"COMPLEXITY={complexity}")
+        return 0
+
     elif command == "mark-done":
         try:
             result = mark_done(plan_path, branch=opts.get("branch", ""))
