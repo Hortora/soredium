@@ -32,9 +32,8 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
 
 def _init_repo(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
-    _git(path, "init", "-b", "main")
-    _git(path, "config", "user.email", "test@test.com")
-    _git(path, "config", "user.name", "Test")
+    _git(path, "init", "-b", "main", "--template=")
+    (path / ".git" / "hooks").mkdir(exist_ok=True)
     _git(path, "commit", "--allow-empty", "-m", "init")
     return path
 
@@ -308,10 +307,8 @@ def _slot_clone(tmp_path: Path, slot_dir: Path, name: str) -> Path:
     """A slot repo as slots really are: a clone whose `local` remote is its canonical repo."""
     canonical = _init_repo(_canonical(tmp_path, name))
     clone = slot_dir / name
-    subprocess.run(["git", "clone", "-q", str(canonical), str(clone)],
+    subprocess.run(["git", "clone", "-q", "--template=", str(canonical), str(clone)],
                    capture_output=True, check=True)
-    _git(clone, "config", "user.email", "test@test.com")
-    _git(clone, "config", "user.name", "Test")
     _git(clone, "remote", "rename", "origin", "local")
     return clone
 

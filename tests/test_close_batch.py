@@ -28,9 +28,8 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
 
 def _init_repo(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
-    _git(path, "init", "-b", "main")
-    _git(path, "config", "user.email", "test@test.com")
-    _git(path, "config", "user.name", "Test")
+    _git(path, "init", "-b", "main", "--template=")
+    (path / ".git" / "hooks").mkdir(exist_ok=True)
     _git(path, "commit", "--allow-empty", "-m", "init")
     return path
 
@@ -362,9 +361,7 @@ class TestLocalBaseAheadOfRemote:
         bare = _with_remote(tmp_path, proj)
         _branch(proj, "b1", {"one.txt": "1"})
         other = tmp_path / "other"
-        subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True)
-        _git(other, "config", "user.email", "o@test.com")
-        _git(other, "config", "user.name", "Other")
+        subprocess.run(["git", "clone", "-q", "--template=", str(bare), str(other)], check=True)
         (other / "remote-only.txt").write_text("r")
         _git(other, "add", ".")
         _git(other, "commit", "-m", "feat: pushed by someone else Refs #9")
@@ -384,9 +381,7 @@ class TestLocalBaseAheadOfRemote:
         bare = _with_remote(tmp_path, proj)
         _branch(proj, "b1", {"one.txt": "1"})
         other = tmp_path / "other"
-        subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True)
-        _git(other, "config", "user.email", "o@test.com")
-        _git(other, "config", "user.name", "Other")
+        subprocess.run(["git", "clone", "-q", "--template=", str(bare), str(other)], check=True)
         (other / "remote-only.txt").write_text("r")
         _git(other, "add", ".")
         _git(other, "commit", "-m", "feat: pushed by someone else Refs #9")
@@ -523,10 +518,8 @@ class TestLandsOnDiskOnly:
         slot.mkdir()
         (slot / ".slot").write_text("# Slot\n")
         clone = slot / "project"
-        subprocess.run(["git", "clone", "-q", str(proj), str(clone)],
+        subprocess.run(["git", "clone", "-q", "--template=", str(proj), str(clone)],
                        capture_output=True, check=True)
-        _git(clone, "config", "user.email", "test@test.com")
-        _git(clone, "config", "user.name", "Test")
         _git(clone, "remote", "remove", "origin")
         _branch(clone, "issue-1-a", {"a.txt": "a", ".close-state": "x"})
         tip = _git(clone, "rev-parse", "issue-1-a").stdout.strip()

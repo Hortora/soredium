@@ -18,12 +18,10 @@ from queue_io import read_queue, write_queue, Queue, QueueItem, QueueState
 # --- helpers ---
 
 def _init_repo(path: Path, branch: str = "main") -> None:
-    subprocess.run(["git", "init", "-b", branch, str(path)],
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-b", branch, "--template=", str(path)],
                    capture_output=True, check=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test.com"],
-                   capture_output=True, check=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"],
-                   capture_output=True, check=True)
+    (path / ".git" / "hooks").mkdir(exist_ok=True)
     subprocess.run(["git", "-C", str(path), "commit",
                      "--allow-empty", "-m", "init"],
                    capture_output=True, check=True)
@@ -224,11 +222,7 @@ class TestPreflight:
         _init_repo(origin)
 
         repo = tmp_path / "project"
-        subprocess.run(["git", "clone", str(origin), str(repo)],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@test.com"],
-                       capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"],
+        subprocess.run(["git", "clone", "--template=", str(origin), str(repo)],
                        capture_output=True, check=True)
 
         (repo / "local-only.txt").write_text("local")
@@ -358,10 +352,8 @@ class TestLand:
         canonical = tmp_path / "canonical"
         _init_repo(canonical)
         clone = tmp_path / "slot" / "workspace"
-        subprocess.run(["git", "clone", "-q", str(canonical), str(clone)],
+        subprocess.run(["git", "clone", "-q", "--template=", str(canonical), str(clone)],
                        capture_output=True, check=True)
-        for key, value in (("user.email", "test@test.com"), ("user.name", "Test")):
-            subprocess.run(["git", "-C", str(clone), "config", key, value], check=True)
         subprocess.run(["git", "-C", str(clone), "remote", "rename", "origin", "local"],
                        capture_output=True, check=True)
         _create_branch_with_commit(clone, "issue-1-feat")
@@ -764,15 +756,11 @@ class TestPreflightAndOutput:
         """Issue #502: preflight must not reset main when local-only commits exist."""
         from close import preflight, CloseTarget
         bare = tmp_path / "bare"
-        subprocess.run(["git", "init", "--bare", str(bare)],
+        subprocess.run(["git", "init", "--bare", "--template=", str(bare)],
                        capture_output=True, check=True)
         repo = tmp_path / "repo"
-        subprocess.run(["git", "clone", str(bare), str(repo)],
+        subprocess.run(["git", "clone", "--template=", str(bare), str(repo)],
                        capture_output=True, check=True)
-        subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t.com"],
-                       capture_output=True)
-        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"],
-                       capture_output=True)
         subprocess.run(["git", "-C", str(repo), "commit", "--allow-empty", "-m", "init"],
                        capture_output=True, check=True)
         subprocess.run(["git", "-C", str(repo), "push", "origin", "main"],
