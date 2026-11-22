@@ -32,6 +32,11 @@ class Route:
     stop: str = ""       # "", "end", "nothing" or "decision"
     detail: str = ""
     offer: bool = False  # finished items are waiting: weigh wrapping up
+    next_item: str = ""
+    next_title: str = ""
+    next_scale: str = ""
+    next_complexity: str = ""
+    done_waiting: int = 0
 
 
 def _number(ref: str) -> str:
@@ -48,6 +53,22 @@ def _open(queue: Queue) -> list[QueueItem]:
             if not i.completed and not i.active and not i.done_branch]
 
 
+def _enrich_offer(r: Route, queue: Queue) -> Route:
+    if not r.offer:
+        return r
+    open_items = _open(queue)
+    nxt = open_items[0] if open_items else None
+    return Route(
+        run=r.run, reason=r.reason, activate=r.activate, issue=r.issue,
+        title=r.title, stop=r.stop, detail=r.detail, offer=r.offer,
+        next_item=nxt.ref if nxt else "",
+        next_title=nxt.title if nxt else "",
+        next_scale=getattr(nxt, "scale", "") or "unknown" if nxt else "",
+        next_complexity=getattr(nxt, "complexity", "") or "unknown" if nxt else "",
+        done_waiting=len(queue.done_items()),
+    )
+
+
 def route(command: str, queue: Optional[Queue], branch: str, base_branch: str,
           stack_depth: int = 0) -> Route:
     if command not in ROUTED or queue is None:
@@ -59,53 +80,56 @@ def route(command: str, queue: Optional[Queue], branch: str, base_branch: str,
     on_base = not branch or branch == base_branch
     on_finished_branch = any(i.done_branch == branch for i in done)
 
+    result: Route
+
     if active is not None:
         if command == "done":
-            return Route(run="done", reason="mark_done", issue=active.ref,
-                         title=active.title, offer=True)
-        if on_base or on_finished_branch:
-            # The active item has no branch checked out. Finishing an item
-            # activates the one after it and clears the recorded branch, so an
-            # empty record means it has not been started.
+            result = Route(run="done", reason="mark_done", issue=active.ref,
+                           title=active.title, offer=True)
+        elif on_base or on_finished_branch:
             if not queue.state.branch:
-                return Route(run="start", reason="active_item_not_started",
-                             issue=active.ref, title=active.title, offer=offer)
-            return Route(stop="decision", reason="active_branch_not_checked_out",
-                         issue=active.ref,
-                         detail=f"{active.ref} is active on {queue.state.branch}, "
-                                f"which is not the branch checked out", offer=offer)
-        return Route(run="continue", reason="active_work", issue=active.ref,
-                     title=active.title, offer=offer)
+                result = Route(run="start", reason="active_item_not_started",
+                               issue=active.ref, title=active.title, offer=offer)
+            else:
+                result = Route(stop="decision", reason="active_branch_not_checked_out",
+                               issue=active.ref,
+                               detail=f"{active.ref} is active on {queue.state.branch}, "
+                                      f"which is not the branch checked out", offer=offer)
+        else:
+            result = Route(run="continue", reason="active_work", issue=active.ref,
+                           title=active.title, offer=offer)
+    else:
+        open_items = _open(queue)
 
-    open_items = _open(queue)
+        if not on_base and not on_finished_branch:
+            number = _branch_issue(branch)
+            matches = [i for i in open_items if number and _number(i.ref) == number]
+            if len(matches) == 1:
+                item = matches[0]
+                result = Route(run="continue", reason="branch_item_activated",
+                               activate=item.ref, issue=item.ref, title=item.title, offer=offer)
+            elif not matches:
+                result = Route(stop="decision", reason="branch_matches_no_open_item",
+                               detail=f"on {branch}, which belongs to no open queue item",
+                               offer=offer)
+            else:
+                result = Route(stop="decision", reason="branch_matches_several_items",
+                               detail=f"on {branch}; open items "
+                                      f"{', '.join(i.ref for i in matches)} all carry that number",
+                               offer=offer)
+        elif on_base and stack_depth > 0:
+            result = Route(run="resume", reason="paused_work", offer=offer,
+                           detail=f"{stack_depth} paused branch(es) on the stack")
+        elif open_items:
+            item = open_items[0]
+            result = Route(run="start", reason="next_open_item", activate=item.ref,
+                           issue=item.ref, title=item.title, offer=offer)
+        elif done:
+            result = Route(stop="end", reason="done_items_await_close",
+                           detail=f"{len(done)} finished item(s) are waiting to be closed",
+                           offer=True)
+        else:
+            result = Route(stop="nothing", reason="queue_empty",
+                           detail="the queue has no open item; find work or name an issue")
 
-    if not on_base and not on_finished_branch:
-        number = _branch_issue(branch)
-        matches = [i for i in open_items if number and _number(i.ref) == number]
-        if len(matches) == 1:
-            item = matches[0]
-            return Route(run="continue", reason="branch_item_activated",
-                         activate=item.ref, issue=item.ref, title=item.title, offer=offer)
-        if not matches:
-            return Route(stop="decision", reason="branch_matches_no_open_item",
-                         detail=f"on {branch}, which belongs to no open queue item",
-                         offer=offer)
-        return Route(stop="decision", reason="branch_matches_several_items",
-                     detail=f"on {branch}; open items "
-                            f"{', '.join(i.ref for i in matches)} all carry that number",
-                     offer=offer)
-
-    if on_base and stack_depth > 0:
-        # Paused work comes before new work: the resume pipeline shows the stack.
-        return Route(run="resume", reason="paused_work", offer=offer,
-                     detail=f"{stack_depth} paused branch(es) on the stack")
-    if open_items:
-        item = open_items[0]
-        return Route(run="start", reason="next_open_item", activate=item.ref,
-                     issue=item.ref, title=item.title, offer=offer)
-    if done:
-        return Route(stop="end", reason="done_items_await_close",
-                     detail=f"{len(done)} finished item(s) are waiting to be closed",
-                     offer=True)
-    return Route(stop="nothing", reason="queue_empty",
-                 detail="the queue has no open item; find work or name an issue")
+    return _enrich_offer(result, queue)

@@ -13,6 +13,8 @@ sys.path.insert(0, str(ROOT / "work-slot"))
 
 from queue_io import Queue, QueueItem, QueueState, read_queue, write_queue  # noqa: E402
 
+WORK = str(ROOT / "project" / "work.py")
+
 
 class TestQueueItemScaleComplexity:
 
@@ -92,6 +94,20 @@ class TestSetScale:
         assert reloaded.items[0].complexity == "Med"
         assert reloaded.items[0].title == "First"
 
+    def test_set_scale_clears_when_empty(self, tmp_path):
+        write_queue(tmp_path, Queue(
+            items=[QueueItem(ref="o/r#1", title="First", completed=False, active=True,
+                             scale="S", complexity="Med")],
+            state=QueueState(branch="x", issue_repo="O/r", status="active")))
+        subprocess.run(
+            ["python3", str(ROOT / "work-slot" / "plan_manager.py"),
+             "set-scale", str(tmp_path / ".queue"),
+             "ref=o/r#1", "scale=", "complexity="],
+            capture_output=True, text=True, check=True)
+        reloaded = read_queue(tmp_path)
+        assert reloaded.items[0].scale == ""
+        assert reloaded.items[0].complexity == ""
+
     def test_set_scale_on_missing_ref_fails(self, tmp_path):
         write_queue(tmp_path, Queue(
             items=[QueueItem(ref="o/r#1", title="First", completed=False, active=True)],
@@ -102,3 +118,72 @@ class TestSetScale:
              "ref=o/r#99", "scale=S", "complexity=Med"],
             capture_output=True, text=True)
         assert result.returncode == 1
+
+
+class TestPipelineNextItemOutput:
+
+    def _init_repo(self, path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "-C", str(path), "init", "-q", "-b", "main", "--template="],
+                       capture_output=True, check=True)
+        (path / ".git" / "info").mkdir(parents=True, exist_ok=True)
+        (path / "seed.txt").write_text("x")
+        subprocess.run(["git", "-C", str(path), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", "init"],
+                       capture_output=True)
+
+    def test_offer_includes_next_item_metadata(self, tmp_path):
+        """After mark_done, #1 is done on branch, #2 is active, #3 is next open.
+        OFFER should carry #3's metadata."""
+        self._init_repo(tmp_path / "project")
+        project = tmp_path / "project"
+        write_queue(project, Queue(
+            items=[
+                QueueItem(ref="o/r#1", title="Done task", completed=False, active=False,
+                          done_branch="issue-1-x"),
+                QueueItem(ref="o/r#2", title="Active task", completed=False, active=True),
+                QueueItem(ref="o/r#3", title="Next task", completed=False, active=False,
+                          scale="M", complexity="High"),
+            ],
+            state=QueueState(branch="", issue_repo="O/r", status="active",
+                             covers="o/r#2")))
+        subprocess.run(["git", "-C", str(project), "add", ".queue"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-q", "-m", "queue"],
+                       capture_output=True)
+        result = subprocess.run(
+            ["python3", WORK, "continue",
+             f"workspace={project}", f"project={project}",
+             "branch=main", "base_branch=main", "on_main=yes",
+             f"plan_path={project / '.queue'}", "issue_repo=O/r"],
+            capture_output=True, text=True, cwd=str(project))
+        out = dict(l.split("=", 1) for l in result.stdout.splitlines() if "=" in l)
+        assert out.get("OFFER") == "wrap_or_continue", result.stdout
+        assert out.get("NEXT_SCALE") == "M"
+        assert out.get("NEXT_COMPLEXITY") == "High"
+        assert "o/r#3" in out.get("NEXT_ITEM", "")
+        assert out.get("DONE_WAITING") == "1"
+
+    def test_offer_without_next_open_item_omits_next_lines(self, tmp_path):
+        """When only the active item remains after the done one, no NEXT_ITEM."""
+        self._init_repo(tmp_path / "project")
+        project = tmp_path / "project"
+        write_queue(project, Queue(
+            items=[
+                QueueItem(ref="o/r#1", title="Done task", completed=False, active=False,
+                          done_branch="issue-1-x"),
+                QueueItem(ref="o/r#2", title="Active task", completed=False, active=True),
+            ],
+            state=QueueState(branch="", issue_repo="O/r", status="active",
+                             covers="o/r#2")))
+        subprocess.run(["git", "-C", str(project), "add", ".queue"], capture_output=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-q", "-m", "queue"],
+                       capture_output=True)
+        result = subprocess.run(
+            ["python3", WORK, "continue",
+             f"workspace={project}", f"project={project}",
+             "branch=main", "base_branch=main", "on_main=yes",
+             f"plan_path={project / '.queue'}", "issue_repo=O/r"],
+            capture_output=True, text=True, cwd=str(project))
+        out = dict(l.split("=", 1) for l in result.stdout.splitlines() if "=" in l)
+        assert "NEXT_ITEM" not in out
+        assert out.get("DONE_WAITING") == "1"

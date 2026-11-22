@@ -402,6 +402,12 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
         lines.append("OFFER=wrap_or_continue")
         lines.append("DONE_ITEMS=" + ",".join(
             f"{i.ref}@{i.done_branch}" for i in queue.done_items()))
+        if r.next_item:
+            lines.append(f"NEXT_ITEM={r.next_item}")
+            lines.append(f"NEXT_TITLE={r.next_title}")
+            lines.append(f"NEXT_SCALE={r.next_scale}")
+            lines.append(f"NEXT_COMPLEXITY={r.next_complexity}")
+        lines.append(f"DONE_WAITING={r.done_waiting}")
 
     if r.stop:
         if r.stop == "decision":
@@ -1100,6 +1106,17 @@ def sequence_report(command: str, workspace: Path) -> list[str]:
     lines.append("THEN=python3 " + str(Path(__file__).resolve()) + " continue"
                  + ("   (scaffold the next item; do not begin it)" if finished == "yes"
                     else "   (next session: continues the current item)"))
+    from queue_io import read_queue as _rq
+    _q = _rq(workspace)
+    if _q:
+        _next = next((i for i in _q.items
+                      if not i.completed and not i.active and not i.done_branch), None)
+        if _next:
+            lines.append(f"NEXT_ITEM={_next.ref}")
+            lines.append(f"NEXT_TITLE={_next.title}")
+            lines.append(f"NEXT_SCALE={getattr(_next, 'scale', '') or 'unknown'}")
+            lines.append(f"NEXT_COMPLEXITY={getattr(_next, 'complexity', '') or 'unknown'}")
+        lines.append(f"DONE_WAITING={len(_q.done_items())}")
     return lines
 
 
