@@ -98,7 +98,7 @@ _ITEM_RE = re.compile(
 )
 _DONE_RE = re.compile(r"\s*(?:←|<-)\s*done on (\S+)")
 _FROM_MAIN_RE = re.compile(r"\s*\(from main\)")
-_SCALE_RE = re.compile(r"\s*\(([A-Z]+)/([A-Za-z]+)\)")
+_SCALE_RE = re.compile(r"\s*\((XS|S|M|L|XL)/(Low|Med|High)\)")
 _REF_TITLE_RE = re.compile(r"^(.+?) — (.+)$")
 _SUB_TASK_RE = re.compile(r"^\s+- \[[ x]\] ")
 

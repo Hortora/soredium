@@ -63,8 +63,8 @@ def _enrich_offer(r: Route, queue: Queue) -> Route:
         title=r.title, stop=r.stop, detail=r.detail, offer=r.offer,
         next_item=nxt.ref if nxt else "",
         next_title=nxt.title if nxt else "",
-        next_scale=getattr(nxt, "scale", "") or "unknown" if nxt else "",
-        next_complexity=getattr(nxt, "complexity", "") or "unknown" if nxt else "",
+        next_scale=(getattr(nxt, "scale", "") or "unknown") if nxt else "",
+        next_complexity=(getattr(nxt, "complexity", "") or "unknown") if nxt else "",
         done_waiting=len(queue.done_items()),
     )
 

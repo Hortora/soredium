@@ -5,8 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "project"))
 sys.path.insert(0, str(ROOT / "work-slot"))
@@ -58,6 +56,15 @@ class TestQueueItemScaleComplexity:
         assert reloaded.items[0].title == "First"
         assert reloaded.items[1].scale == ""
         assert reloaded.items[1].complexity == ""
+
+    def test_title_with_parentheses_is_not_misread_as_scale(self, tmp_path):
+        (tmp_path / ".queue").write_text(
+            "- [ ] o/r#1 — Implement (REST/JSON) handler        ← active\n\n"
+            "## State\nbranch: x\nissue-repo: O/r\nstatus: active\n"
+        )
+        queue = read_queue(tmp_path)
+        assert queue.items[0].scale == ""
+        assert queue.items[0].title == "Implement (REST/JSON) handler"
 
     def test_scale_and_from_main_coexist(self, tmp_path):
         original = Queue(
