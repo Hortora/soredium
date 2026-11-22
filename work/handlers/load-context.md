@@ -3,7 +3,7 @@
 Used by both `continue` and `resume` pipelines. The branch exists and mechanical setup is done. Orient the session.
 
 1. Read `META_STATE`, `HAS_HANDOFF`, `HANDOFF_PATH` from the ACTION output
-2. If `.plan` exists: read it for queue progress and active issue. Display:
+2. If `.queue` exists: read it for queue progress and active issue. Display:
    ```
    ━━━ Queue state ━━━
    Active issue: #N — title

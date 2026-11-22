@@ -29,7 +29,7 @@ The step-by-step logic previously in this file now lives in:
 ## Existing externalized scripts (unchanged)
 
 - `work-start/branch_create.py` — sync-main, create-branches, commit-scaffold. sync-main only fast-forwards (the canonical repo from its remote, a slot clone from canonical); it never rebases, merges or pushes, and an unreachable remote is a warning. commit-scaffold pushes nothing: the canonical repo keeps a backup of the new branch
-- `work-start/scaffold.py` — .plan and JOURNAL.md creation
+- `work-start/scaffold.py` — .queue and JOURNAL.md creation
 - `work-start/flyway_scan.py` — Flyway version scan
 
 ## Skill Chaining

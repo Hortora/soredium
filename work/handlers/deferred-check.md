@@ -2,7 +2,7 @@
 
 All planned issues complete but deferred items exist. Present them for triage.
 
-1. Read deferred items from `.plan`
+1. Read deferred items from `.queue`
 2. Present each with scale, complexity, and deferral reason:
    ```
    All planned issues complete. N deferred items:

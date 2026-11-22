@@ -31,25 +31,25 @@ If unavailable, **stop**. Plans specify IntelliJ operations for code changes —
 executing them with bash bypasses reference updates. If IntelliJ becomes
 unavailable mid-execution, stop and inform the user.
 
-**.plan guard:** Verify a `.plan` exists for the current branch:
+**.queue guard:** Verify a `.queue` exists for the current branch:
 ```bash
 python3 ~/.claude/skills/project/ctx.py
 ```
 Read `HAS_PLAN`, `META_STATE`, and `BRANCH_MISMATCH` from output.
 
-- If `HAS_PLAN=no` → **stop**: "No .plan exists. Run `work start` to
+- If `HAS_PLAN=no` → **stop**: "No .queue exists. Run `work start` to
   create one before executing."
-- If `BRANCH_MISMATCH=yes` → **stop**: "The .plan belongs to branch
-  '{X}' but you're on '{Y}'. Run `work start` to create a .plan for
+- If `BRANCH_MISMATCH=yes` → **stop**: "The .queue belongs to branch
+  '{X}' but you're on '{Y}'. Run `work start` to create a .queue for
   this branch."
-- If `META_STATE` starts with `closing` → **stop**: "The .plan is in
+- If `META_STATE` starts with `closing` → **stop**: "The .queue is in
   closing state. Run `work start` to begin new work."
 
 **Why this gate exists:** The Build flow (`brainstorming → writing-plans
 → executing-plans`) can be entered without going through `work-start`.
-Without a `.plan`, task tracking (`inject-tasks`, `check-task`,
+Without a `.queue`, task tracking (`inject-tasks`, `check-task`,
 `advance`) silently fails, and the next session cannot resume — the
-lifecycle sees no active work. This gate ensures `.plan` exists before
+lifecycle sees no active work. This gate ensures `.queue` exists before
 any code is written.
 
 ### Step 1: Load and Review Plan
@@ -81,10 +81,11 @@ contains 1-3 tasks and ends at a safe wrap point.
    complete.
 5. Mark as completed
 
-**After completing each task**, check it off in the unified `.plan`:
+**After completing each task**, check it off in the unified `.queue`.
+Use the `QUEUE_PATH` from the `detect` output at the start of this skill:
 
 ```bash
-python3 ~/.claude/skills/work-slot/plan_manager.py check-task <PLAN_PATH> task="<task name>"
+python3 ~/.claude/skills/work-slot/plan_manager.py check-task <QUEUE_PATH> task="<task name>"
 ```
 
 Read the output — it reports `BATCH_DONE`, `ALL_DONE`, and
@@ -112,7 +113,7 @@ batch — execute all tasks, then proceed to Step 3.
 context, or explicitly deferred by the user, record it mechanically:
 
 ```bash
-python3 ~/.claude/skills/work-slot/plan_manager.py defer <PLAN_PATH> \
+python3 ~/.claude/skills/work-slot/plan_manager.py defer <QUEUE_PATH> \
   title="<task title>" scale=<XS|S|M|L|XL> complexity=<Low|Med|High> \
   repos=<comma-sep-repos> reason="<why deferred>"
 ```
@@ -131,7 +132,7 @@ every check, present the results, and let the user decide.
 **1. Scan for leftover work:**
 - **Spec vs. plan:** Re-read the spec. Is every requirement covered by a
   completed task? List any spec sections with no matching task.
-- **Deferred items:** Read `.plan` deferred section. List any items that
+- **Deferred items:** Read `.queue` deferred section. List any items that
   were deferred during execution.
 - **Skipped steps:** Scan the plan doc for unchecked `- [ ]` steps.
   List any that were skipped without being deferred.
@@ -174,7 +175,7 @@ AskUserQuestion(questions=[{
 }])
 ```
 
-- **Add to plan:** inject new tasks into `.plan` via `inject-tasks`,
+- **Add to plan:** inject new tasks into `.queue` via `inject-tasks`,
   continue execution (loop back to Step 2)
 - **Defer all:** record each gap via `plan_manager.py defer`, proceed
 - **Triage each:** walk through gaps one at a time via `AskUserQuestion`

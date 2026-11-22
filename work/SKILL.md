@@ -7,7 +7,7 @@ description: >
   "work" alone starts new work or shows the pause stack. "work end" closes the
   branch. "work pause" saves state. "work continue" keeps working on the current
   branch. "work resume" restores a paused branch from the stack. "work next"
-  advances to the next issue in the .plan queue. "work sync" lands completed
+  advances to the next issue in the .queue. "work sync" lands completed
   work without closing the branch. "work find" discovers and populates the
   queue with new work.
 ---

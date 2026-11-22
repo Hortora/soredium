@@ -308,20 +308,23 @@ git -C "$WORKSPACE" add plans/
 git -C "$WORKSPACE" commit -m "wip(plan): implementation plan for #<N> Refs #<N>"
 ```
 
-**Inject task summary into `.plan`:** After writing the plan doc, write
-a task summary into the unified `.plan` so the lifecycle queue shows both
-issue order AND task progress:
+**Inject task summary into `.queue`:** After writing the plan doc, write
+a task summary into the unified `.queue` so the lifecycle queue shows both
+issue order AND task progress. Resolve the queue path first:
 
 ```bash
-python3 ~/.claude/skills/work-slot/plan_manager.py inject-tasks <PLAN_PATH> \
+# Get the queue path (self-resolves via queue_io.queue_dir)
+python3 ~/.claude/skills/work-slot/plan_manager.py detect <workspace>
+# Use the QUEUE_PATH from detect output
+python3 ~/.claude/skills/work-slot/plan_manager.py inject-tasks <QUEUE_PATH> \
   tasks="<batch1>:<task1>,<batch1>:<task2>,<batch2>:<task3>"
 ```
 
 Example: `tasks="Foundation:Create adapter,Foundation:Add validation,Wiring:Connect pipeline"`
 
-This adds indented batch/task checkboxes under the active issue in `.plan`.
+This adds indented batch/task checkboxes under the active issue in `.queue`.
 The detail plan doc (`plans/*.md`) remains the executor's reference; the
-`.plan` summary provides the at-a-glance view.
+`.queue` summary provides the at-a-glance view.
 
 **Default: invoke `executing-plans`** — inline execution with full access
 to skills, IntelliJ MCP, and project context. Review the diff after each
