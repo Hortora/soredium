@@ -1,13 +1,15 @@
 ---
 name: work
 description: >
-  Use when the user says "work", "work end", "work pause", "work resume",
-  "work continue", "work next", "work sync", or "work find" — detects current
+  Use when the user says "work", "work done", "work end", "work pause",
+  "work resume", "work start", "work continue", "work next", "work sync",
+  or "work find" — detects current
   branch state and routes to the correct work lifecycle skill automatically.
-  "work" alone starts new work or shows the pause stack. "work end" closes the
-  branch. "work pause" saves state. "work continue" keeps working on the current
-  branch. "work resume" restores a paused branch from the stack. "work next"
-  advances to the next issue in the .queue. "work sync" lands completed
+  "work" or "work continue" carries on with the current item. "work start"
+  or "work next" moves on to the next item (gates on active work).
+  "work done" marks the current item done without starting the next.
+  "work end" closes the branch. "work pause" saves state. "work resume"
+  restores a paused branch from the stack. "work sync" lands completed
   work without closing the branch. "work find" discovers and populates the
   queue with new work.
 ---
@@ -35,9 +37,10 @@ decision for you to present.
 | Invocation | Run |
 |------------|-----|
 | `work` | `python3 ~/.claude/skills/project/work.py continue` |
-| `work start` (no issue) | `python3 ~/.claude/skills/project/work.py continue` |
 | `work continue` | `python3 ~/.claude/skills/project/work.py continue` |
-| `work next` | `python3 ~/.claude/skills/project/work.py continue` |
+| `work start` (no issue) | `python3 ~/.claude/skills/project/work.py start` |
+| `work next` | `python3 ~/.claude/skills/project/work.py next` |
+| `work done` | `python3 ~/.claude/skills/project/work.py done` |
 | `work start #N` | `python3 ~/.claude/skills/project/work.py start issue_n=N` |
 | `work pause` | `python3 ~/.claude/skills/project/work.py pause` |
 | `work resume` | `python3 ~/.claude/skills/project/work.py resume` |
@@ -50,12 +53,18 @@ Run from the workspace directory. No other arguments: the script resolves
 its own context via `ctx.py` internally. Do not run `ctx.py` or
 `work_chain.py` first.
 
+**Two intents.** `work` and `work continue` mean "carry on" — keep
+working on the current item. `work start` (no issue) and `work next`
+mean "move on" — begin the next item. When an item is active, "move on"
+gates: the user must release it first (done, deferred, move down, or
+cancel).
+
 **Multiple issue scheduling.** When the user provides multiple issue
 numbers (`work start #42 #43 #44`): run `plan_manager.py append` to add
-them all to the queue. If there is no active work, run `work.py continue`
+them all to the queue. If there is no active work, run `work.py start`
 — it picks up the first open item. If work is already in progress, the
 new issues are queued after the current work; continue as normal and
-they will be reached in order via `done` → `work.py continue`.
+they will be reached in order via `work next` after each item is released.
 
 **Before a named start.** `work start #N` on a working branch whose
 active queue item is not #N: do not run it yet. Offer: pause current
@@ -116,6 +125,18 @@ user typed. To skip: `outcome=skipped`. If blocked:
 **`ACTION=decision`** with `DECISION=`, `DETAIL=`, `OPTIONS=` — Present
 the options with a recommendation and wait. Never run git to resolve
 it yourself.
+
+**`DECISION=current_item_not_released`** — The user typed `start` or
+`next` while an item is active. Read `handlers/move-on-gate.md` for the
+four options (done, deferred, move_down, continue_current). After the
+user chooses, call back with:
+
+```
+python3 ~/.claude/skills/project/work.py <COMMAND> step_done=move_on_gate outcome=completed choice=<option>
+```
+
+If the working tree has uncommitted changes, the pipeline returns
+`ACTION=stop` instead — the user must commit or stash first.
 
 **`ACTION=error`** — Report `ERROR=` and `DETAIL=`. If `RETRY=` is
 present, re-run the same command.

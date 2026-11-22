@@ -388,33 +388,37 @@ def apply_move_on_gate(args: dict[str, str]) -> tuple[dict[str, str], list[str],
         lines.append("GATE_CHOICE=continue_current")
         return result, lines, False
 
+    if not queue_file:
+        return args, ["ACTION=error", "ERROR=no_queue_file",
+                      "DETAIL=cannot execute gate choice without a queue file"], True
+
     if choice == "done":
         branch = args.get("branch", "")
-        if queue_file:
-            done = run_script(["python3", str(_PLAN_MANAGER), "mark-done",
-                               str(queue_file), f"branch={branch}"])
-            lines.append(f"GATE_CHOICE=done")
-            if done.get("ERROR"):
-                lines.append(f"ACTION=error\nERROR=mark_done_failed\nDETAIL={done.get('ERROR')}")
-                return args, lines, True
+        done = run_script(["python3", str(_PLAN_MANAGER), "mark-done",
+                           str(queue_file), f"branch={branch}"])
+        lines.append("GATE_CHOICE=done")
+        if done.get("ERROR"):
+            lines += ["ACTION=error", "ERROR=mark_done_failed",
+                      f"DETAIL={done.get('ERROR')}"]
+            return args, lines, True
     elif choice == "deferred":
         reason = args.get("reason", "deferred via move-on gate")
-        if queue_file:
-            done = run_script(["python3", str(_PLAN_MANAGER), "defer-active",
-                               str(queue_file), f"reason={reason}"])
-            lines.append(f"GATE_CHOICE=deferred")
-            if done.get("ERROR"):
-                lines.append(f"ACTION=error\nERROR=defer_failed\nDETAIL={done.get('ERROR')}")
-                return args, lines, True
+        done = run_script(["python3", str(_PLAN_MANAGER), "defer-active",
+                           str(queue_file), f"reason={reason}"])
+        lines.append("GATE_CHOICE=deferred")
+        if done.get("ERROR"):
+            lines += ["ACTION=error", "ERROR=defer_failed",
+                      f"DETAIL={done.get('ERROR')}"]
+            return args, lines, True
     elif choice == "move_down":
         position = args.get("position", "end")
-        if queue_file:
-            done = run_script(["python3", str(_PLAN_MANAGER), "move-down",
-                               str(queue_file), f"position={position}"])
-            lines.append(f"GATE_CHOICE=move_down")
-            if done.get("ERROR"):
-                lines.append(f"ACTION=error\nERROR=move_down_failed\nDETAIL={done.get('ERROR')}")
-                return args, lines, True
+        done = run_script(["python3", str(_PLAN_MANAGER), "move-down",
+                           str(queue_file), f"position={position}"])
+        lines.append("GATE_CHOICE=move_down")
+        if done.get("ERROR"):
+            lines += ["ACTION=error", "ERROR=move_down_failed",
+                      f"DETAIL={done.get('ERROR')}"]
+            return args, lines, True
     else:
         return args, ["ACTION=error", "ERROR=invalid_choice",
                       f"DETAIL=unknown choice '{choice}'; expected done|deferred|move_down|continue_current"], True

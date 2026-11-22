@@ -142,7 +142,7 @@ Steps as defined in `PIPELINES` (`*` marks a judgment step with a handler):
 | `wrap` | review*, diary*, file_issues*, item_finished*, mark_done, commit_queue, handoff* |
 | `end` | review*, diary*, file_issues*, item_finished*, mark_done, commit_queue, land, promote_backlog, publish, publish_blog, handoff* |
 
-`work`, `work start` (no issue), `work continue` and `work next` are one operation: `work.py continue`, which reads the queue and decides.
+`work` and `work continue` are "carry on": `work.py continue`, which resumes the active item. `work start` (no issue) and `work next` are "move on": `work.py start` / `work.py next`, which gate on active work — the user must release the current item (done, deferred, or move down) before the next one starts. `work done` marks the active item done without starting anything.
 
 ### 4.2 Gates that run before a pipeline
 
@@ -151,11 +151,12 @@ In `work.py main()`, in this order. Each can stop the command and print why.
 1. `apply_clone_guard`: no new work in a canonical repo of a clone-enabled family.
 2. `sequence_branch_check` (wrap, end): the branch the queue names must be checked out somewhere here. Checked **before** any repair.
 3. `apply_alignment`: project and workspace must agree on a branch. Two states are repaired automatically; anything else is `ACTION=decision` with `OPTIONS=`.
-4. `apply_route`: for the routed commands; `_named_start` registers a named issue in the queue.
-5. `sequence_preflight` (wrap, end): prints `SCOPE=`, `RESUMING=`, or stops with `nothing_to_end`.
-6. `begin_run`: step progress in `.work-progress` belongs to one run. For `wrap` and `end` the run key is the command alone, so a retry resumes whatever the queue now says.
+4. `apply_move_on_gate`: handles `step_done=move_on_gate` from a prior `current_item_not_released` decision. Executes the user's choice (mark-done, defer-active, move-down) and re-routes as `continue`.
+5. `apply_route`: for the routed commands; `_named_start` registers a named issue in the queue. For `start`/`next` with an active item, checks for dirty tree then returns `DECISION=current_item_not_released`.
+6. `sequence_preflight` (wrap, end): prints `SCOPE=`, `RESUMING=`, or stops with `nothing_to_end`.
+7. `begin_run`: step progress in `.work-progress` belongs to one run. For `wrap` and `end` the run key is the command alone, so a retry resumes whatever the queue now says.
 
-Stops and decisions you will see: `canonical_repo_of_clone_family`, `nothing_to_end`, `active_branch_not_checked_out`, `workspace_not_level`, `alignment_*`, `named_issue_already_closed`, `named_issue_done_awaiting_close`, `another_item_active`.
+Stops and decisions you will see: `canonical_repo_of_clone_family`, `nothing_to_end`, `active_branch_not_checked_out`, `current_item_not_released`, `workspace_not_level`, `alignment_*`, `named_issue_already_closed`, `named_issue_done_awaiting_close`, `another_item_active`.
 
 ### 4.3 An item's states in the queue
 
