@@ -230,6 +230,11 @@ version with git and re-run the pipeline.
 
 ## Wrap-vs-continue decision
 
+The pipeline prints `NEXT_ITEM=`, `NEXT_TITLE=`, `NEXT_SCALE=`,
+`NEXT_COMPLEXITY=`, and `DONE_WAITING=` alongside `OFFER=wrap_or_continue`.
+Use these to make the recommendation — do not search for or request
+the data separately.
+
 Present four things, then recommend:
 
 1. **Context usage** — approximate percentage of the context window used.
@@ -238,23 +243,65 @@ Present four things, then recommend:
    consumes roughly 10-20% of the window. A session that has completed
    3+ issues is likely past 50%. If you can't recall specifics from
    early in the session without re-reading, compression has happened.
-2. **Next task scale and complexity** — XS/S/M/L/XL and Low/Med/High
+2. **Next task** — from the pipeline output: `NEXT_ITEM`, `NEXT_SCALE`,
+   `NEXT_COMPLEXITY`. If scale is "unknown", estimate from the title.
 3. **Relevance to current context** — does the next task build on what
    this session worked on, or is it a topic change?
 4. **Recommendation with reasoning** — one of:
-   - "Continue — context is ~30% used, next task is S/Low and builds
-     directly on the orchestrator work we just did"
-   - "Continue — context is full but next task is XS and same domain,
-     compressed context still carries the understanding we built"
-   - "Wrap — context is ~60% used and next task is a different repo
-     with different domain, fresh session will reason better"
-   - "Wrap — we've completed 4 issues, context is heavily compressed,
-     next task is M/High in a different area"
+
+| Situation | Recommend |
+|-----------|-----------|
+| Enough room, no done items waiting | **Continue** |
+| Enough room, done items piling up (DONE_WAITING >= 2) | **End then continue** — land what's done, keep working |
+| Not enough room, done items waiting | **End and stop** |
+| Not enough room, nothing done waiting | **Wrap and stop** |
+
+Examples:
+- "Continue — context is ~30% used, next task is S/Low and builds
+  directly on the work we just did"
+- "End then continue — 3 items waiting to land, context is ~40% used,
+  next task is S and same domain"
+- "End and stop — context is ~70% used, next task is M/High in a
+  different area, 2 items waiting"
+- "Wrap — context is ~60% used, next task is a topic change, fresh
+  session will reason better"
 
 Compressed context is not always bad — when the session moved in one
 direction, compressed understanding is still better than a cold start
 that has to re-read everything. Wrap when the next task is a topic
 change where compressed context adds noise, not signal.
+
+After the user decides, record the recommendation and choice:
+
+```bash
+python3 project/worktrace.py record context-budget repo=$WORKSPACE branch=$BRANCH \
+    recommendation=continue next_issue=$NEXT_ITEM next_scale=$NEXT_SCALE chosen=continue
+```
+
+**Keeping scale/complexity in sync.** When you change a scale or
+complexity label on a GitHub issue, also update the queue item:
+
+```bash
+python3 work-slot/plan_manager.py set-scale <queue_path> ref=<ref> scale=<S> complexity=<Med>
+```
+
+---
+
+## Mid-task context monitoring
+
+While working on an item, watch for signs that the context is running
+long relative to what remains on the task. If the item has consumed a
+large share of the context window and there is still substantial work
+ahead, suggest `work wrap` before context is exhausted — not after.
+
+Signals: you can no longer recall details from the start of the session
+without re-reading; the task is growing beyond its original scale
+estimate; you are on your third or fourth sub-problem within the same
+item.
+
+This is a judgment call, not a hard threshold. A short item that is
+almost done should finish. A large item with hours of work ahead should
+wrap early enough for the handoff to capture context while it is fresh.
 
 ---
 
