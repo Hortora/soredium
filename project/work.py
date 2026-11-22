@@ -179,11 +179,15 @@ def apply_clone_guard(args: dict[str, str]) -> tuple[list[str], bool]:
     clone_dir = family / "clone" / project.name
     lines = ["ACTION=stop", "STOP_REASON=canonical_repo_of_clone_family"]
     if (clone_dir / ".slot").exists():
+        project_clone = clone_dir / project.name
         workspaces = sorted(d for d in clone_dir.iterdir() if (d / ".workspace").exists())
-        where = workspaces[0] if workspaces else clone_dir / project.name
         lines += [f"DETAIL=work on {project.name} happens in its clone, not in the canonical repo",
                   f"CLONE={clone_dir}",
-                  f"NEXT=open the session in {where} and run work there"]
+                  f"PROJECT={project_clone}",
+                  f"WORKSPACE={workspaces[0]}" if workspaces else "",
+                  f"NEXT=open the session in {project_clone} (project) or {workspaces[0]} (workspace) and run work there"
+                  if workspaces else f"NEXT=open the session in {project_clone} and run work there"]
+        lines = [l for l in lines if l]
     else:
         script = Path(__file__).resolve().parent / "clone_manager.py"
         lines += [f"DETAIL={family.name} uses clones and {project.name} has none yet",
