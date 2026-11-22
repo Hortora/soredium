@@ -306,6 +306,35 @@ def clone_repo_pair(
         path_map=path_map)
 
 
+_SLOT_DEBRIS = {".m2", ".mvn", "mvn", "mvnw", "mvnw.cmd"}
+
+
+def _slot_dir_has_content(slot_dir: Path) -> bool:
+    """True if slot_dir contains anything beyond creation debris.
+
+    A slot with only .m2, .mvn, or Maven wrapper files is debris from a
+    failed creation and can be safely removed. Anything else is real work.
+    """
+    if not slot_dir.exists():
+        return False
+    try:
+        return any(c.name not in _SLOT_DEBRIS for c in slot_dir.iterdir())
+    except OSError:
+        return True
+
+
+def _safe_remove_debris(slot_dir: Path, slot_num: int) -> bool:
+    """Remove a slot directory only if it is empty debris. Returns True if removed."""
+    if not slot_dir.exists():
+        return True
+    if _slot_dir_has_content(slot_dir):
+        print(f"WARN=occupied_slot slot={slot_num} path={slot_dir} — "
+              f"directory has content, refusing to delete")
+        return False
+    shutil.rmtree(str(slot_dir), ignore_errors=True)
+    return True
+
+
 def allocate_slot_number(family_root: Path) -> int:
     """Reserve next slot number via DB. Reuses pending/failed slots if available."""
     if _wl is None:
@@ -326,18 +355,25 @@ def allocate_slot_number(family_root: Path) -> int:
                     print(f"WARN=attic_collision slot={slot_num} — skipping reuse, attic entry exists")
                     reusable = None
                     break
+            # Guard: never reuse a number whose directory has content on disk.
+            if reusable is not None:
+                for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
+                    candidate = family_root / dir_name / str(slot_num)
+                    if _slot_dir_has_content(candidate):
+                        print(f"WARN=occupied_reusable slot={slot_num} — "
+                              f"directory has content, skipping reuse")
+                        reusable = None
+                        break
             if reusable is None:
                 slot_num = _wl.reserve_slot_number(conn, str(family_root))
             else:
                 for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
                     debris = family_root / dir_name / str(slot_num)
-                    if debris.exists():
-                        shutil.rmtree(str(debris), ignore_errors=True)
+                    _safe_remove_debris(debris, slot_num)
                 for other_num in others:
                     for dir_name in (SLOT_DIR_NAME, LEGACY_SLOT_DIR_NAME):
                         debris = family_root / dir_name / str(other_num)
-                        if debris.exists():
-                            shutil.rmtree(str(debris), ignore_errors=True)
+                        _safe_remove_debris(debris, other_num)
                     _wl.fail_slot(conn, other_num, str(family_root))
                 print(f"REUSED_PENDING={slot_num}")
                 return slot_num
@@ -400,6 +436,12 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
     slots_dir.mkdir(exist_ok=True)
     slot_num = allocate_slot_number(family_root)
     slot_dir = slots_dir / str(slot_num)
+
+    if slot_dir.exists():
+        raise SlotCreationError(
+            f"Slot directory {slot_dir} already exists after allocation. "
+            f"This indicates a DB/disk state mismatch — refusing to overwrite. "
+            f"Inspect the directory and reconcile manually.")
 
     try:
         slot_dir.mkdir()
