@@ -30,7 +30,7 @@ class TestWriteFieldStateValidation:
         assert "state: closing:review" in plan.read_text()
 
     def test_accepts_all_valid_states(self, tmp_path):
-        from lifecycle import VALID_STATES
+        from plan_io import VALID_STATES
         for state in sorted(VALID_STATES):
             plan = tmp_path / ".plan"
             plan.write_text("## State\nstate: active\n\n## Queue\n")

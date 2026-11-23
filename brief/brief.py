@@ -27,7 +27,7 @@ if str(_PROJECT_DIR) not in sys.path:
 
 from ctx import resolve as ctx_resolve
 from work_health import run_checks
-from lifecycle import is_closed, ClosureState
+from work_health import is_closed, ClosureState
 
 
 def _extract_handoff_summary(handoff_path: str) -> str:

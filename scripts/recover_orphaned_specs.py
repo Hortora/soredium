@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
-from lifecycle import ClosureState
-from lifecycle import is_closed as _lifecycle_is_closed
+from work_health import ClosureState
+from work_health import is_closed as _lifecycle_is_closed
 
 
 def run(*cmd, cwd=None):

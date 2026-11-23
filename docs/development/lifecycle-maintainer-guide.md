@@ -269,7 +269,7 @@ New permanent clones are switched at creation (`clone_manager.create_clone`). Ne
 
 Size: large is over 1,000 lines, medium 300 to 1,000, small under 300. Small files are the focused deciders; start there.
 
-Legacy, do not extend: `project/lifecycle.py`, `project/work_chain.py`.
+Retired (#592): `project/lifecycle.py` and `project/work_chain.py` were deleted. Live symbols relocated: `done_fields` → `ctx.py`, `VALID_STATES` → `plan_io.py`, `is_closed`/`ClosureState` → `work_health.py`.
 
 ### 6.2 How a landing works
 

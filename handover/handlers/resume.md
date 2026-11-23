@@ -27,7 +27,7 @@ python3 ~/.claude/skills/project/work_health.py --scope entry --project "$PROJEC
 Check for an open branch via `.plan` and `is_closed()`:
 
 ```python
-from lifecycle import is_closed, ClosureState
+from work_health import is_closed, ClosureState
 state = is_closed(PROJECT, branch, workspace=WORKSPACE)
 ```
 

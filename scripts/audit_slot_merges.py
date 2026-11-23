@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "project"))
-from lifecycle import ClosureState, is_closed
+from work_health import ClosureState, is_closed
 from slot_io import parse_slot as _parse_slot_io
 
 
