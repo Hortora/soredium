@@ -65,7 +65,7 @@ Work on soredium happens in the permanent clone, not in canonical:
     wsp-soredium/      workspace clone (remote: local)
 ```
 
-Open the session in `wsp-soredium/`. Running `work` in canonical soredium stops with `STOP_REASON=canonical_repo_of_clone_family` and tells you where to go.
+Open the session in `wsp-soredium/`. Running `work` in canonical soredium presents a `DECISION=clone_guard` decision: open the existing clone (or create one if it doesn't exist yet) and tells you where to go.
 
 ### 3.2 The loop for one item
 
@@ -148,7 +148,7 @@ Steps as defined in `PIPELINES` (`*` marks a judgment step with a handler):
 
 In `work.py main()`, in this order. Each can stop the command and print why.
 
-1. `apply_clone_guard`: no new work in a canonical repo of a clone-enabled family.
+1. `apply_clone_guard`: presents `DECISION=clone_guard` when work is attempted in a canonical repo of a clone-enabled family. Options: open the existing clone or create one (if none exists), or stop.
 2. `sequence_branch_check` (wrap, end): the branch the queue names must be checked out somewhere here. Checked **before** any repair.
 3. `apply_alignment`: project and workspace must agree on a branch. Two states are repaired automatically; anything else is `ACTION=decision` with `OPTIONS=`.
 4. `apply_move_on_gate`: handles `step_done=move_on_gate` from a prior `current_item_not_released` decision. Executes the user's choice (mark-done, defer-active, move-down) and re-routes as `continue`.
@@ -156,7 +156,7 @@ In `work.py main()`, in this order. Each can stop the command and print why.
 6. `sequence_preflight` (wrap, end): prints `SCOPE=`, `RESUMING=`, or stops with `nothing_to_end`.
 7. `begin_run`: step progress in `.work-progress` belongs to one run. For `wrap` and `end` the run key is the command alone, so a retry resumes whatever the queue now says.
 
-Stops and decisions you will see: `canonical_repo_of_clone_family`, `nothing_to_end`, `active_branch_not_checked_out`, `current_item_not_released`, `workspace_not_level`, `alignment_*`, `named_issue_already_closed`, `named_issue_done_awaiting_close`, `another_item_active`.
+Stops and decisions you will see: `clone_guard`, `nothing_to_end`, `active_branch_not_checked_out`, `current_item_not_released`, `done_items_informational`, `workspace_not_level`, `alignment_*`, `named_issue_already_closed`, `named_issue_done_awaiting_close`, `another_item_active`.
 
 ### 4.3 An item's states in the queue
 

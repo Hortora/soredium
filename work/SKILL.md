@@ -120,7 +120,7 @@ user typed. To skip: `outcome=skipped`. If blocked:
 **`ACTION=complete`** — The pipeline finished. Report the `SUMMARY=` line.
 
 **`ACTION=stop`** with `NEXT=` — Nothing to run. Tell the user what
-`NEXT=` says and run nothing else. With `STOP_REASON=canonical_repo_of_clone_family`, tell the user to open the session at the path in `NEXT=` (or run the create command it gives) and do not start work in the current repo.
+`NEXT=` says and run nothing else.
 
 **`ACTION=decision`** with `DECISION=`, `DETAIL=`, `OPTIONS=` — Present
 the options with a recommendation and wait. Never run git to resolve
@@ -159,6 +159,7 @@ present, re-run the same command.
 | `deferred_check` | Read `handlers/deferred-check.md` |
 | `resolve_conflict` | Read `handlers/resolve-conflict.md` |
 | `recover_plan_offer` | Read `handlers/recover-plan-offer.md` |
+| `clone_guard` | Read `handlers/clone-guard.md` |
 
 The output includes `HANDLER=<path>` when a handler file exists. Read
 from `HANDLER=` first; fall back to this table for steps without one.

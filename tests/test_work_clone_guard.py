@@ -58,32 +58,40 @@ class TestEnabledFamily:
         (family / ".clone-enabled").touch()
 
     @pytest.mark.parametrize("command", ["start", "continue", "next", "done"])
-    def test_canonical_on_base_is_stopped_and_names_the_clone_workspace(self, family, command):
+    def test_canonical_on_base_emits_decision_with_open_clone(self, family, command):
         clone = make_clone(family)
         lines, stop = call(family / "P", command)
         assert stop
-        assert lines[:2] == ["ACTION=stop", "STOP_REASON=canonical_repo_of_clone_family"]
+        assert "ACTION=decision" in lines
+        assert "DECISION=clone_guard" in lines
+        assert "OPTIONS=open_clone,stop" in lines
+        assert any("HANDLER=" in l for l in lines)
         assert f"CLONE={clone.resolve()}" in lines
-        assert lines[-1] == f"NEXT=open the session in {(clone / 'W').resolve()} and run work there"
 
-    def test_named_start_is_stopped_too(self, family):
+    def test_named_start_emits_decision_too(self, family):
         make_clone(family)
-        assert call(family / "P", "start", issue_n="9")[1] is True
+        lines, stop = call(family / "P", "start", issue_n="9")
+        assert stop
+        assert "ACTION=decision" in lines
 
     def test_clone_without_a_workspace_names_the_project_clone(self, family):
         clone = make_clone(family, with_workspace=False)
         lines, stop = call(family / "P")
-        assert stop and lines[-1].startswith(f"NEXT=open the session in {(clone / 'P').resolve()}")
+        assert stop
+        assert any(str((clone / "P").resolve()) in l for l in lines if l.startswith("NEXT="))
 
-    def test_no_clone_yet_names_the_create_command(self, family):
+    def test_no_clone_yet_emits_decision_with_create(self, family):
         lines, stop = call(family / "P")
         assert stop
-        assert lines[-1].startswith("NEXT=python3 ")
-        assert lines[-1].endswith(f"create family_root={family.resolve()} repo=P")
+        assert "ACTION=decision" in lines
+        assert "DECISION=clone_guard" in lines
+        assert "OPTIONS=create_and_open,stop" in lines
+        assert any("CREATE_CMD=" in l for l in lines)
 
-    def test_a_directory_without_slot_file_is_not_taken_for_a_clone(self, family):
+    def test_a_directory_without_slot_file_offers_create(self, family):
         (family / "clone" / "P" / "P").mkdir(parents=True)
-        assert "create family_root=" in call(family / "P")[0][-1]
+        lines, _ = call(family / "P")
+        assert "OPTIONS=create_and_open,stop" in lines
 
     def test_work_already_on_a_branch_in_canonical_may_finish(self, family):
         make_clone(family)
@@ -115,5 +123,5 @@ class TestEnabledFamily:
             "base_branch=main", "branch=main", "on_main=yes"])
         assert work.main() == 0
         out = capsys.readouterr().out
-        assert "STOP_REASON=canonical_repo_of_clone_family" in out
+        assert "DECISION=clone_guard" in out
         assert "ROUTE_REASON" not in out and "ALIGNMENT" not in out

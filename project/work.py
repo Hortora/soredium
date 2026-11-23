@@ -160,12 +160,13 @@ ALIGNMENT_OPTIONS: dict[str, str] = {
 
 
 def apply_clone_guard(args: dict[str, str]) -> tuple[list[str], bool]:
-    """Stop new work from starting in a canonical repo of a family that uses clones.
+    """Present a decision when work is attempted in a canonical repo of a clone family.
 
     In such a family the canonical repo is only the sync point (#553): work
     happens in <family>/clone/<repo>/. Work already on a branch in canonical
-    is left to finish; only a start from the base branch is stopped. Inside a
-    clone or a slot the parent directory holds a .slot file and this never fires.
+    is left to finish; only a start from the base branch triggers the decision.
+    Inside a clone or a slot the parent directory holds a .slot file and this
+    never fires.
     """
     from work_route import ROUTED
     if args.get("command", "") not in ROUTED or args.get("step_done"):
@@ -177,21 +178,37 @@ def apply_clone_guard(args: dict[str, str]) -> tuple[list[str], bool]:
     if (family / ".slot").exists() or not (family / ".clone-enabled").exists():
         return [], False
     clone_dir = family / "clone" / project.name
-    lines = ["ACTION=stop", "STOP_REASON=canonical_repo_of_clone_family"]
+    handler = str(Path(__file__).resolve().parent.parent / "work" / "handlers" / "clone-guard.md")
     if (clone_dir / ".slot").exists():
         project_clone = clone_dir / project.name
         workspaces = sorted(d for d in clone_dir.iterdir() if (d / ".workspace").exists())
-        lines += [f"DETAIL=work on {project.name} happens in its clone, not in the canonical repo",
-                  f"CLONE={clone_dir}",
-                  f"PROJECT={project_clone}",
-                  f"WORKSPACE={workspaces[0]}" if workspaces else "",
-                  f"NEXT=open the session in {project_clone} (project) or {workspaces[0]} (workspace) and run work there"
-                  if workspaces else f"NEXT=open the session in {project_clone} and run work there"]
-        lines = [l for l in lines if l]
+        ws = workspaces[0] if workspaces else None
+        lines = [
+            "ACTION=decision",
+            "DECISION=clone_guard",
+            f"DETAIL=work on {project.name} happens in its clone, not in the canonical repo",
+            "OPTIONS=open_clone,stop",
+            f"HANDLER={handler}",
+            f"CLONE={clone_dir}",
+            f"PROJECT={project_clone}",
+        ]
+        if ws:
+            lines.append(f"WORKSPACE={ws}")
+            lines.append(f"NEXT=open the session in {ws} (workspace) and run work there")
+        else:
+            lines.append(f"NEXT=open the session in {project_clone} and run work there")
     else:
         script = Path(__file__).resolve().parent / "clone_manager.py"
-        lines += [f"DETAIL={family.name} uses clones and {project.name} has none yet",
-                  f"NEXT=python3 {script} create family_root={family} repo={project.name}"]
+        lines = [
+            "ACTION=decision",
+            "DECISION=clone_guard",
+            f"DETAIL={family.name} uses clones and {project.name} has none yet",
+            "OPTIONS=create_and_open,stop",
+            f"HANDLER={handler}",
+            f"FAMILY_ROOT={family}",
+            f"REPO={project.name}",
+            f"CREATE_CMD=python3 {script} create family_root={family} repo={project.name}",
+        ]
     return lines, True
 
 
