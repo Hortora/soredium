@@ -93,12 +93,16 @@ class TestNothingActiveOnWorkingBranch:
     def test_still_on_a_finished_items_branch_starts_the_next(self):
         q = queue(item(1, done_branch="issue-1-x"), item(2))
         r = route("continue", q, "issue-1-x", "main")
-        assert (r.run, r.activate, r.offer) == ("start", "o/r#2", True)
+        assert (r.run, r.activate) == ("start", "o/r#2")
+        assert not r.offer
+        assert r.done_waiting == 1
 
-    def test_on_a_finished_branch_with_nothing_open_goes_to_end(self):
+    def test_on_a_finished_branch_with_nothing_open_is_informational(self):
         q = queue(item(1, done_branch="issue-1-x"))
         r = route("continue", q, "issue-1-x", "main")
-        assert (r.stop, r.reason) == ("end", "done_items_await_close")
+        assert (r.stop, r.reason) == ("nothing", "done_items_informational")
+        assert not r.offer
+        assert r.done_waiting == 1
 
 
 class TestNothingActiveOnBase:
@@ -110,12 +114,14 @@ class TestNothingActiveOnBase:
         q = queue(item(1, done_branch="issue-1-x"), item(2))
         r = route("continue", q, "main", "main")
         assert r.activate == "o/r#2"
-        assert r.offer
+        assert not r.offer
+        assert r.done_waiting == 1
 
-    def test_only_done_items_goes_to_end(self):
+    def test_only_done_items_is_informational(self):
         r = route("continue", queue(closed(1), item(2, done_branch="issue-2-x")), "main", "main")
-        assert (r.stop, r.run) == ("end", "")
-        assert r.offer
+        assert (r.stop, r.reason) == ("nothing", "done_items_informational")
+        assert not r.offer
+        assert r.done_waiting == 1
 
     def test_everything_closed_is_nothing(self):
         r = route("continue", queue(closed(1), closed(2)), "main", "main")
@@ -225,3 +231,41 @@ class TestPausedWork:
     def test_paused_work_is_ignored_off_the_base_branch(self):
         r = route("continue", queue(item(289)), "issue-289-x", "main", stack_depth=1)
         assert (r.run, r.activate) == ("continue", "o/r#289")
+
+
+class TestOfferOnlyAfterDone:
+    """OFFER=wrap_or_continue fires only after `done`, not on continue/start (#590)."""
+
+    def test_continue_with_done_items_does_not_offer(self):
+        q = queue(item(1, done_branch="issue-1-x"), active(2))
+        r = route("continue", q, "issue-2-y", "main")
+        assert not r.offer
+        assert r.done_waiting == 1
+
+    def test_start_with_done_items_does_not_offer(self):
+        q = queue(item(1, done_branch="issue-1-x"), active(2))
+        r = route("start", q, "issue-2-y", "main")
+        assert not r.offer
+
+    def test_done_still_offers(self):
+        q = queue(active(1), item(2))
+        r = route("done", q, "issue-1-x", "main")
+        assert r.offer
+
+    def test_only_done_items_remain_does_not_stop(self):
+        q = queue(item(1, done_branch="issue-1-x"))
+        r = route("continue", q, "main", "main")
+        assert r.stop != "end"
+        assert r.done_waiting == 1
+
+    def test_resume_with_done_items_does_not_offer(self):
+        q = queue(item(1, done_branch="issue-1-x"), item(2))
+        r = route("continue", q, "main", "main", stack_depth=1)
+        assert not r.offer
+        assert r.done_waiting == 1
+
+    def test_branch_activated_with_done_items_does_not_offer(self):
+        q = queue(item(1, done_branch="issue-1-x"), item(2))
+        r = route("continue", q, "issue-2-y", "main")
+        assert not r.offer
+        assert r.done_waiting == 1

@@ -475,6 +475,8 @@ def apply_route(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
             lines.append(f"NEXT_SCALE={r.next_scale}")
             lines.append(f"NEXT_COMPLEXITY={r.next_complexity}")
         lines.append(f"DONE_WAITING={r.done_waiting}")
+    elif r.done_waiting:
+        lines.append(f"DONE_WAITING={r.done_waiting}")
 
     if r.stop:
         if r.stop == "decision":
