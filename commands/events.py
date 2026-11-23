@@ -205,3 +205,32 @@ class ContextSwitched:
     slot: str | None
     project_path: str
     workspace_path: str | None
+
+
+# ---------------------------------------------------------------------------
+# Survey
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SurveyAreaInfo:
+    kind: str
+    path: str
+    slot_number: int | None
+    project: str | None
+    workspace: str | None
+    repos: list[dict]
+    queues: list[dict]
+    closures: list[dict]
+    work_end_preview: dict | None
+    markers: list[str]
+    findings: list[dict]
+    drift: list[dict]
+    error: str | None
+
+
+@dataclass
+class SurveyReady:
+    family_root: str
+    areas: list[SurveyAreaInfo]
+    attention: list[dict]
+    summary: dict[str, int]

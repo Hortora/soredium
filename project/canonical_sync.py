@@ -171,7 +171,7 @@ def locate(repo: Path | str) -> Canonical:
     return Canonical(canonical, _base_branch(canonical), blessed, mirror)
 
 
-def _worktrees(repo: Path) -> list[tuple[Path, str]]:
+def worktrees(repo: Path) -> list[tuple[Path, str]]:
     """(path, checked-out branch or "") for every worktree of `repo`."""
     found: list[tuple[Path, str]] = []
     path: Optional[Path] = None
@@ -188,13 +188,13 @@ def _worktrees(repo: Path) -> list[tuple[Path, str]]:
 
 
 def _worktree_of(repo: Path, branch: str) -> Optional[Path]:
-    for path, checked_out in _worktrees(repo):
+    for path, checked_out in worktrees(repo):
         if checked_out == branch:
             return path
     return None
 
 
-def _rebase_in_progress(worktree: Path) -> Optional[str]:
+def _rebasein_progress(worktree: Path) -> Optional[str]:
     """Name of the branch being rebased in `worktree`, "" if unknown, None if idle."""
     git_dir = _git_dir(worktree)
     for marker in _REBASE_MARKERS:
@@ -207,8 +207,8 @@ def _rebase_in_progress(worktree: Path) -> Optional[str]:
     return None
 
 
-def _in_progress(worktree: Path) -> Optional[str]:
-    if _rebase_in_progress(worktree) is not None:
+def in_progress(worktree: Path) -> Optional[str]:
+    if _rebasein_progress(worktree) is not None:
         return "rebase"
     git_dir = _git_dir(worktree)
     for marker, operation in (("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick"),
@@ -219,8 +219,8 @@ def _in_progress(worktree: Path) -> Optional[str]:
 
 
 def _base_being_rebased(canon: Canonical) -> Optional[Path]:
-    for path, _ in _worktrees(canon.repo):
-        if _rebase_in_progress(path) == canon.base:
+    for path, _ in worktrees(canon.repo):
+        if _rebasein_progress(path) == canon.base:
             return path
     return None
 
@@ -276,7 +276,7 @@ def advance(canon: Canonical, ref: str) -> None:
             "base_busy", f"{canon.repo.name}: {canon.base} is being rebased in {busy}")
     checked_out = _worktree_of(canon.repo, canon.base)
     if checked_out is not None:
-        operation = _in_progress(checked_out)
+        operation = in_progress(checked_out)
         if operation:
             raise SyncError(
                 "base_busy",
@@ -385,15 +385,15 @@ def checked_out(repo: Path | str, branch: str) -> Iterator[Path]:
         raise SyncError("no_branch", f"{repo.name}: branch {branch} does not exist")
     worktree = _worktree_of(repo, branch)
     if worktree is not None:
-        operation = _in_progress(worktree)
+        operation = in_progress(worktree)
         if operation:
             raise SyncError(
                 "busy",
                 f"{repo.name}: a {operation} is in progress in {worktree}; finish it first")
         yield worktree
         return
-    for path, _ in _worktrees(repo):
-        if _rebase_in_progress(path) == branch:
+    for path, _ in worktrees(repo):
+        if _rebasein_progress(path) == branch:
             raise SyncError(
                 "busy", f"{repo.name}: {branch} is already being rebased in {path}")
     temporary = Path(tempfile.mkdtemp(prefix="soredium-worktree-"))
@@ -423,7 +423,7 @@ def _rebase_where_checked_out(repo: Path, branch: str, onto: str, onto_name: str
         args = ["rebase", "-q", "--onto", onto, own_base] if own_base else ["rebase", "-q", onto]
         result = git(worktree, *args, timeout=_NETWORK_TIMEOUT)
         if result.returncode != 0:
-            if _rebase_in_progress(worktree) is not None:
+            if _rebasein_progress(worktree) is not None:
                 files = _conflicted(worktree)
                 git(worktree, "rebase", "--abort")      # the rebase this call started
                 raise SyncError(

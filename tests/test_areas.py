@@ -4,9 +4,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
-
 def _git(repo: Path, *args: str):
     subprocess.run(
         ["git", "-C", str(repo)] + list(args),
@@ -269,3 +266,295 @@ class TestParseFrontmatter:
         fm = parse_frontmatter_from_text(text)
         assert fm is not None
         assert "/" not in fm["projects"]
+
+
+# ---------------------------------------------------------------------------
+# Inspection tests
+# ---------------------------------------------------------------------------
+
+class TestInspectRepo:
+    def test_basic(self, tmp_path):
+        from project.areas import inspect_repo, RepoInfo, RepoState
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        ri = RepoInfo(name="repo", path=repo, role="project")
+        state = inspect_repo(ri, canon_repo=None, base="main")
+        assert state.branch == "main"
+        assert state.dirty_count == 0
+        assert state.ahead_of_canonical == 0
+        assert state.in_progress is None
+
+    def test_dirty(self, tmp_path):
+        from project.areas import inspect_repo, RepoInfo
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        (repo / "dirty.txt").write_text("dirty")
+        ri = RepoInfo(name="repo", path=repo, role="project")
+        state = inspect_repo(ri, canon_repo=None, base="main")
+        assert state.dirty_count == 1
+
+
+class TestInspectMarkers:
+    def test_slot(self, tmp_path):
+        from project.areas import inspect_markers, discover_areas
+        family = build_family(tmp_path)
+        slot = [a for a in discover_areas(family) if a.kind == "slot"][0]
+        markers = inspect_markers(slot)
+        assert ".slot" in markers
+
+    def test_clone(self, tmp_path):
+        from project.areas import inspect_markers, discover_areas
+        family = build_family(tmp_path)
+        clone = [a for a in discover_areas(family) if a.kind == "clone"][0]
+        markers = inspect_markers(clone)
+        assert ".permanent" in markers
+
+
+class TestInspectClosures:
+    def test_stamped_branch(self, tmp_path):
+        from project.areas import inspect_closures, RepoInfo, Area, QueueInfo
+        repo = tmp_path / "wsp"
+        _init_repo(repo)
+        _git(repo, "checkout", "-b", "issue-10-feat")
+        (repo / "work.txt").write_text("work")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "work")
+        _git(repo, "commit", "--allow-empty", "-m",
+             "chore: branch closed — landed as abc123 on main")
+        _git(repo, "checkout", "main")
+        ri = RepoInfo(name="wsp", path=repo, role="workspace")
+        area = Area(kind="canonical", path=repo)
+        closures = inspect_closures(ri, area, [])
+        stamped = [c for c in closures if c.branch == "issue-10-feat"]
+        assert len(stamped) == 1
+        assert stamped[0].source == "stamp"
+        assert stamped[0].landed_sha == "abc123"
+
+    def test_unstamped_active(self, tmp_path):
+        from project.areas import inspect_closures, RepoInfo, Area, QueueInfo
+        repo = tmp_path / "wsp"
+        _init_repo(repo)
+        _git(repo, "checkout", "-b", "issue-20-wip")
+        (repo / "wip.txt").write_text("wip")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "wip")
+        _git(repo, "checkout", "main")
+        ri = RepoInfo(name="wsp", path=repo, role="workspace")
+        area = Area(kind="slot", path=tmp_path)
+        qi = QueueInfo(path=Path("/fake"), items=2, open_items=1,
+                       active_issue="hortora/proj#20", status="active",
+                       is_root=False)
+        closures = inspect_closures(ri, area, [qi])
+        unstamped = [c for c in closures if c.branch == "issue-20-wip"]
+        assert len(unstamped) == 1
+        assert unstamped[0].classification == "active"
+
+    def test_unstamped_attic_is_orphaned(self, tmp_path):
+        from project.areas import inspect_closures, RepoInfo, Area
+        repo = tmp_path / "wsp"
+        _init_repo(repo)
+        _git(repo, "checkout", "-b", "old-branch")
+        (repo / "old.txt").write_text("old")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "old work")
+        _git(repo, "checkout", "main")
+        ri = RepoInfo(name="wsp", path=repo, role="workspace")
+        area = Area(kind="attic", path=tmp_path)
+        closures = inspect_closures(ri, area, [])
+        orphaned = [c for c in closures if c.branch == "old-branch"]
+        assert len(orphaned) == 1
+        assert orphaned[0].classification == "orphaned"
+
+
+# ---------------------------------------------------------------------------
+# Promotion drift tests
+# ---------------------------------------------------------------------------
+
+class TestPromotionDrift:
+    def test_gap_detected(self, tmp_path):
+        from project.areas import inspect_promotion_drift, RepoInfo, DriftEntry
+        proj = tmp_path / "proj"
+        _init_repo(proj)
+        wsp = tmp_path / "wsp"
+        _init_repo(wsp)
+        _add_blog_entry(wsp, "entry.md",
+                        "---\ntitle: Test\nprojects: owner/repo\n---\nBody")
+        drift = inspect_promotion_drift(
+            RepoInfo("proj", proj, "project"),
+            RepoInfo("wsp", wsp, "workspace"), "main")
+        gaps = [d for d in drift if d.status == "gap"]
+        assert len(gaps) == 1
+
+    def test_no_gap_when_promoted(self, tmp_path):
+        from project.areas import inspect_promotion_drift, RepoInfo
+        proj = tmp_path / "proj"
+        _init_repo(proj)
+        wsp = tmp_path / "wsp"
+        _init_repo(wsp)
+        _add_blog_entry(wsp, "entry.md",
+                        "---\ntitle: Test\nprojects: owner/repo\n---\nBody")
+        _add_blog_entry(proj, "entry.md",
+                        "---\ntitle: Test\nprojects: owner/repo\n---\nBody")
+        drift = inspect_promotion_drift(
+            RepoInfo("proj", proj, "project"),
+            RepoInfo("wsp", wsp, "workspace"), "main")
+        gaps = [d for d in drift if d.status == "gap"]
+        assert len(gaps) == 0
+
+    def test_waiting_for_landing(self, tmp_path):
+        from project.areas import inspect_promotion_drift, RepoInfo
+        proj = tmp_path / "proj"
+        _init_repo(proj)
+        wsp = tmp_path / "wsp"
+        _init_repo(wsp)
+        _git(wsp, "checkout", "-b", "feature")
+        _add_blog_entry(wsp, "entry.md",
+                        "---\ntitle: Test\nprojects: owner/repo\n---\nBody")
+        drift = inspect_promotion_drift(
+            RepoInfo("proj", proj, "project"),
+            RepoInfo("wsp", wsp, "workspace"), "main")
+        waiting = [d for d in drift if d.status == "waiting"]
+        assert len(waiting) == 1
+
+    def test_no_false_gap_on_feature_branch(self, tmp_path):
+        from project.areas import inspect_promotion_drift, RepoInfo
+        proj = tmp_path / "proj"
+        _init_repo(proj)
+        wsp = tmp_path / "wsp"
+        _init_repo(wsp)
+        _add_blog_entry(wsp, "entry.md",
+                        "---\ntitle: Test\nprojects: owner/repo\n---\nBody")
+        _add_blog_entry(proj, "entry.md",
+                        "---\ntitle: Test\nprojects: owner/repo\n---\nBody")
+        _git(proj, "checkout", "-b", "feature-old", "HEAD~1")
+        drift = inspect_promotion_drift(
+            RepoInfo("proj", proj, "project"),
+            RepoInfo("wsp", wsp, "workspace"), "main")
+        gaps = [d for d in drift if d.status == "gap"]
+        assert len(gaps) == 0
+
+    def test_bare_project_ref_string(self, tmp_path):
+        from project.areas import inspect_promotion_drift, RepoInfo
+        proj = tmp_path / "proj"
+        _init_repo(proj)
+        wsp = tmp_path / "wsp"
+        _init_repo(wsp)
+        _add_blog_entry(wsp, "entry.md",
+                        "---\ntitle: Test\nprojects: engine\n---\nBody")
+        drift = inspect_promotion_drift(
+            RepoInfo("proj", proj, "project"),
+            RepoInfo("wsp", wsp, "workspace"), "main")
+        bare = [d for d in drift if d.bare_project]
+        assert len(bare) >= 1
+
+    def test_bare_project_ref_list(self, tmp_path):
+        from project.areas import inspect_promotion_drift, RepoInfo
+        proj = tmp_path / "proj"
+        _init_repo(proj)
+        wsp = tmp_path / "wsp"
+        _init_repo(wsp)
+        _add_blog_entry(wsp, "entry.md",
+                        "---\ntitle: Test\nprojects:\n  - engine\n---\nBody")
+        drift = inspect_promotion_drift(
+            RepoInfo("proj", proj, "project"),
+            RepoInfo("wsp", wsp, "workspace"), "main")
+        bare = [d for d in drift if d.bare_project]
+        assert len(bare) >= 1
+
+    def test_no_false_gap_for_promoted_bare_ref(self, tmp_path):
+        """H1: a promoted entry with bare projects: should not create a gap finding."""
+        from project.areas import inspect_promotion_drift, RepoInfo
+        proj = tmp_path / "proj"
+        _init_repo(proj)
+        wsp = tmp_path / "wsp"
+        _init_repo(wsp)
+        _add_blog_entry(wsp, "entry.md",
+                        "---\ntitle: Test\nprojects: engine\n---\nBody")
+        _add_blog_entry(proj, "entry.md",
+                        "---\ntitle: Test\nprojects: engine\n---\nBody")
+        drift = inspect_promotion_drift(
+            RepoInfo("proj", proj, "project"),
+            RepoInfo("wsp", wsp, "workspace"), "main")
+        gaps = [d for d in drift if d.status == "gap"]
+        assert len(gaps) == 0
+        bare = [d for d in drift if d.bare_project]
+        assert len(bare) == 1
+        assert bare[0].status == "bare-ref-only"
+
+
+# ---------------------------------------------------------------------------
+# Survey orchestrator tests
+# ---------------------------------------------------------------------------
+
+class TestSurvey:
+    def test_complete(self, tmp_path):
+        from project.areas import survey, SurveyResult
+        family = build_family(tmp_path)
+        results = survey([family])
+        assert len(results) == 1
+        r = results[0]
+        assert r.family_root == family
+        assert len(r.areas) >= 4
+        assert isinstance(r.summary, dict)
+
+    def test_read_only(self, tmp_path):
+        from project.areas import survey
+
+        def tree(directory: Path) -> dict[str, bytes]:
+            result = {}
+            for p in sorted(directory.rglob("*")):
+                if p.is_file() and ".git" not in p.relative_to(directory).parts:
+                    result[str(p.relative_to(directory))] = p.read_bytes()
+            return result
+
+        family = build_family(tmp_path)
+        before = tree(family)
+        survey([family])
+        after = tree(family)
+        assert before == after
+
+    def test_idempotent(self, tmp_path):
+        from project.areas import survey
+        family = build_family(tmp_path)
+        r1 = survey([family])
+        r2 = survey([family])
+        assert len(r1) == len(r2)
+        assert len(r1[0].areas) == len(r2[0].areas)
+        assert r1[0].summary == r2[0].summary
+
+    def test_findings_for_diverged_clone(self, tmp_path):
+        from project.areas import survey
+        family = build_family(tmp_path)
+        # Make clone diverge from canonical by adding a commit to canonical
+        canon_proj = family / "myproject"
+        clone_proj = family / "clone" / "myproject" / "myproject"
+        # Clone needs shared ancestry for meaningful divergence
+        _git(clone_proj, "remote", "add", "local", str(canon_proj))
+        _git(clone_proj, "fetch", "local")
+        _git(clone_proj, "reset", "--hard", "local/main")
+        # Now diverge
+        (canon_proj / "canon.txt").write_text("canon")
+        _git(canon_proj, "add", "-A")
+        _git(canon_proj, "commit", "-q", "-m", "canon diverge")
+        (clone_proj / "clone.txt").write_text("clone")
+        _git(clone_proj, "add", "-A")
+        _git(clone_proj, "commit", "-q", "-m", "clone diverge")
+        results = survey([family])
+        attention = results[0].attention
+        drift_errors = [f for f in attention if f.category == "drift"]
+        assert len(drift_errors) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Output tests
+# ---------------------------------------------------------------------------
+
+class TestFormatKV:
+    def test_basic(self, tmp_path):
+        from project.areas import survey, format_kv
+        family = build_family(tmp_path)
+        results = survey([family])
+        output = format_kv(results)
+        assert "FAMILY=" in output
+        assert "AREA_COUNT=" in output
+        assert "AREA_1_KIND=" in output
