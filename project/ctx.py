@@ -26,7 +26,13 @@ if str(_slot_dir) not in sys.path:
 from topology import resolve as topo_resolve, find_design_file, _run
 from work_state import detect as ws_detect
 from queue_io import read_queue, validate_queue, parse_covers_qualified
-from work_chain import done_fields
+def done_fields(queue) -> dict:
+    """Queue items finished on a branch and awaiting the close ceremony."""
+    items = queue.done_items() if queue else []
+    return {
+        "DONE_PENDING": str(len(items)),
+        "DONE_ITEMS": ",".join(f"{i.ref}@{i.done_branch}" for i in items),
+    }
 
 
 def _parse_meta(meta_path: Path) -> dict[str, str]:

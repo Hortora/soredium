@@ -50,8 +50,7 @@ decision for you to present.
 | `work sync` | → **work-end** (close.py) |
 
 Run from the workspace directory. No other arguments: the script resolves
-its own context via `ctx.py` internally. Do not run `ctx.py` or
-`work_chain.py` first.
+its own context via `ctx.py` internally. Do not run `ctx.py` first.
 
 **Two intents.** `work` and `work continue` mean "carry on" — keep
 working on the current item. `work start` (no issue) and `work next`
