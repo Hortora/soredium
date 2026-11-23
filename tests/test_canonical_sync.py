@@ -646,6 +646,45 @@ class TestPublish:
         assert len(result.warnings) == 2
         assert fam.remote_main(fam.blessed) == sha(fam.canon, "refs/heads/main")
 
+    def test_mirror_diagnoses_divergence(self, fam):
+        """When the fork has commits canonical doesn't, mirror returns 'diverged'."""
+        cs.land(fam.slot, "feat")
+        ci_clone = fam.root / "ci-sim"
+        subprocess.run(["git", "clone", "-q", str(fam.mirror), str(ci_clone)],
+                       capture_output=True, check=True)
+        commit(ci_clone, {"ci-docs.txt": "generated\n"},
+               "docs: regenerate API docs [skip ci]")
+        g(ci_clone, "push", "-q", "origin", "main")
+
+        result = cs.publish_base(fam.canon)
+
+        assert result.mirrored == "diverged"
+        assert result.published == "upstream"
+        assert any("diverged" in w for w in result.warnings)
+        assert any("regenerate" in w for w in result.warnings)
+        assert not any("catches up" in w for w in result.warnings)
+
+    def test_mirror_reports_network_failure_not_diverged(self, fam):
+        """When the fork is unreachable, mirror returns 'failed', not 'diverged'."""
+        cs.land(fam.slot, "feat")
+        g(fam.canon, "remote", "set-url", "origin", str(fam.root / "gone.git"))
+
+        result = cs.publish_base(fam.canon)
+
+        assert result.mirrored == "failed"
+        assert result.published == "upstream"
+        assert not any("diverged" in w for w in result.warnings)
+
+    def test_mirror_succeeds_when_canonical_ahead(self, fam):
+        """Normal case: canonical has work the fork doesn't, push is ff."""
+        cs.land(fam.slot, "feat")
+
+        result = cs.publish_base(fam.canon)
+
+        assert result.mirrored == "origin"
+        assert result.published == "upstream"
+        assert not result.warnings
+
     def test_blessed_unreachable_is_an_error_and_nothing_changes(self, fam):
         cs.land(fam.slot, "feat")
         g(fam.canon, "remote", "set-url", "upstream", str(fam.root / "gone.git"))

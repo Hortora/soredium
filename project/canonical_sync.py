@@ -551,11 +551,27 @@ def unpublished(canon: Canonical) -> int:
 
 
 def mirror(canon: Canonical) -> str:
-    """Push canonical's base branch to the mirror. Returns the remote, "none" or "failed"."""
+    """Push canonical's base branch to the mirror. Returns the remote, "none",
+    "diverged" or "failed".
+
+    Fetches the mirror's base branch first to diagnose non-fast-forward failures:
+    "diverged" means the fork has commits canonical doesn't (invariant violation);
+    "failed" means a network or auth error.
+    """
     if not canon.mirror:
         return "none"
+    mirror_ref = f"refs/remotes/{canon.mirror}/{canon.base}"
+    fetched = git(canon.repo, "fetch", "-q", canon.mirror, canon.base,
+                  timeout=_NETWORK_TIMEOUT)
+    if fetched.returncode != 0:
+        return "failed"
+    local = _sha(canon.repo, f"refs/heads/{canon.base}")
+    remote = _sha(canon.repo, mirror_ref)
+    if remote and not _is_ancestor(canon.repo, remote, local):
+        return "diverged"
     result = git(canon.repo, "push", "-q", canon.mirror,
-                 f"refs/heads/{canon.base}:refs/heads/{canon.base}", timeout=_NETWORK_TIMEOUT)
+                 f"refs/heads/{canon.base}:refs/heads/{canon.base}",
+                 timeout=_NETWORK_TIMEOUT)
     return canon.mirror if result.returncode == 0 else "failed"
 
 
@@ -744,10 +760,20 @@ def _publish_base(repo: Path | str, lock_timeout: float = LOCK_TIMEOUT) -> Publi
                 f"{canon.repo.name}: push to {canon.mirror} failed; "
                 f"{canon.blessed} has the work")
         result.mirrored = mirror(canon)
-        if result.mirrored == "failed":
+        if result.mirrored == "diverged":
+            mirror_ref = f"refs/remotes/{canon.mirror}/{canon.base}"
+            subjects = _out(canon.repo, "log", "--oneline", "--format=%s",
+                            f"refs/heads/{canon.base}..{mirror_ref}", "-5")
+            count = _out(canon.repo, "rev-list", "--count",
+                         f"refs/heads/{canon.base}..{mirror_ref}")
             result.warnings.append(
-                f"{canon.repo.name}: {canon.mirror}/{canon.base} could not follow "
-                f"{canon.blessed}/{canon.base}; it catches up on the next publish")
+                f"{canon.repo.name}: {canon.mirror}/{canon.base} has diverged — "
+                f"{count} commit(s) on the fork not in canonical; "
+                f"manual resolution needed"
+                + (("\n  " + "\n  ".join(subjects.splitlines())) if subjects else ""))
+        elif result.mirrored == "failed":
+            result.warnings.append(
+                f"{canon.repo.name}: {canon.mirror}/{canon.base} could not be reached")
     return result
 
 
