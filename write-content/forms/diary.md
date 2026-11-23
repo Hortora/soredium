@@ -173,21 +173,18 @@ file with the next sequence number and a continuity note.
 
 ### Step 2 — Gather
 
-**Entry worthiness check — before gathering anything:**
+**The default is to write.** Almost every session that does real work
+produces something worth a diary entry — a decision, a discovery, a
+constraint that shaped the design, a surprise.
 
-Does this session contain at least one of:
-- A decision and its reasoning
-- An observation or discovery about how something works
-- A conceptual or theoretical exploration
-- An industry reflection or opinion
-- Anything worth reading independently of the action sequence
+**Skip only when** the session was truly trivial chore work: a typo fix,
+a config change, a mechanical rename with no design reasoning. Even then,
+propose skipping with a one-line reason and wait for the user to confirm.
+Do not silently skip.
 
-If the session was a pure action sequence with none of the above:
-**do not write this entry.**
-
-If worthy, extract from conversation context. Only ask for what's
-genuinely unclear: What was the goal? What was believed going in?
-What was built/tried/found? What failed? What changed direction?
+Extract from conversation context. Only ask for what's genuinely unclear:
+What was the goal? What was believed going in? What was built/tried/found?
+What failed? What changed direction?
 
 ### Step 3 — Draft and confirm
 
