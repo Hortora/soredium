@@ -222,7 +222,8 @@ def land(workspace: Path) -> tuple[int, list[str]]:
         return 0, lines + [f"LANDED={closed or 'nothing'}"]
     if result.errors and result.errors[0].startswith("nothing to land"):
         return 0, ["LANDED=nothing"]
-    return 1, ["ERROR=land_failed", "DETAIL=" + " ;; ".join(result.errors)]
+    detail = " ;; ".join(result.errors) if result.errors else "close() failed with no detail"
+    return 1, ["ERROR=land_failed", f"DETAIL={detail}"]
 
 
 def _blog_modules():
