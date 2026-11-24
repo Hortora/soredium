@@ -1059,8 +1059,12 @@ _WRAP_OPENING: list[StepDef] = [
 ]
 
 _CLOSE_STEPS: list[StepDef] = [
-    StepDef("land", "close", StepType.MECHANICAL, script_fn=_scope("land"),
+    StepDef("promote", "close", StepType.MECHANICAL, script_fn=_scope("promote"),
             requires=(ITEM_FINISHED,)),
+    StepDef("squash_review", "close", StepType.MECHANICAL, script_fn=_scope("squash-review"),
+            requires=("promote",)),
+    StepDef("land", "close", StepType.MECHANICAL, script_fn=_scope("land"),
+            requires=("squash_review",)),
     StepDef("promote_backlog", "close", StepType.MECHANICAL,
             script_fn=_scope("promote-backlog", with_covers=True), requires=("land",)),
     StepDef("publish", "close", StepType.MECHANICAL, script_fn=_scope("publish"),

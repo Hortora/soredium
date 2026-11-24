@@ -151,6 +151,58 @@ def commit_queue(workspace: Path, covers: str = "") -> tuple[int, list[str]]:
     return 0, ["QUEUE_COMMITTED=yes"]
 
 
+def promote(workspace: Path) -> tuple[int, list[str]]:
+    """Check for unpromoted artifacts. Returns (exit code, lines).
+
+    Exit 0: nothing to promote. Exit 2: promotion needed with commands.
+    Called as a pipeline step before land, so the session can run the promote
+    commands and retry without re-running the whole ceremony.
+
+    Uses the done items' issue refs for covers — mark_done has already run and
+    queue.state.covers now names the next item, not the one being landed.
+    """
+    queue = ceremony.read_queue(workspace)
+    done_refs = [i.ref for i in queue.done_items()] if queue else []
+    covers = done_refs[0].split(",")[0].strip() if done_refs else ""
+    unpromoted, commands = ceremony.unpromoted_artifacts(workspace, covers)
+    if unpromoted:
+        return 2, ["ERROR=promotion_needed",
+                   "UNPROMOTED=" + " ;; ".join(unpromoted),
+                   "PROMOTE_COMMANDS=" + " ;; ".join(commands)]
+    return 0, ["PROMOTED=nothing_needed"]
+
+
+def squash_review(workspace: Path) -> tuple[int, list[str]]:
+    """Check squash review status for all project targets. Returns (exit code, lines).
+
+    Exit 0: all reviewed or single-commit. Exit 2: review needed.
+    Called as a pipeline step before land, so the session can invoke git-squash
+    and retry without re-running the whole ceremony.
+
+    Uses batch_entries() to discover targets — the same resolution as close() —
+    because mark_done has already run and the done item's branch is only in
+    item.done_branch, not in queue.state.branch.
+    """
+    import squash_marker
+    queue = ceremony.read_queue(workspace)
+    if queue is None:
+        return 0, ["SQUASH_REVIEW=all_clear"]
+    entries = ceremony.batch_entries(workspace, queue)
+    all_branches = [b for entry in entries for b in entry.branches if entry.done]
+    targets = ceremony.resolve(workspace, all_branches) if all_branches else []
+    review_needed = []
+    for target in targets:
+        if target.is_workspace:
+            continue
+        reason = squash_marker.review_status(target.repo, target.branch, target.base_branch)
+        if reason:
+            review_needed.append(f"{target.repo.name}:{target.branch}: {reason}")
+    if review_needed:
+        return 2, ["ERROR=squash_review_needed",
+                   "SQUASH_REVIEW=" + " ;; ".join(review_needed)]
+    return 0, ["SQUASH_REVIEW=all_clear"]
+
+
 def land(workspace: Path) -> tuple[int, list[str]]:
     """Land every item marked done, for the work end pipeline. Returns (exit code, lines).
 
@@ -168,13 +220,6 @@ def land(workspace: Path) -> tuple[int, list[str]]:
             details = "; ".join(f"{k}: {v}" for k, v in result.not_landed.items())
             return 1, lines + [f"ERROR=not_landed", f"DETAIL={details}"]
         return 0, lines + [f"LANDED={closed or 'nothing'}"]
-    if result.unpromoted:
-        return 2, ["ERROR=promotion_needed",
-                   "UNPROMOTED=" + " ;; ".join(result.unpromoted),
-                   "PROMOTE_COMMANDS=" + " ;; ".join(result.promote_commands)]
-    if result.squash_review:
-        return 2, ["ERROR=squash_review_needed",
-                   "SQUASH_REVIEW=" + " ;; ".join(result.squash_review)]
     if result.errors and result.errors[0].startswith("nothing to land"):
         return 0, ["LANDED=nothing"]
     return 1, ["ERROR=land_failed", "DETAIL=" + " ;; ".join(result.errors)]
@@ -307,8 +352,8 @@ def publish_blog(workspace: Path, routing_path: Path | None = None
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) < 2 or args[0] not in ("covered", "commit-queue", "land", "publish",
-                                        "promote-backlog", "publish-blog"):
+    if len(args) < 2 or args[0] not in ("covered", "commit-queue", "promote", "squash-review",
+                                        "land", "publish", "promote-backlog", "publish-blog"):
         print("usage: scope.py <covered|land|publish|promote-backlog|publish-blog> <workspace> "
               "[covers=<ref>] [routing=<path>]", file=sys.stderr)
         return 2
@@ -319,6 +364,16 @@ def main(argv: list[str] | None = None) -> int:
     options = dict(a.split("=", 1) for a in args[2:] if "=" in a)
     if command == "commit-queue":
         code, lines = commit_queue(workspace, options.get("covers", ""))
+        for line in lines:
+            print(line)
+        return code
+    if command == "promote":
+        code, lines = promote(workspace)
+        for line in lines:
+            print(line)
+        return code
+    if command == "squash-review":
+        code, lines = squash_review(workspace)
         for line in lines:
             print(line)
         return code

@@ -1115,26 +1115,6 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
             errors=["no targets found — branch may not exist or has no commits"],
         )
 
-    # Promotion first: promoting adds a commit to the project branch, and the squash
-    # review below has to be of the branch as it will land.
-    unpromoted, promote_commands = unpromoted_artifacts(
-        workspace, queue.state.covers if queue else "")
-    if unpromoted:
-        return CloseResult(success=False, unpromoted=unpromoted,
-                           promote_commands=promote_commands)
-
-    # Checked before anything is rebased: the ceremony's own rebase changes every SHA.
-    # One branch that needs review holds back the whole batch, so nothing lands out of order.
-    review_needed = []
-    for target in targets:
-        if target.is_workspace:
-            continue
-        reason = squash_marker.review_status(target.repo, target.branch, target.base_branch)
-        if reason:
-            review_needed.append(f"{target.repo.name}:{target.branch}: {reason}")
-    if review_needed:
-        return CloseResult(success=False, squash_review=review_needed)
-
     active = queue.active_item() if queue else None
     closing_issue = active.ref if active else ""
     covers_issue = queue.state.covers.split(",")[0].strip() if queue else ""

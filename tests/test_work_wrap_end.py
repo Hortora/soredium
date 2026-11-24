@@ -112,8 +112,8 @@ class TestOrder:
     def test_end_is_wrap_with_the_close_between_marking_done_and_the_handoff(self):
         names = [s.name for s in work.END_STEPS]
         assert names == ["review", "diary", "file_issues", "item_finished", "mark_done",
-                         "commit_queue", "land", "promote_backlog", "publish", "publish_blog",
-                         "handoff"]
+                         "commit_queue", "promote", "squash_review", "land",
+                         "promote_backlog", "publish", "publish_blog", "handoff"]
 
     def test_the_finished_question_cannot_be_skipped(self):
         step = next(s for s in work.END_STEPS if s.name == "item_finished")
@@ -203,7 +203,7 @@ class TestEnd:
         first = next(i for i in read_queue(world["workspace"]).items if i.ref == "o/r#1")
         assert first.active and not first.completed
 
-    def test_a_failed_landing_stops_before_anything_is_published(self, world):
+    def test_a_failed_squash_review_stops_before_anything_is_published(self, world):
         project = world["project"]
         commit(project, "second.txt")            # now two commits and no review of the tip
         remote_before = g(world["project_remote"], "rev-parse", "refs/heads/main")
@@ -212,14 +212,14 @@ class TestEnd:
         result = answer(world, "end", "item_finished", "finished=yes")
 
         assert result["ACTION"] == "error", result["_raw"]
-        assert result["STEP"] == "land" and result["ERROR"] == "squash_review_needed"
+        assert result["STEP"] == "squash_review" and result["ERROR"] == "squash_review_needed"
         assert g(world["project_remote"], "rev-parse", "refs/heads/main") == remote_before
 
         again = run(world, "end")                 # still failing: it does not skip ahead
-        assert again["ACTION"] == "error" and again["STEP"] == "land"
+        assert again["ACTION"] == "error" and again["STEP"] == "squash_review"
         third = run(world, "end")
         fourth = run(world, "end")
-        assert fourth["ACTION"] == "error" and fourth["STEP"] == "land", \
+        assert fourth["ACTION"] == "error" and fourth["STEP"] == "squash_review", \
             "a failing step must never be marked skipped"
         assert g(world["project_remote"], "rev-parse", "refs/heads/main") == remote_before
 
@@ -239,14 +239,14 @@ class TestARetryResumesWhateverTheQueueNowSays:
         commit(world["project"], "second.txt")            # two commits, no review of the tip
         drive_to_item_finished(world, "end")
         failed = answer(world, "end", "item_finished", "finished=yes")
-        assert failed["ACTION"] == "error" and failed["STEP"] == "land", failed["_raw"]
+        assert failed["ACTION"] == "error" and failed["STEP"] == "squash_review", failed["_raw"]
 
         ws, proj = world["workspace"], world["project"]
         retry = subprocess.run(
             ["python3", WORK, "end", f"workspace={ws}", f"project={proj}", f"branch={BRANCH}",
              "base_branch=main", "on_main=no", "covers=o/r#2", "issue_repo=O/r",
              f"plan_path={ws / '.queue'}"], capture_output=True, text=True, cwd=str(ws))
-        assert "ACTION=error" in retry.stdout and "STEP=land" in retry.stdout, retry.stdout
+        assert "ACTION=error" in retry.stdout and "STEP=squash_review" in retry.stdout, retry.stdout
         assert "ACTION=review" not in retry.stdout
         assert "RESUMING=" in retry.stdout
 
@@ -375,10 +375,10 @@ class TestItemFinishedGuard:
 
     def test_retry_after_land_failure_does_not_re_ask_item_finished(self, world):
         project = world["project"]
-        commit(project, "second.txt")  # two commits, no review → land fails
+        commit(project, "second.txt")  # two commits, no review → squash_review fails
         drive_to_item_finished(world, "end")
         failed = answer(world, "end", "item_finished", "finished=yes")
-        assert failed["ACTION"] == "error" and failed["STEP"] == "land"
+        assert failed["ACTION"] == "error" and failed["STEP"] == "squash_review"
 
         squash_marker.mark(project, BRANCH)
         resumed = run(world, "end")
