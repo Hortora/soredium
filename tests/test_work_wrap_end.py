@@ -370,6 +370,27 @@ class TestNoLostWork:
         assert result["ACTION"] == "review", "a stale progress file must not skip the sequence"
 
 
+class TestItemFinishedGuard:
+    """item_finished must not be re-asked on retry (#599)."""
+
+    def test_retry_after_land_failure_does_not_re_ask_item_finished(self, world):
+        project = world["project"]
+        commit(project, "second.txt")  # two commits, no review → land fails
+        drive_to_item_finished(world, "end")
+        failed = answer(world, "end", "item_finished", "finished=yes")
+        assert failed["ACTION"] == "error" and failed["STEP"] == "land"
+
+        squash_marker.mark(project, BRANCH)
+        resumed = run(world, "end")
+        assert "ITEM_FINISHED_REUSED=yes" in resumed["_raw"]
+        assert resumed["ACTION"] != "item_finished", \
+            "item_finished must not be re-asked on retry"
+
+    def test_first_run_does_ask_item_finished(self, world):
+        drive_to_item_finished(world, "end")
+        # We got here by asserting ACTION == item_finished at each step
+
+
 class TestNothingIsRepairedWhenTheQueueDisagrees:
 
     def test_project_on_a_hand_made_branch_and_workspace_on_main_changes_nothing(self, world):

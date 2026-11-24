@@ -988,6 +988,14 @@ def _item_not_finished(ctx) -> bool:
     return ctx.progress.get(ITEM_FINISHED_ANSWER, "") != "yes"
 
 
+def _item_finished_already_answered(ctx) -> bool:
+    answer = ctx.progress.get(ITEM_FINISHED_ANSWER, "")
+    if answer in ("yes", "no"):
+        print(f"ITEM_FINISHED_REUSED={answer}")
+        return True
+    return False
+
+
 def _mark_done_on_branch(ctx) -> list[str] | None:
     """Mark the active item done on its branch. On the base branch there is no
     branch to mark it done on, and this sequence never closes an item outright:
@@ -1038,8 +1046,10 @@ _WRAP_OPENING: list[StepDef] = [
     _wrap_step("review", "wrap-review.md"),
     _wrap_step("diary", "wrap-diary.md"),
     _wrap_step("file_issues", "wrap-issues.md"),
-    # Not skippable: marking and landing both depend on the answer.
-    _wrap_step(ITEM_FINISHED, "wrap-item-finished.md", skippable=False),
+    StepDef(ITEM_FINISHED, "wrap", StepType.JUDGMENT,
+            action_context_fn=lambda ctx: {"CONTEXT": ITEM_FINISHED},
+            handler="handlers/wrap-item-finished.md", skippable=False,
+            skip_fn=_item_finished_already_answered),
     StepDef("mark_done", "wrap", StepType.MECHANICAL,
             skip_fn=_item_not_finished, script_fn=_mark_done_on_branch),
     # The queue change is committed at once: uncommitted it stops the ceremony
