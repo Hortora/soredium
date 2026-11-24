@@ -140,7 +140,7 @@ Steps as defined in `PIPELINES` (`*` marks a judgment step with a handler):
 | `resume` | stack_pick*, pop_stack, checkout_branches, rebase, reset_wip, sync_queue_branch, context_resume* |
 | `find` | refresh_cache, query_recommendations, present_candidates*, populate_queue |
 | `wrap` | review*, diary*, file_issues*, item_finished*, mark_done, commit_queue, handoff* |
-| `end` | review*, diary*, file_issues*, item_finished*, mark_done, commit_queue, land, promote_backlog, publish, publish_blog, handoff* |
+| `end` | review*, diary*, file_issues*, item_finished*, mark_done, commit_queue, promote, squash_review, land, promote_backlog, publish, publish_blog, handoff* |
 
 `work` and `work continue` are "carry on": `work.py continue`, which resumes the active item. `work start` (no issue) and `work next` are "move on": `work.py start` / `work.py next`, which gate on active work — the user must release the current item (done, deferred, or move down) before the next one starts. `work done` marks the active item done without starting anything.
 
@@ -153,7 +153,7 @@ In `work.py main()`, in this order. Each can stop the command and print why.
 3. `apply_alignment`: project and workspace must agree on a branch. Two states are repaired automatically; anything else is `ACTION=decision` with `OPTIONS=`.
 4. `apply_move_on_gate`: handles `step_done=move_on_gate` from a prior `current_item_not_released` decision. Executes the user's choice (mark-done, defer-active, move-down) and re-routes as `continue`.
 5. `apply_route`: for the routed commands; `_named_start` registers a named issue in the queue. For `start`/`next` with an active item, checks for dirty tree then returns `DECISION=current_item_not_released`.
-6. `sequence_preflight` (wrap, end): prints `SCOPE=`, `RESUMING=`, or stops with `nothing_to_end`.
+6. `sequence_preflight` (wrap, end): prints `SCOPE=`, `RESUMING=`, `PREFLIGHT_WARN=` (end only: scans for unpromoted artifacts and unreviewed squashes), or stops with `nothing_to_end`.
 7. `begin_run`: step progress in `.work-progress` belongs to one run. For `wrap` and `end` the run key is the command alone, so a retry resumes whatever the queue now says.
 
 Stops and decisions you will see: `clone_guard`, `nothing_to_end`, `active_branch_not_checked_out`, `current_item_not_released`, `done_items_informational`, `workspace_not_level`, `alignment_*`, `named_issue_already_closed`, `named_issue_done_awaiting_close`, `another_item_active`.
@@ -174,18 +174,19 @@ Items stack by default: a new branch is cut from the previous item's branch whil
 ### 4.4 wrap versus end
 
 - **wrap**: review, diary, loose ends filed and queued, "is the item finished?", mark done if so, handoff. It never lands, promotes, publishes, closes or stamps.
-- **end**: the same, plus land everything marked done, promote, publish the covered repos and their landed blog entries.
-- `item_finished` is never skippable and requires `finished=yes` or `finished=no`. With `no`, the active item is left exactly as it is and only earlier done items land (`close(workspace, land_active=False)`).
+- **end**: the same, plus promote artifacts, verify squash review, land everything marked done, publish the covered repos and their landed blog entries.
+- `item_finished` is never skippable by the LLM but has a `skip_fn` that reuses the saved answer on retry (prints `ITEM_FINISHED_REUSED=<answer>`), preventing the bug where re-answering marks a second item done.
 - `end` can be run part-way through a queue, any number of times.
 - On a mechanical failure the sequence prints `ACTION=error STEP=<name> ERROR=<code>` and stops. Fix the cause and run the same command again; it resumes at that step.
+- Before the first step, `sequence_preflight` prints `PREFLIGHT_WARN=` with all blockers (unpromoted artifacts, unreviewed squashes) so the session sees everything upfront.
 
-Errors from the `land` step and what to do:
+Errors from pre-land steps and `land`:
 
-| ERROR | Do |
-|---|---|
-| `promotion_needed` | Run the `PROMOTE_COMMANDS` line it printed (check the `covers=` value is the finished item's reference), then re-mark the squash review and retry |
-| `squash_review_needed` | Run the `git-squash` skill on that branch; it records the review. Retry |
-| `land_failed` | Read `DETAIL`. Usually uncommitted changes or a rebase conflict. Nothing was landed |
+| STEP | ERROR | Do |
+|---|---|---|
+| `promote` | `promotion_needed` | Run the `PROMOTE_COMMANDS` line it printed. Retry |
+| `squash_review` | `squash_review_needed` | Run the `git-squash` skill on the named branch(es). Retry |
+| `land` | `land_failed` | Read `DETAIL`. Usually uncommitted changes or a rebase conflict. Nothing was landed |
 
 ---
 
@@ -292,10 +293,10 @@ Canonical being ahead of its remote is normal: landed work waiting to be publish
 1. Refuses if a repo is mid-rebase or mid-merge, or branches are misaligned.
 2. Reads the queue, builds one entry per done item plus the active one, resolves each to targets (repo, branch).
 3. Orders entries by what each branch was cut from; queue order only breaks ties.
-4. Refuses with `promotion_needed` if workspace artifacts are not yet in the project.
-5. Refuses with `squash_review_needed` if a multi-commit project branch has no review record for its tip.
-6. Preflight, then writes `.close-state`.
-7. Lands each entry, stamps each branch, clears the base and review refs, marks the item complete.
+4. Preflight, then writes `.close-state`.
+5. Lands each entry, stamps each branch, clears the base and review refs, marks the item complete.
+
+Note: promotion and squash review checks were moved out of `close()` into their own pipeline steps (`promote`, `squash_review`) before `land` (#599). By the time `close()` runs, both have already passed.
 8. Advances the queue. In a slot, carries stray commits (work on a clone's own base branch) unless that base had diverged. Marks a drained numbered slot `.landed`. A permanent clone is settled and never archived.
 9. Reports `LANDED_*`, `CLOSED_ITEM=`, `CARRIED=`, `NOT_LANDED=`, `UNPUBLISHED=`, `UNPROMOTED_BACKLOG=`.
 
@@ -363,7 +364,7 @@ Ordered by how much damage a mistake does.
 2. **Old slots.** `casehub/slots/207` holds a clone whose `main` has diverged from canonical by more than a thousand commits each way. The ceremony refuses to carry a diverged base, but any new "carry" or "catch up" logic must repeat that check.
 3. **Marked areas reaching inherited files.** A reviewer found four such paths after the first implementation (health checks, `plan_manager.detect`, state detection fallback, scaffold with `force=yes`). Three are fixed. Assume more exist in code that was not read: `plan_manager.py` CLI commands, handler markdown that tells a session which path to pass, `work_route.py`, `alignment_repair.py` (Hortora/soredium#584).
 4. **Shared root queue with no lock.** Two sessions in one switched slot do read-modify-write on the same file; the last writer wins (Hortora/soredium#579).
-5. **`covers` after `mark_done`.** It names the next item. Anything that uses `queue.state.covers` after an item is marked done is talking about the wrong issue. The promote command printed by the ceremony does this today.
+5. **`covers` after `mark_done`.** It names the next item. The `promote` and `squash_review` pipeline steps use `done_items()` / `batch_entries()` to find the done item's refs and branches instead of `queue.state.covers` (#599).
 6. **Run keys and progress.** `.work-progress` decides what is skipped. A wrong key either restarts a sequence or treats old steps as done. If a command behaves as if it "already did that", print `.work-progress`.
 7. **Blog routing.** One wrong rule publishes to an organisation's public site. Removing published entries meant rewriting that site's history. Always run the plan first.
 8. **Module shadowing.** In a subprocess the installed copy of a shared module (`~/.claude/lib`, `~/.claude/skills/project`) can be imported instead of the sibling file. New code must not assume a just-added function exists in an imported shared module. `tests/conftest.py` pins the repo's copies for in-process tests only.
