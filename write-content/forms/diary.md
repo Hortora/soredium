@@ -69,12 +69,27 @@ mode is truncating a substantial session to hit an arbitrary limit, producing
 entries that summarise without informing. If the reader would need to read
 the git log to understand what happened, the entry is too short for its topic.
 
-**Include diagrams.** Architectural decisions, data flows, state machines,
-before/after comparisons — if the concept has structure, draw it. Save as
-`.svg` files in an `images/` directory alongside the entry (never inline
-`<svg>` in markdown — see `_universal.md`). Reference with
-`![Description](images/name.svg)`. A diagram that shows the reader what
-changed is worth more than three paragraphs describing it.
+**Every entry includes at least one SVG diagram.** This is mandatory, not
+advisory. Architectural decisions, data flows, state machines,
+before/after comparisons, component relationships, decision trees — if
+the session's work has structure (and it almost always does), draw it.
+
+Save each diagram as a separate `.svg` file in an `images/` directory
+alongside the entry (never inline `<svg>` in markdown — see
+`_universal.md`). Reference with `![Description](images/name.svg)`.
+A diagram that shows the reader what changed is worth more than three
+paragraphs describing it.
+
+What to diagram (pick at least one):
+- **Before/after** — how data flow, architecture, or state changed
+- **Component interaction** — what talks to what, and how
+- **Decision flow** — the path through alternatives to the choice made
+- **State machine** — lifecycle states and transitions
+- **Layer diagram** — where the new code sits in the stack
+
+If you genuinely cannot identify anything diagrammable in the session's
+work, say so explicitly in the draft review and get confirmation before
+proceeding without one.
 
 **Intent: inform, educate, advocate.** A diary entry is not a status update.
 It explains the practicalities and relevance of the work — why this approach,

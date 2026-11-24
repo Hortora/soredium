@@ -1,6 +1,41 @@
 # Visual Elements Reference
 
-Used by `write-blog` Step 4. Visual content makes posts readable and credible.
+Used by diary form Step 3–4. Visual content makes posts readable and credible.
+
+---
+
+## SVG Diagrams (mandatory)
+
+**Every diary entry must include at least one SVG diagram.** This is the
+primary visual element — not an optional enhancement. Claude generates
+the SVG directly; no external tools needed.
+
+**What to diagram** (pick at least one per entry):
+
+| Type | When to use | Example |
+|------|-------------|---------|
+| Before/after | Architecture or data flow changed | Old pipeline → new pipeline |
+| Component interaction | Multiple parts working together | Service A calls B via C |
+| Decision flow | Alternatives were weighed | Three options, one chosen |
+| State machine | Lifecycle states and transitions | Queue item: open → active → done → closed |
+| Layer diagram | Where new code sits in the stack | Handler → pipeline → script → git |
+
+**How to create:**
+
+1. Write the SVG content — keep it clean and readable:
+   - Use `viewBox` for responsive sizing
+   - Use readable fonts (`font-family: system-ui, sans-serif`)
+   - Keep colours minimal — two or three, with good contrast
+   - Label every element — no unlabelled boxes or arrows
+2. Save to `images/<entry-slug>-<description>.svg` alongside the entry
+3. Reference with `![Description](images/<filename>.svg)`
+
+**Style:**
+- Prefer horizontal flow (left to right) for sequences
+- Prefer vertical flow (top to bottom) for hierarchies
+- Use rounded rectangles for components, arrows for flow
+- Include a brief title or caption in the diagram itself
+- Keep it simple — if it needs more than ~15 elements, split into two diagrams
 
 ---
 
@@ -14,7 +49,7 @@ real snippet. If the logic is interesting, show it. Short is better; extract the
 
 ## Illustrations
 
-Small images that give the post visual rhythm. Sources:
+Small images that give the post additional visual interest. Sources:
 - Web search for a relevant diagram, photo, or graphic (`WebSearch` + `WebFetch`)
 - AI-generated illustration for the specific concept (note source in alt text)
 
@@ -24,8 +59,8 @@ Save to `blog/images/<YYYY-MM-DD-slug-description>.png` and reference as:
 ![alt text describing the image](images/YYYY-MM-DD-slug-description.png)
 ```
 
-One illustration per major section is enough. Don't illustrate for its own sake —
-only when a visual genuinely adds something the prose doesn't.
+Illustrations are supplementary — they add variety but do not replace the
+mandatory SVG diagram requirement.
 
 ---
 
