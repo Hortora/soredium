@@ -136,6 +136,133 @@ def test_create_branches_duplicate_name(project_repo, workspace_repo):
     assert "ERROR=project_branch_failed" in result.stdout
 
 
+def test_create_branches_refuses_base_branch_name(project_repo, workspace_repo):
+    """#600: create-branches with branch=main refuses before running git."""
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "create-branches",
+         str(project_repo), str(workspace_repo),
+         "branch=main"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "ERROR=project_branch_failed" in result.stdout
+    assert "refused" in result.stdout
+
+
+def test_create_branches_resumes_known_branches(project_repo, workspace_repo):
+    """#600: create-branches resumes when both repos have known branches."""
+    # First create branches normally
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "create-branches",
+         str(project_repo), str(workspace_repo),
+         "branch=issue-42-feature"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "CREATED=yes" in result.stdout
+
+    # Switch both back to main
+    subprocess.run(["git", "-C", str(project_repo), "checkout", "main"],
+                    check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(workspace_repo), "checkout", "main"],
+                    check=True, capture_output=True)
+
+    # Try again — should resume, not fail
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "create-branches",
+         str(project_repo), str(workspace_repo),
+         "branch=issue-42-feature"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "RESUMED=yes" in result.stdout
+
+    # Verify both repos are on the branch
+    proj_branch = subprocess.run(
+        ["git", "-C", str(project_repo), "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert proj_branch == "issue-42-feature"
+    ws_branch = subprocess.run(
+        ["git", "-C", str(workspace_repo), "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert ws_branch == "issue-42-feature"
+
+
+def test_create_branches_resumes_project_creates_workspace(project_repo, workspace_repo):
+    """#600: branch exists in project only — resume project, create workspace."""
+    # Create branch in project only (simulates partial failure)
+    subprocess.run(["git", "-C", str(project_repo), "checkout", "-b", "issue-50-partial"],
+                    check=True, capture_output=True)
+    # Record a base ref so it's recognised as a known branch
+    main_sha = subprocess.run(
+        ["git", "-C", str(project_repo), "rev-parse", "main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "-C", str(project_repo), "update-ref",
+                    "refs/soredium/base/issue-50-partial", main_sha],
+                    check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(project_repo), "checkout", "main"],
+                    check=True, capture_output=True)
+
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "create-branches",
+         str(project_repo), str(workspace_repo),
+         "branch=issue-50-partial"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    # Project resumed, workspace created — both succeed
+    proj_branch = subprocess.run(
+        ["git", "-C", str(project_repo), "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert proj_branch == "issue-50-partial"
+    ws_branch = subprocess.run(
+        ["git", "-C", str(workspace_repo), "branch", "--show-current"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert ws_branch == "issue-50-partial"
+
+
+def test_create_branches_no_rollback_on_resumed_project(project_repo, workspace_repo):
+    """#600: if project was resumed but workspace fails, don't delete the project branch."""
+    # Create known branch in project
+    subprocess.run(["git", "-C", str(project_repo), "checkout", "-b", "issue-60-keep"],
+                    check=True, capture_output=True)
+    main_sha = subprocess.run(
+        ["git", "-C", str(project_repo), "rev-parse", "main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "-C", str(project_repo), "update-ref",
+                    "refs/soredium/base/issue-60-keep", main_sha],
+                    check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(project_repo), "checkout", "main"],
+                    check=True, capture_output=True)
+
+    # Create a conflicting unknown branch in workspace (no base record)
+    subprocess.run(["git", "-C", str(workspace_repo), "checkout", "-b", "issue-60-keep"],
+                    check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(workspace_repo), "checkout", "main"],
+                    check=True, capture_output=True)
+
+    result = subprocess.run(
+        ["python3", str(BRANCH_CREATE), "create-branches",
+         str(project_repo), str(workspace_repo),
+         "branch=issue-60-keep"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+
+    # Project branch must still exist (it was pre-existing, not created by us)
+    branches = subprocess.run(
+        ["git", "-C", str(project_repo), "branch"],
+        capture_output=True, text=True,
+    ).stdout
+    assert "issue-60-keep" in branches
+
+
 def test_create_branches_missing_branch_arg(project_repo, workspace_repo):
     """create-branches without branch= fails."""
     result = subprocess.run(
@@ -544,6 +671,95 @@ class TestSyncMainInASlot:
         assert result.returncode == 0
         assert "WARN=no_canonical_project" in result.stdout
         assert "SYNCED=partial" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Slot resume: branch exists in one repo only (#600)
+# ---------------------------------------------------------------------------
+
+
+class TestSlotResumePartial:
+    """#600: in a slot, the branch exists in one clone but not the other."""
+
+    def _slot_pair(self, tmp_path):
+        """Two local repos simulating a slot's project and workspace clones."""
+        slot = tmp_path / "family" / "slots" / "1"
+        slot.mkdir(parents=True)
+        (slot / ".slot").write_text("# Slot 1\n")
+        for name in ("project", "workspace"):
+            repo = slot / name
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, capture_output=True)
+            (repo / "README.md").write_text(f"# {name}\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True, capture_output=True)
+        return slot / "project", slot / "workspace"
+
+    def test_resumes_project_creates_workspace(self, tmp_path):
+        proj, ws = self._slot_pair(tmp_path)
+        main_sha = subprocess.run(
+            ["git", "-C", str(proj), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "-C", str(proj), "checkout", "-q", "-b", "issue-77-slot"],
+                        check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(proj), "update-ref",
+                        "refs/soredium/base/issue-77-slot", main_sha],
+                        check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(proj), "checkout", "-q", "main"],
+                        check=True, capture_output=True)
+
+        result = subprocess.run(
+            ["python3", str(BRANCH_CREATE), "create-branches",
+             str(proj), str(ws), "branch=issue-77-slot"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout
+        assert "RESUMED=yes" in result.stdout
+        proj_branch = subprocess.run(
+            ["git", "-C", str(proj), "branch", "--show-current"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        ws_branch = subprocess.run(
+            ["git", "-C", str(ws), "branch", "--show-current"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert proj_branch == "issue-77-slot"
+        assert ws_branch == "issue-77-slot"
+
+    def test_creates_project_resumes_workspace(self, tmp_path):
+        proj, ws = self._slot_pair(tmp_path)
+        main_sha = subprocess.run(
+            ["git", "-C", str(ws), "rev-parse", "main"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "-C", str(ws), "checkout", "-q", "-b", "issue-78-slot"],
+                        check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "update-ref",
+                        "refs/soredium/base/issue-78-slot", main_sha],
+                        check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(ws), "checkout", "-q", "main"],
+                        check=True, capture_output=True)
+
+        result = subprocess.run(
+            ["python3", str(BRANCH_CREATE), "create-branches",
+             str(proj), str(ws), "branch=issue-78-slot"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout
+        assert "RESUMED=yes" in result.stdout
+        proj_branch = subprocess.run(
+            ["git", "-C", str(proj), "branch", "--show-current"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        ws_branch = subprocess.run(
+            ["git", "-C", str(ws), "branch", "--show-current"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert proj_branch == "issue-78-slot"
+        assert ws_branch == "issue-78-slot"
 
 
 # ---------------------------------------------------------------------------

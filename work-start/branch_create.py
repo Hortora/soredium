@@ -63,6 +63,7 @@ class CreateResult:
     stacked_on: str = ""        # the branch it was stacked on; "" when cut from the base branch
     reason: str = ""            # why it starts there
     cut_from: dict | None = None  # {repo name: what its branch was cut from}
+    resumed: bool = False       # True when checking out existing branches rather than creating
 
 
 def create_branches_typed(project: str, workspace: str, branch: str,
@@ -94,26 +95,30 @@ def create_branches_typed(project: str, workspace: str, branch: str,
         return wanted or "main"
 
     def _cut(repo: str, wanted_base: str | None, is_workspace: bool = False) -> tuple[bool, str]:
-        # A workspace repo holds the queue and continues from the previous item's
-        # branch even when the item is marked (from main); see branch_base.
         parent = where.carry if is_workspace else where.parent
         if not parent:
             _follow_canonical(repo)
         ok, detail = branch_base.cut(repo, branch, _base_branch(repo, wanted_base), parent)
         if ok:
-            cut_from[Path(repo).name] = detail
+            actual = detail.removeprefix("resumed:")
+            cut_from[Path(repo).name] = actual
         return ok, detail
 
-    ok, err = _cut(project, base)
+    ok, detail = _cut(project, base)
     if not ok:
-        return CreateResult(branch, False, False, f"project_branch_failed:{err}")
+        return CreateResult(branch, False, False, f"project_branch_failed:{detail}")
+    project_resumed = detail.startswith("resumed:")
 
-    ok, err = _cut(workspace, None, is_workspace=True)
+    ok, detail = _cut(workspace, None, is_workspace=True)
     if not ok:
-        run_git(project, "checkout", "-")
-        run_git(project, "branch", "-D", branch)
-        branch_base.clear(project, branch)
-        return CreateResult(branch, False, False, f"workspace_branch_failed:{err}")
+        if not project_resumed:
+            run_git(project, "checkout", "-")
+            run_git(project, "branch", "-D", branch)
+            branch_base.clear(project, branch)
+        else:
+            run_git(project, "checkout", "-")
+        return CreateResult(branch, project_resumed, False, f"workspace_branch_failed:{detail}")
+    workspace_resumed = detail.startswith("resumed:")
 
     if slot_path:
         for repo_path, label in collect_slot_repos(slot_path, project, workspace):
@@ -123,7 +128,7 @@ def create_branches_typed(project: str, workspace: str, branch: str,
 
     _slot_reentry_cleanup(Path(project).parent)
     return CreateResult(branch, True, True, stacked_on=where.parent, reason=where.reason,
-                        cut_from=cut_from)
+                        cut_from=cut_from, resumed=project_resumed or workspace_resumed)
 
 
 def _follow_canonical(repo: str) -> None:
@@ -237,7 +242,7 @@ def create_branches(project: str, workspace: str, branch: str, base: str | None,
     if result.error:
         print(f"ERROR={result.error}")
         return 1
-    print("CREATED=yes")
+    print(f"{'RESUMED' if result.resumed else 'CREATED'}=yes")
     print(f"STACKED={'yes' if result.stacked_on else 'no'}")
     print(f"STACKED_ON={result.stacked_on or 'none'}")
     print(f"START_REASON={result.reason}")

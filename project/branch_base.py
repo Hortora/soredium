@@ -160,14 +160,30 @@ def cut(repo: Path | str, branch: str, base_branch: str, parent: str = "") -> tu
 
     Stacked on `parent` when that branch exists in this repo; otherwise cut from
     `base_branch`. Returns (ok, detail): detail is what it was cut from, or git's
-    error. Uncommitted changes are carried over by git when they do not conflict
-    and refuse the checkout when they do; nothing is stashed.
+    error. When the branch already exists and has a base record, it is checked out
+    and ``resumed:<parent_or_base>`` is returned as the detail. Uncommitted changes
+    are carried over by git when they do not conflict and refuse the checkout when
+    they do; nothing is stashed.
     """
+    if branch in (base_branch, "HEAD"):
+        return False, f"refused:branch name '{branch}' is the base branch or reserved"
+
     stack_on = parent if parent and branch_exists(repo, parent) else ""
     start = stack_on or base_branch
     start_sha = _sha(repo, f"refs/heads/{start}") or _sha(repo, start)
     if not start_sha:
         return False, f"{start} does not exist in {Path(repo).name}"
+
+    if branch_exists(repo, branch):
+        recorded = _sha(repo, f"{BASE_REF}/{branch}")
+        if recorded:
+            result = git(repo, "checkout", "-q", branch)
+            if result.returncode != 0:
+                return False, " ".join((result.stderr or result.stdout).split())
+            existing_parent = parent_of(repo, branch)
+            return True, f"resumed:{existing_parent or base_branch}"
+        return False, f"branch_exists:{branch} in {Path(repo).name}"
+
     result = git(repo, "checkout", "-q", "-b", branch, start_sha)
     if result.returncode != 0:
         return False, " ".join((result.stderr or result.stdout).split())

@@ -223,6 +223,53 @@ class TestRecord:
         assert branch_base.parent_of(proj, "issue-2") == ""
 
 
+class TestCutGuards:
+    """#600: cut() must refuse base-branch names and handle existing branches."""
+
+    def test_refuses_base_branch_name(self, pair):
+        proj, ws = pair
+        ok, detail = branch_base.cut(proj, "main", "main")
+        assert ok is False
+        assert "refused" in detail
+        assert "main" in detail
+
+    def test_refuses_HEAD(self, pair):
+        proj, ws = pair
+        ok, detail = branch_base.cut(proj, "HEAD", "main")
+        assert ok is False
+        assert "refused" in detail
+
+    def test_resumes_known_branch(self, pair):
+        proj, ws = pair
+        ok, _ = branch_base.cut(proj, "issue-1", "main")
+        assert ok is True
+        commit(proj, "work.txt")
+        g(proj, "checkout", "-q", "main")
+        ok, detail = branch_base.cut(proj, "issue-1", "main")
+        assert ok is True
+        assert detail.startswith("resumed:")
+        assert g(proj, "branch", "--show-current") == "issue-1"
+        assert (proj / "work.txt").exists()
+
+    def test_resumes_stacked_branch_reports_parent(self, pair):
+        proj, ws = pair
+        g(proj, "checkout", "-q", "-b", "issue-1")
+        commit(proj, "a.txt")
+        branch_base.cut(proj, "issue-2", "main", "issue-1")
+        g(proj, "checkout", "-q", "main")
+        ok, detail = branch_base.cut(proj, "issue-2", "main")
+        assert ok is True
+        assert detail == "resumed:issue-1"
+
+    def test_refuses_unknown_existing_branch(self, pair):
+        proj, ws = pair
+        g(proj, "checkout", "-q", "-b", "mystery")
+        g(proj, "checkout", "-q", "main")
+        ok, detail = branch_base.cut(proj, "mystery", "main")
+        assert ok is False
+        assert "branch_exists" in detail
+
+
 class TestCreateBranches:
     def _create(self, proj, ws, branch):
         return subprocess.run(

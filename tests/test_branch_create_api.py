@@ -74,6 +74,40 @@ def test_create_branches_workspace_fails_rolls_back():
         assert branch != "issue-42"
 
 
+def test_create_branches_resumed():
+    """#600: typed API sets resumed=True when branches already exist."""
+    with tempfile.TemporaryDirectory() as tmp:
+        proj = Path(tmp) / "project"
+        ws = Path(tmp) / "workspace"
+        proj.mkdir()
+        ws.mkdir()
+        _init_repo(proj)
+        _init_repo(ws)
+        first = create_branches_typed(str(proj), str(ws), "issue-42")
+        assert first.resumed is False
+        subprocess.run(["git", "-C", str(proj), "checkout", "main"],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(ws), "checkout", "main"],
+                       capture_output=True, check=True)
+        second = create_branches_typed(str(proj), str(ws), "issue-42")
+        assert second.resumed is True
+        assert second.error is None
+
+
+def test_create_branches_refuses_base_branch():
+    """#600: typed API refuses branch name == base branch."""
+    with tempfile.TemporaryDirectory() as tmp:
+        proj = Path(tmp) / "project"
+        ws = Path(tmp) / "workspace"
+        proj.mkdir()
+        ws.mkdir()
+        _init_repo(proj)
+        _init_repo(ws)
+        result = create_branches_typed(str(proj), str(ws), "main")
+        assert result.error is not None
+        assert "refused" in result.error
+
+
 def test_cli_create_branches_still_works():
     """Verify the CLI entry point still returns correct exit code."""
     from branch_create import create_branches
