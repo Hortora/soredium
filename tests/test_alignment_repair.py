@@ -192,7 +192,7 @@ class TestRefusals:
         assert base_of(project, "issue-289-url") == fork
 
     @pytest.mark.parametrize("state", ["on_base", "aligned", "workspace_dirty",
-                                       "workspace_other", "project_behind", "detached"])
+                                       "workspace_other", "detached"])
     def test_other_states_are_never_touched(self, repos, state):
         project, workspace = repos
         if state == "aligned":
@@ -217,6 +217,63 @@ class TestRefusals:
         result = repair(found, project, workspace)
         assert not result.ok and result.reason == "not_repairable"
         assert (snapshot(project), snapshot(workspace)) == before
+
+
+class TestProjectBehind:
+    """project_behind = workspace on a branch, project on main.
+
+    Repairable when workspace is clean: checks workspace out to main.
+    The branch is preserved — it may hold unmerged work.
+    """
+
+    def test_clean_workspace_checked_out_to_main(self, repos):
+        project, workspace = repos
+        g(workspace, "checkout", "-q", "-b", "issue-250-eigentrust")
+        commit(workspace, "stale-work.txt")
+        found = detect(project, workspace)
+        assert found.state == "project_behind"
+
+        result = repair(found, project, workspace)
+
+        assert result.ok, result.detail
+        assert g(workspace, "branch", "--show-current") == "main"
+        assert detect(project, workspace).state == "on_base"
+
+    def test_branch_is_preserved_after_repair(self, repos):
+        project, workspace = repos
+        g(workspace, "checkout", "-q", "-b", "issue-250-eigentrust")
+        tip = commit(workspace, "stale-work.txt")
+        found = detect(project, workspace)
+
+        repair(found, project, workspace)
+
+        branches = g(workspace, "branch", "--list", "issue-250-eigentrust")
+        assert "issue-250-eigentrust" in branches
+        assert g(workspace, "rev-parse", "issue-250-eigentrust") == tip
+
+    def test_dirty_workspace_is_refused(self, repos):
+        project, workspace = repos
+        g(workspace, "checkout", "-q", "-b", "issue-250-eigentrust")
+        (workspace / "uncommitted.txt").write_text("dirty")
+        found = detect(project, workspace)
+        assert found.state == "project_behind"
+        before = snapshot(project), snapshot(workspace)
+
+        result = repair(found, project, workspace)
+
+        assert not result.ok
+        assert result.reason == "workspace_dirty"
+        assert (snapshot(project), snapshot(workspace)) == before
+
+    def test_project_state_unchanged(self, repos):
+        project, workspace = repos
+        g(workspace, "checkout", "-q", "-b", "issue-250-eigentrust")
+        commit(workspace, "stale-work.txt")
+        before = snapshot(project)
+
+        repair(detect(project, workspace), project, workspace)
+
+        assert snapshot(project) == before
 
 
 class TestAdoptableBase:

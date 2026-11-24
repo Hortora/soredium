@@ -130,6 +130,20 @@ class TestRepairs:
         assert lines[0] == "ALIGNMENT_REPAIRED=unrecorded_branch"
         assert all(base_of(repo, "issue-7-x") for repo in repos)
 
+    def test_stale_workspace_branch_checked_out_to_main(self, repos):
+        project, workspace = repos
+        g(workspace, "checkout", "-q", "-b", "issue-250-eigentrust")
+        commit(workspace, "stale-work.txt")
+
+        args, lines, stop = call(project, workspace)
+
+        assert not stop
+        assert lines[0] == "ALIGNMENT_REPAIRED=project_behind"
+        assert lines[1].startswith("ALIGNMENT_ACTIONS=")
+        assert g(workspace, "symbolic-ref", "--short", "HEAD") == "main"
+        assert args["on_main"] == "yes"
+        assert args["branch"] == "main"
+
     def test_a_second_call_after_a_repair_is_silent(self, repos):
         project, workspace = repos
         g(project, "checkout", "-q", "-b", "issue-7-x")
@@ -165,9 +179,10 @@ class TestDecisions:
         args, lines, stop = self._unchanged(repos, lambda: call(project, workspace))
         assert stop and "DECISION=alignment_workspace_other" in lines
 
-    def test_project_left_on_base(self, repos):
+    def test_project_behind_with_queue_naming_branch_is_decision(self, repos):
         project, workspace = repos
         started(workspace, "issue-7-x")
+        queue(workspace, "issue-7-x", active=True)
         args, lines, stop = self._unchanged(repos, lambda: call(project, workspace))
         assert stop and "DECISION=alignment_project_behind" in lines
 

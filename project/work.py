@@ -215,11 +215,11 @@ def apply_clone_guard(args: dict[str, str]) -> tuple[list[str], bool]:
 def apply_alignment(args: dict[str, str]) -> tuple[dict[str, str], list[str], bool]:
     """Check that project and workspace agree before anything is routed.
 
-    Two states are repaired without asking (see alignment_repair). Any other
-    disagreement stops with ACTION=decision: nothing is switched on a guess.
-    Skipped where there is nothing to compare or the caller is mid-pipeline:
-    a follow-up call (`step_done=`), a named `start`, one repo serving as both,
-    and slots, whose several repos this pairwise check does not model.
+    Three states are repaired without asking (see alignment_repair). project_behind
+    is gated: repaired only when the workspace branch is stale (not the queue's
+    active branch), otherwise a decision. Any other disagreement stops with
+    ACTION=decision. Skipped for mid-pipeline calls, named starts, single-repo
+    setups, and slots.
     """
     from work_route import ROUTED
     command = args.get("command", "")
@@ -254,6 +254,12 @@ def apply_alignment(args: dict[str, str]) -> tuple[dict[str, str], list[str], bo
             return args, [], False  # a branch name left by finished work; routing decides
         return decision("queue_mismatch", found.detail)
 
+    if found.state == "project_behind":
+        from queue_io import read_queue
+        queue = read_queue(_queue_dir(args))
+        if queue and queue.state.branch == found.workspace_branch:
+            return decision("project_behind", found.detail)
+
     if found.state not in REPAIRABLE:
         return decision(found.state, found.detail)
 
@@ -261,8 +267,12 @@ def apply_alignment(args: dict[str, str]) -> tuple[dict[str, str], list[str], bo
     if not result.ok:
         return decision(result.reason, result.detail)
     aligned = dict(args)
-    aligned["branch"] = found.project_branch
-    aligned["on_main"] = "no"
+    if found.state == "project_behind":
+        aligned["branch"] = base
+        aligned["on_main"] = "yes"
+    else:
+        aligned["branch"] = found.project_branch
+        aligned["on_main"] = "no"
     lines = [f"ALIGNMENT_REPAIRED={found.state}"]
     if result.actions:
         lines.append("ALIGNMENT_ACTIONS=" + "; ".join(result.actions))
