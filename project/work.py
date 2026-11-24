@@ -1087,7 +1087,12 @@ _REPORTED = ("LANDED", "CLOSED_ITEM", "NOT_LANDED", "CARRIED", "PROMOTED_COUNT",
 
 
 def _preflight_blockers(workspace: Path) -> list[str]:
-    """Scan for everything that will block landing — informational, not stopping."""
+    """Scan for everything that will block landing — informational, not stopping.
+
+    Runs before mark_done, so the active item is still active and
+    queue.state.branch names the working branch. resolve() without
+    explicit branches uses discover_active_branches, which is correct here.
+    """
     blockers: list[str] = []
     work_end = str(_WORK_END_DIR)
     if work_end not in sys.path:

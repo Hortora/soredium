@@ -297,8 +297,8 @@ Canonical being ahead of its remote is normal: landed work waiting to be publish
 5. Lands each entry, stamps each branch, clears the base and review refs, marks the item complete.
 
 Note: promotion and squash review checks were moved out of `close()` into their own pipeline steps (`promote`, `squash_review`) before `land` (#599). By the time `close()` runs, both have already passed.
-8. Advances the queue. In a slot, carries stray commits (work on a clone's own base branch) unless that base had diverged. Marks a drained numbered slot `.landed`. A permanent clone is settled and never archived.
-9. Reports `LANDED_*`, `CLOSED_ITEM=`, `CARRIED=`, `NOT_LANDED=`, `UNPUBLISHED=`, `UNPROMOTED_BACKLOG=`.
+6. Advances the queue. In a slot, carries stray commits (work on a clone's own base branch) unless that base had diverged. Marks a drained numbered slot `.landed`. A permanent clone is settled and never archived.
+7. Reports `LANDED_*`, `CLOSED_ITEM=`, `CARRIED=`, `NOT_LANDED=`, `UNPUBLISHED=`, `UNPROMOTED_BACKLOG=`.
 
 It never squashes, never pushes, never archives.
 
