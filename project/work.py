@@ -1086,6 +1086,28 @@ _REPORTED = ("LANDED", "CLOSED_ITEM", "NOT_LANDED", "CARRIED", "PROMOTED_COUNT",
              "UNPUBLISHED", "UNPROMOTED_BACKLOG", "WARN", "MARKED_DONE")
 
 
+def _preflight_blockers(workspace: Path) -> list[str]:
+    """Scan for everything that will block landing — informational, not stopping."""
+    blockers: list[str] = []
+    work_end = str(_WORK_END_DIR)
+    if work_end not in sys.path:
+        sys.path.insert(0, work_end)
+    try:
+        import close as ceremony_mod
+        import squash_marker as sm
+        unpromoted, _ = ceremony_mod.unpromoted_artifacts(workspace)
+        if unpromoted:
+            blockers.append(f"promotion: {len(unpromoted)} artifact(s)")
+        targets = ceremony_mod.resolve(workspace)
+        review_needed = sum(1 for t in targets if not t.is_workspace
+                           and sm.review_status(t.repo, t.branch, t.base_branch))
+        if review_needed:
+            blockers.append(f"squash: {review_needed} branch(es)")
+    except Exception:
+        pass
+    return blockers
+
+
 def sequence_preflight(args: dict[str, str]) -> tuple[list[str], bool]:
     """What a first call of wrap or end checks and says before any step runs.
 
@@ -1152,8 +1174,11 @@ def sequence_preflight(args: dict[str, str]) -> tuple[list[str], bool]:
             import scope
             repos = scope.covered(_queue_dir(args))
             lines.append("SCOPE=" + ", ".join(str(r) for r in repos))
-        except Exception as error:       # the scope line is information, never a blocker
+        except Exception as error:
             lines.append(f"SCOPE=unknown ({error})")
+        blockers = _preflight_blockers(workspace)
+        if blockers:
+            lines.append("PREFLIGHT_WARN=" + "; ".join(blockers))
     return lines, False
 
 

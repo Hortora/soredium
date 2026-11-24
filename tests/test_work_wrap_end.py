@@ -272,6 +272,24 @@ class TestReport:
         assert result["ACTION"] == "complete" and "ATTENTION" not in result
 
 
+class TestPreflight:
+
+    def test_end_reports_squash_blocker_in_preflight_warn(self, world):
+        commit(world["project"], "second.txt")  # stale squash marker
+        result = run(world, "end")
+        assert "PREFLIGHT_WARN" in result, result["_raw"]
+        assert "squash" in result["PREFLIGHT_WARN"]
+
+    def test_wrap_does_not_report_preflight_warn(self, world):
+        commit(world["project"], "second.txt")
+        result = run(world, "wrap")
+        assert "PREFLIGHT_WARN" not in result
+
+    def test_clean_end_has_no_preflight_warn(self, world):
+        result = run(world, "end")
+        assert "PREFLIGHT_WARN" not in result
+
+
 class TestNoLostWork:
     """Existing layouts and half-finished states are refused or left intact, never guessed at."""
 
