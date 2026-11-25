@@ -69,23 +69,27 @@ mode is truncating a substantial session to hit an arbitrary limit, producing
 entries that summarise without informing. If the reader would need to read
 the git log to understand what happened, the entry is too short for its topic.
 
-**Every entry includes at least one SVG diagram.** This is mandatory, not
-advisory. Architectural decisions, data flows, state machines,
-before/after comparisons, component relationships, decision trees — if
-the session's work has structure (and it almost always does), draw it.
+**Eagerly look for every opportunity to include SVG diagrams.** A diagram
+that shows the reader what changed is worth more than three paragraphs
+describing it. Scan the entire entry for concepts that have structure —
+each one is a diagram opportunity. Most entries should have two or more.
 
-Save each diagram as a separate `.svg` file in an `images/` directory
-alongside the entry (never inline `<svg>` in markdown — see
-`_universal.md`). Reference with `![Description](images/name.svg)`.
-A diagram that shows the reader what changed is worth more than three
-paragraphs describing it.
-
-What to diagram (pick at least one):
+Diagram types to actively look for:
 - **Before/after** — how data flow, architecture, or state changed
 - **Component interaction** — what talks to what, and how
 - **Decision flow** — the path through alternatives to the choice made
 - **State machine** — lifecycle states and transitions
 - **Layer diagram** — where the new code sits in the stack
+- **Sequence** — the order of operations across components
+- **Comparison** — two approaches side by side
+
+For each section of the entry, ask: "would a diagram make this clearer?"
+If yes, draw it. Don't stop at one — if three sections benefit from
+diagrams, draw three.
+
+Save each diagram as a separate `.svg` file in an `images/` directory
+alongside the entry (never inline `<svg>` in markdown — see
+`_universal.md`). Reference with `![Description](images/name.svg)`.
 
 If you genuinely cannot identify anything diagrammable in the session's
 work, say so explicitly in the draft review and get confirmation before

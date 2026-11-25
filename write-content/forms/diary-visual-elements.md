@@ -6,11 +6,13 @@ Used by diary form Step 3–4. Visual content makes posts readable and credible.
 
 ## SVG Diagrams (mandatory)
 
-**Every diary entry must include at least one SVG diagram.** This is the
-primary visual element — not an optional enhancement. Claude generates
-the SVG directly; no external tools needed.
+**Eagerly look for every opportunity to include SVG diagrams.** This is
+the primary visual element — not an optional enhancement. Claude generates
+the SVG directly; no external tools needed. Don't stop at one: scan every
+section of the entry and draw a diagram wherever structure would be
+clearer shown than told. Most entries should have two or more.
 
-**What to diagram** (pick at least one per entry):
+**What to diagram** (actively look for all of these):
 
 | Type | When to use | Example |
 |------|-------------|---------|

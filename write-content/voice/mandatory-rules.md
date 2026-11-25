@@ -128,9 +128,10 @@ Apply the same judgment as code blocks: include when genuinely useful, not to pa
 1. **UI work → always screenshot** — when the entry is about building or changing a UI,
    generate a mock screenshot or capture a PNG of the actual interface and include it.
 
-2. **SVG diagrams (mandatory for diary/blog)** — every diary or blog entry includes at
-   least one SVG diagram. Architecture decisions, data flows, before/after states,
-   component interactions, state machines. Save as separate `.svg` files in `images/`.
+2. **SVG diagrams (mandatory for diary/blog)** — eagerly look for every opportunity
+   to include SVG diagrams. Architecture decisions, data flows, before/after states,
+   component interactions, state machines, sequences, comparisons. Most entries
+   should have two or more. Save as separate `.svg` files in `images/`.
    For other content types, include a diagram when the concept has structure.
 
 3. **Web search** — consider searching for images that make the content more interesting
