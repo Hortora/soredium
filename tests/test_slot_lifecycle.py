@@ -2247,6 +2247,52 @@ class TestStripInheritedLifecycle:
             "Stale .plan from main survived into slot workspace clone"
 
 
+class TestStripInheritedQueue:
+    """Refs #636: .queue must be stripped from inherited workspace clones."""
+
+    def test_strips_queue_file(self, tmp_path):
+        ws = tmp_path / "wsp"
+        ws.mkdir()
+        (ws / ".git").mkdir()
+        (ws / ".queue").write_text("# Queue from canonical workspace\n")
+        stripped = slot_lifecycle._strip_inherited_lifecycle(ws)
+        assert ".queue" in stripped
+        assert not (ws / ".queue").exists()
+
+    def test_lifecycle_files_includes_queue(self):
+        assert ".queue" in slot_lifecycle._LIFECYCLE_FILES
+
+
+class TestCreateSlotQueueRoot:
+    """Refs #636: create_slot must set up .queue-root so queue I/O goes to slot root."""
+
+    @patch("slot_lifecycle.run_cmd")
+    def test_create_slot_writes_queue_root(self, mock_cmd, tmp_path):
+        family = tmp_path / "casehub"
+        family.mkdir()
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
+
+        mock_cmd.return_value = (0, "", "")
+
+        with patch("slot_lifecycle.resolve_workspace_source") as mock_resolve:
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result = slot_lifecycle.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="fix-636",
+                issue="636",
+                issue_repo="hortora/soredium",
+                covers="636",
+                context="Queue root fix",
+            )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+        assert (slot_dir / ".queue-root").exists(), \
+            "create_slot must write .queue-root at slot root"
+
+
 class TestProcessArchiveRequests:
     """process_archive_requests processes .archive-requested markers."""
 
