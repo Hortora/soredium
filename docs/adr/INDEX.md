@@ -15,3 +15,6 @@
 | 0011 | [Revert subtype taxonomy value from 'log' back to 'diary'](0011-revert-subtype-diary-log-to-diary.md) | Accepted | 2026-05-22 |
 | 0012 | [Unified review framework — lifecycle-driven dimensions with degree-only user choice](0012-unified-review-framework.md) | Proposed | 2026-08-01 |
 | 0013 | [Unified .plan file replaces .meta and .epic](0013-unified-plan-file.md) | Accepted | 2026-08-14 |
+| 0016 | [Workspace merge in branch mode](ADR-0016-workspace-merge-in-branch-mode.md) | Accepted | — |
+| 0017 | [Separate queue from ceremony state](ADR-0017-separate-queue-from-ceremony-state.md) | Accepted | 2026-11-05 |
+| 0018 | [Kill promotion — workspace is ephemeral](ADR-0018-kill-promotion-ephemeral-workspace.md) | Accepted | 2026-11-25 |
