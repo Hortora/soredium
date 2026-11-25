@@ -422,7 +422,8 @@ def apply_move_on_gate(args: dict[str, str]) -> tuple[dict[str, str], list[str],
     if choice == "done":
         branch = args.get("branch", "")
         done = run_script(["python3", str(_PLAN_MANAGER), "mark-done",
-                           str(queue_file), f"branch={branch}"])
+                           str(queue_file), f"branch={branch}"],
+                          workspace=queue_file.parent)
         lines.append("GATE_CHOICE=done")
         if done.get("ERROR"):
             lines += ["ACTION=error", "ERROR=mark_done_failed",
@@ -431,7 +432,8 @@ def apply_move_on_gate(args: dict[str, str]) -> tuple[dict[str, str], list[str],
     elif choice == "deferred":
         reason = args.get("reason", "deferred via move-on gate")
         done = run_script(["python3", str(_PLAN_MANAGER), "defer-active",
-                           str(queue_file), f"reason={reason}"])
+                           str(queue_file), f"reason={reason}"],
+                          workspace=queue_file.parent)
         lines.append("GATE_CHOICE=deferred")
         if done.get("ERROR"):
             lines += ["ACTION=error", "ERROR=defer_failed",
@@ -440,7 +442,8 @@ def apply_move_on_gate(args: dict[str, str]) -> tuple[dict[str, str], list[str],
     elif choice == "move_down":
         position = args.get("position", "end")
         done = run_script(["python3", str(_PLAN_MANAGER), "move-down",
-                           str(queue_file), f"position={position}"])
+                           str(queue_file), f"position={position}"],
+                          workspace=queue_file.parent)
         lines.append("GATE_CHOICE=move_down")
         if done.get("ERROR"):
             lines += ["ACTION=error", "ERROR=move_down_failed",
