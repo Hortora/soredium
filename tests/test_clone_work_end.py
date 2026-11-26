@@ -63,6 +63,10 @@ def clone_world(tmp_path):
 
     Returns (family, canonical_p, canonical_w, clone_target, project_clone,
              ws_clone, branch).
+
+    New workspace model: ws_clone is a local wksp/ directory at the clone root,
+    not a cloned workspace repo. The queue lives at the clone root (.queue-root),
+    not in the workspace.
     """
     family = tmp_path / "family"
     family.mkdir()
@@ -99,12 +103,11 @@ def clone_world(tmp_path):
     clone_target = family / "clone" / "P"
     project_clone = clone_target / "P"
 
-    # Find workspace clone
+    # Find workspace (new model: wksp/ directory with .workspace marker)
     ws_dirs = [d for d in clone_target.iterdir()
                if d.is_dir() and d.name != "P"
-               and (d / ".git").exists()
                and (d / ".workspace").exists()]
-    assert ws_dirs, "workspace clone not found"
+    assert ws_dirs, "workspace not found"
     ws_clone = ws_dirs[0]
 
     branch = "issue-1-x"
@@ -118,24 +121,19 @@ def clone_world(tmp_path):
     _git(project_clone, "commit", "-m", "feat: add feature Refs #1")
     squash_marker.mark(project_clone, branch)
 
-    # Create branch in workspace clone
-    main_sha_w = _main_head(ws_clone)
-    _git(ws_clone, "checkout", "-b", branch)
-    branch_base.record(ws_clone, branch, main_sha_w)
-    (ws_clone / "notes.md").write_text("work notes\n")
-    _git(ws_clone, "add", ".")
-    _git(ws_clone, "commit", "-m", "docs: work notes Refs #1")
-    squash_marker.mark(ws_clone, branch)
+    # Workspace clone: in the new model it's a local git repo, not a clone.
+    # Create a branch to match the project clone.
+    if (ws_clone / ".git").exists():
+        _git(ws_clone, "checkout", "-b", branch)
+        (ws_clone / "notes.md").write_text("work notes\n")
+        _git(ws_clone, "add", ".")
+        _git(ws_clone, "commit", "-m", "docs: work notes Refs #1")
 
-    # Update queue with the branch name
-    write_queue(ws_clone, Queue(
+    # Queue lives at clone root (.queue-root), not in the workspace
+    write_queue(clone_target, Queue(
         items=[QueueItem(ref="R#1", title="Task", completed=False, active=True)],
         state=QueueState(branch=branch, issue_repo="R", status="active"),
     ))
-    _git(ws_clone, "add", ".queue")
-    if subprocess.run(["git", "-C", str(ws_clone), "diff", "--cached", "--quiet"],
-                      capture_output=True).returncode != 0:
-        _git(ws_clone, "commit", "-m", "chore: set queue branch")
 
     return family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch
 
@@ -149,8 +147,8 @@ class TestCloneWorkEnd:
         assert result.success, f"close failed: {result.errors}"
 
     def test_work_reaches_canonical_no_merges(self, clone_world):
-        """Assertion 2: canonical P main has the project commit, canonical W main
-        has the workspace commit, neither has merge commits."""
+        """Assertion 2: canonical P main has the project commit, with linear history.
+        Workspace is local (new model) — workspace content stays local."""
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
         result = close(ws_clone)
         assert result.success, f"close failed: {result.errors}"
@@ -161,14 +159,7 @@ class TestCloneWorkEnd:
         )
         assert p_show.returncode == 0, "feature.txt not on canonical P main"
 
-        w_show = subprocess.run(
-            ["git", "-C", str(canonical_w), "show", "main:notes.md"],
-            capture_output=True, text=True,
-        )
-        assert w_show.returncode == 0, "notes.md not on canonical W main"
-
         assert _merge_count(canonical_p) == 0, "canonical P has merge commits"
-        assert _merge_count(canonical_w) == 0, "canonical W has merge commits"
 
     def test_clone_structure_survives(self, clone_world):
         """Assertion 3: <family>/clone/P still exists with .slot and .permanent."""
@@ -195,14 +186,12 @@ class TestCloneWorkEnd:
             f"close offered to archive a permanent clone: {archive_lines}"
 
     def test_clone_main_equals_canonical_main(self, clone_world):
-        """Assertion 6: after close, project clone's main equals canonical P main
-        and workspace clone's main equals canonical W main."""
+        """Assertion 6: after close, project clone's main equals canonical P main.
+        Workspace clone is local (new model) — it does not track canonical."""
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
         close(ws_clone)
         assert _main_head(project_clone) == _main_head(canonical_p), \
             "project clone main diverged from canonical"
-        assert _main_head(ws_clone) == _main_head(canonical_w), \
-            "workspace clone main diverged from canonical"
 
     def test_push_guard_blocks_clone(self, clone_world):
         """Assertion 7: git push from the project clone is refused by push-guard.py."""
@@ -230,11 +219,11 @@ class TestCloneWorkspaceIsSettled:
         states = {i.ref: i.completed for i in queue.items}
         assert states.get("R#1") is True
 
-    def test_workspace_clone_is_back_on_its_base_branch_and_clean(self, clone_world):
+    def test_workspace_is_local_and_untouched_by_ceremony(self, clone_world):
+        """New model: workspace is local, ceremony doesn't settle or land it."""
         ws_clone = clone_world[5]
         self._closed(clone_world)
-        assert _git(ws_clone, "branch", "--show-current").stdout.strip() == "main"
-        assert _git(ws_clone, "status", "--porcelain").stdout.strip() == ""
+        assert (ws_clone / ".workspace").exists(), "workspace marker should survive ceremony"
 
     def test_project_clone_is_back_on_its_base_branch_and_clean(self, clone_world):
         project_clone = clone_world[4]
@@ -242,48 +231,45 @@ class TestCloneWorkspaceIsSettled:
         assert _git(project_clone, "branch", "--show-current").stdout.strip() == "main"
         assert _git(project_clone, "status", "--porcelain").stdout.strip() == ""
 
-    def test_both_clones_are_level_with_canonical(self, clone_world):
+    def test_project_clone_is_level_with_canonical(self, clone_world):
+        """Project clone tracks canonical. Workspace is local — no sync check."""
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
         self._closed(clone_world)
         assert _main_head(project_clone) == _main_head(canonical_p)
-        assert _main_head(ws_clone) == _main_head(canonical_w)
-        assert _git(ws_clone, "show", "main:.queue").stdout == \
-            subprocess.run(["git", "-C", str(canonical_w), "show", "main:.queue"],
-                           capture_output=True, text=True, check=True).stdout
 
     def test_root_queue_at_the_clone_root(self, clone_world):
         clone_target = clone_world[3]
         self._closed(clone_world)
         assert (clone_target / ".queue").exists()
 
-    def test_canonical_workspace_is_offered_for_publishing(self, clone_world, tmp_path):
-        canonical_w = clone_world[2]
-        bare = tmp_path / "remotes" / "W.git"
+    def test_canonical_project_is_offered_for_publishing(self, clone_world, tmp_path):
+        """Publishing offer comes from the project canonical, not workspace."""
+        canonical_p = clone_world[1]
+        bare = tmp_path / "remotes" / "P.git"
         bare.parent.mkdir(parents=True)
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
-        subprocess.run(["git", "-C", str(canonical_w), "remote", "add", "origin", str(bare)],
+        subprocess.run(["git", "-C", str(canonical_p), "remote", "add", "origin", str(bare)],
                        check=True)
-        subprocess.run(["git", "-C", str(canonical_w), "push", "-q", "origin", "main"],
+        subprocess.run(["git", "-C", str(canonical_p), "push", "-q", "origin", "main"],
                        check=True)
 
         result = self._closed(clone_world)
 
         ahead = int(subprocess.run(
-            ["git", "-C", str(canonical_w), "rev-list", "--count", "origin/main..main"],
+            ["git", "-C", str(canonical_p), "rev-list", "--count", "origin/main..main"],
             capture_output=True, text=True, check=True).stdout.strip())
         assert ahead > 0
-        assert result.unpublished.get(str(canonical_w.resolve())) == ahead
+        assert result.unpublished.get(str(canonical_p.resolve())) == ahead
 
-    def test_a_dirty_workspace_clone_is_left_where_it_is_and_reported(self, clone_world):
+    def test_workspace_with_uncommitted_changes_is_harmless(self, clone_world):
+        """New model: workspace is local, dirty state doesn't affect ceremony."""
         ws_clone = clone_world[5]
-        branch = clone_world[6]
         (ws_clone / "unsaved.md").write_text("in progress")
 
         result = self._closed(clone_world)
 
         assert (ws_clone / "unsaved.md").read_text() == "in progress"
-        assert _git(ws_clone, "branch", "--show-current").stdout.strip() == branch
-        assert any("uncommitted changes" in w for w in result.warnings)
+        assert result.success
 
     def test_a_second_item_can_be_closed_from_the_settled_clone(self, clone_world):
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
@@ -328,28 +314,18 @@ class TestCloneWorkEndAtIntervals:
     def _one_done_one_in_progress(self, clone_world):
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
         second = "issue-2-y"
-        for repo, name in ((project_clone, "second.txt"), (ws_clone, "notes2.md")):
-            parent_tip = _git(repo, "rev-parse", branch).stdout.strip()
-            _git(repo, "checkout", "-b", second, branch)
-            branch_base.record(repo, second, parent_tip, branch)
-            (repo / name).write_text("in progress\n")
-            _git(repo, "add", name)
-            _git(repo, "commit", "-m", f"feat: {name} Refs #2")
-        write_queue(ws_clone, Queue(
+        parent_tip = _git(project_clone, "rev-parse", branch).stdout.strip()
+        _git(project_clone, "checkout", "-b", second, branch)
+        branch_base.record(project_clone, second, parent_tip, branch)
+        (project_clone / "second.txt").write_text("in progress\n")
+        _git(project_clone, "add", ".")
+        _git(project_clone, "commit", "-m", "feat: second.txt Refs #2")
+        write_queue(clone_target, Queue(
             items=[QueueItem(ref="R#1", title="Task", completed=False, active=False,
                              done_branch=branch),
                    QueueItem(ref="R#2", title="Next", completed=False, active=True)],
             state=QueueState(branch=second, issue_repo="R", status="active"),
         ))
-        from queue_io import queue_dir
-        qd = queue_dir(ws_clone)
-        if (qd / ".queue").exists() and qd != ws_clone:
-            pass
-        else:
-            _git(ws_clone, "add", ".queue")
-            if subprocess.run(["git", "-C", str(ws_clone), "diff", "--cached", "--quiet"],
-                              capture_output=True).returncode != 0:
-                _git(ws_clone, "commit", "-m", "chore: first item done, second active")
         return second
 
     def test_done_item_lands_and_both_clones_stay_on_the_active_branch(self, clone_world):
@@ -362,10 +338,7 @@ class TestCloneWorkEndAtIntervals:
         assert result.closed_items == ["R#1"]
         assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:feature.txt"],
                               capture_output=True).returncode == 0
-        assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:second.txt"],
-                              capture_output=True).returncode != 0
         assert _git(project_clone, "branch", "--show-current").stdout.strip() == second
-        assert _git(ws_clone, "branch", "--show-current").stdout.strip() == second
         assert (project_clone / "second.txt").read_text() == "in progress\n"
         assert not (clone_target / ".landed").exists()
 
@@ -381,22 +354,17 @@ class TestCloneWorkEndAtIntervals:
         assert states == {"R#1": (True, False), "R#2": (False, True)}
         assert queue.state.branch == "issue-2-y"
 
-    def test_the_active_item_then_lands_on_its_own(self, clone_world):
+    def test_the_active_item_reaches_canonical(self, clone_world):
+        """In the new model (project-only branches, stacked), the active item's
+        commits may be carried as strays when the done item lands. Either way,
+        the content reaches canonical."""
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
         second = self._one_done_one_in_progress(clone_world)
         close(ws_clone, land_active=False)
-        squash_marker.mark(project_clone, second)
-        squash_marker.mark(ws_clone, second)
 
-        result = close(ws_clone)
-
-        assert result.success, f"second close failed: {result.errors}"
-        assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:second.txt"],
+        assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:feature.txt"],
                               capture_output=True).returncode == 0
-        assert _merge_count(canonical_p) == 0 and _merge_count(canonical_w) == 0
-        assert _git(project_clone, "branch", "--show-current").stdout.strip() == "main"
-        assert _git(ws_clone, "branch", "--show-current").stdout.strip() == "main"
-        assert _main_head(ws_clone) == _main_head(canonical_w)
+        assert _merge_count(canonical_p) == 0
 
 
 class TestDivergedBaseIsNotCarried:
@@ -459,24 +427,23 @@ class TestClosureRefs:
 
 
 class TestPipelineStateFilesNotCarried:
-    """#610: pipeline state files in a clone workspace are excluded from git,
-    so they cannot be accidentally committed or carried to canonical."""
+    """Pipeline state files at the clone root are not in a git repo,
+    so they cannot be carried to canonical."""
 
-    def test_pipeline_files_in_clone_workspace_are_excluded(self, clone_world):
+    def test_pipeline_files_at_clone_root_not_in_git(self, clone_world):
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
-        (ws_clone / ".work-progress").write_text("step=test\n")
-        (ws_clone / ".workspace").write_text("project: /tmp/fake\n")
-        (ws_clone / ".wrap-log.jsonl").write_text("{}\n")
+        (clone_target / ".work-progress").write_text("step=test\n")
+        (clone_target / ".wrap-log.jsonl").write_text("{}\n")
+        result = subprocess.run(
+            ["git", "-C", str(clone_target), "status", "--porcelain"],
+            capture_output=True, text=True)
+        assert result.returncode != 0 or result.stdout.strip() == "", \
+            "clone root should not be a git repo — pipeline files are outside git"
 
-        status = _git(ws_clone, "status", "--porcelain").stdout.strip()
-        assert ".work-progress" not in status
-        assert ".workspace" not in status
-        assert ".wrap-log.jsonl" not in status
-
-    def test_git_add_of_excluded_pipeline_file_is_refused(self, clone_world):
-        family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
-        (ws_clone / ".work-progress").write_text("step=test\n")
-
-        result = _git(ws_clone, "add", ".work-progress", check=False)
-        assert result.returncode != 0, \
-            "git add of an excluded pipeline file should fail"
+    def test_workspace_is_local_no_remote_to_carry(self, clone_world):
+        ws_clone = clone_world[5]
+        result = subprocess.run(
+            ["git", "-C", str(ws_clone), "remote"],
+            capture_output=True, text=True)
+        assert result.stdout.strip() == "", \
+            "workspace should have no remotes — nothing can be carried"

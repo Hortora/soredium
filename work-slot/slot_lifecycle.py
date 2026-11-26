@@ -241,6 +241,8 @@ def clone_repo_pair(
 
         # Symlink from project clone to root workspace
         pc_wksp = clone_dest / "wksp"
+        if pc_wksp.is_symlink():
+            pc_wksp.unlink()
         if not pc_wksp.exists():
             pc_wksp.symlink_to("../wksp")
         _exclude_symlinks(clone_dest)
