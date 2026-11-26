@@ -322,6 +322,29 @@ class TestLand:
         sha2 = land(target)
         assert sha2 == sha1
 
+    def test_already_landed_sets_flag(self, tmp_path: Path) -> None:
+        """Refs #614: second landing must set already_landed so the ceremony can report it."""
+        from close import land_targets, CloseTarget
+
+        repo = tmp_path / "project"
+        _init_repo(repo)
+        _create_branch_with_commit(repo, "issue-1-feat")
+
+        target = CloseTarget(
+            repo=repo, branch="issue-1-feat", base_branch="main",
+            transport="direct", canonical=None,
+            push_target="origin", mirror_target="",
+            is_workspace=False,
+        )
+
+        results1 = land_targets([target])
+        assert not results1[target].already_landed
+
+        _checkout(repo, "main")
+        results2 = land_targets([target])
+        assert results2[target].already_landed
+        assert results2[target].before_sha == results2[target].sha
+
     def test_land_workspace_is_linear(self, tmp_path: Path) -> None:
         """Workspace repos land like project repos: fast-forward, no merge commit."""
         from close import land, CloseTarget

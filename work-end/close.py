@@ -1162,6 +1162,10 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
             for target, outcome in results.items():
                 landed[target] = outcome.sha
                 warnings.extend(outcome.warnings)
+                if outcome.already_landed:
+                    warnings.append(
+                        f"{target.repo.name}: {target.branch} already on main "
+                        f"(landed via a prior ceremony or stacked branch)")
                 canonical = str(canonical_sync.locate(target.repo).repo)
                 unpublished.pop(canonical, None)
                 if outcome.unpublished:
