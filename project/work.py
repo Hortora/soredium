@@ -1005,6 +1005,10 @@ def _mark_done_on_branch(ctx) -> list[str] | None:
     that would record work as finished that nothing has landed."""
     if not ctx.plan_path or not ctx.branch or ctx.branch == ctx.base_branch:
         return None
+    from queue_io import read_queue
+    q = read_queue(Path(ctx.workspace))
+    if q and q.active_item() is None:
+        return None
     return ["python3", str(_PLAN_MANAGER), "mark-done", str(ctx.plan_path),
             f"branch={ctx.branch}"]
 
