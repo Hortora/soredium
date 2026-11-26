@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" font-family="system-ui, -apple-system, sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="#475569" stroke-width="1.5"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="360" y="28" text-anchor="middle" font-size="15" font-weight="600" fill="#1e293b">Closure refs complement creation refs</text>
+
+  <!-- Creation side -->
+  <rect x="30" y="55" width="300" height="120" rx="8" fill="#f0f9ff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="180" y="78" text-anchor="middle" font-weight="600" fill="#1e40af" font-size="14">Creation time</text>
+  <text x="50" y="105" fill="#334155" font-size="12" font-family="monospace">refs/soredium/base/&lt;branch&gt;</text>
+  <text x="55" y="122" fill="#64748b" font-size="11">commit the branch was cut from</text>
+  <text x="50" y="148" fill="#334155" font-size="12" font-family="monospace">refs/soredium/parent/&lt;branch&gt;</text>
+  <text x="55" y="165" fill="#64748b" font-size="11">branch it was stacked on</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="115" x2="380" y2="115" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="360" y="108" text-anchor="middle" fill="#64748b" font-size="11">lifecycle</text>
+
+  <!-- Closure side -->
+  <rect x="390" y="55" width="300" height="120" rx="8" fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
+  <text x="540" y="78" text-anchor="middle" font-weight="600" fill="#166534" font-size="14">Closure time</text>
+  <text x="410" y="105" fill="#334155" font-size="12" font-family="monospace">refs/soredium/closed/&lt;branch&gt;</text>
+  <text x="415" y="122" fill="#64748b" font-size="11">SHA where content landed on base</text>
+  <text x="410" y="148" fill="#334155" font-size="12" font-family="monospace">refs/soredium/closed-meta/&lt;branch&gt;</text>
+  <text x="415" y="165" fill="#64748b" font-size="11">blob: landed_sha, base, issue, timestamp</text>
+
+  <!-- Bottom: where they live -->
+  <rect x="80" y="210" width="560" height="110" rx="8" fill="#fefce8" stroke="#fde047" stroke-width="1.5"/>
+  <text x="360" y="237" text-anchor="middle" font-weight="600" fill="#854d0e" font-size="14">Workspace repo (owns the lifecycle record)</text>
+
+  <text x="120" y="262" fill="#334155" font-size="12">.queue</text>
+  <text x="120" y="280" fill="#64748b" font-size="11">what's active / done</text>
+
+  <text x="280" y="262" fill="#334155" font-size="12">refs/soredium/base/*</text>
+  <text x="280" y="280" fill="#64748b" font-size="11">how branches started</text>
+
+  <text x="470" y="262" fill="#334155" font-size="12">refs/soredium/closed/*</text>
+  <text x="470" y="280" fill="#64748b" font-size="11">how branches ended</text>
+
+  <text x="360" y="308" text-anchor="middle" fill="#92400e" font-size="11" font-style="italic">git for-each-ref refs/soredium/ — no file I/O, works across clones</text>
+</svg>

@@ -443,6 +443,30 @@ class TestDivergedBaseIsNotCarried:
                               capture_output=True).returncode == 0
 
 
+class TestClosureRefs:
+    """#618: close ceremony writes structured closure refs to workspace."""
+
+    def test_closure_refs_written_after_close(self, clone_world):
+        family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
+        result = close(ws_clone)
+        assert result.success, f"close failed: {result.errors}"
+
+        import closure_refs
+        meta = closure_refs.read(ws_clone, branch)
+        assert meta is not None, "no closure ref written for the branch"
+        assert meta["landed_on"] == "main"
+        assert meta["landed_sha"]
+        assert meta["issue"] == "R#1"
+
+    def test_closure_ref_lists_the_branch(self, clone_world):
+        family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
+        close(ws_clone)
+
+        import closure_refs
+        closed = closure_refs.list_closed(ws_clone)
+        assert branch in closed
+
+
 class TestPipelineStateFilesNotCarried:
     """#610: pipeline state files in a clone workspace are excluded from git,
     so they cannot be accidentally committed or carried to canonical."""

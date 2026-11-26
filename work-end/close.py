@@ -34,6 +34,7 @@ import squash_marker
 import canonical_sync
 from canonical_sync import SyncError
 import branch_base
+import closure_refs
 
 
 LIFECYCLE_FILES = [
@@ -1180,7 +1181,6 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
                                  sha=landed[target], issue=issue)
                 worktrace.work_ended(target.repo, target.branch, landed[target])
                 squash_marker.clear(target.repo, target.branch)
-                # The branch now sits on the base branch: the record has done its job.
                 branch_base.clear(target.repo, target.branch)
             if entry.done:
                 # Checked only now, so a later failure leaves the rest done-but-not-closed.
@@ -1268,6 +1268,14 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
         except Exception as error:      # a report must never fail a ceremony that landed
             backlog, backlog_commands = {}, []
             warnings.append(f"promotion backlog could not be counted: {error}")
+
+        base = _get_base_branch(workspace)
+        for issue_ref, branch in closed_branches.items():
+            landed_sha = _rev_parse(workspace, base) or ""
+            closure_refs.record(workspace, branch,
+                                landed_sha=landed_sha,
+                                base_branch=base,
+                                issue=issue_ref)
 
         return CloseResult(
             success=True,
