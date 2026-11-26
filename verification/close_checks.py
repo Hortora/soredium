@@ -410,7 +410,7 @@ def resolve_canonical_repos(
     for sub in sorted(slot_path.iterdir()):
         if not sub.is_dir() or not (sub / ".git").exists():
             continue
-        if sub.name in (".m2", "attic") or sub.name.startswith("wsp-"):
+        if sub.name in (".m2", "attic") or sub.name.startswith("wsp-") or (sub / ".workspace").exists():
             continue
         if covers_repos and sub.name not in covers_repos:
             continue

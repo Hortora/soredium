@@ -106,7 +106,7 @@ def check_zombie_slots(slots_dir: Path) -> list[Finding]:
         for clone in sorted(slot_dir.iterdir()):
             if not clone.is_dir() or not (clone / ".git").exists():
                 continue
-            if clone.name.startswith("wsp-"):
+            if clone.name.startswith("wsp-") or (clone / ".workspace").exists():
                 continue
             has_repos = True
             r = git(clone, "log", "-1", "--format=%s", branch)
@@ -172,7 +172,10 @@ def check_unpublished_slot_blogs(
         if not slot_dir.is_dir() or slot_dir.name in ("attic", "quarantine"):
             continue
         for clone in sorted(slot_dir.iterdir()):
-            if not clone.is_dir() or not clone.name.startswith("wsp-"):
+            if not clone.is_dir():
+                continue
+            is_workspace = clone.name.startswith("wsp-") or (clone / ".workspace").exists()
+            if not is_workspace:
                 continue
             if not (clone / ".git").exists():
                 continue
