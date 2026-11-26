@@ -402,31 +402,22 @@ class TestCloneWorkEndAtIntervals:
 class TestDivergedBaseIsNotCarried:
     """A clone whose own main has diverged from canonical is reported, never replayed."""
 
-    def test_diverged_clone_main_is_left_alone_and_the_work_still_lands(self, clone_world):
+    def test_diverged_clone_blocks_ceremony(self, clone_world):
+        """#624: a diverged clone now blocks preflight instead of landing silently."""
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
-        # canonical moves on
         (canonical_p / "elsewhere.txt").write_text("landed by someone else\n")
         _git(canonical_p, "add", "elsewhere.txt")
         _git(canonical_p, "commit", "-m", "feat: elsewhere Refs #9")
-        # the clone's own main gains a commit canonical never had
         _git(project_clone, "checkout", "main")
         (project_clone / "stray.txt").write_text("old clone history\n")
         _git(project_clone, "add", "stray.txt")
         _git(project_clone, "commit", "-m", "feat: stray Refs #9")
-        stray_tip = _git(project_clone, "rev-parse", "main").stdout.strip()
         _git(project_clone, "checkout", branch)
 
         result = close(ws_clone)
 
-        assert result.success, f"close failed: {result.errors}"
-        key = next(k for k in result.not_landed if k.endswith(":main"))
-        assert "diverged" in result.not_landed[key]
-        assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:stray.txt"],
-                              capture_output=True).returncode != 0
-        assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:feature.txt"],
-                              capture_output=True).returncode == 0
-        assert _git(project_clone, "cat-file", "-t", stray_tip).stdout.strip() == "commit"
-        assert _merge_count(canonical_p) == 0
+        assert not result.success
+        assert any("diverged" in e for e in result.errors)
 
     def test_a_clone_main_that_is_only_ahead_is_still_carried(self, clone_world):
         family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world

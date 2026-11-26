@@ -37,6 +37,14 @@ import branch_base
 import closure_refs
 
 
+class SettlementError(Exception):
+    """A permanent clone could not be returned to its base branch after landing."""
+
+    def __init__(self, unsettled: list[str]):
+        self.unsettled = unsettled
+        super().__init__(f"clones not settled: {'; '.join(unsettled)}")
+
+
 LIFECYCLE_FILES = [
     "JOURNAL.md", ".close-state", ".execute-progress",
     ".land-ledger.jsonl", ".artifacts-promoted", ".squash-plan",
@@ -428,9 +436,13 @@ def preflight(targets: list[CloseTarget]) -> dict:
         if not _branch_exists(t.repo, t.base_branch):
             errors.append(f"{t.repo.name}: no {t.base_branch} branch")
         try:
-            canonical_sync.locate(t.repo)
+            canon = canonical_sync.locate(t.repo)
+            state = canonical_sync.follow(t.repo, canon)
+            if state == "diverged":
+                errors.append(
+                    f"{t.repo.name}: base branch {t.base_branch} has diverged from "
+                    f"canonical — resolve the divergence before landing")
         except SyncError as error:
-            # Refused before anything is touched: the work would have nowhere to land.
             errors.append(error.detail)
         if not _remote_reachable(t.repo, t.push_target):
             pass
@@ -593,53 +605,53 @@ def carry_strays(slot_dir: Path, covered: set, diverged: Optional[set] = None) -
     return carried, not_landed
 
 
-def settle_permanent_clone(slot_dir: Path, keep_branches: Optional[set] = None) -> list[str]:
+def settle_permanent_clone(slot_dir: Path, keep_branches: Optional[set] = None) -> None:
     """After a ceremony in a permanent clone: every clone returns to its base
-    branch and follows canonical, ready for the next item. Returns warnings.
+    branch and follows canonical, ready for the next item.
 
     A clone on one of `keep_branches` stays there: that is an active item the
     ceremony deliberately did not land, and its work continues on that branch.
 
-    A clone with uncommitted changes, or whose branch still holds commits
-    canonical lacks, is left where it is: moving it would hide work.
+    Raises SettlementError when any clone cannot be returned to its base branch.
     """
     from slot_core import get_all_slot_repos
-    left: list[str] = []
+    unsettled: list[str] = []
     for name in get_all_slot_repos(slot_dir):
         repo = slot_dir / name
         base = _get_base_branch(repo)
         current = _current_branch(repo)
         if current and current != base and current in (keep_branches or set()):
             try:
-                canonical_sync.follow(repo)      # the base ref still catches up
+                canonical_sync.follow(repo)
             except SyncError:
                 pass
             continue
         if current and current != base:
             commit_pipeline_files(repo, "")
             if _git(repo, "status", "--porcelain").stdout.strip():
-                left.append(f"{name}: left on {current} with uncommitted changes")
+                unsettled.append(f"{name}: left on {current} with uncommitted changes")
                 continue
             try:
                 ahead = canonical_sync.ahead_of_canonical(repo, current)
             except SyncError:
                 ahead = 0
             if ahead and not _is_stamp_commit(repo, current):
-                left.append(f"{name}: left on {current}, {ahead} commit(s) not in canonical")
+                unsettled.append(f"{name}: left on {current}, {ahead} commit(s) not in canonical")
                 continue
             if _git(repo, "checkout", "-q", base).returncode != 0:
-                left.append(f"{name}: could not return to {base}")
+                unsettled.append(f"{name}: could not return to {base}")
                 continue
         try:
             state = canonical_sync.follow(repo)
         except SyncError as error:
-            left.append(f"{name}: {error.detail}")
+            unsettled.append(f"{name}: {error.detail}")
             continue
         if state == "diverged":
-            left.append(f"{name}: {base} has diverged from canonical")
+            unsettled.append(f"{name}: {base} has diverged from canonical")
         elif state == "blocked":
-            left.append(f"{name}: {base} is behind canonical and could not be moved")
-    return left
+            unsettled.append(f"{name}: {base} is behind canonical and could not be moved")
+    if unsettled:
+        raise SettlementError(unsettled)
 
 
 def promotion_pairs(workspace: Path) -> list[tuple[Path, Path]]:
@@ -1175,6 +1187,12 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
                 unpublished.pop(canonical, None)
                 if outcome.unpublished:
                     unpublished[canonical] = outcome.unpublished
+            unlanded = [t for t in entry.targets if not landed.get(t)]
+            if unlanded:
+                names = ", ".join(f"{t.repo.name}:{t.branch}" for t in unlanded)
+                raise RuntimeError(
+                    f"stage invariant: landing produced no SHA for {names} — "
+                    f"refusing to stamp")
             for target in entry.targets:
                 stamp(target, landed[target], issue)
                 worktrace.record("stamp", repo=target.repo, branch=target.branch,
@@ -1234,7 +1252,10 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
         if permanent:
             kept = set() if active_landed or not queue else {
                 b for b in discover_active_branches(workspace, queue)}
-            warnings.extend(settle_permanent_clone(slot_dir, keep_branches=kept))
+            try:
+                settle_permanent_clone(slot_dir, keep_branches=kept)
+            except SettlementError as error:
+                warnings.extend(error.unsettled)
 
         # Counted last: after the queue commit and after strays were carried, and
         # for the workspace even when it had no branch to land. Commits made
