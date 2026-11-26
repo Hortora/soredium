@@ -145,10 +145,15 @@ def _cleanup_inherited_symlinks(clone_path: Path, slot_dir: Path) -> list[str]:
     return removed
 
 
+_EXCLUDE_ENTRIES = {"wksp", "proj", ".claude",
+                    ".work-progress", ".wrap-log.jsonl",
+                    ".land-ledger.jsonl", ".close-state", ".workspace"}
+
+
 def _exclude_symlinks(clone_path: Path) -> None:
     exclude_file = clone_path / ".git" / "info" / "exclude"
     exclude_file.parent.mkdir(parents=True, exist_ok=True)
-    entries = {"wksp", "proj", ".claude"}
+    entries = set(_EXCLUDE_ENTRIES)
     if exclude_file.exists():
         existing_lines = {
             line.strip() for line in exclude_file.read_text().splitlines()

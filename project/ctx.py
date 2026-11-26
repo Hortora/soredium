@@ -104,8 +104,7 @@ def resolve(cwd=None) -> dict[str, str]:
         try:
             from workspace_create import (validate_workspace_location,
                                           validate_workspace_marker,
-                                          write_workspace_marker,
-                                          resolve_workspace, ensure_workspace)
+                                          resolve_workspace)
             loc_err = validate_workspace_location(topo.workspace)
             if loc_err:
                 correct_ws = resolve_workspace(topo.project)
@@ -119,14 +118,8 @@ def resolve(cwd=None) -> dict[str, str]:
             else:
                 marker_err = validate_workspace_marker(topo.workspace, topo.project)
                 if marker_err:
-                    write_workspace_marker(topo.workspace, topo.project)
-                    import subprocess as _sp2
-                    _sp2.run(["git", "-C", str(topo.workspace), "add", ".workspace"],
-                             capture_output=True)
-                    _sp2.run(["git", "-C", str(topo.workspace), "commit", "-m",
-                              "chore: add .workspace marker"],
-                             capture_output=True)
-                    workspace_valid = "yes"
+                    workspace_valid = "marker_stale"
+                    workspace_error = marker_err
         except ImportError:
             pass
 

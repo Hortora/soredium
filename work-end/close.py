@@ -339,7 +339,7 @@ _LIFECYCLE_IGNORE = frozenset({
     ".queue", ".plan", ".close-state", ".work-progress", ".close-progress",
     ".execute-progress", ".land-ledger.jsonl", ".close-log.jsonl",
     ".wrap-log.jsonl", ".artifacts-promoted", "JOURNAL.md",
-    ".close-report.json", ".squash-plan",
+    ".close-report.json", ".squash-plan", ".workspace",
 })
 
 

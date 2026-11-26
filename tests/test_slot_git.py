@@ -108,6 +108,23 @@ class TestExcludeSymlinks:
         assert non_comment.count("proj") == 1
         assert non_comment.count("wksp") == 1
 
+    def test_pipeline_state_files_are_excluded(self, tmp_path):
+        repo = init_repo(tmp_path / "repo")
+        slot_git._exclude_symlinks(repo)
+        exclude = (repo / ".git" / "info" / "exclude").read_text()
+        for name in (".work-progress", ".wrap-log.jsonl", ".land-ledger.jsonl",
+                     ".close-state", ".workspace"):
+            assert name in exclude, f"{name} missing from exclude"
+
+    def test_excluded_pipeline_files_are_invisible_to_git(self, tmp_path):
+        repo = init_repo(tmp_path / "repo")
+        slot_git._exclude_symlinks(repo)
+        (repo / ".work-progress").write_text("step=1\n")
+        (repo / ".workspace").write_text("project: /tmp/fake\n")
+        result = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+                                capture_output=True, text=True)
+        assert result.stdout.strip() == ""
+
 
 
 class TestConfigureSlotRemotes:

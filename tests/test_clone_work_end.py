@@ -441,3 +441,27 @@ class TestDivergedBaseIsNotCarried:
         assert result.success, f"close failed: {result.errors}"
         assert subprocess.run(["git", "-C", str(canonical_p), "show", "main:extra.txt"],
                               capture_output=True).returncode == 0
+
+
+class TestPipelineStateFilesNotCarried:
+    """#610: pipeline state files in a clone workspace are excluded from git,
+    so they cannot be accidentally committed or carried to canonical."""
+
+    def test_pipeline_files_in_clone_workspace_are_excluded(self, clone_world):
+        family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
+        (ws_clone / ".work-progress").write_text("step=test\n")
+        (ws_clone / ".workspace").write_text("project: /tmp/fake\n")
+        (ws_clone / ".wrap-log.jsonl").write_text("{}\n")
+
+        status = _git(ws_clone, "status", "--porcelain").stdout.strip()
+        assert ".work-progress" not in status
+        assert ".workspace" not in status
+        assert ".wrap-log.jsonl" not in status
+
+    def test_git_add_of_excluded_pipeline_file_is_refused(self, clone_world):
+        family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch = clone_world
+        (ws_clone / ".work-progress").write_text("step=test\n")
+
+        result = _git(ws_clone, "add", ".work-progress", check=False)
+        assert result.returncode != 0, \
+            "git add of an excluded pipeline file should fail"

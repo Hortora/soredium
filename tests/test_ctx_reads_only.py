@@ -73,6 +73,33 @@ def test_a_current_workspace_reports_no_legacy_layout(tmp_path, monkeypatch):
     assert context["LEGACY_LAYOUT"] == ""
 
 
+def test_stale_workspace_marker_is_not_rewritten(tmp_path, monkeypatch):
+    """ctx.py must not write .workspace when it names the wrong project (#610)."""
+    proj = tmp_path / "project"
+    proj.mkdir()
+    g(proj, "init", "-q", "-b", "main")
+    (proj / "README.md").write_text("project\n")
+    g(proj, "add", "-A")
+    g(proj, "commit", "-q", "-m", "init")
+
+    ws = workspace_with(tmp_path, {
+        ".workspace": "project: /tmp/wrong-project\ncreated: 2026-01-01\n",
+        ".queue": PLAN.replace("state:", "status:"),
+    })
+    (ws / "proj").symlink_to(proj)
+    g(ws, "add", "-A")
+    g(ws, "commit", "-q", "-m", "add proj symlink", "--allow-empty")
+
+    before = tree(ws)
+    monkeypatch.chdir(ws)
+
+    context = ctx.resolve()
+
+    assert tree(ws) == before, ".workspace file was rewritten by ctx.resolve()"
+    assert g(ws, "status", "--porcelain") == ""
+    assert context["WORKSPACE_VALID"] == "marker_stale"
+
+
 def test_the_explicit_command_converts_the_legacy_layout(tmp_path):
     ws = workspace_with(tmp_path, {"design/.plan": PLAN, "design/JOURNAL.md": "j"})
     done = subprocess.run(["python3", str(ROOT / "work-slot" / "plan_migrate.py"), "to-root", str(ws)],
