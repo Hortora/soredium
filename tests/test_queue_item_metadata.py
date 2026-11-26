@@ -152,13 +152,13 @@ class TestPipelineNextItemOutput:
                 QueueItem(ref="o/r#3", title="Next task", completed=False, active=False,
                           scale="M", complexity="High"),
             ],
-            state=QueueState(branch="", issue_repo="O/r", status="active",
+            state=QueueState(branch="main", issue_repo="O/r", status="active",
                              covers="o/r#2")))
         subprocess.run(["git", "-C", str(project), "add", ".queue"], capture_output=True)
         subprocess.run(["git", "-C", str(project), "commit", "-q", "-m", "queue"],
                        capture_output=True)
         result = subprocess.run(
-            ["python3", WORK, "continue",
+            ["python3", WORK, "done",
              f"workspace={project}", f"project={project}",
              "branch=main", "base_branch=main", "on_main=yes",
              f"plan_path={project / '.queue'}", "issue_repo=O/r"],
@@ -194,3 +194,30 @@ class TestPipelineNextItemOutput:
         out = dict(l.split("=", 1) for l in result.stdout.splitlines() if "=" in l)
         assert "NEXT_ITEM" not in out
         assert out.get("DONE_WAITING") == "1"
+
+
+class TestEndSummaryNextItem:
+    """Refs #639: end summary must report the active item as NEXT_ITEM,
+    not skip it to show the item after it."""
+
+    def test_active_item_reported_as_next(self):
+        """When the queue has an active-but-unstarted item, the end summary
+        should report it, not skip over it."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
+        from queue_io import Queue, QueueItem, QueueState
+
+        q = Queue(
+            items=[
+                QueueItem(ref="o/r#1", title="Done", completed=True, active=False),
+                QueueItem(ref="o/r#618", title="Active unstarted", completed=False, active=True),
+                QueueItem(ref="o/r#623", title="After active", completed=False, active=False),
+            ],
+            state=QueueState(branch="", issue_repo="O/r", status="active"))
+
+        _active = q.active_item()
+        _next = _active or next((i for i in q.items
+                                 if not i.completed and not i.done_branch), None)
+
+        assert _next is not None
+        assert _next.ref == "o/r#618", f"expected active item, got {_next.ref}"

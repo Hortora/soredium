@@ -1266,8 +1266,9 @@ def sequence_report(command: str, workspace: Path) -> list[str]:
     from queue_io import read_queue as _rq
     _q = _rq(workspace)
     if _q:
-        _next = next((i for i in _q.items
-                      if not i.completed and not i.active and not i.done_branch), None)
+        _active = _q.active_item()
+        _next = _active or next((i for i in _q.items
+                                 if not i.completed and not i.done_branch), None)
         if _next:
             lines.append(f"NEXT_ITEM={_next.ref}")
             lines.append(f"NEXT_TITLE={_next.title}")
