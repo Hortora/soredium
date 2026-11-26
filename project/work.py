@@ -1084,9 +1084,9 @@ WRAP_STEPS: list[StepDef] = _WRAP_OPENING + _WRAP_CLOSING
 END_STEPS: list[StepDef] = _WRAP_OPENING + _CLOSE_STEPS + _WRAP_CLOSING
 
 # What each mechanical step printed that the final report repeats.
-_REPORTED = ("LANDED", "CLOSED_ITEM", "NOT_LANDED", "CARRIED", "PROMOTED_COUNT", "NOT_PROMOTED",
+_REPORTED = ("LANDED", "CLOSED_ITEM", "NOT_LANDED", "CARRIED",
              "PUBLISHED_COUNT", "NOT_PUBLISHED", "BLOG_PUBLISHED_COUNT", "BLOG_HELD",
-             "UNPUBLISHED", "UNPROMOTED_BACKLOG", "WARN", "MARKED_DONE")
+             "UNPUBLISHED", "WARN", "MARKED_DONE")
 
 
 def _preflight_blockers(workspace: Path) -> list[str]:
@@ -1251,7 +1251,7 @@ def sequence_report(command: str, workspace: Path) -> list[str]:
         lines.append(f"STEP_{step.name.upper()}={state}")
     troubled = [step.name for step in PIPELINES[command]
                 if any(mark in progress.get(f"report_{step.name}", "")
-                       for mark in ("NOT_PUBLISHED", "NOT_PROMOTED", "BLOG_HELD", "NOT_LANDED"))]
+                       for mark in ("NOT_PUBLISHED", "BLOG_HELD", "NOT_LANDED"))]
     if troubled:
         lines.append("ATTENTION=" + ",".join(troubled)
                      + " reported something they could not do; tell the user what and why")

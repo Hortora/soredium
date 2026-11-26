@@ -56,6 +56,7 @@ def configure_slot_remotes(clone_path: Path, canonical_path: Path) -> dict[str, 
     return {"origin": "", "upstream": "", "local": str(canonical_path)}
 
 
+# Retained for reference — no longer called. See workspace isolation (2026-11-26).
 def configure_update_instead(canonical_path: Path) -> None:
     """Set receive.denyCurrentBranch=updateInstead on canonical repo."""
     run_cmd(["git", "-C", str(canonical_path), "config",
