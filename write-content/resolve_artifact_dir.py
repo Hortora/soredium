@@ -1,4 +1,4 @@
-#!/usr/bin/3
+#!/usr/bin/env python3
 """
 resolve_artifact_dir.py — Unified artifact directory resolution with slot-escape detection.
 
