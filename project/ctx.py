@@ -180,13 +180,14 @@ def resolve(cwd=None) -> dict[str, str]:
     # Workspace setup checks — project scope first, then CWD
     cwd_path = Path(cwd) if cwd else Path.cwd()
     scope_path = topo.project
-    wksp_ok = (scope_path / "wksp").is_symlink() and (scope_path / "wksp").is_dir()
+    # wksp can be a symlink (canonical) or a plain directory (slot/clone)
+    wksp_ok = (scope_path / "wksp").is_dir()
     proj_ok = (scope_path / "proj").is_symlink() and (scope_path / "proj").is_dir()
-    wksp_ok = wksp_ok or ((cwd_path / "wksp").is_symlink() and (cwd_path / "wksp").is_dir())
+    wksp_ok = wksp_ok or (cwd_path / "wksp").is_dir()
     proj_ok = proj_ok or ((cwd_path / "proj").is_symlink() and (cwd_path / "proj").is_dir())
     if topo.in_worktree and topo.main_worktree_root:
         _main = topo.main_worktree_root
-        wksp_ok = wksp_ok or ((_main / "wksp").is_symlink() and (_main / "wksp").is_dir())
+        wksp_ok = wksp_ok or (_main / "wksp").is_dir()
         proj_ok = proj_ok or ((_main / "proj").is_symlink() and (_main / "proj").is_dir())
     # Cross-check: if wksp symlink exists but topology fell back to single-repo,
     # the target is not in a git repo — the symlink is broken

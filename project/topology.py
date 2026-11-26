@@ -131,6 +131,23 @@ def _detect_slot(project: Path) -> tuple[Path | None, str | None]:
     return slot_dir, primary
 
 
+def _find_workspace_dir_up(start: Path, git_root: Path) -> Path | None:
+    """Walk from start toward git_root looking for a wksp/ directory with .workspace marker."""
+    check = start.resolve()
+    root = git_root.resolve()
+    while True:
+        candidate = check / "wksp"
+        if candidate.is_dir() and not candidate.is_symlink() and (candidate / ".workspace").exists():
+            return candidate
+        if check == root:
+            break
+        parent = check.parent
+        if parent == check:
+            break
+        check = parent
+    return None
+
+
 def _find_symlink_up(start: Path, git_root: Path, name: str) -> Path | None:
     """Walk from start toward git_root looking for a symlink named 'name'."""
     check = start.resolve()
@@ -179,7 +196,7 @@ def resolve(cwd: str | None = None) -> Topology:
     if in_worktree:
         # Worktree: check worktree root first, then main worktree
         cwd_wksp = cwd_git_root / "wksp"
-        symlink_root = cwd_git_root if (cwd_wksp.is_symlink() and cwd_wksp.is_dir()) else main_worktree_path
+        symlink_root = cwd_git_root if (cwd_wksp.is_dir()) else main_worktree_path
         proj_symlink = symlink_root / "proj"
         wksp_symlink = symlink_root / "wksp"
 
@@ -200,8 +217,15 @@ def resolve(cwd: str | None = None) -> Topology:
                 workspace_str = resolved
     else:
         # Non-worktree: walk up from CWD toward git root looking for symlinks
+        # or wksp/ directories (slot/clone local workspace model)
         wksp_sym = _find_symlink_up(cwd_path, cwd_git_root, "wksp")
         proj_sym = _find_symlink_up(cwd_path, cwd_git_root, "proj")
+
+        if not wksp_sym:
+            wksp_dir = _find_workspace_dir_up(cwd_path, cwd_git_root)
+            if wksp_dir:
+                project_str = str(wksp_dir.parent.resolve())
+                workspace_str = str(wksp_dir.resolve())
 
         if wksp_sym:
             resolved = _resolve_symlink_target(wksp_sym)
