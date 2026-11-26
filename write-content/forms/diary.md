@@ -125,12 +125,12 @@ python3 ~/.claude/skills/project/ctx.py
 Then resolve the blog directory. When `IN_SLOT=yes`, pass `slot_root` to
 prevent escape to shared repos:
 ```bash
-python3 ~/.claude/skills/write-content/resolve_artifact_dir.py blog <WORKSPACE> <CLAUDE_MD_PATH> slot_root=<SLOT_PATH>
+python3 ~/.claude/skills/write-content/resolve_artifact_dir.py blog <WORKSPACE> <CLAUDE_MD_PATH> slot_root=<SLOT_PATH> project=<PROJECT>
 ```
-Omit `slot_root=` when `IN_SLOT=no`.
+Omit `slot_root=` when `IN_SLOT=no`. Always pass `project=` when `PROJECT` is known.
 
-Read `ARTIFACT_DIR` from output. If `WARNING` is non-empty, the configured
-path escaped the slot boundary — the resolver fell back to `<WORKSPACE>/blog/`.
+Read `ARTIFACT_DIR` from output. With `project=`, durable artifacts (blog, specs, adr)
+default to the project's `docs/<type>/` directory.
 
 **Load voice:** check `~/claude-workspace/writing-styles/` for personal
 style files. Load personal style or fall back to `voice/common-voice.md`.

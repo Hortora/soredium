@@ -46,7 +46,7 @@ Read `DESTINATION` from output (`workspace` or `project`).
 Resolve authoring directory:
 
 ```bash
-python3 ~/.claude/skills/write-content/resolve_artifact_dir.py adr <WORKSPACE> <WORKSPACE>/CLAUDE.md
+python3 ~/.claude/skills/write-content/resolve_artifact_dir.py adr <WORKSPACE> <WORKSPACE>/CLAUDE.md project=<PROJECT>
 ```
 
 Read `ARTIFACT_DIR` from output.

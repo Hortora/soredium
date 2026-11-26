@@ -105,8 +105,8 @@ You MUST create a task for each of these items and complete them in order:
    decision-review for adversarial validation (see Decision Review Gate)
 6. **Present design** — in sections scaled to complexity, get user approval
    after each section
-7. **Write design doc** — save to `$WORKSPACE/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
-   and commit (if no workspace, fall back to `docs/specs/` in the project)
+7. **Write design doc** — save to `$PROJECT/docs/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
+   and commit (if no project path, fall back to `$WORKSPACE/specs/`)
 8. **Spec self-review** — check for placeholders, contradictions, ambiguity,
    scope, SOURCES.md coherence, and trade-off verification (see below)
 9. **User reviews written spec** — ask user to review before proceeding
@@ -436,8 +436,8 @@ When decision-review revises decisions:
 
 ### Documentation
 
-- Write the validated design (spec) to `$WORKSPACE/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
-  (if no workspace or branch, fall back to `docs/specs/` in the project)
+- Write the validated design (spec) to `$PROJECT/docs/specs/<branch-name>/YYYY-MM-DD-<topic>-design.md`
+  (if no project path, fall back to `$WORKSPACE/specs/`)
 - **Record provenance with spec name:** If garden entries were selected
   during context gathering, re-record provenance with the spec filename:
   ```
