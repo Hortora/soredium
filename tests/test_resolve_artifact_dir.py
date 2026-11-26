@@ -187,3 +187,55 @@ class TestEdgeCases:
             "blog", str(slot2_ws), claude_text, slot_root=str(slot2)
         )
         assert r2 == str(slot2_ws / "blog")
+
+
+class TestProjectRouting:
+    """When a project path is provided, durable artifacts route to project/docs/<type>/."""
+
+    @pytest.mark.parametrize("artifact_type", ["blog", "specs", "adr"])
+    def test_durable_types_route_to_project(self, tmp_path, artifact_type):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        project = tmp_path / "project"
+        (project / "docs" / artifact_type).mkdir(parents=True)
+        result = resolve_artifact_dir.resolve(
+            artifact_type, str(workspace), "", project=str(project))
+        assert result == str(project / "docs" / artifact_type)
+
+    def test_plans_stay_in_workspace(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        project = tmp_path / "project"
+        project.mkdir()
+        result = resolve_artifact_dir.resolve(
+            "plans", str(workspace), "", project=str(project))
+        assert result == str(workspace / "plans")
+
+    def test_no_project_falls_back_to_workspace(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        result = resolve_artifact_dir.resolve("blog", str(workspace), "")
+        assert result == str(workspace / "blog")
+
+    def test_claude_md_override_wins_over_project_default(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        project = tmp_path / "project"
+        (project / "docs" / "blog").mkdir(parents=True)
+        custom = tmp_path / "custom-blog"
+        claude_text = f"**Blog directory:** `{custom}/`"
+        result = resolve_artifact_dir.resolve(
+            "blog", str(workspace), claude_text, project=str(project))
+        assert result == str(custom)
+
+    def test_project_routing_with_slot_escape(self, tmp_path):
+        slot_root = tmp_path / "slots" / "1"
+        workspace = slot_root / "wksp"
+        workspace.mkdir(parents=True)
+        project = slot_root / "myrepo"
+        (project / "docs" / "blog").mkdir(parents=True)
+        claude_text = "**Blog directory:** `/external/blog/`"
+        result = resolve_artifact_dir.resolve(
+            "blog", str(workspace), claude_text,
+            slot_root=str(slot_root), project=str(project))
+        assert result == str(project / "docs" / "blog")
