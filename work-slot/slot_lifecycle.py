@@ -213,6 +213,9 @@ def clone_repo_pair(
                      "chore: add slot infrastructure to .gitignore"])
 
     # --- workspace ---
+    # A local wksp/ directory inside the project clone. Not a git clone of the
+    # canonical workspace: no remote, no updateInstead, no contamination path.
+    # git-inited so code that commits pipeline state still works.
     if auto_discover:
         ws_info = resolve_workspace_source(repo_path)
         if not ws_info:
@@ -221,51 +224,30 @@ def clone_repo_pair(
                 print(f"DISCOVERED_WORKSPACE={ws_info[1]} repo={repo_name}")
 
     ws_dir: Path | None = None
-    ws_name = ""
+    ws_name = "wksp"
 
     if ws_info:
-        ws_source, ws_name = ws_info
-        ws_slot_dir = target_dir / ws_name
+        ws_source, _ws_canonical_name = ws_info
+        ws_slot_dir = clone_dest / "wksp"
 
-        if ws_slot_dir.exists():
-            if auto_discover:
-                raise SlotCreationError(
-                    f"workspace_name_collision ws={ws_name} repo={repo_name}: "
-                    f"Workspace clone name '{ws_name}' already exists in slot.")
+        if ws_slot_dir.exists() and (ws_slot_dir / ".git").exists():
             ws_dir = ws_slot_dir
         else:
-            sync_main(str(ws_source))
-            rc, _, stderr = run_cmd([
-                "git", "clone", "--shared", "--branch", "main",
-                str(ws_source), str(ws_slot_dir),
-            ])
-            if rc != 0:
-                if auto_discover:
-                    raise SlotCreationError(
-                        f"workspace_clone_failed ws={ws_name} stderr={stderr.strip()}")
+            ws_slot_dir.mkdir(exist_ok=True)
+            _exclude_symlinks(clone_dest)
+            run_cmd(["git", "init", "-q", str(ws_slot_dir)])
+            if branch:
+                run_cmd(["git", "-C", str(ws_slot_dir),
+                         "checkout", "-b", branch])
             else:
-                if branch:
-                    rc, _, _ = run_cmd(["git", "-C", str(ws_slot_dir),
-                                        "checkout", "-b", branch])
-                    if rc != 0 and auto_discover:
-                        raise SlotCreationError(
-                            f"workspace_branch_failed ws={ws_name}")
+                run_cmd(["git", "-C", str(ws_slot_dir),
+                         "commit", "--allow-empty", "-m", "init workspace"])
 
-                _cleanup_inherited_symlinks(ws_slot_dir, target_dir)
-                _exclude_symlinks(ws_slot_dir)
-                configure_slot_remotes(ws_slot_dir, ws_source)
-                configure_update_instead(ws_source)
-                install_post_commit_hook(ws_slot_dir)
-                (ws_slot_dir / ".workspace").touch()
-
-                if strip_lifecycle:
-                    _strip_inherited_lifecycle(ws_slot_dir)
-
-                path_map[str(ws_source.resolve())] = str(ws_slot_dir)
-                ws_dir = ws_slot_dir
+            (ws_slot_dir / ".workspace").touch()
+            path_map[str(ws_source.resolve())] = str(ws_slot_dir)
+            ws_dir = ws_slot_dir
 
         if auto_discover and ws_dir:
-            repoint_wksp(clone_dest, ws_slot_dir)
             create_proj_symlink(ws_slot_dir, clone_dest)
             replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
 
@@ -445,12 +427,12 @@ def create_slot(family_root: Path, repos: list[str], branch: str,
 
         primary_repo = repos[0]
         primary_wksp = slot_dir / primary_repo / "wksp"
-        if not primary_wksp.is_symlink():
+        if not primary_wksp.exists():
             raise SlotCreationError(
                 f"primary_no_workspace repo={primary_repo}: "
-                f"primary repo has no workspace clone — .plan cannot be scaffolded. "
+                f"primary repo has no workspace — .plan cannot be scaffolded. "
                 f"Add a wksp symlink to {family_root / primary_repo} pointing to its workspace.")
-        if primary_wksp.is_symlink():
+        if primary_wksp.exists():
             ws_path = primary_wksp.resolve()
             scaffold_script = Path.home() / ".claude" / "skills" / "work-start" / "scaffold.py"
             if scaffold_script.exists():
@@ -581,33 +563,17 @@ def add_repo(family_root: Path, slot_number: int, repo_name: str,
         if instance:
             _wire_isx_remotes(slot_dir, [repo_name], instance)
 
-    # Workspace repointing (add_repo-specific: handles subdirectory targets)
-    ws_slot_dir = None
-    if ws_resolved:
-        ws_source, ws_name = ws_resolved
-        ws_slot_dir = slot_dir / ws_name
-
-        wksp_target = repo_path / "wksp"
-        if wksp_target.is_symlink():
-            orig_target = wksp_target.resolve()
-            try:
-                rel_subdir = orig_target.relative_to(ws_source)
-                ws_subdir = ws_slot_dir / rel_subdir
-            except ValueError:
-                ws_subdir = ws_slot_dir
-            ws_subdir.mkdir(parents=True, exist_ok=True)
-            if rel_subdir != Path("."):
-                _unignore_subdir(ws_slot_dir, str(rel_subdir.parts[0]))
-            repoint_wksp(pair_result.clone_dest, ws_subdir)
-            create_proj_symlink(ws_subdir, pair_result.clone_dest)
-            replicate_claude_md(repo_path, ws_subdir, pair_result.clone_dest)
+    # Workspace: clone_repo_pair created wksp/ inside the project clone.
+    # Finish repointing if it wasn't done inside clone_repo_pair (non-auto mode).
+    ws_slot_dir = pair_result.ws_dir
+    if ws_slot_dir and not (ws_slot_dir / "proj").exists():
+        create_proj_symlink(ws_slot_dir, pair_result.clone_dest)
+        replicate_claude_md(repo_path, ws_slot_dir, pair_result.clone_dest)
 
     add_path_map = dict(pair_result.path_map)
-    if ws_resolved:
-        ws_source, ws_name = ws_resolved
-        ws_sd = slot_dir / ws_name
-        if ws_sd.is_dir():
-            add_path_map[str(ws_source.resolve())] = str(ws_sd)
+    if ws_resolved and ws_slot_dir and ws_slot_dir.is_dir():
+        ws_source, _ = ws_resolved
+        add_path_map[str(ws_source.resolve())] = str(ws_slot_dir)
     sanitized = sanitize_slot_claude_md(slot_dir, add_path_map)
     for s in sanitized:
         print(f"SANITIZED_CLAUDE_MD={s}")

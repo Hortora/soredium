@@ -588,18 +588,19 @@ def land(target: CloseTarget, issue: str = "") -> str:
 def slot_strays(slot_dir: Path, covered: set) -> list[tuple[Path, str, int]]:
     """Commits in a slot that no queue branch carries and canonical lacks.
 
-    Workspace clones are worked on directly, on their base branch or whatever
-    they have checked out, and an earlier ceremony may have left work on a
-    clone's own base branch. Both are (repo, branch, commits) here, so that
-    nothing in the slot is left behind when its issue closes.
+    Only project repos are checked. Workspace clones are excluded: their
+    base-branch commits (queue, handoff, pipeline state) are local to the
+    slot and must never be carried into canonical.
     """
     from slot_core import get_all_slot_repos, is_workspace_clone
     strays = []
     for name in get_all_slot_repos(slot_dir):
         repo = slot_dir / name
+        if is_workspace_clone(repo):
+            continue
         branches = [_get_base_branch(repo)]
         current = _current_branch(repo)
-        if is_workspace_clone(repo) and current and current not in branches:
+        if current and current not in branches:
             branches.append(current)
         for branch in branches:
             if (repo, branch) in covered or _is_stamp_commit(repo, branch):
@@ -607,7 +608,7 @@ def slot_strays(slot_dir: Path, covered: set) -> list[tuple[Path, str, int]]:
             try:
                 count = canonical_sync.ahead_of_canonical(repo, branch)
             except SyncError:
-                continue      # no canonical behind this clone: reported by preflight for targets
+                continue
             if count:
                 strays.append((repo, branch, count))
     return strays
@@ -621,10 +622,12 @@ def diverged_bases(slot_dir: Optional[Path]) -> set:
     """
     if slot_dir is None:
         return set()
-    from slot_core import get_all_slot_repos
+    from slot_core import get_all_slot_repos, is_workspace_clone
     found = set()
     for name in get_all_slot_repos(slot_dir):
         repo = slot_dir / name
+        if is_workspace_clone(repo):
+            continue
         try:
             if canonical_sync.follow(repo) == "diverged":
                 found.add(repo.resolve())
@@ -668,10 +671,12 @@ def settle_permanent_clone(slot_dir: Path, keep_branches: Optional[set] = None) 
 
     Raises SettlementError when any clone cannot be returned to its base branch.
     """
-    from slot_core import get_all_slot_repos
+    from slot_core import get_all_slot_repos, is_workspace_clone
     unsettled: list[str] = []
     for name in get_all_slot_repos(slot_dir):
         repo = slot_dir / name
+        if is_workspace_clone(repo):
+            continue
         base = _get_base_branch(repo)
         current = _current_branch(repo)
         if current and current != base and current in (keep_branches or set()):
