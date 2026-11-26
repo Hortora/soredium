@@ -100,39 +100,41 @@ class TestAllocateSlotNumber:
 
 
 
-class TestWorkspaceNameCollision:
+class TestRootWorkspaceCreation:
     @patch("slot_lifecycle.run_cmd")
-    def test_collision_detected_when_workspace_name_matches_repo(self, mock_cmd, tmp_path):
-        """When resolve_workspace_source returns a name that collides with
-        an existing directory (e.g., a repo clone), create_slot errors."""
+    def test_slot_creates_root_wksp_with_workspace_marker(self, mock_cmd, tmp_path):
+        """New workspace model: one wksp/ at slot root with .workspace marker."""
         family = tmp_path / "casehub"
         family.mkdir()
-        work_repo = init_repo(family / "work")
-        ws_repo = init_repo(tmp_path / "public" / "casehub" / "work")
-        (work_repo / "wksp").symlink_to(ws_repo)
+        engine = init_repo(family / "engine")
+        ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
+        (engine / "wksp").symlink_to(ws_engine)
 
         mock_cmd.return_value = (0, "", "")
 
         with patch("slot_lifecycle.resolve_workspace_source") as mock_resolve:
-            mock_resolve.return_value = (ws_repo, "work")
-            with pytest.raises(slot_core.SlotCreationError):
-                slot_lifecycle.create_slot(
-                    family_root=family,
-                    repos=["work"],
-                    branch="issue-99-test",
-                    issue="99",
-                    issue_repo="casehubio/parent",
-                    covers="99",
-                    context="Test collision",
-                )
+            mock_resolve.return_value = (ws_engine, "wsp-casehub-engine")
+            result = slot_lifecycle.create_slot(
+                family_root=family,
+                repos=["engine"],
+                branch="issue-99-test",
+                issue="99",
+                issue_repo="casehubio/parent",
+                covers="99",
+                context="Test root wksp",
+            )
+
+        slot_dir = family / "slots" / str(result["slot_number"])
+        root_wksp = slot_dir / "wksp"
+        assert root_wksp.is_dir()
+        assert (root_wksp / ".workspace").exists()
 
 
 
-class TestCrossOrgWorkspaceWiring:
+class TestMultiRepoSharedWorkspace:
     @patch("slot_lifecycle.run_cmd")
-    def test_cross_org_repos_get_separate_workspace_clones(self, mock_cmd, tmp_path):
-        """When a slot mixes repos from different families, each gets its
-        own workspace clone with a unique name from resolve_workspace_source."""
+    def test_multi_repo_slot_shares_one_root_wksp(self, mock_cmd, tmp_path):
+        """Multi-repo slots get ONE root wksp/, not per-repo workspace clones."""
         family = tmp_path / "hortora"
         family.mkdir()
 
@@ -159,22 +161,17 @@ class TestCrossOrgWorkspaceWiring:
                 issue="200",
                 issue_repo="Hortora/soredium",
                 covers="200",
-                context="Cross-org test",
+                context="Multi-repo test",
             )
 
         slot_dir = family / "slots" / str(result["slot_number"])
-
-        clone_dests = []
-        for c in mock_cmd.call_args_list:
-            args = c.args[0] if c.args else c[0]
-            if isinstance(args, list) and len(args) >= 2 and args[0] == "git" and "clone" in args:
-                clone_dests.append(args[-1])
-
-        ws_dests = [d for d in clone_dests if "wsp-" in Path(d).name]
-        assert len(ws_dests) == 2, (
-            f"Expected 2 workspace clones, got {len(ws_dests)}: {ws_dests}"
-        )
-        assert len(set(ws_dests)) == 2, f"Workspace clone directories collided: {ws_dests}"
+        root_wksp = slot_dir / "wksp"
+        assert root_wksp.is_dir(), "Expected one root wksp/ directory"
+        assert (root_wksp / ".workspace").exists()
+        for repo_name in ["trellis", "pages"]:
+            clone_wksp = slot_dir / repo_name / "wksp"
+            assert clone_wksp.is_symlink(), f"{repo_name}/wksp should be a symlink"
+            assert str(clone_wksp.resolve()) == str(root_wksp.resolve())
 
 
 
@@ -293,8 +290,9 @@ class TestCreateSlotPrimaryWorkspace:
                 )
 
     @patch("slot_lifecycle.run_cmd")
-    def test_discovers_workspace_when_wksp_symlink_missing(self, mock_cmd, tmp_path, capsys):
-        """When wksp symlink is missing but discover_workspace finds it, clone proceeds."""
+    def test_discovers_workspace_and_creates_root_wksp(self, mock_cmd, tmp_path):
+        """When wksp symlink is missing but discover_workspace finds it,
+        a root wksp/ is created (not a workspace clone)."""
         family = tmp_path / "casehub"
         family.mkdir()
         engine = init_repo(family / "engine")
@@ -304,7 +302,7 @@ class TestCreateSlotPrimaryWorkspace:
 
         with patch("slot_lifecycle.resolve_workspace_source", return_value=None), \
              patch("slot_lifecycle.discover_workspace", return_value=(ws_engine, "wsp-casehub-engine")):
-            slot_lifecycle.create_slot(
+            result = slot_lifecycle.create_slot(
                 family_root=family,
                 repos=["engine"],
                 branch="issue-42-spi",
@@ -314,8 +312,9 @@ class TestCreateSlotPrimaryWorkspace:
                 context="Add SPI layer",
             )
 
-        captured = capsys.readouterr()
-        assert "DISCOVERED_WORKSPACE=wsp-casehub-engine" in captured.out
+        slot_dir = family / "slots" / str(result["slot_number"])
+        assert (slot_dir / "wksp").is_dir()
+        assert (slot_dir / "wksp" / ".workspace").exists()
 
     @patch("slot_lifecycle.run_cmd")
     def test_no_error_when_primary_has_workspace(self, mock_cmd, tmp_path, capsys):
@@ -1261,14 +1260,12 @@ class TestCreateSlotRemoteConfig:
             ["git", "-C", str(clone), "remote", "get-url", "local"])
         assert rc == 0
 
-        # #515 stage 2: the clone's only remote is its canonical repo.
         rc, names, _ = slot_core.run_cmd(["git", "-C", str(clone), "remote"])
         assert names.split() == ["local"]
 
-        rc, value, _ = slot_core.run_cmd(
+        rc, _, _ = slot_core.run_cmd(
             ["git", "-C", str(repo), "config", "receive.denyCurrentBranch"])
-        assert rc == 0
-        assert value.strip() == "updateInstead"
+        assert rc != 0, "updateInstead must NOT be set on canonical"
 
 
 
@@ -1331,15 +1328,13 @@ class TestMigrateRemotes:
 
 
 
-class TestCreateSlotCollisionFamily:
+class TestCreateSlotNoWorkspaceClone:
     @patch("slot_lifecycle.run_cmd")
-    def test_workspace_name_from_remote_avoids_family_collision(self, mock_cmd, tmp_path):
-        """With per-repo workspace naming from remote URL, family repo names
-        like 'work' cannot collide — workspace gets 'wsp-casehub-engine'."""
+    def test_no_workspace_clone_created(self, mock_cmd, tmp_path):
+        """New model: no wsp-* clone directories are created in the slot."""
         family = tmp_path / "casehub"
         family.mkdir()
         engine = init_repo(family / "engine")
-        init_repo(family / "work")
         ws_engine = init_repo(tmp_path / "public" / "casehub" / "engine")
         (engine / "wksp").symlink_to(ws_engine)
 
@@ -1354,18 +1349,13 @@ class TestCreateSlotCollisionFamily:
                 issue="99",
                 issue_repo="casehubio/parent",
                 covers="99",
-                context="Test no collision",
+                context="Test no wsp clone",
             )
 
         slot_dir = family / "slots" / str(result["slot_number"])
-        clone_dests = []
-        for c in mock_cmd.call_args_list:
-            args = c.args[0] if c.args else c[0]
-            if isinstance(args, list) and len(args) >= 2 and args[0] == "git" and "clone" in args:
-                dest = Path(args[-1])
-                if dest.parent == slot_dir:
-                    clone_dests.append(dest.name)
-        assert "wsp-casehub-engine" in clone_dests
+        wsp_dirs = [d for d in slot_dir.iterdir() if d.is_dir() and d.name.startswith("wsp-")]
+        assert len(wsp_dirs) == 0, f"Should not create wsp-* dirs, found: {wsp_dirs}"
+        assert (slot_dir / "wksp").is_dir()
 
 
 
@@ -1418,16 +1408,20 @@ class TestCreateSlotWkspValidation:
 
 
 
-class TestAddRepoWorkspaceRemotes:
+class TestAddRepoWkspSymlink:
     @patch("slot_lifecycle.configure_slot_remotes")
     @patch("slot_lifecycle.run_cmd")
-    def test_add_repo_configures_workspace_remotes(self, mock_cmd, mock_configure, tmp_path):
-        """add_repo must call configure_slot_remotes on new workspace clones."""
+    def test_add_repo_creates_wksp_symlink(self, mock_cmd, mock_configure, tmp_path):
+        """add_repo creates a wksp -> ../wksp symlink in the new project clone."""
         family = tmp_path / "casehub"
         family.mkdir()
         slot_dir = family / "slots" / "1"
         slot_dir.mkdir(parents=True)
         init_repo(slot_dir / "engine")
+        root_wksp = slot_dir / "wksp"
+        root_wksp.mkdir()
+        subprocess.run(["git", "init", "-q", str(root_wksp)], capture_output=True)
+        (root_wksp / ".workspace").write_text("project: engine\n")
 
         repo_b = init_repo(family / "iot")
         ws_iot = init_repo(tmp_path / "public" / "casehub" / "iot")
@@ -1445,13 +1439,8 @@ class TestAddRepoWorkspaceRemotes:
             mock_resolve.return_value = (ws_iot, "wsp-casehub-iot")
             slot_lifecycle.add_repo(family, 1, "iot", "test-branch")
 
-        ws_calls = [
-            c for c in mock_configure.call_args_list
-            if "wsp-" in str(c.args[0])
-        ]
-        assert len(ws_calls) >= 1, (
-            "add_repo did not call configure_slot_remotes on workspace clone"
-        )
+        clone_wksp = slot_dir / "iot" / "wksp"
+        assert clone_wksp.is_symlink(), "add_repo should create wksp symlink in project clone"
 
 
 
