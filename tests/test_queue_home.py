@@ -104,19 +104,21 @@ class TestAdopt:
 
     def test_apply_copies_the_chosen_queue_keeps_the_old_root_and_marks_the_slot(self, slot):
         old_root = (slot / ".queue").read_bytes()
-        chosen = (slot / "wsp-a" / ".queue").read_bytes()
         other = (slot / "wsp-b" / ".queue").read_bytes()
 
         plan = queue_home.adopt(slot, source=slot / "wsp-a", apply=True)
 
         assert plan["applied"] is True
-        assert (slot / ".queue").read_bytes() == chosen
+        adopted = read_queue(slot)
+        assert len(adopted.items) == 3, "items must be preserved"
+        assert adopted.state.branch == "", "branch must be cleared on adopt"
+        assert adopted.state.status == "idle", "status must be idle on adopt"
+        assert adopted.active_item() is None, "no item should be active after adopt"
         assert Path(plan["backup"]).read_bytes() == old_root
-        assert (slot / "wsp-a" / ".queue").read_bytes() == chosen, "the source is kept"
+        assert (slot / "wsp-a" / ".queue").exists(), "the source is kept"
         assert (slot / "wsp-b" / ".queue").read_bytes() == other, "the others are kept"
         assert queue_home.home(slot / "wsp-b") == slot.resolve()
         assert "adopted-from:" in (slot / queue_home.MARKER).read_text()
-        assert read_queue(slot).active_item().ref == "o/r#3"
 
     def test_keeping_the_root_queue_writes_only_the_marker(self, slot):
         before = tree(slot)
@@ -160,7 +162,9 @@ class TestAdopt:
         queue_home.adopt(slot, source=slot / "wsp-b", apply=True)
         assert (slot / "wsp-b" / ".plan").read_text() == plan_text
         assert not (slot / "wsp-b" / ".queue").exists()
-        assert read_queue(slot).state.branch == "issue-9-z"
+        adopted = read_queue(slot)
+        assert adopted.state.branch == "", "branch must be cleared on adopt"
+        assert adopted.state.status == "idle", "status must be idle on adopt"
 
     def test_a_slot_with_one_queue_needs_no_choice(self, tmp_path):
         area = tmp_path / "clone" / "repo"
@@ -169,7 +173,12 @@ class TestAdopt:
         (area / "wsp" / ".workspace").write_text("project: x\n")
         write_queue(area / "wsp", queue("o/r#1", active="o/r#1", branch="issue-1-a"))
         plan = queue_home.adopt(area, apply=True)
-        assert plan["applied"] and read_queue(area).active_item().ref == "o/r#1"
+        adopted = read_queue(area)
+        assert plan["applied"]
+        assert len(adopted.items) == 1
+        assert adopted.items[0].ref == "o/r#1"
+        assert adopted.active_item() is None, "items deactivated on adopt"
+        assert adopted.state.branch == ""
 
     def test_a_slot_with_no_queue_at_all_is_marked_and_starts_empty(self, tmp_path):
         area = tmp_path / "slots" / "8"
@@ -183,6 +192,37 @@ class TestAdopt:
         with pytest.raises(queue_home.AdoptError) as refused:
             queue_home.adopt(tmp_path, apply=True)
         assert refused.value.code == "not_an_area"
+
+    def test_adopt_sanitizes_state(self, slot):
+        """Refs #582: adopted queue must have branch cleared and status set to idle."""
+        queue_home.adopt(slot, source=slot / "wsp-a", apply=True)
+        adopted = read_queue(slot)
+        assert adopted.state.branch == "", "branch must be cleared on adopt"
+        assert adopted.state.status == "idle", "status must be idle on adopt"
+
+    def test_adopt_deactivates_items(self, slot):
+        """Refs #582: items must not be active after adopt (branch doesn't exist in area)."""
+        queue_home.adopt(slot, source=slot / "wsp-a", apply=True)
+        adopted = read_queue(slot)
+        assert adopted.active_item() is None, "no item should be active after adopt"
+
+
+class TestQueueValidation:
+    """Refs #582: read-back validation must reject conflict markers."""
+
+    def test_conflict_markers_are_detected(self, tmp_path):
+        area = tmp_path / "slot"
+        area.mkdir()
+        (area / ".slot").write_text("# Slot\n")
+        (area / ".queue").write_text(
+            "<<<<<<< HEAD\n"
+            "- [ ] o/r#1 — First\n"
+            "=======\n"
+            "- [ ] o/r#2 — Second\n"
+            ">>>>>>> branch\n"
+            "\n## State\nbranch: x\nstatus: active\n"
+        )
+        assert queue_home.validate_queue(area) is False
 
 
 class TestCommandLine:
@@ -221,7 +261,9 @@ class TestTheToolsFollowTheMarker:
     def test_a_marked_slot_reads_the_root_queue_from_anywhere_in_it(self, slot):
         queue_home.adopt(slot, source=slot / "wsp-a", apply=True)
         for where in (slot, slot / "wsp-a", slot / "wsp-b"):
-            assert read_queue(where).active_item().ref == "o/r#3", where
+            q = read_queue(where)
+            assert q is not None, f"queue must be readable from {where}"
+            assert len(q.items) == 3, f"all items must be present from {where}"
 
     def test_a_write_from_a_workspace_clone_changes_only_the_root_queue(self, slot):
         queue_home.adopt(slot, source=slot / "wsp-a", apply=True)

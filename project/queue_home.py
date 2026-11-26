@@ -119,14 +119,34 @@ def _backup_name(area: Path) -> Path:
 
 
 def _queue_text(candidate: Candidate) -> str:
-    """The candidate as .queue text. An older .plan is converted in a scratch directory."""
-    if candidate.name == ".queue":
-        return candidate.path.read_text()
-    import tempfile
+    """The candidate as sanitized .queue text for a new area.
+
+    State is reset: branch cleared, status set to idle, all items deactivated.
+    The new area has no branches yet, so inherited state would be misleading.
+    """
     queue = read_queue(candidate.directory, exact=True)
+    queue.state.branch = ""
+    queue.state.status = "idle"
+    for item in queue.items:
+        item.active = False
+    import tempfile
     with tempfile.TemporaryDirectory() as scratch:
         write_queue(Path(scratch), queue)
         return (Path(scratch) / ".queue").read_text()
+
+
+def validate_queue(directory: Path | str) -> bool:
+    """True if the queue file in directory is structurally valid (no conflict markers)."""
+    directory = Path(directory)
+    for name in (".queue", ".plan"):
+        path = directory / name
+        if path.is_file():
+            content = path.read_text()
+            if any(content.startswith(m) or f"\n{m}" in content
+                   for m in ("<<<<<<< ", "======= ", "=======\n", ">>>>>>> ")):
+                return False
+            return True
+    return True
 
 
 def adopt(area: Path | str, source: Optional[Path | str] = None, apply: bool = False) -> dict:
