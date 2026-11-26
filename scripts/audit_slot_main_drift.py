@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Audit attic slot workspace clones for artifacts promoted to the slot's
-local main but never pushed to origin/main.
+Audit attic slot workspace clones for commits on local main that were
+never pushed to origin/main.
 
-This catches the case where artifact_promote.py ran successfully inside
-the slot clone (checkout main, cherry-pick, commit) but the push to
-origin failed silently.
+Historical: this caught cases where the now-removed artifact_promote.py
+ran successfully inside a slot clone but the push to origin failed.
 """
 
 import subprocess

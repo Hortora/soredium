@@ -10,8 +10,6 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 PUBLISH = ROOT / "publish-blog" / "blog_publish.py"
-PROMOTE = ROOT / "work-end" / "artifact_promote.py"
-SWEEP = ROOT / "work-end" / "artifact_sweep.py"
 
 
 def g(repo: Path, *args: str, check: bool = True) -> str:
@@ -268,43 +266,3 @@ class TestCommitDestination:
         assert g(site, "show", "main:_notes/entry.md") == "entry"
 
 
-class TestPromotionImages:
-    def test_to_project_fails_when_an_image_does_not_arrive(self, tmp_path):
-        ws = init(tmp_path / "workspace")
-        entry_with_images(ws)
-        proj = init(tmp_path / "project")
-        (proj / "docs" / "blog").mkdir(parents=True)
-        (proj / "docs" / "blog" / "images").write_text("a file where the directory must go\n")
-        g(proj, "add", ".")
-        g(proj, "commit", "-q", "-m", "obstacle")
-        before = g(proj, "rev-parse", "HEAD")
-
-        result = run(PROMOTE, "to-project", str(proj), str(ws),
-                     "artifacts=blog/2026-01-01-entry.md", "dest-prefix=docs/")
-
-        assert result.returncode == 1, result.stdout + result.stderr
-        assert "ERROR=image_not_promoted" in result.stdout
-        assert g(proj, "rev-parse", "HEAD") == before          # nothing committed half-done
-
-    def test_to_project_carries_the_images(self, tmp_path):
-        ws = init(tmp_path / "workspace")
-        entry_with_images(ws)
-        proj = init(tmp_path / "project")
-
-        result = run(PROMOTE, "to-project", str(proj), str(ws),
-                     "artifacts=blog/2026-01-01-entry.md", "dest-prefix=docs/")
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert g(proj, "show", "main:docs/blog/images/diagram.svg") == "<svg>diagram</svg>"
-        assert g(proj, "show", "main:docs/blog/images/second.svg") == "<svg>second</svg>"
-
-    def test_sweep_carries_the_images_and_the_workspace_keeps_its_copy(self, tmp_path):
-        ws = init(tmp_path / "workspace")
-        entry = entry_with_images(ws)
-        proj = init(tmp_path / "project")
-
-        result = run(SWEEP, str(ws), str(proj))
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert g(proj, "show", "main:docs/blog/images/diagram.svg") == "<svg>diagram</svg>"
-        assert entry.exists() and (ws / "blog" / "images" / "diagram.svg").exists()
