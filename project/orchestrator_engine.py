@@ -71,7 +71,7 @@ def run_script(cmd: list[str], workspace: Path,
         if proc.returncode != 0 and "ERROR" not in result:
             result["ERROR"] = f"exit_{proc.returncode}"
             if proc.stderr:
-                result["STDERR"] = proc.stderr[:500]
+                result["STDERR"] = proc.stderr[:2000]
         return result
     except subprocess.TimeoutExpired:
         return {"ERROR": "timeout"}

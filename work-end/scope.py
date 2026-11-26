@@ -212,7 +212,13 @@ def land(workspace: Path) -> tuple[int, list[str]]:
     (documents to promote, a squash review) is one ERROR line with everything
     needed to act on it, so the pipeline halts instead of carrying on.
     """
-    result = ceremony.close(Path(workspace), land_active=False)
+    try:
+        result = ceremony.close(Path(workspace), land_active=False)
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        return 1, [f"ERROR=land_exception", f"DETAIL={type(exc).__name__}: {exc}",
+                    f"TRACEBACK={tb.replace(chr(10), ' | ')}"]
     if result.success:
         lines = [l for l in ceremony.render(result) if not l.startswith(("ACTION=", "OFFER="))]
         closed = ",".join(result.closed_items)
