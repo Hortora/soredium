@@ -361,6 +361,39 @@ class TestDuplicateWorkGate:
         assert out.get("DUPLICATE") == "yes"
 
 
+class TestRootQueueSlot:
+    """Refs #580: scaffold in a slot with .queue-root writes to the slot root."""
+
+    def _slot_with_workspace(self, tmp_path):
+        slot = tmp_path / "slots" / "7"
+        slot.mkdir(parents=True)
+        (slot / ".slot").write_text("# Slot 7\n")
+        (slot / ".queue-root").write_text("since: 2026-11-25\n")
+        ws = slot / "wsp-proj"
+        ws.mkdir()
+        (ws / ".workspace").write_text("project: proj\n")
+        return slot, ws
+
+    def test_force_writes_queue_to_slot_root(self, tmp_path):
+        slot, ws = self._slot_with_workspace(tmp_path)
+        result = run(ws, *required_args(issue="42", covers="test/repo#42"), "force=yes")
+        assert result.returncode == 0, result.stderr
+        assert (slot / ".queue").exists(), "queue must be at slot root"
+        assert not (ws / ".plan").exists(), ".plan must NOT be in workspace clone"
+        assert not (ws / ".queue").exists(), ".queue must NOT be in workspace clone"
+
+    def test_force_writes_journal_to_workspace(self, tmp_path):
+        slot, ws = self._slot_with_workspace(tmp_path)
+        run(ws, *required_args(issue="42", covers="test/repo#42"), "force=yes")
+        assert (ws / "JOURNAL.md").exists(), "journal stays in workspace"
+
+    def test_root_queue_contains_issue_item(self, tmp_path):
+        slot, ws = self._slot_with_workspace(tmp_path)
+        run(ws, *required_args(issue="42", covers="test/repo#42"), "force=yes")
+        content = (slot / ".queue").read_text()
+        assert "test/repo#42" in content
+
+
 class TestBranchFieldUpdate:
     """scaffold updates .plan branch field when reusing an existing plan
     on a new branch (#471)."""
