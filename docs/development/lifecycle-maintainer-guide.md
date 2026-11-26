@@ -36,10 +36,10 @@ If a change you are about to make conflicts with one of these, stop and ask the 
 | Family | A directory of related repos: `~/claude/hortora/`, `~/claude/casehub/` |
 | Canonical repo | `~/claude/<family>/<repo>`. The one copy that talks to GitHub |
 | Project repo | The code repo (for example `soredium`) |
-| Workspace repo | A companion repo holding methodology artifacts: handoff, blog drafts, specs, plans. For soredium it is `soredium` (`~/claude/public/soredium`) |
+| Workspace | A directory holding methodology artifacts: handoff, pipeline state, plans. For canonical repos it is a companion git repo at a configurable location (e.g. `~/claude/public/soredium`). For slots and clones it is a plain `wksp/` directory inside each project clone — git-inited locally, no remotes, no connection to canonical. Workspace state never flows back to canonical |
 | Base branch | `main` (occasionally `master`) |
-| Slot | `~/claude/<family>/slots/<N>/`: clones of several project and workspace repos cut for one piece of work, with a `.slot` file at the root. Archived to `slots/attic/<N>/` when done |
-| Permanent clone | `~/claude/<family>/clone/<repo>/`: one project clone and its workspace clone, with `.slot` and `.permanent`. Never archived |
+| Slot | `~/claude/<family>/slots/<N>/`: clones of several project repos cut for one piece of work, with a `.slot` file at the root. Each project clone has a local `wksp/` directory. Archived to `slots/attic/<N>/` when done |
+| Permanent clone | `~/claude/<family>/clone/<repo>/`: one project clone with a local `wksp/` directory, plus `.slot` and `.permanent`. Never archived. Legacy clones may still have sibling workspace git clones; the close ceremony skips them |
 | Area of work | One slot, one clone, or one canonical workspace. The unit that owns a queue |
 | Queue | The list of issues for an area and its state (`.queue`; older name `.plan`) |
 | Landing | Getting a branch's commits onto canonical's base branch, on disk, no network |
@@ -393,6 +393,7 @@ Read this as a list of mistakes not to repeat.
 | Edits were made before starting an item and sat on the clone's `main` | Start the item first |
 | A session took "publish all" to mean every repo on the machine | Scope is enforced in code (`scope.covered`), not left to interpretation |
 | A notes store was built to push and pull queues, with a hard reset on conflict | If data has one owner, do not build sync for it |
+| Workspace clones in slots pushed queue state into canonical workspaces for 7 days. `carry_strays` treated workspace-clone main as a stray and landed it; `updateInstead` on canonical allowed direct pushes. 33 canonical workspaces contaminated, 585 backup refs, 53 stale state files | Workspaces are local working state, never synced. Slots get a git-inited `wksp/` dir with no remotes. `carry_strays` skips `.workspace`-marked repos. `updateInstead` removed from all canonical workspaces. Migration: `scripts/migrate_workspace_isolation.py` |
 
 ---
 
