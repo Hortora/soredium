@@ -50,7 +50,7 @@ from slot_claude import (
     relocate_claude_projects, sweep_orphaned_claude_projects, is_claude_session,
 )
 from slot_git import (
-    configure_slot_remotes, configure_update_instead,
+    configure_slot_remotes,
     install_post_commit_hook, sync_main,
     _exclude_symlinks,
     _cleanup_inherited_symlinks,
@@ -201,7 +201,6 @@ def clone_repo_pair(
     _cleanup_inherited_symlinks(clone_dest, target_dir)
     _exclude_symlinks(clone_dest)
     configure_slot_remotes(clone_dest, repo_path)
-    configure_update_instead(repo_path)
     install_post_commit_hook(clone_dest)
     path_map[str(repo_path.resolve())] = str(clone_dest)
 
@@ -1116,7 +1115,6 @@ def migrate_remotes(family_root: Path) -> int:
                     ["git", "-C", str(clone), "remote", "get-url", "local"])
                 if rc == 0:
                     migrated += 1
-                configure_update_instead(canonical)
     print(f"MIGRATED={migrated}")
     return migrated
 

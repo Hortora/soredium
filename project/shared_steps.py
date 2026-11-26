@@ -170,7 +170,8 @@ def make_update_claude_md_step(phase: str, sweep_key: str = "sweep_selected") ->
 def _find_existing_diary(ctx) -> dict[str, str]:
     """Check for an existing diary entry on this branch to revise."""
     context: dict[str, str] = {}
-    blog_dir = ctx.workspace / "blog"
+    project_blog = Path(ctx.project) / "docs" / "blog" if hasattr(ctx, "project") else None
+    blog_dir = project_blog if project_blog and project_blog.is_dir() else ctx.workspace / "blog"
     if not blog_dir.is_dir():
         return context
     branch = getattr(ctx, "branch", "")

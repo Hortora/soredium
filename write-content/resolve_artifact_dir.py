@@ -1,19 +1,17 @@
-#!/usr/bin/env python3
+#!/usr/bin/3
 """
 resolve_artifact_dir.py — Unified artifact directory resolution with slot-escape detection.
 
 Resolves the authoring directory for any artifact type (blog, adr, specs, plans)
-from CLAUDE.md content. When running inside a slot, detects absolute paths that
-escape the slot boundary and falls back to $WORKSPACE/<type>/.
+from CLAUDE.md content. When a project path is provided, durable artifacts
+(blog, specs, adr) default to the project's docs/<type>/ directory. Plans
+default to the workspace (they are transient and never land).
 
-This is a PATH RESOLVER, not a ROUTING RESOLVER. It answers "what directory
-should I write to?" — not "should this go to workspace or project?" (that's
-routing.py's job).
-
-Replaces the blog-specific resolve_blog_dir.py.
+When running inside a slot, detects absolute paths that escape the slot boundary
+and falls back to the default.
 
 Usage:
-    python3 resolve_artifact_dir.py <type> <workspace> <claude_md_path> [slot_root=<path>]
+    python3 resolve_artifact_dir.py <type> <workspace> <claude_md_path> [slot_root=<path>] [project=<path>]
 
 Output:
     ARTIFACT_DIR=<resolved path>
@@ -31,6 +29,8 @@ FIELD_NAMES = {
     "specs": "Specs",
     "plans": "Plans",
 }
+
+_DURABLE_TYPES = {"blog", "specs", "adr"}
 
 
 def _parse_custom_dir(artifact_type: str, claude_text: str) -> str | None:
@@ -57,13 +57,20 @@ def _is_inside(path: str, root: str) -> bool:
         return False
 
 
+def _default_dir(artifact_type: str, workspace: str, project: str | None) -> str:
+    if project and artifact_type in _DURABLE_TYPES:
+        return str(Path(project) / "docs" / artifact_type)
+    return str(Path(workspace) / artifact_type)
+
+
 def resolve_with_warning(
     artifact_type: str,
     workspace: str,
     claude_text: str,
     slot_root: str | None = None,
+    project: str | None = None,
 ) -> tuple[str, str]:
-    default = str(Path(workspace) / artifact_type)
+    default = _default_dir(artifact_type, workspace, project)
     raw = _parse_custom_dir(artifact_type, claude_text)
 
     if raw is None:
@@ -87,14 +94,15 @@ def resolve(
     workspace: str,
     claude_text: str,
     slot_root: str | None = None,
+    project: str | None = None,
 ) -> str:
-    path, _ = resolve_with_warning(artifact_type, workspace, claude_text, slot_root)
+    path, _ = resolve_with_warning(artifact_type, workspace, claude_text, slot_root, project)
     return path
 
 
 def main() -> int:
     if len(sys.argv) < 4:
-        print("Usage: resolve_artifact_dir.py <type> <workspace> <claude_md_path> [slot_root=<path>]")
+        print("Usage: resolve_artifact_dir.py <type> <workspace> <claude_md_path> [slot_root=<path>] [project=<path>]")
         return 1
 
     artifact_type = sys.argv[1]
@@ -108,13 +116,14 @@ def main() -> int:
             kv[k] = v
 
     slot_root = kv.get("slot_root")
+    project = kv.get("project")
 
     try:
         claude_text = Path(claude_md_path).read_text()
     except FileNotFoundError:
         claude_text = ""
 
-    path, warning = resolve_with_warning(artifact_type, workspace, claude_text, slot_root)
+    path, warning = resolve_with_warning(artifact_type, workspace, claude_text, slot_root, project)
     print(f"ARTIFACT_DIR={path}")
     if warning:
         print(f"WARNING={warning}")
