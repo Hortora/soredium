@@ -52,14 +52,12 @@ def create_clone(family_root: Path, repo: str) -> dict[str, str]:
     """Create a permanent clone of a canonical repo.
 
     Target layout: <family_root>/clone/<repo>/
-      <repo>/        project clone (--shared, local remote)
-      <workspace>/   workspace clone (if canonical has wksp symlink)
-      .slot          slot file (slot_number=None)
-      .permanent     marker file
+      <repo>/            project clone (--shared, local remote)
+        wksp/            local workspace (git-inited, no remotes)
+      .slot              slot file (slot_number=None)
+      .permanent         marker file
 
-    The clone's one queue is at its root, copied from the repo's backlog (#577).
-    The workspace clone keeps the files it inherited (.queue, HANDOFF.md);
-    the handoff travels with its base branch, the inherited .queue is not read.
+    The clone's one queue is at its root (#577).
     """
     canonical = family_root / repo
     if not canonical.is_dir() or not (canonical / ".git").exists():

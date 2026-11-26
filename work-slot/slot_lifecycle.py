@@ -243,7 +243,7 @@ def clone_repo_pair(
                 run_cmd(["git", "-C", str(ws_slot_dir),
                          "commit", "--allow-empty", "-m", "init workspace"])
 
-            (ws_slot_dir / ".workspace").touch()
+            (ws_slot_dir / ".workspace").write_text(f"project: {clone_dest}\n")
             path_map[str(ws_source.resolve())] = str(ws_slot_dir)
             ws_dir = ws_slot_dir
 

@@ -98,8 +98,8 @@ def _create_local_workspace(project_clone: Path, wksp: Path) -> None:
     if rc == 0 and branch and branch != "main" and branch != "master":
         run(["git", "-C", str(wksp), "checkout", "-b", branch])
 
-    # .workspace marker
-    (wksp / ".workspace").touch()
+    # .workspace marker with project field
+    (wksp / ".workspace").write_text(f"project: {project_clone}\n")
 
     # proj symlink -> parent (the project clone)
     proj = wksp / "proj"
