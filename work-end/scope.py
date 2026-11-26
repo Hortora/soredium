@@ -6,14 +6,11 @@
                                             commit the queue file alone, if it changed
     scope.py land <workspace>               land every item marked done; never the active item
     scope.py publish <workspace>            publish each of those that is ahead of its remote
-    scope.py promote-backlog <workspace> [covers=<ref>]
-                                            promote documents on a covered workspace's base
-                                            branch that its project lacks
     scope.py publish-blog <workspace>       post the covered projects' landed blog entries to
                                             the destinations the routing names
 
-"Publish all" and "promote all" mean all of what `covered` prints: the project
-and workspace the ceremony ran in, or every repo of the slot or clone it ran in.
+"Publish all" means all of what `covered` prints: the project and workspace
+the ceremony ran in, or every repo of the slot or clone it ran in.
 Nothing here ever looks for other repos that happen to be ahead. That boundary
 is the point of this module: left to wording, "all" has been read as every
 repo on the machine.
@@ -21,8 +18,8 @@ repo on the machine.
 Nothing is pushed except through canonical_sync.publish_base, which never forces.
 
 `land` fails loudly, because everything after it depends on it. The follow-up
-actions (publish, promote-backlog, publish-blog) do what they can and name what
-they could not (NOT_PUBLISHED=, NOT_PROMOTED=, BLOG_HELD=) with exit 0: one repo
+actions (publish, publish-blog) do what they can and name what they could not
+(NOT_PUBLISHED=, BLOG_HELD=) with exit 0: one repo
 with expired credentials should not stop the handoff being written, and the
 sequence's final report repeats every such line under ATTENTION.
 """
@@ -89,37 +86,6 @@ def publish(workspace: Path) -> tuple[dict[str, int], dict[str, str]]:
     return pushed, failed
 
 
-def promote_backlog(workspace: Path, covers: str = "") -> tuple[dict[str, int], dict[str, str]]:
-    """Promote documents on each covered workspace's base branch that its project lacks.
-
-    Returns ({"workspace -> project": documents promoted}, {pair: why not}).
-    Only the ceremony's own workspace/project pairs are considered.
-    """
-    import contextlib
-    import io
-    import artifact_promote
-
-    promoted: dict[str, int] = {}
-    failed: dict[str, str] = {}
-    backlog, _ = ceremony.promotion_backlog(Path(workspace), covers)
-    for ws_repo, project in ceremony.promotion_pairs(Path(workspace)):
-        pair = f"{ws_repo.name} -> {project.name}"
-        if pair not in backlog:
-            continue
-        params = {"covers": covers} if covers else {}
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
-            code = artifact_promote.sweep_promotion_gaps(str(project), str(ws_repo), params)
-        lines = captured.getvalue().splitlines()
-        swept = next((l.split("=", 1)[1] for l in lines if l.startswith("SWEPT=")), "0")
-        problems = [l for l in lines if l.startswith(("ERROR", "CONFLICT", "LAND_ERROR"))]
-        if code != 0 or problems:
-            failed[pair] = "; ".join(problems) or f"exit {code}"
-        if swept.isdigit() and int(swept):
-            promoted[pair] = int(swept)
-    return promoted, failed
-
-
 def commit_queue(workspace: Path, covers: str = "") -> tuple[int, list[str]]:
     """Commit the workspace's queue file, that path only, when it has changed.
 
@@ -149,27 +115,6 @@ def commit_queue(workspace: Path, covers: str = "") -> tuple[int, list[str]]:
         return 1, ["ERROR=queue_commit_failed",
                    "DETAIL=" + " ".join((done.stderr or done.stdout).split())[:300]]
     return 0, ["QUEUE_COMMITTED=yes"]
-
-
-def promote(workspace: Path) -> tuple[int, list[str]]:
-    """Check for unpromoted artifacts. Returns (exit code, lines).
-
-    Exit 0: nothing to promote. Exit 2: promotion needed with commands.
-    Called as a pipeline step before land, so the session can run the promote
-    commands and retry without re-running the whole ceremony.
-
-    Uses the done items' issue refs for covers — mark_done has already run and
-    queue.state.covers now names the next item, not the one being landed.
-    """
-    queue = ceremony.read_queue(workspace)
-    done_refs = [i.ref for i in queue.done_items()] if queue else []
-    covers = done_refs[0].split(",")[0].strip() if done_refs else ""
-    unpromoted, commands = ceremony.unpromoted_artifacts(workspace, covers)
-    if unpromoted:
-        return 2, ["ERROR=promotion_needed",
-                   "UNPROMOTED=" + " ;; ".join(unpromoted),
-                   "PROMOTE_COMMANDS=" + " ;; ".join(commands)]
-    return 0, ["PROMOTED=nothing_needed"]
 
 
 def squash_review(workspace: Path) -> tuple[int, list[str]]:
@@ -209,7 +154,7 @@ def land(workspace: Path) -> tuple[int, list[str]]:
     The active item is never landed here: by the time the pipeline lands, a
     finished item has been marked done, and an unfinished one must stay as it
     is. Having nothing to land is not a failure. A stop that needs a person
-    (documents to promote, a squash review) is one ERROR line with everything
+    (a squash review) is one ERROR line with everything
     needed to act on it, so the pipeline halts instead of carrying on.
     """
     try:
@@ -265,7 +210,7 @@ def publish_blog(workspace: Path, routing_path: Path | None = None
     written: dict[Path, list[Path]] = {}      # destination repo -> files written
     names: dict[Path, set[str]] = {}
 
-    for ws_repo, project in ceremony.promotion_pairs(Path(workspace)):
+    for project in covered(Path(workspace)):
         label = project.name
         try:
             base = canonical_sync.locate(project).base
@@ -281,7 +226,7 @@ def publish_blog(workspace: Path, routing_path: Path | None = None
         if not blog_routing.source_identity(canonical_project):
             held[label] = "project has no remote to identify it by; nothing is routed on a guess"
             continue
-        override = ws_repo / "blog-routing.yaml"
+        override = project / "blog-routing.yaml"
         try:
             with canonical_sync.checked_out(canonical_project, base) as tree:
                 tree = Path(tree)
@@ -359,9 +304,9 @@ def publish_blog(workspace: Path, routing_path: Path | None = None
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) < 2 or args[0] not in ("covered", "commit-queue", "promote", "squash-review",
-                                        "land", "publish", "promote-backlog", "publish-blog"):
-        print("usage: scope.py <covered|land|publish|promote-backlog|publish-blog> <workspace> "
+    if len(args) < 2 or args[0] not in ("covered", "commit-queue", "squash-review",
+                                        "land", "publish", "publish-blog"):
+        print("usage: scope.py <covered|land|publish|publish-blog> <workspace> "
               "[covers=<ref>] [routing=<path>]", file=sys.stderr)
         return 2
     command, workspace = args[0], Path(args[1])
@@ -371,11 +316,6 @@ def main(argv: list[str] | None = None) -> int:
     options = dict(a.split("=", 1) for a in args[2:] if "=" in a)
     if command == "commit-queue":
         code, lines = commit_queue(workspace, options.get("covers", ""))
-        for line in lines:
-            print(line)
-        return code
-    if command == "promote":
-        code, lines = promote(workspace)
         for line in lines:
             print(line)
         return code
@@ -410,13 +350,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"BLOG_HELD={what} reason={why}")
         print(f"BLOG_PUBLISHED_COUNT={sum(posted.values())}")
         return 0
-    promoted, failed = promote_backlog(workspace, options.get("covers", ""))
-    for pair, count in promoted.items():
-        print(f"PROMOTED={pair} documents={count}")
-    for pair, why in failed.items():
-        print(f"NOT_PROMOTED={pair} reason={why}")
-    print(f"PROMOTED_COUNT={sum(promoted.values())}")
-    return 0
+    return 2
 
 
 if __name__ == "__main__":

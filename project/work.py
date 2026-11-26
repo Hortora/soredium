@@ -1066,18 +1066,14 @@ _WRAP_OPENING: list[StepDef] = [
 ]
 
 _CLOSE_STEPS: list[StepDef] = [
-    StepDef("promote", "close", StepType.MECHANICAL, script_fn=_scope("promote"),
-            requires=(ITEM_FINISHED,)),
     StepDef("squash_review", "close", StepType.MECHANICAL, script_fn=_scope("squash-review"),
-            requires=("promote",)),
+            requires=(ITEM_FINISHED,)),
     StepDef("land", "close", StepType.MECHANICAL, script_fn=_scope("land"),
             requires=("squash_review",)),
-    StepDef("promote_backlog", "close", StepType.MECHANICAL,
-            script_fn=_scope("promote-backlog", with_covers=True), requires=("land",)),
     StepDef("publish", "close", StepType.MECHANICAL, script_fn=_scope("publish"),
             requires=("land",)),
     StepDef("publish_blog", "close", StepType.MECHANICAL, script_fn=_scope("publish-blog"),
-            requires=("promote_backlog",)),
+            requires=("publish",)),
 ]
 
 _WRAP_CLOSING: list[StepDef] = [
@@ -1107,9 +1103,6 @@ def _preflight_blockers(workspace: Path) -> list[str]:
     try:
         import close as ceremony_mod
         import squash_marker as sm
-        unpromoted, _ = ceremony_mod.unpromoted_artifacts(workspace)
-        if unpromoted:
-            blockers.append(f"promotion: {len(unpromoted)} artifact(s)")
         targets = ceremony_mod.resolve(workspace)
         review_needed = sum(1 for t in targets if not t.is_workspace
                            and sm.review_status(t.repo, t.branch, t.base_branch))

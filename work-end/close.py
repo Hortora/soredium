@@ -75,10 +75,6 @@ class CloseResult:
     next_item: Optional[QueueItem] = None
     rescued: dict = field(default_factory=dict)
     squash_review: list[str] = field(default_factory=list)
-    # Documents this work added to a workspace that its project does not hold yet,
-    # and the command that promotes each workspace's share.
-    unpromoted: list[str] = field(default_factory=list)
-    promote_commands: list[str] = field(default_factory=list)
     workspace_landed: dict = field(default_factory=dict)
     slot_ready: str = ""
     # Queue items this ceremony closed, in the order they landed, and each one's branch.
@@ -91,11 +87,6 @@ class CloseResult:
     # Canonical repos holding commits their remote lacks: {canonical path: count}.
     unpublished: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
-    # Documents on a workspace's base branch that its project's base branch lacks,
-    # whoever wrote them and whenever: {"workspace -> project": count}, and the
-    # command that promotes each. Reported, never a reason to refuse (#566).
-    backlog: dict = field(default_factory=dict)
-    backlog_commands: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -713,94 +704,6 @@ def settle_permanent_clone(slot_dir: Path, keep_branches: Optional[set] = None) 
         raise SettlementError(unsettled)
 
 
-def promotion_pairs(workspace: Path) -> list[tuple[Path, Path]]:
-    """(workspace repo, project repo) pairs this ceremony covers.
-
-    Outside a slot: the workspace and the project its proj/ symlink names. In a
-    slot: every workspace clone, with the project named in its .workspace marker.
-    """
-    pairs: list[tuple[Path, Path]] = []
-    slot_dir = _slot_dir_of(workspace)
-    if slot_dir is None:
-        project = _resolve_project(workspace)
-        if project and project.is_dir() and project.resolve() != workspace.resolve():
-            pairs.append((workspace, project))
-        return pairs
-    from slot_core import get_all_slot_repos
-    for name in get_all_slot_repos(slot_dir):
-        clone = slot_dir / name
-        marker = clone / ".workspace"
-        if not marker.exists():
-            continue
-        for line in marker.read_text().splitlines():
-            if line.startswith("project:"):
-                project = Path(line.split(":", 1)[1].strip())
-                if project.is_dir():
-                    pairs.append((clone, project))
-                break
-    return pairs
-
-
-def unpromoted_artifacts(workspace: Path, covers: str = "") -> tuple[list[str], list[str]]:
-    """Documents this work added to a workspace that are not in the project yet.
-
-    Returns (findings, commands). Checked before anything lands: a branch must not
-    be reported closed while what it wrote is still only in the workspace.
-    """
-    import artifact_sweep
-    findings: list[str] = []
-    commands: list[str] = []
-    sweep = Path(__file__).resolve().parent / "artifact_sweep.py"
-    for ws_repo, project in promotion_pairs(workspace):
-        gaps = artifact_sweep.branch_gaps(ws_repo, project)
-        if not gaps:
-            continue
-        findings += [f"{ws_repo.name}/{gap['source_rel']} -> {project.name}/{gap['dest_rel']}"
-                     for gap in gaps]
-        commands.append(f"python3 {sweep} {ws_repo} {project} scope=branch"
-                        + (f" covers={covers}" if covers else ""))
-    return findings, commands
-
-
-# Where the sweep (artifact_promote.py sweep-gaps) promotes from and to.
-_PROMOTED_DIRS = (("blog", "docs/blog"), ("specs", "docs/specs"))
-_NOT_DOCUMENTS = {"INDEX.md", "index.html", ".gitkeep", "decisions.md", "pipeline.state"}
-
-
-def _documents_on(repo: Path, branch: str, directory: str) -> set[str]:
-    """Names of the markdown files directly in `directory` on `branch`."""
-    listed = _git(repo, "ls-tree", "--name-only", branch, f"{directory}/")
-    if listed.returncode != 0:
-        return set()
-    names = {Path(line).name for line in listed.stdout.splitlines() if line.strip()}
-    return {n for n in names if n.endswith(".md") and n not in _NOT_DOCUMENTS}
-
-
-def promotion_backlog(workspace: Path, covers: str = "") -> tuple[dict, list[str]]:
-    """Documents committed on a workspace's base branch that its project lacks.
-
-    The promotion gate sees only what the closing branch added. A document
-    committed straight onto the base branch (workspace left on it, an entry
-    written outside a work branch, a recovery) is never the closing branch's,
-    so it is counted here, after the ceremony, from the base branches as they
-    now stand. Returns ({"workspace -> project": count}, commands).
-    """
-    backlog: dict[str, int] = {}
-    commands: list[str] = []
-    sweep = Path(__file__).resolve().parent / "artifact_promote.py"
-    for ws_repo, project in promotion_pairs(workspace):
-        ws_base, project_base = _get_base_branch(ws_repo), _get_base_branch(project)
-        missing = 0
-        for source, destination in _PROMOTED_DIRS:
-            missing += len(_documents_on(ws_repo, ws_base, source)
-                           - _documents_on(project, project_base, destination))
-        if missing:
-            backlog[f"{ws_repo.name} -> {project.name}"] = missing
-            commands.append(f"python3 {sweep} sweep-gaps {project} {ws_repo}"
-                            + (f" covers={covers}" if covers else ""))
-    return backlog, commands
-
-
 def _branch_landed(repo: Path, branch: str, base: str) -> bool:
     """A branch that is gone, stamped closed, or wholly on the base branch has landed."""
     if not _branch_exists(repo, branch):
@@ -1126,7 +1029,7 @@ def close(workspace: Path, land_active: bool = True) -> CloseResult:
     worktrace.record(
         "close-ceremony", repo=workspace, success=result.success,
         land_active=land_active, closed=result.closed_items,
-        landed={**result.landed, **result.workspace_landed}, carried=result.carried,
+        landed=result.landed, carried=result.carried,
         not_landed=result.not_landed, squash_review=result.squash_review,
         slot_ready=result.slot_ready, errors=[str(e)[:200] for e in result.errors])
     return result
@@ -1207,8 +1110,6 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
         "repos": ", ".join(f"{t.repo.name}:{t.branch}" for t in targets),
     })
 
-    # A workspace repo can share its directory name with the project repo.
-    split_workspace = len(discover_repo_topology(workspace)) > 1
     slot_root = _detect_slot_root(workspace)
 
     landed: dict[CloseTarget, str] = {}
@@ -1348,12 +1249,6 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
             if (slot_dir / ".landed").exists():
                 slot_ready = str(slot_dir)
 
-        try:
-            backlog, backlog_commands = promotion_backlog(workspace, covers_issue)
-        except Exception as error:      # a report must never fail a ceremony that landed
-            backlog, backlog_commands = {}, []
-            warnings.append(f"promotion backlog could not be counted: {error}")
-
         base = _get_base_branch(workspace)
         for issue_ref, branch in closed_branches.items():
             landed_sha = _rev_parse(workspace, base) or ""
@@ -1367,13 +1262,11 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
 
         return CloseResult(
             success=True,
-            backlog=backlog,
-            backlog_commands=backlog_commands,
             slot_ready=slot_ready,
             landed={t.repo.name: sha for t, sha in landed.items()
-                    if not (split_workspace and t.is_workspace)},
+                    if not t.is_workspace},
             workspace_landed={t.repo.name: sha for t, sha in landed.items()
-                              if split_workspace and t.is_workspace},
+                              if t.is_workspace},
             next_item=next_item,
             rescued=pre["rescued"],
             closed_items=closed,
@@ -1418,20 +1311,11 @@ def render(result: CloseResult) -> list[str]:
                   for repo, count in result.unpublished.items()]
         if result.unpublished:
             lines.append("OFFER=publish")
-        lines += [f"UNPROMOTED_BACKLOG={pair} documents={count}"
-                  for pair, count in result.backlog.items()]
-        lines += [f"PROMOTE_BACKLOG={command}" for command in result.backlog_commands]
-        if result.backlog:
-            lines.append("OFFER=promote_backlog")
         if result.slot_ready:
             lines.append(f"SLOT_READY_FOR_ARCHIVE={result.slot_ready}")
         return lines
     if result.squash_review:
         return ["ACTION=squash_review_needed"] + [f"SQUASH_REVIEW={r}" for r in result.squash_review]
-    if result.unpromoted:
-        return (["ACTION=promotion_needed"]
-                + [f"UNPROMOTED={u}" for u in result.unpromoted]
-                + [f"PROMOTE={c}" for c in result.promote_commands])
     return ["ACTION=error"] + [f"ERROR={e}" for e in result.errors]
 
 
@@ -1453,7 +1337,7 @@ def main() -> int:
         print(line)
     if result.success:
         return 0
-    return 2 if (result.squash_review or result.unpromoted) else 1
+    return 2 if result.squash_review else 1
 
 
 if __name__ == "__main__":

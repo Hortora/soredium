@@ -11,7 +11,7 @@ description: >
 
 > **`work end` is run through `python3 ~/.claude/skills/project/work.py end`** (see the
 > `work` skill, "Wrap and end"). That sequence does the review, diary entry and issue
-> filing as steps, then runs this ceremony, then promotes and publishes within the
+> filing as steps, then runs this ceremony, then publishes within the
 > ceremony's scope. This skill documents the ceremony itself and `work sync`. Where the
 > advisory pre-close checklist below overlaps the sequence's steps, the sequence wins.
 
@@ -120,18 +120,6 @@ Read the output:
   the slot is then not marked ready for archive. Report every
   `NOT_LANDED` line to the user and fix the cause (uncommitted changes or
   a conflict in that repo), then run the ceremony again.
-- `ACTION=promotion_needed` — nothing was changed. This work wrote
-  documents (blog entries, specs, ADRs) into a workspace that are not in
-  the project yet; each `UNPROMOTED=<workspace path> -> <project path>`
-  line names one. A branch is never closed while what it wrote exists only
-  in the workspace. Run every `PROMOTE=` line exactly as printed. Each
-  prints `PROMOTED=<N>` and `REMAINING=0` on success; `ERROR=commit_failed`
-  means the project refused the commit (show `ERROR_DETAIL` to the user).
-  The promotion is a commit on the project's working branch, so it lands
-  with the branch. Then run the ceremony again; if the branch now has more
-  than one commit it will ask for the squash review next.
-  Only documents this work added are checked. Older ones that were never
-  promoted are a backlog for a separate recovery, not this close.
 **Order and stacked branches.** The ceremony works out the landing order
 itself, from what each branch was cut from; the queue's order only breaks
 ties. A branch stacked on another lands after it and contributes only its
@@ -163,24 +151,7 @@ committed state.
 
 After `ACTION=complete`:
 
-1. **Artifacts** — nothing to do here. The ceremony refuses to land until
-   the documents this work wrote are in the project (`ACTION=promotion_needed`,
-   above), so they have already landed with the branch. Do not run a full
-   `artifact_sweep.py` here: without `scope=branch` it promotes every older
-   unpromoted artifact in the workspace in one commit.
-
-1b. **Canonical workspace sweep** — also check the canonical workspace
-   (not just the slot clone) for unpromoted blogs/specs/images:
-   ```bash
-   python3 ~/.claude/skills/work-end/artifact_promote.py sweep-gaps $PROJECT $CANONICAL_WORKSPACE covers=$COVERS
-   ```
-   `$CANONICAL_WORKSPACE` is the original workspace repo (e.g.
-   `~/claude/public/casehub/quarkmind`), resolved via the project's
-   `wksp` symlink target's `local` remote. If `$WORKSPACE` IS the
-   canonical workspace (non-slot work), skip this step.
-   Reports `PROMOTION_GAPS=N` and `SWEPT=N`. Auto-fixes all gaps.
-
-2. **Close GitHub issues** — one per `CLOSED_ITEM` line, and no others:
+1. **Close GitHub issues** — one per `CLOSED_ITEM` line, and no others:
    ```bash
    gh issue close $ISSUE_N --repo $OWNER_REPO --comment "Landed as <SHA>"
    ```
