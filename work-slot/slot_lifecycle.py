@@ -213,43 +213,41 @@ def clone_repo_pair(
                      "chore: add slot infrastructure to .gitignore"])
 
     # --- workspace ---
-    # A local wksp/ directory inside the project clone. Not a git clone of the
-    # canonical workspace: no remote, no updateInstead, no contamination path.
-    # git-inited so code that commits pipeline state still works.
+    # One workspace per slot/clone root, shared by all project clones.
+    # Each project clone gets a wksp -> ../wksp symlink.
+    # The root workspace is created by create_slot; here we just wire the symlink.
+    ws_dir: Path | None = None
+    ws_name = "wksp"
+    root_wksp = target_dir / "wksp"
+
     if auto_discover:
         ws_info = resolve_workspace_source(repo_path)
         if not ws_info:
             ws_info = discover_workspace(repo_path)
-            if ws_info:
-                print(f"DISCOVERED_WORKSPACE={ws_info[1]} repo={repo_name}")
-
-    ws_dir: Path | None = None
-    ws_name = "wksp"
 
     if ws_info:
-        ws_source, _ws_canonical_name = ws_info
-        ws_slot_dir = clone_dest / "wksp"
-
-        if ws_slot_dir.exists() and (ws_slot_dir / ".git").exists():
-            ws_dir = ws_slot_dir
-        else:
-            ws_slot_dir.mkdir(exist_ok=True)
-            _exclude_symlinks(clone_dest)
-            run_cmd(["git", "init", "-q", str(ws_slot_dir)])
+        ws_source, _ = ws_info
+        # Create root workspace if this is the first repo being cloned
+        if not root_wksp.exists():
+            root_wksp.mkdir(exist_ok=True)
+            run_cmd(["git", "init", "-q", str(root_wksp)])
             if branch:
-                run_cmd(["git", "-C", str(ws_slot_dir),
-                         "checkout", "-b", branch])
+                run_cmd(["git", "-C", str(root_wksp), "checkout", "-b", branch])
             else:
-                run_cmd(["git", "-C", str(ws_slot_dir),
+                run_cmd(["git", "-C", str(root_wksp),
                          "commit", "--allow-empty", "-m", "init workspace"])
+            (root_wksp / ".workspace").write_text(f"project: {clone_dest}\n")
+            create_proj_symlink(root_wksp, clone_dest)
+            replicate_claude_md(repo_path, root_wksp, clone_dest)
 
-            (ws_slot_dir / ".workspace").write_text(f"project: {clone_dest}\n")
-            path_map[str(ws_source.resolve())] = str(ws_slot_dir)
-            ws_dir = ws_slot_dir
+        # Symlink from project clone to root workspace
+        pc_wksp = clone_dest / "wksp"
+        if not pc_wksp.exists():
+            pc_wksp.symlink_to("../wksp")
+        _exclude_symlinks(clone_dest)
 
-        if auto_discover and ws_dir:
-            create_proj_symlink(ws_slot_dir, clone_dest)
-            replicate_claude_md(repo_path, ws_slot_dir, clone_dest)
+        path_map[str(ws_source.resolve())] = str(root_wksp)
+        ws_dir = root_wksp
 
     return RepoPairResult(
         clone_dest=clone_dest, ws_dir=ws_dir, ws_name=ws_name,
