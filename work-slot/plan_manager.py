@@ -60,6 +60,8 @@ class QueueItem:
     done_branch: str = ""
     # Its branch starts from the base branch, not stacked on the item before it.
     from_main: bool = False
+    scale: str = ""
+    complexity: str = ""
 
 
 @dataclass
@@ -115,6 +117,7 @@ _EPIC_MARKER_RE = re.compile(r'\(epic\)')
 _ACTIVE_MARKER_RE = re.compile(r'(?:←|<-)\s*active')
 _DONE_MARKER_RE = re.compile(r'(?:←|<-)\s*done on (\S+)')
 _FROM_MAIN_MARKER_RE = re.compile(r'\s*\(from main\)')
+_SCALE_MARKER_RE = re.compile(r'\s*\((XS|S|M|L|XL)/(Low|Med|High)\)')
 _BATCH_RE = re.compile(r'^(\s*)###\s*(Batch\s+\d+\s*—\s*.+?)(?:\s*(?:←|<-)\s*current)?$')
 _DEFERRED_RE = re.compile(
     r'^- \[([ x])\]\s+(.+?)\s+\((\w+)\s*/\s*(\w+)\)\s+\[([^\]]*)\](?:\s+—\s+(.+))?$'
@@ -328,6 +331,12 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
             title = _DONE_MARKER_RE.sub("", title).strip()
             from_main = bool(_FROM_MAIN_MARKER_RE.search(title))
             title = _FROM_MAIN_MARKER_RE.sub("", title).strip()
+            scale_m = _SCALE_MARKER_RE.search(title)
+            scale = scale_m.group(1) if scale_m else ""
+            complexity = scale_m.group(2) if scale_m else ""
+            if scale_m:
+                title = title[:scale_m.start()] + title[scale_m.end():]
+                title = title.strip()
             is_epic = bool(_EPIC_MARKER_RE.search(item_m.group(0)))
             active = bool(_ACTIVE_MARKER_RE.search(item_m.group(0)))
             done_m = _DONE_MARKER_RE.search(item_m.group(0))
@@ -341,6 +350,8 @@ def _parse_queue_lines(lines: list[str]) -> list[QueueItem]:
                 batch=current_batch,
                 done_branch=done_m.group(1) if done_m and not completed else "",
                 from_main=from_main,
+                scale=scale,
+                complexity=complexity,
             )
 
             if is_epic:
@@ -529,8 +540,9 @@ def _write_item(item: QueueItem, lines: list[str], indent: int) -> None:
     active_marker = " ← active" if item.active else ""
     if item.done_branch and not item.completed and not item.active:
         active_marker = f" ← done on {item.done_branch}"
+    scale_str = f" ({item.scale}/{item.complexity})" if item.scale else ""
     base_marker = " (from main)" if item.from_main else ""
-    lines.append(f"{prefix}- [{check}] {item.ref} — {item.title}{base_marker}{epic_marker}{active_marker}")
+    lines.append(f"{prefix}- [{check}] {item.ref} — {item.title}{scale_str}{base_marker}{epic_marker}{active_marker}")
 
     if item.is_epic and item.children:
         current_batch = None
@@ -1067,6 +1079,33 @@ def _check_issue_state(repo: str, number: int) -> str | None:
         return None
 
 
+_SCALE_LABEL_RE = re.compile(r'^scale:\s*(XS|S|M|L|XL)$', re.IGNORECASE)
+_COMPLEXITY_LABEL_RE = re.compile(r'^complexity:\s*(Low|Med|High)$', re.IGNORECASE)
+
+
+def _fetch_issue_scale(repo: str, number: int) -> tuple[str, str]:
+    """Query GitHub labels for scale/complexity. Returns (scale, complexity)."""
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "view", str(number), "--repo", repo,
+             "--json", "labels", "--jq", ".labels[].name"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return ("", "")
+        scale, complexity = "", ""
+        for label in result.stdout.strip().splitlines():
+            sm = _SCALE_LABEL_RE.match(label.strip())
+            if sm:
+                scale = sm.group(1).upper()
+            cm = _COMPLEXITY_LABEL_RE.match(label.strip())
+            if cm:
+                complexity = cm.group(1).capitalize()
+        return (scale, complexity)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ("", "")
+
+
 def append_to_queue(plan_path: Path, new_items: list[QueueItem],
                     position: int | None = None,
                     skip_state_check: bool = False,
@@ -1108,6 +1147,11 @@ def append_to_queue(plan_path: Path, new_items: list[QueueItem],
         deduped = accepted
         if not deduped:
             return []
+    for item in deduped:
+        if not item.scale:
+            s, c = _fetch_issue_scale(item.ref.repo, item.ref.number)
+            item.scale = s
+            item.complexity = c
     if position is not None:
         for i, item in enumerate(reversed(deduped)):
             tree.queue.insert(position, item)

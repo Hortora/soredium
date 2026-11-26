@@ -1,4 +1,4 @@
-"""Queue items carry scale and complexity metadata (#586)."""
+"""Queue items carry scale and complexity metadata (#586, #623)."""
 from __future__ import annotations
 
 import subprocess
@@ -10,6 +10,8 @@ sys.path.insert(0, str(ROOT / "project"))
 sys.path.insert(0, str(ROOT / "work-slot"))
 
 from queue_io import Queue, QueueItem, QueueState, read_queue, write_queue  # noqa: E402
+import plan_manager  # noqa: E402
+from plan_manager import IssueRef  # noqa: E402
 
 WORK = str(ROOT / "project" / "work.py")
 
@@ -221,3 +223,160 @@ class TestEndSummaryNextItem:
 
         assert _next is not None
         assert _next.ref == "o/r#618", f"expected active item, got {_next.ref}"
+
+
+PLAN_WITH_SCALE = """\
+# Work Plan —
+
+## State
+branch: issue-1-x
+issue-repo: O/r
+status: active
+covers: o/r#1
+
+## Queue
+- [ ] o/r#1 — First task (S/Med) ← active
+- [ ] o/r#2 — Second task (M/High)
+- [ ] o/r#3 — No metadata
+"""
+
+PLAN_SCALE_FROM_MAIN = """\
+# Work Plan —
+
+## State
+branch: issue-1-x
+issue-repo: O/r
+status: active
+covers: o/r#1
+
+## Queue
+- [ ] o/r#1 — Task (L/High) (from main) ← active
+"""
+
+
+class TestPlanManagerScaleComplexity:
+
+    def test_parse_items_with_scale(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(PLAN_WITH_SCALE)
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.queue[0].scale == "S"
+        assert tree.queue[0].complexity == "Med"
+        assert tree.queue[0].title == "First task"
+        assert tree.queue[1].scale == "M"
+        assert tree.queue[1].complexity == "High"
+        assert tree.queue[2].scale == ""
+        assert tree.queue[2].complexity == ""
+
+    def test_write_item_renders_scale(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(PLAN_WITH_SCALE)
+        tree = plan_manager.parse_plan(plan_file)
+        plan_manager.rewrite_plan(plan_file, tree)
+        content = plan_file.read_text()
+        assert "(S/Med)" in content
+        assert "(M/High)" in content
+        assert "No metadata" in content
+        assert "No metadata (" not in content
+
+    def test_roundtrip_preserves_scale(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(PLAN_WITH_SCALE)
+        tree = plan_manager.parse_plan(plan_file)
+        plan_manager.rewrite_plan(plan_file, tree)
+        tree2 = plan_manager.parse_plan(plan_file)
+        assert tree2.queue[0].scale == "S"
+        assert tree2.queue[0].complexity == "Med"
+        assert tree2.queue[0].title == "First task"
+        assert tree2.queue[1].scale == "M"
+        assert tree2.queue[1].complexity == "High"
+
+    def test_scale_and_from_main_coexist(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(PLAN_SCALE_FROM_MAIN)
+        tree = plan_manager.parse_plan(plan_file)
+        item = tree.queue[0]
+        assert item.scale == "L"
+        assert item.complexity == "High"
+        assert item.from_main is True
+        assert item.title == "Task"
+
+    def test_parentheses_in_title_not_misread(self, tmp_path):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(
+            "# Work Plan —\n\n## State\nbranch: x\nissue-repo: O/r\n"
+            "status: active\ncovers: o/r#1\n\n## Queue\n"
+            "- [ ] o/r#1 — Implement (REST/JSON) handler ← active\n"
+        )
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.queue[0].scale == ""
+        assert tree.queue[0].title == "Implement (REST/JSON) handler"
+
+    def test_build_plan_content_includes_scale(self):
+        items = [plan_manager.QueueItem(
+            ref=IssueRef("o/r", 1), title="Fix login",
+            active=True, scale="S", complexity="Low")]
+        content = plan_manager.build_plan_content("issue-1-fix-login", items, "2026-01-01")
+        assert "(S/Low)" in content
+
+    def test_append_populates_scale_from_labels(self, tmp_path, monkeypatch):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(
+            "# Work Plan —\n\n## State\nbranch: x\nissue-repo: O/r\n"
+            "status: active\n\n## Queue\n"
+        )
+        monkeypatch.setattr(
+            "plan_manager._fetch_issue_scale",
+            lambda repo, num: ("XS", "Low"))
+        monkeypatch.setattr(
+            "plan_manager._check_issue_state",
+            lambda repo, num: "OPEN")
+        items = [plan_manager.QueueItem(
+            ref=IssueRef("o/r", 42), title="New feature")]
+        plan_manager.append_to_queue(plan_file, items)
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.queue[0].scale == "XS"
+        assert tree.queue[0].complexity == "Low"
+
+    def test_append_does_not_overwrite_explicit_scale(self, tmp_path, monkeypatch):
+        plan_file = tmp_path / ".plan"
+        plan_file.write_text(
+            "# Work Plan —\n\n## State\nbranch: x\nissue-repo: O/r\n"
+            "status: active\n\n## Queue\n"
+        )
+        monkeypatch.setattr(
+            "plan_manager._fetch_issue_scale",
+            lambda repo, num: ("M", "High"))
+        monkeypatch.setattr(
+            "plan_manager._check_issue_state",
+            lambda repo, num: "OPEN")
+        items = [plan_manager.QueueItem(
+            ref=IssueRef("o/r", 42), title="Task",
+            scale="S", complexity="Low")]
+        plan_manager.append_to_queue(plan_file, items)
+        tree = plan_manager.parse_plan(plan_file)
+        assert tree.queue[0].scale == "S"
+        assert tree.queue[0].complexity == "Low"
+
+
+class TestFetchIssueScale:
+
+    def test_parses_scale_and_complexity_labels(self, monkeypatch):
+        monkeypatch.setattr("subprocess.run", lambda *a, **kw: type(
+            "R", (), {"returncode": 0, "stdout": "scale: S\ncomplexity: Low\nenhancement\n"})())
+        assert plan_manager._fetch_issue_scale("o/r", 1) == ("S", "Low")
+
+    def test_returns_empty_on_no_labels(self, monkeypatch):
+        monkeypatch.setattr("subprocess.run", lambda *a, **kw: type(
+            "R", (), {"returncode": 0, "stdout": "enhancement\nbug\n"})())
+        assert plan_manager._fetch_issue_scale("o/r", 1) == ("", "")
+
+    def test_returns_empty_on_failure(self, monkeypatch):
+        monkeypatch.setattr("subprocess.run", lambda *a, **kw: type(
+            "R", (), {"returncode": 1, "stdout": ""})())
+        assert plan_manager._fetch_issue_scale("o/r", 1) == ("", "")
+
+    def test_normalizes_case(self, monkeypatch):
+        monkeypatch.setattr("subprocess.run", lambda *a, **kw: type(
+            "R", (), {"returncode": 0, "stdout": "scale: xs\ncomplexity: high\n"})())
+        assert plan_manager._fetch_issue_scale("o/r", 1) == ("XS", "High")
