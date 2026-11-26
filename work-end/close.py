@@ -526,6 +526,61 @@ def land_targets(targets: list[CloseTarget]) -> dict:
     return landed
 
 
+def verify_landing_advanced(landed: dict) -> list[str]:
+    """Post-landing check: main must have advanced and history must be linear.
+
+    Returns error strings for any target whose canonical base did not advance
+    or gained merge commits during the landing.
+    """
+    errors: list[str] = []
+    for target, result in landed.items():
+        if result.already_landed:
+            continue
+        if not result.sha:
+            errors.append(f"{target.repo.name}: landing produced no SHA for {target.branch}")
+            continue
+        if result.sha == result.before_sha:
+            errors.append(
+                f"{target.repo.name}: {target.base_branch} did not advance after "
+                f"landing {target.branch} (SHA unchanged: {result.sha[:12]})")
+            continue
+        canon = canonical_sync.locate(target.repo)
+        merge_count = _git(canon.repo, "rev-list", "--merges", "--count",
+                           f"{result.before_sha}..{result.sha}")
+        if merge_count.returncode == 0 and merge_count.stdout.strip() not in ("0", ""):
+            count = merge_count.stdout.strip()
+            if count != "0":
+                errors.append(
+                    f"{target.repo.name}: {count} merge commit(s) introduced on "
+                    f"{target.base_branch} between {result.before_sha[:12]} and "
+                    f"{result.sha[:12]}")
+    return errors
+
+
+def reconcile_stamps(workspace: Path) -> list[str]:
+    """Verify every closed branch's landed SHA is reachable from current main.
+
+    Returns warning strings for stamps whose SHA is not an ancestor of main.
+    """
+    warnings: list[str] = []
+    closed = closure_refs.list_closed(workspace)
+    if not closed:
+        return warnings
+    base = _get_base_branch(workspace)
+    base_sha = _rev_parse(workspace, base)
+    if not base_sha:
+        return warnings
+    for branch in closed:
+        sha = closure_refs.closed_sha(workspace, branch)
+        if not sha:
+            continue
+        if not _is_ancestor(workspace, sha, base):
+            warnings.append(
+                f"{branch}: stamp SHA {sha[:12]} is not reachable from {base} — "
+                f"the stamp disagrees with what is on main")
+    return warnings
+
+
 def land(target: CloseTarget, issue: str = "") -> str:
     """Land one target; returns the canonical base SHA it landed as."""
     return land_targets([target])[target].sha
@@ -1193,6 +1248,11 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
                 raise RuntimeError(
                     f"stage invariant: landing produced no SHA for {names} — "
                     f"refusing to stamp")
+            advance_errors = verify_landing_advanced(
+                {t: results[t] for t in entry.targets})
+            if advance_errors:
+                raise RuntimeError(
+                    f"post-landing verification failed: {'; '.join(advance_errors)}")
             for target in entry.targets:
                 stamp(target, landed[target], issue)
                 worktrace.record("stamp", repo=target.repo, branch=target.branch,
@@ -1297,6 +1357,9 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
                                 landed_sha=landed_sha,
                                 base_branch=base,
                                 issue=issue_ref)
+
+        stamp_warnings = reconcile_stamps(workspace)
+        warnings.extend(stamp_warnings)
 
         return CloseResult(
             success=True,
