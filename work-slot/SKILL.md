@@ -325,17 +325,18 @@ nothing and enable branch hygiene scans, blog recovery, and stamp verification.
 ## How slots work
 
 - **Self-contained.** Everything under `slots/<N>/` — repo clones,
-  per-repo workspace clones, isolated `.m2`, `.slot` context file,
-  `.plan` queue.
-- **Per-repo workspaces.** Each project repo has its own workspace clone
-  named by its git remote (e.g., `wsp-casehub-connectors/`). No family
-  workspace clone. Skills follow `wksp` and see the same structure as
-  outside a slot.
+  one shared workspace, isolated `.m2`, `.slot` context file,
+  `.queue` queue.
+- **One workspace per slot.** A single `wksp/` directory at the slot root
+  (git-inited, no remotes). Each project clone has a `wksp -> ../wksp`
+  symlink. No cloning of canonical workspaces. Workspace state never
+  flows back to canonical.
 - **Isolated .m2.** Every slot gets its own Maven local repo via
   `.mvn/maven.config`. No cross-contamination with the canonical repos.
-- **Symlinks re-pointed.** `wksp`/`proj` symlinks point to sibling
-  workspace clones. ctx.py follows them transparently.
-- **Scaffold pre-created.** `.plan` and `JOURNAL.md` exist in the slot.
+- **Symlinks.** Each project clone's `wksp` symlink points to the root
+  workspace. The root workspace has a `proj` symlink to the primary
+  project clone. ctx.py follows them transparently.
+- **Scaffold pre-created.** `.queue` and `JOURNAL.md` exist in the slot.
   work-start detects state 2 (scaffold exists) and runs the resume path.
 
 ### Slot Scope
@@ -346,9 +347,8 @@ should write to any cloned repo — that is the point of slots.
 - **Issue routing:** `.plan` entries are tagged with their target repo
   (e.g., `[pages]`). Work goes in the tagged repo, regardless of which
   repo the session was started in.
-- **Artifact routing:** Each repo's workspace artifacts go in that repo's
-  workspace clone. Cross-cutting artifacts go in the primary workspace,
-  tagged for scope.
+- **Artifact routing:** Artifacts (blog entries, specs, ADRs) are written
+  directly to the project repo's `docs/<type>/` directory.
 - **CWD is not scope:** Starting in `slots/138/connectors/` does not
   limit the session to connectors. It means connectors is the shell's
   working directory — nothing more.
@@ -375,7 +375,7 @@ the rename, ensure Maven is linked (`ide_open_project` with
 rm <repo>/wksp                    # remove symlink
 # ide_open_project with autoLink: true
 # ide_refactor_rename ...
-ln -s ../wsp-<family>-<repo> <repo>/wksp   # restore
+ln -s ../wksp <repo>/wksp                  # restore
 ```
 
 The root cause is IntelliJ attempting to process text occurrences in

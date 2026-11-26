@@ -44,13 +44,15 @@ CLAUDE.md is the single most common regression this skill causes.**
 ### Detection (run before any edit)
 
 ```bash
-# Is this a workspace repo?
+# Is this a workspace (canonical or slot-local)?
 [ -f ".workspace" ] && echo "CONTEXT=workspace" || echo "CONTEXT=project"
 ```
 
-A `.workspace` marker means this is a workspace repo. Its CLAUDE.md holds artifact
-locations, routing, git discipline, and session structure. Without the marker, this
-is a project repo — its CLAUDE.md holds build commands, conventions, and project type.
+A `.workspace` marker means this is a workspace — either a canonical workspace
+(a full git repo) or a slot-local workspace (a git-inited directory with no remotes).
+Its CLAUDE.md holds artifact locations, routing, git discipline, and session structure.
+Without the marker, this is a project repo — its CLAUDE.md holds build commands,
+conventions, and project type.
 
 If `proj/CLAUDE.md` is a symlink to `wksp/CLAUDE.md`, you are editing the WORKSPACE
 CLAUDE.md through the project — apply workspace rules.

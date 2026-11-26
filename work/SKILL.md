@@ -79,7 +79,7 @@ The script prints KEY=VALUE lines in two phases.
 
 ### Alignment output
 
-Printed first, and only when the project and workspace repos disagree
+Printed first, and only when the project and workspace disagree
 about which branch is checked out:
 
 | Line | Meaning |

@@ -10,6 +10,9 @@ slash-command: false
 
 # Workspace Init
 
+**Canonical workspaces only.** Slots, clones, and agents get a local `wksp/`
+directory automatically via `slot_lifecycle.py` — they do not use this skill.
+
 Creates a companion workspace at `~/claude/private/<project>/` or
 `~/claude/public/<project>/`. If the project belongs to a family of
 related projects, the workspace can be nested under a shared parent folder

@@ -44,7 +44,7 @@ If a change you are about to make conflicts with one of these, stop and ask the 
 | Queue | The list of issues for an area and its state (`.queue`; older name `.plan`) |
 | Landing | Getting a branch's commits onto canonical's base branch, on disk, no network |
 | Publishing | Pushing canonical's base branch to GitHub |
-| Promotion | Copying finished artifacts (blog entries, specs, ADRs) from the workspace repo into the project repo's `docs/` |
+| Promotion | Writing artifacts (blog entries, specs, ADRs) directly into the project repo's `docs/` |
 | Stamp | An empty commit on a closed branch: `chore: branch closed — landed as <SHA> on <base>` |
 | Ceremony | `work-end/close.py`: the code that lands, stamps and advances the queue |
 
@@ -61,11 +61,11 @@ Work on soredium happens in the permanent clone, not in canonical:
 ```
 ~/claude/hortora/clone/soredium/
     .slot  .permanent  .queue  .queue-root
-    soredium/          project clone   (remote: local)
-    wsp-soredium/      workspace clone (remote: local)
+    wksp/              local workspace (git-inited, no remotes)
+    soredium/          project clone   (remote: local, wksp -> ../wksp)
 ```
 
-Open the session in `wsp-soredium/`. Running `work` in canonical soredium presents a `DECISION=clone_guard` decision: open the existing clone (or create one if it doesn't exist yet) and tells you where to go.
+Open the session in the project clone (`soredium/`). Running `work` in canonical soredium presents a `DECISION=clone_guard` decision: open the existing clone (or create one if it doesn't exist yet) and tells you where to go.
 
 ### 3.2 The loop for one item
 
@@ -140,7 +140,7 @@ Steps as defined in `PIPELINES` (`*` marks a judgment step with a handler):
 | `resume` | stack_pick*, pop_stack, checkout_branches, rebase, reset_wip, sync_queue_branch, context_resume* |
 | `find` | refresh_cache, query_recommendations, present_candidates*, populate_queue |
 | `wrap` | review*, diary*, file_issues*, item_finished*, mark_done, commit_queue, handoff* |
-| `end` | review*, diary*, file_issues*, item_finished*, mark_done, commit_queue, promote, squash_review, land, promote_backlog, publish, publish_blog, handoff* |
+| `end` | review*, diary*, file_issues*, item_finished*, mark_done, commit_queue, squash_review, land, publish, publish_blog, handoff* |
 
 `work` and `work continue` are "carry on": `work.py continue`, which resumes the active item. `work start` (no issue) and `work next` are "move on": `work.py start` / `work.py next`, which gate on active work — the user must release the current item (done, deferred, or move down) before the next one starts. `work done` marks the active item done without starting anything.
 
@@ -256,8 +256,8 @@ New permanent clones are switched at creation (`clone_manager.create_clone`). Ne
 | `work-slot/plan_manager.py` | large | Queue edits by path: append, activate, mark-done, advance, detect. Older code; writes whatever path it is given |
 | `project/canonical_sync.py` | large | `locate`, `land`, `land_all`, `publish_base`, `follow`, `checked_out`, backup. The only code that moves base branches |
 | `work-end/close.py` | large | The ceremony |
-| `work-end/scope.py` | medium | What one `work end` may touch: `covered`, `land`, `publish`, `promote_backlog`, `publish_blog`, `commit_queue` |
-| `work-end/artifact_promote.py`, `artifact_sweep.py` | medium | Promotion |
+| `work-end/scope.py` | medium | What one `work end` may touch: `covered`, `land`, `publish`, `publish_blog`, `commit_queue` |
+| `work-end/resolve_artifact_dir.py` | small | Resolves `docs/<type>/` paths in the project repo for artifact writes |
 | `publish-blog/blog_routing.py`, `blog_publish.py` | medium | Which site an entry goes to; copying and committing |
 | `project/branch_base.py`, `squash_marker.py` | small | The refs that record branch origin and squash review |
 | `project/topology.py`, `ctx.py`, `work_state.py` | medium | Where am I: layout, context, state. Read-only |
@@ -296,9 +296,9 @@ Canonical being ahead of its remote is normal: landed work waiting to be publish
 4. Preflight, then writes `.close-state`.
 5. Lands each entry, stamps each branch, clears the base and review refs, marks the item complete.
 
-Note: promotion and squash review checks were moved out of `close()` into their own pipeline steps (`promote`, `squash_review`) before `land` (#599). By the time `close()` runs, both have already passed.
-6. Advances the queue. In a slot, carries stray commits (work on a clone's own base branch) unless that base had diverged. Marks a drained numbered slot `.landed`. A permanent clone is settled and never archived.
-7. Reports `LANDED_*`, `CLOSED_ITEM=`, `CARRIED=`, `NOT_LANDED=`, `UNPUBLISHED=`, `UNPROMOTED_BACKLOG=`.
+Note: squash review is a separate pipeline step (`squash_review`) before `land` (#599). By the time `close()` runs, it has already passed.
+6. Advances the queue. In a slot, carries stray commits (work on a clone's own base branch, excluding workspace clones) unless that base had diverged. Marks a drained numbered slot `.landed`. A permanent clone is settled and never archived.
+7. Reports `LANDED_*`, `CLOSED_ITEM=`, `CARRIED=`, `NOT_LANDED=`, `UNPUBLISHED=`.
 
 It never squashes, never pushes, never archives.
 
@@ -360,11 +360,11 @@ Reviewing someone else's branch (another session's work): read the diff and run 
 
 Ordered by how much damage a mistake does.
 
-1. **Anything that writes to a canonical repo.** `advance`, `checked_out`, `publish_base`, `artifact_promote`. A bug here affects every session on the machine.
+1. **Anything that writes to a canonical repo.** `advance`, `checked_out`, `publish_base`. A bug here affects every session on the machine.
 2. **Old slots.** `casehub/slots/207` holds a clone whose `main` has diverged from canonical by more than a thousand commits each way. The ceremony refuses to carry a diverged base, but any new "carry" or "catch up" logic must repeat that check.
 3. **Marked areas reaching inherited files.** A reviewer found four such paths after the first implementation (health checks, `plan_manager.detect`, state detection fallback, scaffold with `force=yes`). Three are fixed. Assume more exist in code that was not read: `plan_manager.py` CLI commands, handler markdown that tells a session which path to pass, `work_route.py`, `alignment_repair.py` (Hortora/soredium#584).
 4. **Shared root queue with no lock.** Two sessions in one switched slot do read-modify-write on the same file; the last writer wins (Hortora/soredium#579).
-5. **`covers` after `mark_done`.** It names the next item. The `promote` and `squash_review` pipeline steps use `done_items()` / `batch_entries()` to find the done item's refs and branches instead of `queue.state.covers` (#599).
+5. **`covers` after `mark_done`.** It names the next item. The `squash_review` pipeline step uses `done_items()` / `batch_entries()` to find the done item's refs and branches instead of `queue.state.covers` (#599).
 6. **Run keys and progress.** `.work-progress` decides what is skipped. A wrong key either restarts a sequence or treats old steps as done. If a command behaves as if it "already did that", print `.work-progress`.
 7. **Blog routing.** One wrong rule publishes to an organisation's public site. Removing published entries meant rewriting that site's history. Always run the plan first.
 8. **Module shadowing.** In a subprocess the installed copy of a shared module (`~/.claude/lib`, `~/.claude/skills/project`) can be imported instead of the sibling file. New code must not assume a just-added function exists in an imported shared module. `tests/conftest.py` pins the repo's copies for in-process tests only.

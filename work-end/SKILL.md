@@ -105,8 +105,6 @@ Read the output:
   and `NEXT_ITEM`. Each `CLOSED_ITEM=<issue> branch=<branch>` line is one
   queue item this ceremony landed and closed, in landing order.
   `LANDED_<repo>` is that project repo's base-branch tip after landing.
-  Workspace repos are reported separately as `WORKSPACE_LANDED_<repo>`,
-  because a workspace can share its directory name with the project.
   **Landed means on disk.** Every branch is now on its canonical repo's
   base branch (the repo under `~/claude/<family>/`); from a slot, the work
   has reached canonical. Landing uses no network and pushes nothing. Each
@@ -115,7 +113,7 @@ Read the output:
   shown to the user as they are.
   In a slot the ceremony also carries everything else the slot holds:
   `CARRIED=<repo>:<branch> commits=<N>` is work outside the queue's branch
-  (a workspace clone's commits, usually) that it landed in canonical.
+  that it landed in canonical.
   `NOT_LANDED=<repo>:<branch> reason=<why>` is work it could not land;
   the slot is then not marked ready for archive. Report every
   `NOT_LANDED` line to the user and fix the cause (uncommitted changes or
