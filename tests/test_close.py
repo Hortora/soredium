@@ -824,3 +824,78 @@ class TestPreflightAndOutput:
             lines.append(f"RESCUED_{repo}={branch_name}")
         assert lines == ["RESCUED_platform=rescue-platform"]
 
+
+class TestStaleRecordWithLandedParent:
+    """Refs #638: stale branch_base record should not block landing when
+    the parent branch has already landed (squash artifact)."""
+
+    def test_stale_record_cleared_when_parent_landed(self, tmp_path: Path) -> None:
+        """B stacked on A. A is squashed (commits rewritten to new SHAs), then
+        landed on main. B is rebased onto squashed A — its base record (A's
+        pre-squash tip) is now stale. But A's content is on main via the
+        squashed commits. The stale record should be cleared."""
+        import branch_base
+        from close import order_entries, BatchEntry, CloseTarget
+
+        repo = tmp_path / "project"
+        _init_repo(repo)
+        main_sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "main"],
+                                  capture_output=True, text=True).stdout.strip()
+
+        # Branch A: two commits (so squashing is meaningful)
+        ok, _ = branch_base.cut(repo, "issue-1-a", "main")
+        assert ok
+        (repo / "a1.txt").write_text("a1")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "A commit 1"], capture_output=True)
+        (repo / "a2.txt").write_text("a2")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "A commit 2"], capture_output=True)
+
+        # Branch B stacked on A
+        ok, origin = branch_base.cut(repo, "issue-2-b", "main", "issue-1-a")
+        assert ok and origin == "issue-1-a"
+        (repo / "b.txt").write_text("b")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "B work"], capture_output=True)
+
+        # Squash A: reset --soft to main, recommit (rewrites A's SHAs)
+        _checkout(repo, "issue-1-a")
+        subprocess.run(["git", "-C", str(repo), "reset", "--soft", main_sha],
+                       capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "A squashed"],
+                       capture_output=True, check=True)
+
+        # Land squashed A onto main
+        _checkout(repo, "main")
+        subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", "issue-1-a"],
+                       capture_output=True, check=True)
+        # Stamp A
+        _checkout(repo, "issue-1-a")
+        subprocess.run(["git", "-C", str(repo), "commit", "--allow-empty",
+                        "-m", "chore: branch closed"], capture_output=True)
+
+        # Rebase B onto squashed A — B's recorded base (A's pre-squash tip)
+        # is NOT an ancestor of B after this rebase
+        _checkout(repo, "issue-2-b")
+        subprocess.run(["git", "-C", str(repo), "rebase", "issue-1-a"],
+                       capture_output=True, check=True)
+
+        assert branch_base.record_is_stale(repo, "issue-2-b"), "B's base should be stale"
+        assert branch_base.parent_of(repo, "issue-2-b") == "issue-1-a"
+
+        target_b = CloseTarget(
+            repo=repo, branch="issue-2-b", base_branch="main",
+            transport="direct", canonical=None,
+            push_target="origin", mirror_target="",
+            is_workspace=False,
+        )
+        entry_b = BatchEntry(
+            targets=[target_b], issue="R#2",
+            done=True, branches=["issue-2-b"],
+        )
+
+        ordered, errors = order_entries([entry_b])
+        assert not errors, f"should not error when parent landed: {errors}"
+        assert len(ordered) == 1
+

@@ -766,12 +766,16 @@ def order_entries(entries: list[BatchEntry]) -> tuple[list[BatchEntry], list[str
         for target in entry.targets:
             name = f"{target.repo.name}:{target.branch}"
             if branch_base.record_is_stale(target.repo, target.branch):
-                errors.append(
-                    f"{name} no longer sits on the commit it was recorded as cut from, so its "
-                    f"own commits cannot be told apart from what it was stacked on. Nothing was "
-                    f"landed. Rebase it back onto its parent, or clear the record if it was "
-                    f"deliberately rebuilt.")
-                continue
+                stale_parent = branch_base.parent_of(target.repo, target.branch)
+                if stale_parent and _branch_landed(target.repo, stale_parent, target.base_branch):
+                    branch_base.clear(target.repo, target.branch)
+                else:
+                    errors.append(
+                        f"{name} no longer sits on the commit it was recorded as cut from, so its "
+                        f"own commits cannot be told apart from what it was stacked on. Nothing was "
+                        f"landed. Rebase it back onto its parent, or clear the record if it was "
+                        f"deliberately rebuilt.")
+                    continue
             parent = branch_base.parent_of(target.repo, target.branch)
             if parent:
                 if parent in owner:
