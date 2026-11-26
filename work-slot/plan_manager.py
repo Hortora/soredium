@@ -737,6 +737,12 @@ def mark_done(plan_path: Path, branch: str = "") -> dict:
             "no_branch", "the queue names no branch for the active item; pass branch=<name>")
 
     done_leaf = leaves[active_idx]
+    state_branch = tree.state.get("branch", "")
+    if not state_branch and branch:
+        raise MarkDoneError(
+            "item_not_started",
+            f"the active item {done_leaf.ref} has no branch in state — "
+            f"it was never started; refusing to mark it done on {branch}")
     _set_done(tree.queue, done_leaf.ref, branch)
     next_leaf = _next_open_leaf(leaves, active_idx)
     if next_leaf:

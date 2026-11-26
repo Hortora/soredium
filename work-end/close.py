@@ -547,13 +547,12 @@ def verify_landing_advanced(landed: dict) -> list[str]:
         canon = canonical_sync.locate(target.repo)
         merge_count = _git(canon.repo, "rev-list", "--merges", "--count",
                            f"{result.before_sha}..{result.sha}")
-        if merge_count.returncode == 0 and merge_count.stdout.strip() not in ("0", ""):
-            count = merge_count.stdout.strip()
-            if count != "0":
-                errors.append(
-                    f"{target.repo.name}: {count} merge commit(s) introduced on "
-                    f"{target.base_branch} between {result.before_sha[:12]} and "
-                    f"{result.sha[:12]}")
+        count = merge_count.stdout.strip() if merge_count.returncode == 0 else "0"
+        if count.isdigit() and int(count) > 0:
+            errors.append(
+                f"{target.repo.name}: {count} merge commit(s) introduced on "
+                f"{target.base_branch} between {result.before_sha[:12]} and "
+                f"{result.sha[:12]}")
     return errors
 
 

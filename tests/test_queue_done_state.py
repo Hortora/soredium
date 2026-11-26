@@ -107,6 +107,17 @@ class TestMarkDone:
         assert "OFFER=wrap_or_continue" in r.stdout
         assert "DONE_PENDING=1" in r.stdout
 
+    def test_double_call_does_not_mark_next_item_done(self, ws):
+        """#630: calling mark-done twice must not mark the newly active item done."""
+        r1 = run("mark-done", str(ws / ".queue"))
+        assert r1.returncode == 0, r1.stdout + r1.stderr
+        r2 = run("mark-done", str(ws / ".queue"), "branch=issue-1-first")
+        assert r2.returncode != 0
+        assert "ERROR=item_not_started" in r2.stdout
+        second = leaves(ws)["o/r#2"]
+        assert second.active is True
+        assert second.done_branch == ""
+
 
 class TestDoneSurvivesRewrites:
     def test_plan_manager_rewrite_keeps_the_marker(self, ws):
