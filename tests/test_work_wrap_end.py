@@ -107,13 +107,13 @@ class TestOrder:
         names = [s.name for s in work.WRAP_STEPS]
         assert names == ["review", "diary", "file_issues", "item_finished", "mark_done",
                          "commit_queue", "handoff"]
-        assert not {"land", "promote_backlog", "publish", "publish_blog"} & set(names)
+        assert not {"land", "publish", "publish_blog"} & set(names)
 
     def test_end_is_wrap_with_the_close_between_marking_done_and_the_handoff(self):
         names = [s.name for s in work.END_STEPS]
         assert names == ["review", "diary", "file_issues", "item_finished", "mark_done",
-                         "commit_queue", "promote", "squash_review", "land",
-                         "promote_backlog", "publish", "publish_blog", "handoff"]
+                         "commit_queue", "squash_review", "land",
+                         "publish", "publish_blog", "handoff"]
 
     def test_the_finished_question_cannot_be_skipped(self):
         step = next(s for s in work.END_STEPS if s.name == "item_finished")

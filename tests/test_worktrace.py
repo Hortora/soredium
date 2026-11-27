@@ -157,7 +157,7 @@ class TestWorkEndIsTraced:
         steps = [(e["step"], e["outcome"]) for e in events("step") if e["command"] == "end"]
         assert [s for s, _ in steps] == [
             "review", "diary", "file_issues", "item_finished", "mark_done", "commit_queue",
-            "land", "promote_backlog", "publish", "publish_blog", "handoff"]
+            "squash_review", "land", "publish", "publish_blog", "handoff"]
         assert all(outcome == "completed" for _, outcome in steps)
         assert next(e for e in events("step") if e["step"] == "item_finished")["finished"] == "yes"
         assert {Path(e["repo"]).name for e in events("publish")} == {"project", "workspace"}
@@ -205,8 +205,7 @@ class TestTestsNeverReachTheRealWorklog:
         assert SESSION_WORKLOG_DB != worklog.DEFAULT_DB
         assert "soredium-test-worklog-" in SESSION_WORKLOG_DB
 
-    def test_an_environment_copied_at_import_is_already_isolated(self):
-        """test_safe_promotion.py builds its subprocess environment at module import."""
-        from tests import test_safe_promotion
-        copied = test_safe_promotion.GIT_ENV.get("HORTORA_WORKLOG_DB", "")
-        assert copied and copied != worklog.DEFAULT_DB
+    def test_session_worklog_is_not_the_real_one(self):
+        """The session-scoped DB conftest sets up must not be the real worklog."""
+        from tests.conftest import SESSION_WORKLOG_DB
+        assert SESSION_WORKLOG_DB != worklog.DEFAULT_DB

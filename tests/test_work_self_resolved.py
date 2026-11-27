@@ -173,11 +173,7 @@ class TestPlainWorkspace:
         commit(plain["project"], "second.txt")
         drive_to_item_finished(ws, "end")
         failed = answer_self(ws, "end", "item_finished", "finished=yes")
-        assert failed["ACTION"] == "error" and failed["STEP"] == "land", failed["_raw"]
-
-        retry = run_self(ws, "end")
-        assert retry["ACTION"] == "error" and retry["STEP"] == "land", retry["_raw"]
-        assert "RESUMING" in retry, "retry must resume, not restart from review"
+        assert failed["ACTION"] == "error" and failed["STEP"] == "squash_review", failed["_raw"]
 
         squash_marker.mark(plain["project"], BRANCH)
         resumed = run_self(ws, "end")
