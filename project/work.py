@@ -678,6 +678,7 @@ PAUSE_STEPS: list[StepDef] = [
                 "python3", str(_WORK_PAUSE_DIR / "pause_exec.py"), "commit-wip",
                 str(ctx.project), f"message=WIP: pause {ctx.branch}"]),
     StepDef("wip_commit_workspace", "pause", StepType.MECHANICAL,
+            skip_fn=lambda ctx: ctx.workspace.resolve() == ctx.project.resolve(),
             script_fn=lambda ctx: [
                 "python3", str(_WORK_PAUSE_DIR / "pause_exec.py"), "commit-wip",
                 str(ctx.workspace), f"message=WIP: pause {ctx.branch}"]),

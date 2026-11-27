@@ -403,3 +403,118 @@ class TestResumeIntent:
         )
         assert result.returncode == 0
         assert not (workspace / "design" / ".resuming").exists()
+
+
+# ---------------------------------------------------------------------------
+# Single-repo (workspace == project) — #573 orphan branch model
+# ---------------------------------------------------------------------------
+
+
+RESUME_EXEC = Path(__file__).parent.parent / "work-resume" / "resume_exec.py"
+
+
+def _single_repo(tmp_path):
+    """A single git repo used as both project and workspace."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@test"], cwd=repo, check=True, capture_output=True)
+    (repo / "file.txt").write_text("initial")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Initial"], cwd=repo, check=True, capture_output=True)
+    return repo
+
+
+class TestSingleRepoCheckout:
+    """checkout-branches with workspace == project creates the branch once."""
+
+    def test_checkout_single_repo(self, resume_exec, tmp_path):
+        repo = _single_repo(tmp_path)
+        subprocess.run(["git", "checkout", "-b", "feature"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", "main"], cwd=repo, check=True, capture_output=True)
+
+        exit_code, stdout, _ = run_script(
+            resume_exec, "checkout-branches",
+            str(repo), str(repo), "branch=feature",
+        )
+
+        assert exit_code == 0
+        assert "CHECKED_OUT=yes" in stdout
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo, capture_output=True, text=True,
+        ).stdout.strip()
+        assert branch == "feature"
+
+    def test_checkout_single_repo_missing_branch(self, resume_exec, tmp_path):
+        repo = _single_repo(tmp_path)
+
+        exit_code, stdout, _ = run_script(
+            resume_exec, "checkout-branches",
+            str(repo), str(repo), "branch=nonexistent",
+        )
+
+        assert exit_code == 1
+        assert "branch_not_found" in stdout
+
+
+class TestSingleRepoRebase:
+    """rebase with workspace == project only rebases the project."""
+
+    def test_rebase_single_repo(self, resume_exec, tmp_path):
+        repo = _single_repo(tmp_path)
+        (repo / "main.txt").write_text("main work")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Work on main"], cwd=repo, check=True, capture_output=True)
+
+        subprocess.run(["git", "checkout", "HEAD~1"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", "-b", "feature"], cwd=repo, check=True, capture_output=True)
+        (repo / "feature.txt").write_text("feature work")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Work on feature"], cwd=repo, check=True, capture_output=True)
+
+        exit_code, stdout, _ = run_script(
+            resume_exec, "rebase",
+            str(repo), str(repo), "base-branch=main",
+        )
+
+        assert exit_code == 0
+        assert "REBASED=yes" in stdout
+        assert (repo / "main.txt").exists()
+        assert (repo / "feature.txt").exists()
+
+
+class TestSingleRepoResetWip:
+    """reset-wip with workspace == project resets the WIP commit once."""
+
+    def test_reset_wip_single_repo(self, resume_exec, tmp_path):
+        repo = _single_repo(tmp_path)
+        (repo / "wip.txt").write_text("wip work")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "WIP: pause work"], cwd=repo, check=True, capture_output=True)
+
+        exit_code, stdout, _ = run_script(
+            resume_exec, "reset-wip",
+            str(repo), str(repo),
+        )
+
+        assert exit_code == 0
+        assert "RESET=yes" in stdout
+        head_msg = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=repo, capture_output=True, text=True,
+        ).stdout.strip()
+        assert head_msg == "Initial"
+        assert (repo / "wip.txt").exists()
+
+    def test_reset_wip_single_repo_no_wip(self, resume_exec, tmp_path):
+        repo = _single_repo(tmp_path)
+
+        exit_code, stdout, _ = run_script(
+            resume_exec, "reset-wip",
+            str(repo), str(repo),
+        )
+
+        assert exit_code == 0
+        assert "RESET=no" in stdout

@@ -109,16 +109,18 @@ def create_branches_typed(project: str, workspace: str, branch: str,
         return CreateResult(branch, False, False, f"project_branch_failed:{detail}")
     project_resumed = detail.startswith("resumed:")
 
-    ok, detail = _cut(workspace, None, is_workspace=True)
-    if not ok:
-        if not project_resumed:
-            run_git(project, "checkout", "-")
-            run_git(project, "branch", "-D", branch)
-            branch_base.clear(project, branch)
-        else:
-            run_git(project, "checkout", "-")
-        return CreateResult(branch, project_resumed, False, f"workspace_branch_failed:{detail}")
-    workspace_resumed = detail.startswith("resumed:")
+    workspace_resumed = project_resumed
+    if Path(workspace).resolve() != Path(project).resolve():
+        ok, detail = _cut(workspace, None, is_workspace=True)
+        if not ok:
+            if not project_resumed:
+                run_git(project, "checkout", "-")
+                run_git(project, "branch", "-D", branch)
+                branch_base.clear(project, branch)
+            else:
+                run_git(project, "checkout", "-")
+            return CreateResult(branch, project_resumed, False, f"workspace_branch_failed:{detail}")
+        workspace_resumed = detail.startswith("resumed:")
 
     if slot_path:
         for repo_path, label in collect_slot_repos(slot_path, project, workspace):
@@ -403,7 +405,8 @@ def sync_main(project: str, workspace: str, base: str) -> int:
         pass
 
     _sync_repo(project, warnings, "project")
-    _sync_repo(workspace, warnings, "workspace")
+    if Path(workspace).resolve() != Path(project).resolve():
+        _sync_repo(workspace, warnings, "workspace")
 
     synced = "yes" if not warnings else "partial"
     print(f"SYNCED={synced}")

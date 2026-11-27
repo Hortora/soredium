@@ -939,3 +939,82 @@ class TestCommitScaffoldNothingToCommit:
         )
         assert result.returncode == 0
         assert "COMMITTED=yes" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Single-repo (workspace == project) — #573 orphan branch model
+# ---------------------------------------------------------------------------
+
+
+class TestSingleRepoCreateBranches:
+    """When workspace == project, branch is created only once."""
+
+    def test_create_branches_single_repo(self, project_repo):
+        result = subprocess.run(
+            ["python3", str(BRANCH_CREATE), "create-branches",
+             str(project_repo), str(project_repo),
+             "branch=issue-99-single"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "CREATED=yes" in result.stdout
+
+        branch = subprocess.run(
+            ["git", "-C", str(project_repo), "branch", "--show-current"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        assert branch == "issue-99-single"
+
+    def test_create_branches_single_repo_with_base(self, project_repo):
+        (project_repo / "base.txt").write_text("on main\n")
+        subprocess.run(["git", "-C", str(project_repo), "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(project_repo), "commit", "-m", "base work"], check=True, capture_output=True)
+
+        result = subprocess.run(
+            ["python3", str(BRANCH_CREATE), "create-branches",
+             str(project_repo), str(project_repo),
+             "branch=issue-100-based", "base=main"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "CREATED=yes" in result.stdout
+
+    def test_create_branches_single_repo_resumes_existing(self, project_repo):
+        """Create branch via script, switch back, then resume — single repo."""
+        result = subprocess.run(
+            ["python3", str(BRANCH_CREATE), "create-branches",
+             str(project_repo), str(project_repo),
+             "branch=issue-101-exists"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+        subprocess.run(
+            ["git", "-C", str(project_repo), "checkout", "main"],
+            check=True, capture_output=True,
+        )
+
+        result = subprocess.run(
+            ["python3", str(BRANCH_CREATE), "create-branches",
+             str(project_repo), str(project_repo),
+             "branch=issue-101-exists"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "RESUMED=yes" in result.stdout
+
+
+class TestSingleRepoSyncMain:
+    """When workspace == project, sync only runs on the project."""
+
+    def test_sync_main_single_repo(self, tmp_path):
+        project, bare = _init_repo_with_bare(tmp_path, "project")
+
+        result = _sync(project, project)
+
+        assert result.returncode == 0
+        assert "SYNCED=yes" in result.stdout
+        lines = result.stdout.strip().splitlines()
+        strategy_lines = [l for l in lines if "STRATEGY=" in l]
+        assert len(strategy_lines) == 1, f"expected 1 strategy line, got {strategy_lines}"
+        assert "repo=project" in strategy_lines[0]

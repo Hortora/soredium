@@ -74,23 +74,26 @@ def checkout_branches_typed(project: str, workspace: str, branch: str) -> Resume
     """Checkout branch in both repos and verify. Returns typed result."""
     project_path = Path(project)
     workspace_path = Path(workspace)
+    same_repo = project_path.resolve() == workspace_path.resolve()
 
     exit_code, _, _ = run(["git", "rev-parse", "--verify", branch], cwd=project_path, check=False)
     if exit_code != 0:
         return ResumeCheckoutResult(False, branch, "branch_not_found_in_project")
 
-    exit_code, _, _ = run(["git", "rev-parse", "--verify", branch], cwd=workspace_path, check=False)
-    if exit_code != 0:
-        return ResumeCheckoutResult(False, branch, "branch_not_found_in_workspace")
+    if not same_repo:
+        exit_code, _, _ = run(["git", "rev-parse", "--verify", branch], cwd=workspace_path, check=False)
+        if exit_code != 0:
+            return ResumeCheckoutResult(False, branch, "branch_not_found_in_workspace")
 
     run(["git", "checkout", branch], cwd=project_path)
-    run(["git", "checkout", branch], cwd=workspace_path)
+    if not same_repo:
+        run(["git", "checkout", branch], cwd=workspace_path)
 
     _, project_branch, _ = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=project_path)
-    _, workspace_branch, _ = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=workspace_path)
-
-    if project_branch != workspace_branch:
-        return ResumeCheckoutResult(False, branch, f"branch_mismatch:{project_branch}!={workspace_branch}")
+    if not same_repo:
+        _, workspace_branch, _ = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=workspace_path)
+        if project_branch != workspace_branch:
+            return ResumeCheckoutResult(False, branch, f"branch_mismatch:{project_branch}!={workspace_branch}")
 
     return ResumeCheckoutResult(True, branch)
 
@@ -110,7 +113,8 @@ def rebase_typed(project: str, workspace: str, base_branch: str) -> ResumeRebase
     if exit_code != 0:
         return ResumeRebaseResult(False, error="rebase_conflict")
 
-    run(["git", "rebase", "main"], cwd=workspace_path, check=False)
+    if project_path.resolve() != workspace_path.resolve():
+        run(["git", "rebase", "main"], cwd=workspace_path, check=False)
     return ResumeRebaseResult(True)
 
 
@@ -118,6 +122,7 @@ def reset_wip_typed(project: str, workspace: str) -> ResumeResetResult:
     """Reset WIP commits if present. Returns typed result."""
     project_path = Path(project)
     workspace_path = Path(workspace)
+    same_repo = project_path.resolve() == workspace_path.resolve()
     reset_count = 0
 
     _, project_subject, _ = run(["git", "log", "-1", "--format=%s"], cwd=project_path)
@@ -125,10 +130,11 @@ def reset_wip_typed(project: str, workspace: str) -> ResumeResetResult:
         run(["git", "reset", "HEAD~1"], cwd=project_path)
         reset_count += 1
 
-    _, workspace_subject, _ = run(["git", "log", "-1", "--format=%s"], cwd=workspace_path)
-    if workspace_subject.startswith("WIP:"):
-        run(["git", "reset", "HEAD~1"], cwd=workspace_path)
-        reset_count += 1
+    if not same_repo:
+        _, workspace_subject, _ = run(["git", "log", "-1", "--format=%s"], cwd=workspace_path)
+        if workspace_subject.startswith("WIP:"):
+            run(["git", "reset", "HEAD~1"], cwd=workspace_path)
+            reset_count += 1
 
     return ResumeResetResult(reset_count > 0, reset_count)
 
@@ -142,6 +148,7 @@ def checkout_branches(project: str, workspace: str, branch: str,
     """Checkout branch in all repos (project, workspace, and slot siblings)."""
     project_path = Path(project)
     workspace_path = Path(workspace)
+    same_repo = project_path.resolve() == workspace_path.resolve()
 
     exit_code, _, _ = run(
         ["git", "rev-parse", "--verify", branch], cwd=project_path, check=False
@@ -150,15 +157,17 @@ def checkout_branches(project: str, workspace: str, branch: str,
         print("ERROR=branch_not_found")
         return 1
 
-    exit_code, _, _ = run(
-        ["git", "rev-parse", "--verify", branch], cwd=workspace_path, check=False
-    )
-    if exit_code != 0:
-        print("ERROR=branch_not_found")
-        return 1
+    if not same_repo:
+        exit_code, _, _ = run(
+            ["git", "rev-parse", "--verify", branch], cwd=workspace_path, check=False
+        )
+        if exit_code != 0:
+            print("ERROR=branch_not_found")
+            return 1
 
     run(["git", "checkout", branch], cwd=project_path)
-    run(["git", "checkout", branch], cwd=workspace_path)
+    if not same_repo:
+        run(["git", "checkout", branch], cwd=workspace_path)
 
     if slot_path:
         _project_dir = str(Path(__file__).resolve().parent.parent / "project")
@@ -177,15 +186,15 @@ def checkout_branches(project: str, workspace: str, branch: str,
     _, project_branch, _ = run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=project_path
     )
-    _, workspace_branch, _ = run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=workspace_path
-    )
-
-    if project_branch != workspace_branch:
-        print(
-            f"ERROR=branch_mismatch project={project_branch} workspace={workspace_branch}"
+    if not same_repo:
+        _, workspace_branch, _ = run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=workspace_path
         )
-        return 1
+        if project_branch != workspace_branch:
+            print(
+                f"ERROR=branch_mismatch project={project_branch} workspace={workspace_branch}"
+            )
+            return 1
 
     print("CHECKED_OUT=yes")
 
