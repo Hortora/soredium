@@ -138,6 +138,19 @@ def pop_entry(stack_path: Path, branch: str) -> tuple[bool, int]:
     return before != len(raw), len(raw)
 
 
+def purge_branches(stack_path: Path, branches: set[str]) -> list[str]:
+    """Remove all entries whose branch is in `branches`. Returns removed branch names."""
+    if not stack_path.exists() or not branches:
+        return []
+    raw = _read_entries(stack_path)
+    before = len(raw)
+    kept = [e for e in raw if e.get("branch") not in branches]
+    removed = [e.get("branch", "") for e in raw if e.get("branch") in branches]
+    if len(kept) < before:
+        stack_path.write_text(_entries_to_text(kept))
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # Commands (CLI entry points — print KEY=value output)
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
 
-from stack import StackEntry, read_entries, push_entry, pop_entry
+from stack import StackEntry, read_entries, push_entry, pop_entry, purge_branches
 
 
 def test_read_empty_stack():
@@ -86,3 +86,41 @@ def test_existing_cli_cmd_depth_still_works():
         raw = _read_entries(path)
         assert len(raw) == 1
         assert raw[0]["branch"] == "issue-1"
+
+
+def test_purge_branches_removes_matching():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / ".pause-stack"
+        push_entry(path, StackEntry("issue-1", 1, "t1", True, True))
+        push_entry(path, StackEntry("issue-2", 2, "t2", True, True))
+        push_entry(path, StackEntry("issue-3", 3, "t3", True, True))
+        removed = purge_branches(path, {"issue-1", "issue-3"})
+        assert sorted(removed) == ["issue-1", "issue-3"]
+        entries = read_entries(path)
+        assert len(entries) == 1
+        assert entries[0].branch == "issue-2"
+
+
+def test_purge_branches_no_matches():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / ".pause-stack"
+        push_entry(path, StackEntry("issue-1", 1, "t1", True, True))
+        removed = purge_branches(path, {"issue-99"})
+        assert removed == []
+        assert len(read_entries(path)) == 1
+
+
+def test_purge_branches_missing_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / ".pause-stack"
+        removed = purge_branches(path, {"issue-1"})
+        assert removed == []
+
+
+def test_purge_branches_empty_set():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / ".pause-stack"
+        push_entry(path, StackEntry("issue-1", 1, "t1", True, True))
+        removed = purge_branches(path, set())
+        assert removed == []
+        assert len(read_entries(path)) == 1

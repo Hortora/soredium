@@ -1017,6 +1017,23 @@ def mark_slot_landed(slot_dir: Path, branch: str, project_shas: dict[str, str]) 
     ]) + "\n")
 
 
+def _purge_stale_pause_entries(workspace: Path, closed_branches: set[str]) -> None:
+    """Remove pause stack entries for branches that just landed."""
+    if not closed_branches:
+        return
+    import stack
+    candidates = [
+        workspace / ".pause-stack",
+        workspace / ".notes" / ".pause-stack",
+    ]
+    slot_dir = _slot_dir_of(workspace)
+    if slot_dir is not None:
+        candidates.append(slot_dir / ".pause-stack")
+    for stack_path in candidates:
+        if stack_path.exists():
+            stack.purge_branches(stack_path, closed_branches)
+
+
 # --- close orchestration ---
 
 def close(workspace: Path, land_active: bool = True) -> CloseResult:
@@ -1255,6 +1272,8 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
                                 landed_sha=landed_sha,
                                 base_branch=base,
                                 issue=issue_ref)
+
+        _purge_stale_pause_entries(workspace, set(closed_branches.values()))
 
         stamp_warnings = reconcile_stamps(workspace)
         warnings.extend(stamp_warnings)

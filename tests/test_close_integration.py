@@ -1269,3 +1269,46 @@ class TestUnpublishedCountsEveryCoveredRepo:
         lines = close_module.render(result)
         assert f"UNPUBLISHED={repo.resolve()} commits={self._ahead(repo)}" in lines
         assert "OFFER=publish" in lines
+
+
+# --- Pause stack cleanup (#640) ---
+
+
+class TestPauseStackCleanup:
+    """close() purges stale pause stack entries for branches it just landed."""
+
+    def test_stale_pause_entry_removed_after_close(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(repo, "issue-1-feat")
+
+        from stack import push_entry, read_entries, StackEntry
+        stack_path = repo / ".pause-stack"
+        push_entry(stack_path, StackEntry("issue-1-feat", 1, "2026-11-20T00:00:00Z", True, False))
+        push_entry(stack_path, StackEntry("issue-2-other", 2, "2026-11-22T00:00:00Z", True, False))
+        _git(repo, "add", ".pause-stack")
+        _git(repo, "commit", "-m", "chore: pause stack")
+        _git(repo, "checkout", "issue-1-feat")
+
+        with patch("close.discover_repo_topology") as m:
+            m.return_value = [(repo, "main", "direct", None, "origin", "")]
+            result = close(repo)
+
+        assert result.success
+        entries = read_entries(stack_path)
+        assert len(entries) == 1
+        assert entries[0].branch == "issue-2-other"
+
+    def test_no_pause_stack_is_fine(self, tmp_path):
+        repo = _init_repo(tmp_path / "repo")
+        _add_commits(repo, "issue-1-feat", 2)
+        _make_queue(repo, "issue-1-feat")
+
+        assert not (repo / ".pause-stack").exists()
+
+        with patch("close.discover_repo_topology") as m:
+            m.return_value = [(repo, "main", "direct", None, "origin", "")]
+            result = close(repo)
+
+        assert result.success
+        assert not (repo / ".pause-stack").exists()
