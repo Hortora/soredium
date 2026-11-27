@@ -95,20 +95,17 @@ class TestCreateClone:
         url = _git(clone_path, "remote", "get-url", "local").stdout.strip()
         assert str(canonical.resolve()) in url or str(canonical) in url
 
-    def test_workspace_clone_only_remote_is_local(self, family_with_repo):
-        """Test 2 (workspace): workspace clone's only remote is local."""
+    def test_workspace_has_no_remotes(self, family_with_repo):
+        """Test 2 (workspace): local workspace has no remotes."""
         family, canonical = family_with_repo
         from clone_manager import create_clone
         create_clone(family, "engine")
         target = family / "clone" / "engine"
-        ws_dirs = [d for d in target.iterdir()
-                   if d.is_dir() and d.name != "engine"
-                   and (d / ".git").exists()
-                   and (d / ".workspace").exists()]
-        assert ws_dirs, "no workspace clone found"
-        ws_clone = ws_dirs[0]
-        remotes = _git(ws_clone, "remote").stdout.strip().split()
-        assert remotes == ["local"], f"workspace has unexpected remotes: {remotes}"
+        ws = target / "wksp"
+        assert ws.is_dir(), "no root workspace found"
+        assert (ws / ".workspace").exists(), "workspace missing .workspace marker"
+        remotes = _git(ws, "remote").stdout.strip().split()
+        assert remotes == [], f"workspace has unexpected remotes: {remotes}"
 
     def test_post_commit_hook_installed(self, family_with_repo):
         """Test 3: post-commit backup hook is installed in project clone."""

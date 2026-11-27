@@ -100,14 +100,21 @@ def clone_world(tmp_path):
     _git(ws_clone, "commit", "-m", "docs: work notes Refs #1")
     squash_marker.mark(ws_clone, branch)
 
+    from queue_io import queue_dir
+    qdir = queue_dir(ws_clone)
     write_queue(ws_clone, Queue(
         items=[QueueItem(ref="R#1", title="Task", completed=False, active=True)],
         state=QueueState(branch=branch, issue_repo="R", status="active"),
     ))
-    _git(ws_clone, "add", ".queue")
-    if subprocess.run(["git", "-C", str(ws_clone), "diff", "--cached", "--quiet"],
-                      capture_output=True).returncode != 0:
-        _git(ws_clone, "commit", "-m", "chore: set queue branch")
+    qfile = qdir / ".queue"
+    if qfile.exists() and (qdir / ".git").exists():
+        r = subprocess.run(["git", "-C", str(qdir), "add", ".queue"],
+                           capture_output=True, check=False)
+        if r.returncode == 0:
+            r2 = subprocess.run(["git", "-C", str(qdir), "diff", "--cached", "--quiet"],
+                                capture_output=True)
+            if r2.returncode != 0:
+                _git(qdir, "commit", "-m", "chore: set queue branch")
 
     return family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch
 

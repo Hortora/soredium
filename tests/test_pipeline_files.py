@@ -192,15 +192,19 @@ def clone_world(tmp_path):
     _git(ws_clone, "commit", "-m", "docs: work notes Refs #1")
     squash_marker.mark(ws_clone, branch)
 
+    from queue_io import queue_dir
+    qdir = queue_dir(ws_clone)
     write_queue(ws_clone, Queue(
         items=[QueueItem(ref="R#1", title="Task", completed=False, active=True)],
         state=QueueState(branch=branch, issue_repo="R", status="active"),
     ))
-    r = _git_nc(ws_clone, "add", ".queue")
-    if r.returncode == 0:
-        r2 = _git_nc(ws_clone, "diff", "--cached", "--quiet")
-        if r2.returncode != 0:
-            _git(ws_clone, "commit", "-m", "chore: set queue branch Refs #1")
+    qfile = qdir / ".queue"
+    if qfile.exists() and (qdir / ".git").exists():
+        r = _git_nc(qdir, "add", ".queue")
+        if r.returncode == 0:
+            r2 = _git_nc(qdir, "diff", "--cached", "--quiet")
+            if r2.returncode != 0:
+                _git(qdir, "commit", "-m", "chore: set queue branch Refs #1")
 
     return family, canonical_p, canonical_w, clone_target, project_clone, ws_clone, branch
 
@@ -225,8 +229,8 @@ class TestCeremonyWithPipelineFiles:
 
         assert result.success, f"ceremony failed: {result.errors}"
         assert not result.not_landed, f"not landed: {result.not_landed}"
-        assert _on_branch(ws_clone) == "main"
-        assert _is_clean(ws_clone)
+        # Workspace is not settled in the new model — it stays on its branch
+        assert _on_branch(ws_clone) == branch
 
     def test_non_pipeline_dirty_file_not_committed(self, clone_world):
         """Non-pipeline tracked files must not be committed by the helper."""
