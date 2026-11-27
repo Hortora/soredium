@@ -314,23 +314,6 @@ def check_no_open_findings(workspace: Path) -> list[Finding]:
     return []
 
 
-def check_artifacts_promoted(workspace: Path, on_main: bool = False) -> list[Finding]:
-    if on_main:
-        return []
-    for candidate in [
-        workspace / ".artifacts-promoted",
-        workspace / "design" / ".artifacts-promoted",
-    ]:
-        if candidate.exists():
-            return []
-    result = git(workspace, "log", "--oneline", "--all", "-1",
-                 "--grep=workspace and project promotion stamp")
-    if result.returncode == 0 and result.stdout.strip():
-        return []
-    return [Finding("WARN", "artifacts-not-promoted",
-                     "no .artifacts-promoted stamp found")]
-
-
 def check_no_stale_scaffold(workspace: Path) -> list[Finding]:
     stale = []
     for name in [".execute-progress", ".land-ledger.jsonl", ".artifacts-promoted"]:

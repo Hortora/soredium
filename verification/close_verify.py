@@ -20,7 +20,7 @@ from verification.close_checks import (
 from verification.outcomes import (
     verification_to_findings,
     verify_branch_stamped, verify_push, verify_checkout_main,
-    verify_artifacts_promoted, verify_issues_closed,
+    verify_issues_closed,
     verify_landed_marker, verify_slot_phase_complete,
 )
 
@@ -53,8 +53,6 @@ def _run_branch_checks(
         checks.append(_v("workspace_pushed", verify_push(workspace, base)))
         checks.append(_v("on_main", verify_checkout_main(project, workspace,
                                                           extra_repos=extra_repos)))
-        checks.append(_v("artifacts_promoted",
-                         verify_artifacts_promoted(workspace, project, branch, base)))
         checks.append(("promoted_images", check_promoted_images(project)))
         checks.append(("no_open_findings", check_no_open_findings(workspace)))
         checks.append(("no_stale_scaffold", check_no_stale_scaffold(workspace)))

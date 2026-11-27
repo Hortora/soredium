@@ -28,7 +28,6 @@ def _create_worktree_test_repos(tmp_path, repo_names):
     canonicals = {}
     for name in repo_names:
         canonicals[name] = init_repo_with_remote(family / name)
-        slot_git.configure_update_instead(canonicals[name])
     slot = slots_dir / "1"
     slot.mkdir()
     branch = "issue-42-test"
@@ -60,7 +59,6 @@ def _create_clone_test_repos(tmp_path, repo_names):
     canonicals = {}
     for name in repo_names:
         canonicals[name] = init_repo_with_remote(family / name)
-        slot_git.configure_update_instead(canonicals[name])
     slot = slots_dir / "1"
     slot.mkdir()
     branch = "issue-42-test"
@@ -192,25 +190,6 @@ class TestConfigureSlotRemotes:
                                 capture_output=True, text=True)
         assert pushed.returncode != 0
         assert "origin" in pushed.stderr
-
-
-
-class TestConfigureUpdateInstead:
-    def test_sets_config_on_canonical(self, tmp_path):
-        canonical = init_repo(tmp_path / "canonical")
-        slot_git.configure_update_instead(canonical)
-        rc, value, _ = slot_core.run_cmd(
-            ["git", "-C", str(canonical), "config", "receive.denyCurrentBranch"])
-        assert rc == 0
-        assert value.strip() == "updateInstead"
-
-    def test_idempotent(self, tmp_path):
-        canonical = init_repo(tmp_path / "canonical")
-        slot_git.configure_update_instead(canonical)
-        slot_git.configure_update_instead(canonical)
-        rc, value, _ = slot_core.run_cmd(
-            ["git", "-C", str(canonical), "config", "receive.denyCurrentBranch"])
-        assert value.strip() == "updateInstead"
 
 
 

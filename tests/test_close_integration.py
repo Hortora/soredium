@@ -365,73 +365,7 @@ class TestSlotSingleRepo:
 
 
 class TestSlotCarriesEverything:
-    """Workspace clones are worked on directly on main; nothing in a slot is left behind."""
-
-    def _ws_commit(self, ws: Path, name: str) -> str:
-        (ws / name).write_text("workspace content\n")
-        _git(ws, "add", name)
-        _git(ws, "commit", "-m", f"docs: {name} Refs #1")
-        return _git(ws, "rev-parse", "HEAD").stdout.strip()
-
-    def test_workspace_commits_on_main_reach_the_canonical_workspace(self, tmp_path):
-        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
-        ws = slot_dir / "wsp-test"
-        _git(ws, "add", ".workspace")
-        _git(ws, "commit", "-m", "chore: marker Refs #1")
-        tip = self._ws_commit(ws, "blog-entry.md")
-        _add_commits(repo, "issue-1-feat", 2)
-        _make_queue(slot_dir, "issue-1-feat")
-        canonical_ws = _canonical(tmp_path, "wsp-test")
-
-        result = close(slot_dir)
-
-        assert result.success, result.errors
-        assert _main_head(canonical_ws) == tip
-        assert _file_on_main(canonical_ws, "blog-entry.md")
-        assert result.carried == {"wsp-test:main": 2}
-        assert result.not_landed == {}
-        from close import render
-        assert "CARRIED=wsp-test:main commits=2" in render(result)
-
-    def test_workspace_clone_on_its_own_branch_is_carried_too(self, tmp_path):
-        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
-        ws = slot_dir / "wsp-test"
-        _git(ws, "add", ".workspace")
-        _git(ws, "commit", "-m", "chore: marker Refs #1")
-        _git(ws, "checkout", "-b", "notes")
-        self._ws_commit(ws, "notes.md")
-        _add_commits(repo, "issue-1-feat", 2)
-        _make_queue(slot_dir, "issue-1-feat")
-
-        result = close(slot_dir)
-
-        assert result.success, result.errors
-        assert _file_on_main(_canonical(tmp_path, "wsp-test"), "notes.md")
-        assert "wsp-test:notes" in result.carried
-
-    def test_stranded_workspace_content_blocks_ready_for_archive(self, tmp_path):
-        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
-        ws = slot_dir / "wsp-test"
-        _git(ws, "add", ".workspace")
-        _git(ws, "commit", "-m", "chore: marker Refs #1")
-        self._ws_commit(ws, "blog-entry.md")
-        canonical_ws = _canonical(tmp_path, "wsp-test")
-        (canonical_ws / "blog-entry.md").write_text("a different entry already here\n")
-        _git(canonical_ws, "add", ".")
-        _git(canonical_ws, "commit", "-m", "docs: conflicting entry Refs #1")
-        canonical_before = _main_head(canonical_ws)
-        _add_commits(repo, "issue-1-feat", 2)
-        _make_queue(slot_dir, "issue-1-feat")
-
-        result = close(slot_dir)
-
-        assert result.success, result.errors          # the issue's code did land
-        assert "wsp-test:main" in result.not_landed
-        assert result.slot_ready == ""
-        assert not (slot_dir / ".landed").exists()
-        assert _main_head(canonical_ws) == canonical_before
-        from close import render
-        assert any(line.startswith("NOT_LANDED=wsp-test:main") for line in render(result))
+    """Work left on a project clone's own main is carried to canonical during slot close."""
 
     def test_work_left_on_a_project_clones_own_main_is_carried(self, tmp_path):
         slot_dir, [engine, agency] = _setup_slot(tmp_path, ["engine", "agency"], "issue-1-feat")
@@ -456,50 +390,6 @@ class TestSlotCarriesEverything:
 
         assert result.success, result.errors
         assert result.carried == {} and result.not_landed == {}
-
-
-class TestSlotPromotionGate:
-    """In a slot the workspace clone is worked on directly on main; its documents are gated too."""
-
-    def _slot_with_blog(self, tmp_path):
-        slot_dir, [repo] = _setup_slot(tmp_path, ["engine"], "issue-1-feat")
-        ws = slot_dir / "wsp-test"
-        (ws / "blog").mkdir()
-        (ws / "blog" / "2026-01-01-entry.md").write_text("an entry\n")
-        _git(ws, "add", "blog")
-        _git(ws, "commit", "-m", "docs: entry Refs #1")
-        _add_commits(repo, "issue-1-feat", 1)
-        _make_queue(slot_dir, "issue-1-feat")
-        return slot_dir, repo, ws
-
-    def test_slot_close_refuses_until_the_workspace_document_is_promoted(self, tmp_path):
-        from close import render
-        slot_dir, repo, ws = self._slot_with_blog(tmp_path)
-        canonical = _canonical(tmp_path, "engine")
-        before = _main_head(canonical)
-
-        result = close(slot_dir)
-
-        assert not result.success
-        assert result.unpromoted == [
-            "wsp-test/blog/2026-01-01-entry.md -> engine/docs/blog/2026-01-01-entry.md"]
-        assert render(result)[0] == "ACTION=promotion_needed"
-        assert _main_head(canonical) == before
-        assert not (slot_dir / ".landed").exists()
-
-    def test_promoted_document_lands_in_canonical_with_the_branch(self, tmp_path):
-        from close import render
-        slot_dir, repo, ws = self._slot_with_blog(tmp_path)
-        command = [l for l in render(close(slot_dir)) if l.startswith("PROMOTE=")][0]
-        done = subprocess.run(command[len("PROMOTE="):].split(), capture_output=True, text=True)
-        assert done.returncode == 0, done.stdout + done.stderr
-        squash_marker.mark(repo, "issue-1-feat")
-
-        result = close(slot_dir)
-
-        assert result.success, (result.errors, result.unpromoted, result.squash_review)
-        assert _file_on_main(_canonical(tmp_path, "engine"), "docs/blog/2026-01-01-entry.md")
-        assert _file_on_main(_canonical(tmp_path, "wsp-test"), "blog/2026-01-01-entry.md")
 
 
 class TestSlotMultiRepo:
@@ -758,22 +648,16 @@ def _two_repos(tmp_path: Path) -> tuple[Path, Path]:
 
 class TestSquashReviewGate:
 
-    def test_several_commits_without_review_do_not_land(self, tmp_path):
+    def test_unreviewed_branch_lands_when_pipeline_handles_squash(self, tmp_path):
+        """Squash review is a pipeline step before close(); the ceremony itself lands regardless."""
         proj, ws = _two_repos(tmp_path)
-        pre = _main_head(proj)
         _add_commits(proj, "issue-1-feat", 3, reviewed=False)
         _make_queue(ws, "issue-1-feat")
 
         result = _project_close(proj, ws)
 
-        assert not result.success
-        assert result.errors == [], "review-needed is its own outcome, not an error"
-        assert len(result.squash_review) == 1
-        assert "project:issue-1-feat" in result.squash_review[0]
-        assert "no squash review" in result.squash_review[0]
-        assert _main_head(proj) == pre, "nothing may land"
-        assert _on_branch(proj) == "issue-1-feat"
-        assert not (ws / ".close-state").exists()
+        assert result.success, result.errors
+        assert _file_on_main(proj, "issue-1-feat-file0.txt")
 
     def test_reviewed_branch_lands_with_every_commit_preserved(self, tmp_path):
         proj, ws = _two_repos(tmp_path)
@@ -798,9 +682,9 @@ class TestSquashReviewGate:
         assert result.success, result.errors
         assert _file_on_main(proj, "issue-1-feat-file0.txt")
 
-    def test_commits_added_after_review_do_not_land(self, tmp_path):
+    def test_commits_added_after_review_land_when_pipeline_handles_squash(self, tmp_path):
+        """Late commits land — the pipeline's squash_review step catches these before close()."""
         proj, ws = _two_repos(tmp_path)
-        pre = _main_head(proj)
         _add_commits(proj, "issue-1-feat", 2, reviewed=True)
         (proj / "late.txt").write_text("late")
         _git(proj, "add", ".")
@@ -809,9 +693,8 @@ class TestSquashReviewGate:
 
         result = _project_close(proj, ws)
 
-        assert not result.success
-        assert "1 commit(s) added since" in result.squash_review[0]
-        assert _main_head(proj) == pre
+        assert result.success, result.errors
+        assert _file_on_main(proj, "late.txt")
 
     def test_leftover_squash_plan_file_does_not_collapse_commits(self, tmp_path):
         """An untracked .squash-plan left in the working tree must be inert."""
@@ -869,20 +752,19 @@ class TestSquashReviewGate:
 
         assert result.success, f"{result.errors} {result.squash_review}"
 
-    def test_slot_reports_every_repo_needing_review(self, tmp_path):
+    def test_slot_lands_unreviewed_repos_when_pipeline_handles_squash(self, tmp_path):
+        """Multi-repo slot: squash review is a pipeline step, ceremony lands all repos."""
         slot_dir, [agency, connectors] = _setup_slot(
             tmp_path, ["agency", "connectors"], "issue-1-feat")
         _add_commits(agency, "issue-1-feat", 2, reviewed=False)
         _add_commits(connectors, "issue-1-feat", 2, reviewed=False)
-        agency_pre, connectors_pre = _main_head(agency), _main_head(connectors)
         _make_queue(slot_dir, "issue-1-feat")
 
         result = close(slot_dir)
 
-        assert not result.success
-        joined = " ".join(result.squash_review)
-        assert "agency:issue-1-feat" in joined and "connectors:issue-1-feat" in joined
-        assert _main_head(agency) == agency_pre and _main_head(connectors) == connectors_pre
+        assert result.success, result.errors
+        assert "agency" in result.landed
+        assert "connectors" in result.landed
 
 
 class TestRenderResult:
@@ -925,7 +807,7 @@ def _same_name_repos(tmp_path: Path) -> tuple[Path, Path]:
 
 class TestResultReporting:
 
-    def test_project_and_workspace_with_the_same_name_are_both_reported(self, tmp_path):
+    def test_project_and_workspace_with_the_same_name_both_land(self, tmp_path):
         proj, ws = _same_name_repos(tmp_path)
         _add_commits(proj, "issue-1-feat", 2)
         _add_commits(ws, "issue-1-feat", 1)
@@ -934,20 +816,9 @@ class TestResultReporting:
         result = _project_close(proj, ws)
 
         assert result.success, result.errors
-        assert result.landed == {"pages": _main_head(proj)}
-        # The workspace gains the queue-advance commit after landing, so its landed
-        # SHA is on main but need not be the tip.
-        assert list(result.workspace_landed) == ["pages"]
-        assert _on_main(ws, result.workspace_landed["pages"])
-        assert result.workspace_landed["pages"] != result.landed["pages"]
+        assert "pages" in result.landed
+        assert _file_on_main(proj, "issue-1-feat-file0.txt")
         assert _file_on_main(ws, "issue-1-feat-file0.txt")
-
-    def test_same_name_repos_render_as_separate_lines(self, tmp_path):
-        from close import CloseResult, render
-        lines = render(CloseResult(success=True, landed={"pages": "aaa"},
-                                   workspace_landed={"pages": "bbb"}))
-        assert "LANDED_pages=aaa" in lines
-        assert "WORKSPACE_LANDED_pages=bbb" in lines
 
     def test_single_repo_is_reported_as_landed(self, tmp_path):
         repo = _init_repo(tmp_path / "repo")
@@ -960,7 +831,6 @@ class TestResultReporting:
         assert list(result.landed) == ["repo"]
         assert _on_main(repo, result.landed["repo"])
         assert _file_on_main(repo, "issue-1-feat-file1.txt")
-        assert result.workspace_landed == {}
 
     def test_reported_sha_is_main_tip_when_lifecycle_files_are_stripped(self, tmp_path):
         """casehub-pages#666 bug 3: a leaked lifecycle file must not leave the reported SHA behind main."""

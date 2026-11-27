@@ -75,7 +75,6 @@ class CloseResult:
     next_item: Optional[QueueItem] = None
     rescued: dict = field(default_factory=dict)
     squash_review: list[str] = field(default_factory=list)
-    workspace_landed: dict = field(default_factory=dict)
     slot_ready: str = ""
     # Queue items this ceremony closed, in the order they landed, and each one's branch.
     closed_items: list[str] = field(default_factory=list)
@@ -1263,10 +1262,7 @@ def _close(workspace: Path, land_active: bool = True) -> CloseResult:
         return CloseResult(
             success=True,
             slot_ready=slot_ready,
-            landed={t.repo.name: sha for t, sha in landed.items()
-                    if not t.is_workspace},
-            workspace_landed={t.repo.name: sha for t, sha in landed.items()
-                              if t.is_workspace},
+            landed={t.repo.name: sha for t, sha in landed.items()},
             next_item=next_item,
             rescued=pre["rescued"],
             closed_items=closed,
@@ -1296,8 +1292,6 @@ def render(result: CloseResult) -> list[str]:
     if result.success:
         lines = ["ACTION=complete"]
         lines += [f"LANDED_{repo}={sha}" for repo, sha in result.landed.items()]
-        lines += [f"WORKSPACE_LANDED_{repo}={sha}"
-                  for repo, sha in result.workspace_landed.items()]
         lines += [f"CLOSED_ITEM={ref} branch={result.closed_branches.get(ref, '')}"
                   for ref in result.closed_items]
         if result.next_item:

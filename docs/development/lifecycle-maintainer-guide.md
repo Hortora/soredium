@@ -70,7 +70,7 @@ Open the session in the project clone (`soredium/`). Running `work` in canonical
 ### 3.2 The loop for one item
 
 ```
-cd ~/claude/hortora/clone/soredium/wsp-soredium
+cd ~/claude/hortora/clone/soredium/soredium
 python3 ~/.claude/skills/project/work.py start issue_n=<N> "issue_title=<title>"
 python3 ~/.claude/skills/project/work.py start step_done=<step> outcome=completed|skipped [key=value]
 # ... edit in ../soredium, test, commit there ...
@@ -173,12 +173,12 @@ Items stack by default: a new branch is cut from the previous item's branch whil
 
 ### 4.4 wrap versus end
 
-- **wrap**: review, diary, loose ends filed and queued, "is the item finished?", mark done if so, handoff. It never lands, promotes, publishes, closes or stamps.
-- **end**: the same, plus promote artifacts, verify squash review, land everything marked done, publish the covered repos and their landed blog entries.
+- **wrap**: review, diary, loose ends filed and queued, "is the item finished?", mark done if so, handoff. It never lands, publishes, closes or stamps.
+- **end**: the same, plus verify squash review, land everything marked done, publish the covered repos and their landed blog entries.
 - `item_finished` is never skippable by the LLM but has a `skip_fn` that reuses the saved answer on retry (prints `ITEM_FINISHED_REUSED=<answer>`), preventing the bug where re-answering marks a second item done.
 - `end` can be run part-way through a queue, any number of times.
 - On a mechanical failure the sequence prints `ACTION=error STEP=<name> ERROR=<code>` and stops. Fix the cause and run the same command again; it resumes at that step.
-- Before the first step, `sequence_preflight` prints `PREFLIGHT_WARN=` with all blockers (unpromoted artifacts, unreviewed squashes) so the session sees everything upfront.
+- Before the first step, `sequence_preflight` prints `PREFLIGHT_WARN=` with all blockers (unreviewed squashes) so the session sees everything upfront.
 
 Errors from pre-land steps and `land`:
 

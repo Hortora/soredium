@@ -1676,7 +1676,6 @@ def _create_merge_test_repos(tmp_path, repo_names):
     canonicals = {}
     for name in repo_names:
         canonicals[name] = init_repo_with_remote(family / name)
-        slot_git.configure_update_instead(canonicals[name])
 
     slot = slots_dir / "1"
     slot.mkdir()
@@ -1721,7 +1720,6 @@ def _create_worktree_test_repos(tmp_path, repo_names):
     canonicals = {}
     for name in repo_names:
         canonicals[name] = init_repo_with_remote(family / name)
-        slot_git.configure_update_instead(canonicals[name])
 
     slot = slots_dir / "1"
     slot.mkdir()
@@ -1758,7 +1756,6 @@ def _create_clone_test_repos(tmp_path, repo_names):
     canonicals = {}
     for name in repo_names:
         canonicals[name] = init_repo_with_remote(family / name)
-        slot_git.configure_update_instead(canonicals[name])
 
     slot = slots_dir / "1"
     slot.mkdir()

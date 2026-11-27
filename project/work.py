@@ -976,10 +976,10 @@ FIND_STEPS: list[StepDef] = [
 # ---------------------------------------------------------------------------
 #
 # `wrap` is the session wrap-up: review, diary, loose ends filed and queued,
-# the item marked done if it is finished, handoff. Nothing lands, is promoted
-# or is published. `end` is the same steps plus the close, in between marking
-# the item done and the handoff: land what is done, promote, publish the repos
-# the ceremony covered and post their landed blog entries. The close steps act
+# the item marked done if it is finished, handoff. Nothing lands or is
+# published. `end` is the same steps plus the close, in between marking
+# the item done and the handoff: land what is done, publish the repos the
+# ceremony covered and post their landed blog entries. The close steps act
 # only on what work-end/scope.py says the ceremony covers.
 
 ITEM_FINISHED = "item_finished"                 # the step

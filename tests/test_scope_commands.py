@@ -71,28 +71,6 @@ def world(tmp_path):
     return dict(project=project, workspace=workspace)
 
 
-class TestPromote:
-
-    def test_no_unpromoted_returns_exit_0(self, world):
-        code, lines = scope.promote(world["workspace"])
-        assert code == 0
-        assert any("PROMOTED=nothing_needed" in l for l in lines)
-
-    def test_unpromoted_blog_entry_returns_exit_2(self, world):
-        ws = world["workspace"]
-        (ws / "blog").mkdir(exist_ok=True)
-        (ws / "blog" / "2026-11-24-test-entry.md").write_text(
-            "---\ntitle: test\n---\nbody\n")
-        g(ws, "add", "blog")
-        g(ws, "commit", "-q", "-m", "add blog entry Refs O/r#1")
-
-        code, lines = scope.promote(ws)
-
-        assert code == 2
-        assert any("ERROR=promotion_needed" in l for l in lines)
-        assert any("PROMOTE_COMMANDS=" in l for l in lines)
-
-
 class TestSquashReview:
 
     def test_reviewed_branch_returns_exit_0(self, world):
