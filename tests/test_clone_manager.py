@@ -283,38 +283,27 @@ class TestTargetExists:
 
 
 class TestLifecycleFilesPreserved:
-    def test_workspace_lifecycle_files_kept(self, tmp_path):
-        """Canonical workspace has HANDOFF.md and .queue committed -> both
-        exist in clone workspace, git status --porcelain is empty."""
+    def test_inherited_queue_migrated_to_notes_store(self, tmp_path):
+        """Canonical project has .queue committed -> clone's notes store
+        holds the queue in .notes/.queue."""
         family = tmp_path / "family"
         family.mkdir()
         (family / "slots").mkdir()
         canonical = init_repo(family / "engine")
-        ws = init_repo(family / "work")
-        (ws / "HANDOFF.md").write_text("# Handoff\nSome state\n")
-        (ws / ".queue").write_text("state: active\nbranch: main\n")
-        _git(ws, "add", ".")
-        _git(ws, "commit", "-m", "add lifecycle files")
-        wksp_link = canonical / "wksp"
-        wksp_link.symlink_to(os.path.relpath(ws, canonical))
+        (canonical / ".queue").write_text("- [ ] hortora/engine#1 — first\n\n## State\nbranch: main\nissue-repo: hortora/engine\nstatus: active\n")
         _git(canonical, "add", ".")
-        _git(canonical, "commit", "-m", "add wksp symlink")
+        _git(canonical, "commit", "-m", "add queue")
         from clone_manager import create_clone
         result = create_clone(family, "engine")
         assert result["CREATED"] == "yes"
+        assert result["QUEUE"] == "notes_store"
         target = family / "clone" / "engine"
-        ws_dirs = [d for d in target.iterdir()
-                   if d.is_dir() and d.name != "engine"
-                   and (d / ".git").exists()
-                   and (d / ".workspace").exists()]
-        assert ws_dirs, "workspace clone not found"
-        ws_clone = ws_dirs[0]
-        assert (ws_clone / "HANDOFF.md").exists()
-        assert (ws_clone / ".queue").exists()
-        status_lines = _git(ws_clone, "status", "--porcelain").stdout.strip().splitlines()
-        lifecycle_dirty = [l for l in status_lines
-                          if "HANDOFF" in l or ".queue" in l]
-        assert lifecycle_dirty == [], f"lifecycle files are dirty: {lifecycle_dirty}"
+        project_clone = target / "engine"
+        from notes_store import NotesStore
+        store = NotesStore(project_clone)
+        assert store.available
+        content = store.read(".queue")
+        assert "hortora/engine#1" in content
 
 
 class TestCLIMissingArgs:
@@ -347,8 +336,8 @@ class TestCLIMissingArgs:
         assert cmd_enabled({}) == 1
 
 
-class TestCloneQueueIsAtItsRoot:
-    """Hortora/soredium#577: one queue per clone, at the clone root."""
+class TestCloneQueueInNotesStore:
+    """Clone queue lives in the project's notes store (.notes/.queue)."""
 
     QUEUE = ("- [x] o/r#1 — Done\n- [ ] o/r#2 — Next\n\n"
              "## State\nbranch: \nissue-repo: O/r\nstatus: active\n")
@@ -357,67 +346,39 @@ class TestCloneQueueIsAtItsRoot:
         family = tmp_path / "family"
         family.mkdir()
         canonical = init_repo(family / "engine")
-        ws = init_repo(family / "work")
         if queue_text is not None:
-            (ws / ".queue").write_text(queue_text)
-            _git(ws, "add", ".")
-            _git(ws, "commit", "-m", "queue")
-        (canonical / "wksp").symlink_to(os.path.relpath(ws, canonical))
-        _git(canonical, "add", ".")
-        _git(canonical, "commit", "-m", "add wksp symlink")
+            (canonical / ".queue").write_text(queue_text)
+            _git(canonical, "add", ".")
+            _git(canonical, "commit", "-m", "queue")
         return family
 
-    def _ws_clone(self, target):
-        return next(d for d in target.iterdir() if d.is_dir() and (d / ".workspace").exists())
+    def test_inherited_queue_migrated_to_notes_store(self, tmp_path):
+        from clone_manager import create_clone
+        family = self._family(tmp_path, self.QUEUE)
+        result = create_clone(family, "engine")
+        assert result["QUEUE"] == "notes_store"
+        project_clone = family / "clone" / "engine" / "engine"
+        from notes_store import NotesStore
+        store = NotesStore(project_clone)
+        assert store.available
+        content = store.read(".queue")
+        assert "o/r#1" in content and "o/r#2" in content
 
-    def test_the_repos_backlog_becomes_the_clones_root_queue(self, tmp_path):
+    def test_queue_io_reads_from_notes_store(self, tmp_path):
         from clone_manager import create_clone
         from queue_io import read_queue
         family = self._family(tmp_path, self.QUEUE)
-        result = create_clone(family, "engine")
-        target = family / "clone" / "engine"
-        assert result["QUEUE"] == "root"
-        assert (target / ".queue-root").is_file()
-        assert [i.ref for i in read_queue(target, exact=True).items] == ["o/r#1", "o/r#2"]
-        ws_clone = self._ws_clone(target)
-        assert read_queue(ws_clone).items[1].ref == "o/r#2"          # resolved to the root
-        assert (ws_clone / ".queue").read_text() == self.QUEUE       # inherited file untouched
-        assert _git(ws_clone, "status", "--porcelain", "--", ".queue").stdout.strip() == ""
-
-    def test_a_write_in_the_clone_changes_the_root_queue_only(self, tmp_path):
-        from clone_manager import create_clone
-        from queue_io import QueueItem, read_queue, write_queue
-        family = self._family(tmp_path, self.QUEUE)
         create_clone(family, "engine")
-        target = family / "clone" / "engine"
-        ws_clone = self._ws_clone(target)
-        queue = read_queue(ws_clone)
-        queue.items.append(QueueItem(ref="o/r#3", title="Third", completed=False, active=False))
-        write_queue(ws_clone, queue)
-        assert len(read_queue(target, exact=True).items) == 3
-        assert _git(ws_clone, "status", "--porcelain", "--", ".queue").stdout.strip() == ""
-        assert (family / "work" / ".queue").read_text() == self.QUEUE, "canonical is untouched"
+        project_clone = family / "clone" / "engine" / "engine"
+        queue = read_queue(project_clone)
+        assert queue is not None
+        assert [i.ref for i in queue.items] == ["o/r#1", "o/r#2"]
 
-    def test_a_repo_with_no_queue_gets_a_clone_that_starts_empty_at_its_root(self, tmp_path):
+    def test_no_inherited_queue_still_creates_notes_store(self, tmp_path):
         from clone_manager import create_clone
         family = self._family(tmp_path)
         result = create_clone(family, "engine")
-        target = family / "clone" / "engine"
-        assert result["QUEUE"] == "root" and (target / ".queue-root").is_file()
-        assert not (target / ".queue").exists()
-
-    def test_an_unreadable_inherited_queue_leaves_the_clone_unswitched(self, tmp_path):
-        from clone_manager import create_clone
-        family = tmp_path / "family"
-        family.mkdir()
-        canonical = init_repo(family / "engine")
-        ws = init_repo(family / "work")
-        (ws / ".queue").write_bytes(b"\xff\xfe not a queue")
-        _git(ws, "add", ".")
-        _git(ws, "commit", "-m", "broken queue")
-        (canonical / "wksp").symlink_to(os.path.relpath(ws, canonical))
-        _git(canonical, "add", ".")
-        _git(canonical, "commit", "-m", "add wksp symlink")
-        result = create_clone(family, "engine")
-        assert result["CREATED"] == "yes" and result["QUEUE"].startswith("not_switched")
-        assert not (family / "clone" / "engine" / ".queue-root").exists()
+        assert result["QUEUE"] == "notes_store"
+        project_clone = family / "clone" / "engine" / "engine"
+        from notes_store import NotesStore
+        assert NotesStore(project_clone).available

@@ -53,11 +53,11 @@ def create_clone(family_root: Path, repo: str) -> dict[str, str]:
 
     Target layout: <family_root>/clone/<repo>/
       <repo>/            project clone (--shared, local remote)
-        wksp/            local workspace (git-inited, no remotes)
+        .notes/          worktree on orphan notes branch (queue + work notes)
       .slot              slot file (slot_number=None)
       .permanent         marker file
 
-    The clone's one queue is at its root (#577).
+    The clone's queue lives in the project's notes store (.notes/.queue).
     """
     canonical = family_root / repo
     if not canonical.is_dir() or not (canonical / ".git").exists():
@@ -87,16 +87,18 @@ def create_clone(family_root: Path, repo: str) -> dict[str, str]:
                issue="", issue_repo="", covers="", context="")
     (target / ".permanent").touch()
 
-    # One queue for the clone, at its root (#577). The workspace clone arrived
-    # with the repo's own queue; that backlog becomes the clone's queue by copy,
-    # and the inherited file is left as it is. If the choice is not clear the
-    # clone is left unswitched and says so; `queue_home.py adopt` settles it.
+    from notes_store import NotesStore
+    clone_project = target / repo
+    store = NotesStore(clone_project)
     try:
-        import queue_home
-        queue_home.adopt(target, apply=True)
-        queue = "root"
-    except Exception as error:      # the clone exists either way; say what happened
-        queue = f"not_switched: {getattr(error, 'detail', error)}"
+        store.ensure()
+        inherited_queue = clone_project / ".queue"
+        if inherited_queue.exists():
+            store.write(".queue", inherited_queue.read_text(),
+                        "migrate inherited queue to notes store")
+        queue = "notes_store"
+    except Exception as error:
+        queue = f"notes_store_failed: {error}"
 
     return {"CREATED": "yes",
             "CLONE_PATH": str(result.clone_dest),

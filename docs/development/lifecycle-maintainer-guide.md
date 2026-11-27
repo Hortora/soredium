@@ -221,7 +221,7 @@ python3 ~/.claude/skills/project/queue_home.py adopt <slot-dir> from=<dir> [--ap
 
 `adopt` is a dry run without `--apply`. It copies the chosen queue to the root, keeps the old root copy as `.queue.before-adopt-<date>`, writes `.queue-root` last, and removes nothing.
 
-New permanent clones are switched at creation (`clone_manager.create_clone`). New numbered slots are not yet (Hortora/soredium#580). The notes store (`project/notes_store.py`) is dormant: nothing creates the worktree outside tests, so rules 2 and 4 do not fire yet (Hortora/soredium#581).
+New permanent clones activate the notes store at creation (`clone_manager.create_clone`) — the queue lives in `.notes/.queue` (rules 2 and 4). Existing clones are migrated with `project/migrate_to_notes.py`. New numbered slots are not yet on the notes store (Hortora/soredium#580).
 
 ### 5.4 Things that must stay true
 
