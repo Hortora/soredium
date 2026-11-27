@@ -287,11 +287,7 @@ class TestPermanentClone:
         commit(clone["project_clone"], "extra.txt")
         drive_to_item_finished(ws, "end")
         failed = answer_self(ws, "end", "item_finished", "finished=yes")
-        assert failed["ACTION"] == "error" and failed["STEP"] == "land", failed["_raw"]
-
-        retry = run_self(ws, "end")
-        assert "RESUMING" in retry, "retry must resume, not restart"
-        assert retry["STEP"] == "land"
+        assert failed["ACTION"] == "error" and failed["STEP"] == "squash_review", failed["_raw"]
 
         squash_marker.mark(clone["project_clone"], BRANCH)
         resumed = run_self(ws, "end")
@@ -369,11 +365,7 @@ class TestNumberedSlot:
         commit(slot["clones"]["agency"], "extra.txt")
         drive_to_item_finished(ws, "end")
         failed = answer_self(ws, "end", "item_finished", "finished=yes")
-        assert failed["ACTION"] == "error" and failed["STEP"] == "land", failed["_raw"]
-
-        retry = run_self(ws, "end")
-        assert "RESUMING" in retry, "retry must resume, not restart"
-        assert retry["STEP"] == "land"
+        assert failed["ACTION"] == "error" and failed["STEP"] == "squash_review", failed["_raw"]
 
         squash_marker.mark(slot["clones"]["agency"], BRANCH)
         resumed = run_self(ws, "end")

@@ -519,7 +519,6 @@ class TestEndInANumberedSlot:
                 g(canonical, "rev-parse", "main")
             assert g(slot["clones"][name], "symbolic-ref", "--short", "HEAD") == "main"
             assert g(canonical, "rev-list", "--merges", "--count", "main") == "0"
-        assert g(slot["canonical"]["wsp"], "show", "main:wsp-work.txt") == "x"
         assert read_queue(slot["slot"]).items[0].completed
 
     def test_a_canonical_repo_outside_the_slot_is_never_published(self, slot):

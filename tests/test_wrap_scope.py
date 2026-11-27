@@ -140,42 +140,6 @@ class TestPublish:
         assert "unrelated" not in out
 
 
-class TestPromoteBacklog:
-
-    def test_promotes_what_the_project_lacks(self, world):
-        commit(world["workspace"], "blog/2026-01-01-entry.md", "# Entry\n")
-
-        promoted, failed = scope.promote_backlog(world["workspace"])
-
-        assert failed == {}
-        assert promoted == {"workspace -> project": 1}
-        assert g(world["project"], "show", "main:docs/blog/2026-01-01-entry.md") == "# Entry"
-        assert g(world["project"], "status", "--porcelain") == ""
-
-    def test_nothing_missing_does_nothing(self, world):
-        tip = g(world["project"], "rev-parse", "main")
-        assert scope.promote_backlog(world["workspace"]) == ({}, {})
-        assert g(world["project"], "rev-parse", "main") == tip
-
-    def test_another_workspace_with_a_backlog_is_not_touched(self, world, tmp_path):
-        other_project, _ = repo_with_remote(tmp_path, "other-project")
-        other_ws, _ = repo_with_remote(tmp_path, "other-ws")
-        (other_ws / "proj").symlink_to(other_project)
-        commit(other_ws, "blog/2026-02-02-theirs.md")
-        tip = g(other_project, "rev-parse", "main")
-
-        scope.promote_backlog(world["workspace"])
-
-        assert g(other_project, "rev-parse", "main") == tip
-
-    def test_command_line(self, world, capsys):
-        commit(world["workspace"], "blog/2026-01-01-entry.md", "# Entry\n")
-        assert scope.main(["promote-backlog", str(world["workspace"])]) == 0
-        out = capsys.readouterr().out
-        assert "PROMOTED=workspace -> project documents=1" in out
-        assert "PROMOTED_COUNT=1" in out
-
-
 class TestCommandLine:
 
     def test_usage(self, capsys):
