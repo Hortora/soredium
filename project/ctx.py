@@ -193,8 +193,9 @@ def resolve(cwd=None) -> dict[str, str]:
     # the target is not in a git repo — the symlink is broken
     if wksp_ok and topo.layout == "single" and not (cwd_path / "proj").is_symlink():
         wksp_ok = False
+    notes_ok = topo.notes_path is not None
     wksp_declined = "workspace: declined" in scope_text or "workspace: declined" in root_text
-    workspace_ok = "yes" if (wksp_ok or proj_ok or wksp_declined) else "no"
+    workspace_ok = "yes" if (wksp_ok or proj_ok or wksp_declined or notes_ok) else "no"
 
     # Identity — from .queue's ## State section (via read_queue), with
     # .plan fallback (via plan_manager.detect) and .meta fallback
@@ -370,6 +371,7 @@ def resolve(cwd=None) -> dict[str, str]:
         "IN_CLONE": "yes" if topo.in_clone else "no",
         "CLONE_DIR": str(topo.clone_dir) if topo.clone_dir else "",
         "IN_CANONICAL_FAMILY": "yes" if topo.in_canonical_family else "no",
+        "NOTES_PATH": str(topo.notes_path) if topo.notes_path else "",
         "CLONE_PATH": str(topo.clone_path) if topo.clone_path else "",
         "FAMILY_ROOT": str(topo.family_root) if topo.family_root else "",
         # WorkState fields (F1/F3 — work/SKILL.md reads these)

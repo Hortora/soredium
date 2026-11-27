@@ -400,6 +400,59 @@ class TestFindDesignFile:
         assert result == workspace / ".meta"
 
 
+class TestNotesDiscovery:
+    """Workspace discovery via .notes/ worktree (#573 Phase 1)."""
+
+    def test_notes_worktree_detected(self, tmp_path):
+        """Project with .notes/ worktree: notes_path is set."""
+        project = init_repo(tmp_path / "project")
+        from notes_store import NotesStore
+        NotesStore(project).ensure()
+        topo = _resolve(str(project))
+        assert topo.notes_path == (project / ".notes").resolve()
+        assert topo.layout == "single"
+
+    def test_no_notes_worktree(self, tmp_path):
+        """Project without .notes/: notes_path is None."""
+        project = init_repo(tmp_path / "project")
+        topo = _resolve(str(project))
+        assert topo.notes_path is None
+
+    def test_plain_notes_dir_not_detected(self, tmp_path):
+        """A plain .notes/ directory (not a worktree) is not detected."""
+        project = init_repo(tmp_path / "project")
+        (project / ".notes").mkdir()
+        (project / ".notes" / "NOTES.md").write_text("plain notes\n")
+        topo = _resolve(str(project))
+        assert topo.notes_path is None
+
+    def test_notes_coexists_with_wksp_symlink(self, tmp_path):
+        """When both .notes/ and wksp symlink exist, both are reported."""
+        project = init_repo(tmp_path / "project")
+        workspace = init_repo(tmp_path / "workspace")
+        (project / "wksp").symlink_to(workspace)
+        from notes_store import NotesStore
+        NotesStore(project).ensure()
+        topo = _resolve(str(project))
+        assert topo.notes_path == (project / ".notes").resolve()
+        assert topo.layout == "dual"
+        assert topo.workspace == workspace.resolve()
+
+    def test_clone_with_notes_worktree(self, tmp_path):
+        """Permanent clone with .notes/ worktree: notes_path detected."""
+        family = tmp_path / "casehub"
+        family.mkdir()
+        (family / "slots").mkdir()
+        clone_dir = family / "clone"
+        clone_dir.mkdir()
+        project = init_repo(clone_dir / "engine")
+        from notes_store import NotesStore
+        NotesStore(project).ensure()
+        topo = _resolve(str(project))
+        assert topo.notes_path == (project / ".notes").resolve()
+        assert topo.in_clone is True
+
+
 class TestCloneDetection:
     """Clone directory detection for family repos (#378)."""
 

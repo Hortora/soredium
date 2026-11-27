@@ -330,6 +330,69 @@ class TestSourceAudit:
             )
 
 
+# ---------------------------------------------------------------------------
+# Queue directory management
+# ---------------------------------------------------------------------------
+
+
+class TestQueueDirs:
+    def test_ensure_queue_dir_creates_directory(self, workspace):
+        store = NotesStore(workspace)
+        store.ensure()
+        path = store.ensure_queue_dir("issue-324-cdi-wiring")
+        assert path == store.path / "queue" / "issue-324-cdi-wiring"
+        assert path.is_dir()
+
+    def test_ensure_queue_dir_idempotent(self, workspace):
+        store = NotesStore(workspace)
+        store.ensure()
+        p1 = store.ensure_queue_dir("issue-324-cdi-wiring")
+        p2 = store.ensure_queue_dir("issue-324-cdi-wiring")
+        assert p1 == p2
+
+    def test_ensure_queue_dir_commits_gitkeep(self, workspace):
+        store = NotesStore(workspace)
+        store.ensure()
+        store.ensure_queue_dir("issue-324-cdi-wiring")
+        log = _git(store.path, "log", "--oneline").stdout.strip()
+        assert "issue-324-cdi-wiring" in log
+
+    def test_ensure_queue_dir_raises_before_ensure(self, workspace):
+        store = NotesStore(workspace)
+        with pytest.raises(NotesError, match="not available"):
+            store.ensure_queue_dir("issue-324")
+
+    def test_list_queue_dirs_empty(self, workspace):
+        store = NotesStore(workspace)
+        store.ensure()
+        assert store.list_queue_dirs() == []
+
+    def test_list_queue_dirs_multiple(self, workspace):
+        store = NotesStore(workspace)
+        store.ensure()
+        store.ensure_queue_dir("issue-100-first")
+        store.ensure_queue_dir("issue-200-second")
+        assert store.list_queue_dirs() == ["issue-100-first", "issue-200-second"]
+
+    def test_queue_dir_path_returns_path_without_creating(self, workspace):
+        store = NotesStore(workspace)
+        store.ensure()
+        path = store.queue_dir_path("issue-999")
+        assert path == store.path / "queue" / "issue-999"
+        assert not path.exists()
+
+    def test_write_to_queue_dir(self, workspace):
+        """Write work notes into a queue directory via the standard write() method."""
+        store = NotesStore(workspace)
+        store.ensure()
+        store.ensure_queue_dir("issue-324-cdi-wiring")
+        store.write("queue/issue-324-cdi-wiring/WORK-NOTES.md",
+                     "# Work Notes\n\nStarted work.\n",
+                     "add work notes for issue-324")
+        content = store.read("queue/issue-324-cdi-wiring/WORK-NOTES.md")
+        assert content == "# Work Notes\n\nStarted work.\n"
+
+
 class TestReviewFindings:
     """Found by review of the first version (Hortora/soredium#577)."""
 

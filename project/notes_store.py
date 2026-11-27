@@ -179,6 +179,38 @@ class NotesStore:
         else:
             exclude_file.write_text(self._EXCLUDE_LINE + "\n")
 
+    # -- Queue directory management --
+
+    def ensure_queue_dir(self, slug: str) -> Path:
+        """Create ``queue/<slug>/`` under ``.notes/``, returning its path.
+
+        The directory is committed as a ``.gitkeep`` so it persists on the
+        ``notes`` branch even when empty.
+        """
+        if not self.available:
+            raise NotesError("notes worktree not available; call ensure() first")
+        queue_path = self.path / "queue" / slug
+        if queue_path.is_dir():
+            return queue_path
+        queue_path.mkdir(parents=True, exist_ok=True)
+        gitkeep = queue_path / ".gitkeep"
+        gitkeep.touch()
+        self.write(f"queue/{slug}/.gitkeep", "", f"create queue dir {slug}")
+        return queue_path
+
+    def list_queue_dirs(self) -> list[str]:
+        """List queue directory slugs under ``queue/``."""
+        queue_root = self.path / "queue"
+        if not queue_root.is_dir():
+            return []
+        return sorted(d.name for d in queue_root.iterdir() if d.is_dir())
+
+    def queue_dir_path(self, slug: str) -> Path:
+        """Path to ``queue/<slug>/``, whether it exists or not."""
+        return self.path / "queue" / slug
+
+    # -- Internal helpers --
+
     def _resolve_workspace_git_dir(self) -> Path | None:
         result = _git(self._workspace, "rev-parse", "--git-dir")
         if result.returncode != 0:

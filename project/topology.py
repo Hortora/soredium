@@ -40,6 +40,7 @@ class Topology:
     primary_repo: str | None
     in_worktree: bool
     main_worktree_root: Path | None
+    notes_path: Path | None = None
     in_clone: bool = False
     clone_dir: Path | None = None
     family_root: Path | None = None
@@ -163,6 +164,15 @@ def _find_symlink_up(start: Path, git_root: Path, name: str) -> Path | None:
             break
         check = parent
     return None
+
+
+def _detect_notes_worktree(project: Path) -> Path | None:
+    """Return the ``.notes/`` path if it is a worktree on the ``notes`` branch."""
+    notes = project / ".notes"
+    if not notes.is_dir():
+        return None
+    result = _run("git", "-C", str(notes), "branch", "--show-current")
+    return notes if result == "notes" else None
 
 
 def resolve(cwd: str | None = None) -> Topology:
@@ -293,6 +303,8 @@ def resolve(cwd: str | None = None) -> Topology:
         if in_canonical_family and clone_path:
             family_root = project.parent
 
+    notes_path = _detect_notes_worktree(project)
+
     return Topology(
         layout=layout,
         project=project,
@@ -303,6 +315,7 @@ def resolve(cwd: str | None = None) -> Topology:
         primary_repo=primary_repo,
         in_worktree=in_worktree,
         main_worktree_root=main_worktree_path,
+        notes_path=notes_path,
         in_clone=in_clone,
         clone_dir=clone_dir,
         family_root=family_root,

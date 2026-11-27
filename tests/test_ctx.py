@@ -553,6 +553,28 @@ workspace: declined
         assert result.returncode == 0
         assert data["WORKSPACE_OK"] == "no"
 
+    def test_workspace_ok_yes_with_notes_store(self, tmp_path):
+        """WORKSPACE_OK=yes when .notes/ worktree exists (no wksp/proj symlinks)."""
+        repo = init_repo(tmp_path / "repo", "# Project\n")
+        sys.path.insert(0, str(Path(__file__).parent.parent / "project"))
+        from notes_store import NotesStore
+        NotesStore(repo).ensure()
+        result = run_ctx(repo)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["WORKSPACE_OK"] == "yes"
+        assert data["NOTES_PATH"] == str(repo / ".notes")
+
+    def test_notes_path_empty_without_notes_store(self, tmp_path):
+        """NOTES_PATH is empty when no .notes/ worktree exists."""
+        repo = init_repo(tmp_path / "repo", "# Project\n")
+        result = run_ctx(repo)
+        data = parse(result)
+
+        assert result.returncode == 0
+        assert data["NOTES_PATH"] == ""
+
     def test_issues_ok_yes_when_enabled(self, tmp_path):
         """ISSUES_STATUS=enabled when 'Issue tracking: enabled' in CLAUDE.md."""
         claude_md = """
